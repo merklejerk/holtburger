@@ -1,0 +1,9 @@
+*
+!.gitignore
+!README.md
+!docker.example.env
+!docker-compose.yml
+!dats/
+dats/*
+!dats/.gitkeep
+!db_tool.sh

@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
 
     // Run client in background
     let password = args.password.clone();
-    tokio::spawn(async move {
+    let client_handle = tokio::spawn(async move {
         let _ = client.run(&password).await;
     });
 
@@ -77,6 +77,7 @@ async fn main() -> Result<()> {
                         ui::UIState::Chat => {
                             let input = app_state.input.drain(..).collect::<String>();
                             if input == "/quit" || input == "/exit" {
+                                let _ = command_tx.send(ClientCommand::Quit);
                                 break;
                             }
                             let _ = command_tx.send(ClientCommand::Talk(input));
@@ -111,10 +112,13 @@ async fn main() -> Result<()> {
                         app_state.input.pop();
                     }
                     KeyCode::Esc => {
+                        let _ = command_tx.send(ClientCommand::Quit);
                         break;
                     }
                     _ => {}
                 }
+            } else {
+                // Ignore non-key events
             }
         }
 
@@ -136,6 +140,9 @@ async fn main() -> Result<()> {
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
+
+    // Wait for client to finish disconnecting
+    let _ = client_handle.await;
 
     Ok(())
 }

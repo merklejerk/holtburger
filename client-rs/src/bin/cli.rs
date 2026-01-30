@@ -28,7 +28,7 @@ struct Args {
     password: String,
 
     /// Timeout in seconds for CLI operations
-    #[arg(short, long, default_value_t = 2)]
+    #[arg(short, long, default_value_t = 10)]
     timeout: u64,
 
     /// Enable verbose logging
@@ -70,8 +70,13 @@ async fn main() -> Result<()> {
     client.set_command_rx(command_rx);
 
     let password = args.password.clone();
-    tokio::spawn(async move {
-        let _ = client.run(&password).await;
+    let client_handle = tokio::spawn(async move {
+        match client.run(&password).await {
+            Err(e) if !e.to_string().contains("Graceful disconnect") => {
+                log::error!("Client task error: {}", e);
+            }
+            _ => {}
+        }
     });
 
     let timeout = tokio::time::sleep(tokio::time::Duration::from_secs(args.timeout));
@@ -86,34 +91,48 @@ async fn main() -> Result<()> {
                         for (id, name) in chars {
                             println!("  - {} (ID: {:08X})", name, id);
                         }
+                        let _ = command_tx.send(ClientCommand::Quit);
+                        let _ = client_handle.await;
                         return Ok(());
                     }
                 }
                     _ = &mut timeout => {
                         eprintln!("Error: Timed out waiting for response (after {}s).", args.timeout);
+                        let _ = command_tx.send(ClientCommand::Quit);
+                        let _ = client_handle.await;
                         std::process::exit(1);
                     }
             }
         },
         Commands::Connect { .. } => {
             println!("Connected. Press Ctrl-C to exit.");
-            while let Some(event) = event_rx.recv().await {
-                match event {
-                    ClientEvent::Message(msg) => {
-                        println!("{}", msg);
-                    }
-                    ClientEvent::CharacterList(chars) => {
-                        println!(
-                            "Available characters: {:?}",
-                            chars.iter().map(|c| &c.1).collect::<Vec<_>>()
-                        );
-                        if character_pref.is_none() {
-                            println!("No character specified, selecting first by default...");
-                            let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(1));
+            loop {
+                tokio::select! {
+                    Some(event) = event_rx.recv() => {
+                        match event {
+                            ClientEvent::Message(msg) => {
+                                println!("{}", msg);
+                            }
+                            ClientEvent::CharacterList(chars) => {
+                                println!(
+                                    "Available characters: {:?}",
+                                    chars.iter().map(|c| &c.1).collect::<Vec<_>>()
+                                );
+                                if character_pref.is_none() {
+                                    println!("No character specified, selecting first by default...");
+                                    let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(1));
+                                }
+                            }
                         }
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        println!("\nDisconnecting...");
+                        let _ = command_tx.send(ClientCommand::Quit);
+                        break;
                     }
                 }
             }
+            let _ = client_handle.await;
         }
     }
 

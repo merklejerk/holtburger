@@ -162,12 +162,17 @@ pub mod opcodes {
     pub const GAME_ACTION: u32 = 0xF7B1;
     pub const SERVER_MESSAGE: u32 = 0xF7E0;
     pub const HEAR_SPEECH: u32 = 0x02BB;
+    pub const SOUL_EMOTE: u32 = 0x01E2;
     pub const CHARACTER_ERROR: u32 = 0xF659;
     pub const SERVER_NAME: u32 = 0xF7E1;
     pub const BOOT_ACCOUNT: u32 = 0xF7DC;
     pub const DDD_INTERROGATION: u32 = 0xF7E5;
     pub const DDD_INTERROGATION_RESPONSE: u32 = 0xF7E6;
-}
+    pub const PRIVATE_UPDATE_PROPERTY_INT: u32 = 0x02CD;
+    pub const UPDATE_MOTION: u32 = 0xF74C;
+    pub const UPDATE_POSITION: u32 = 0xF748;
+    pub const VECTOR_UPDATE: u32 = 0xF74E;
+} 
 
 #[derive(Debug, Clone)]
 pub enum GameMessage {
@@ -195,6 +200,22 @@ pub enum GameMessage {
         guid: u32,
         data: Vec<u8>,
     },
+    UpdatePropertyInt {
+        property: u32,
+        value: u32,
+    },
+    UpdateMotion {
+        guid: u32,
+        data: Vec<u8>,
+    },
+    UpdatePosition {
+        guid: u32,
+        data: Vec<u8>,
+    },
+    VectorUpdate {
+        guid: u32,
+        data: Vec<u8>,
+    },
     PlayEffect {
         guid: u32,
     },
@@ -214,6 +235,11 @@ pub enum GameMessage {
     HearSpeech {
         message: String,
         sender: String,
+    },
+    SoulEmote {
+        sender_id: u32,
+        sender_name: String,
+        text: String,
     },
     CharacterError {
         error_code: u32,
@@ -250,6 +276,18 @@ impl GameMessage {
                 let sender = read_string16(data, &mut offset);
                 // Also has senderID (4) and chatMessageType (4)
                 GameMessage::HearSpeech { message, sender }
+            }
+            opcodes::SOUL_EMOTE => {
+                if data.len() >= 8 {
+                    let mut offset = 4;
+                    let sender_id = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    offset += 4;
+                    let sender_name = read_string16(data, &mut offset);
+                    let text = read_string16(data, &mut offset);
+                    GameMessage::SoulEmote { sender_id, sender_name, text }
+                } else {
+                    GameMessage::Unknown { opcode, data: data[4..].to_vec() }
+                }
             }
             opcodes::CHARACTER_LIST => {
                 let mut offset = 8; // opcode + 0u
@@ -351,6 +389,48 @@ impl GameMessage {
                         opcode,
                         data: data.to_vec(),
                     }
+                }
+            }
+            opcodes::PRIVATE_UPDATE_PROPERTY_INT => {
+                if data.len() >= 13 {
+                    // Sequence(4), Property(1/2/4?), Value(4)
+                    // ACE says 4+4+4=12 payload, but we see 9 payload (13 total).
+                    // We'll assume Property is 1 byte for now based on the pcap logic.
+                    let property = data[8] as u32;
+                    let value = LittleEndian::read_u32(&data[9..13]);
+                    GameMessage::UpdatePropertyInt { property, value }
+                } else {
+                    GameMessage::Unknown { opcode, data: data[4..].to_vec() }
+                }
+            }
+            opcodes::UPDATE_MOTION => {
+                if data.len() >= 8 {
+                    GameMessage::UpdateMotion {
+                        guid: LittleEndian::read_u32(&data[4..8]),
+                        data: data[8..].to_vec(),
+                    }
+                } else {
+                    GameMessage::Unknown { opcode, data: data[4..].to_vec() }
+                }
+            }
+            opcodes::UPDATE_POSITION => {
+                if data.len() >= 8 {
+                    GameMessage::UpdatePosition {
+                        guid: LittleEndian::read_u32(&data[4..8]),
+                        data: data[8..].to_vec(),
+                    }
+                } else {
+                    GameMessage::Unknown { opcode, data: data[4..].to_vec() }
+                }
+            }
+            opcodes::VECTOR_UPDATE => {
+                if data.len() >= 8 {
+                    GameMessage::VectorUpdate {
+                        guid: LittleEndian::read_u32(&data[4..8]),
+                        data: data[8..].to_vec(),
+                    }
+                } else {
+                    GameMessage::Unknown { opcode, data: data[4..].to_vec() }
                 }
             }
             opcodes::GAME_EVENT => {

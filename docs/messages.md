@@ -22,6 +22,15 @@ Used for public chat (Say).
 | `uint32` | `SenderID` | GUID of the speaker. |
 | `uint32` | `Type` | Chat message type (usually `1` for Speech). |
 
+### `0x01E2` SoulEmote
+A short emote broadcast by a player (e.g., "waves.").
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `SenderID` | GUID of the emoter. |
+| `String16L` | `SenderName` | Name of the emoter (may include prefixes like `+`). |
+| `String16L` | `EmoteText` | The emote text, e.g., `waves.`. |
+
 ### `0xF7E1` ServerName
 Sent during connection to provide server metadata.
 
@@ -43,6 +52,21 @@ Sent after login. Details in [handshake.md](handshake.md).
 ### `0xF745` ObjectCreate (S2C)
 Used to spawn objects in the client's view.
 - `uint32` `GUID`: The unique ID of the object.
+
+### `0xF748` UpdatePosition (S2C)
+Sent frequently to sync object locations. Contains `PositionPack`.
+
+### `0xF74C` UpdateMotion (S2C)
+Sent for object animations and movement state changes.
+
+### `0xF74E` VectorUpdate (S2C)
+Sent to sync object velocity and angular velocity.
+
+### `0x02CD` PrivateUpdatePropertyInt (S2C)
+Updates an integer property on the player.
+- `uint32` `Sequence`.
+- `uint8` `PropertyID`. (Note: Some implementations see this as `uint16` or `uint32`).
+- `int32` `Value`.
 
 ### `0xF7B0` GameEvent (Multiplexer)
 The primary multiplexer for world state updates and social events.
@@ -73,7 +97,23 @@ The primary multiplexer for world state updates and social events.
 
 ---
 
-## 2. Common Client-to-Server (C2S) Messages
+## 4. Other Game Messages
+
+### `0x02CD` PrivateUpdatePropertyInt
+Updates an integer property for the player's character.
+- `uint32` `Sequence`.
+- `byte` `PropertyID` (Based on observation).
+- `uint32` `Value`.
+
+### `0xF74C` UpdateMotion
+Synchronizes movement and animation states for objects.
+- `uint32` `GUID`: The object moving.
+- `uint32` `InstanceSequence`.
+- `byte[]` `MovementData`: Header + Animation/Position state.
+
+---
+
+## 5. Common Client-to-Server (C2S) Messages
 
 ### `0xF7C8` CharacterEnterWorldRequest
 Initial request to select a character slot.

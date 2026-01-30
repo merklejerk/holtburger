@@ -202,7 +202,7 @@ pub enum GameMessage {
     },
     UpdatePropertyInt {
         property: u32,
-        value: u32,
+        value: i32, // signed per ACE server implementation
     },
     UpdateMotion {
         guid: u32,
@@ -392,14 +392,13 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_INT => {
-                if data.len() >= 13 {
-                    // Sequence(4), Property(1/2/4?), Value(4)
-                    // ACE says 4+4+4=12 payload, but we see 9 payload (13 total).
-                    // We'll assume Property is 1 byte for now based on the pcap logic.
-                    let property = data[8] as u32;
-                    let value = LittleEndian::read_u32(&data[9..13]);
+                // Expected layout (ACE server): [seq:uint32][property:uint32][value:int32]
+                if data.len() >= 16 {
+                    let property = LittleEndian::read_u32(&data[8..12]);
+                    let value = LittleEndian::read_i32(&data[12..16]);
                     GameMessage::UpdatePropertyInt { property, value }
                 } else {
+                    // Fallback: unknown/short payload
                     GameMessage::Unknown { opcode, data: data[4..].to_vec() }
                 }
             }
@@ -549,6 +548,7 @@ pub mod game_event_opcodes {
 pub mod character_error_codes {
     pub const ACCOUNT_ALREADY_LOGGED_ON: u32 = 0x1;
     pub const CHARACTER_ALREADY_LOGGED_ON: u32 = 0x2;
+    pub const ENTER_GAME_CHARACTER_IN_WORLD: u32 = 0x0D;
     pub const CHARACTER_LIMIT_REACHED: u32 = 0x10;
 }
 

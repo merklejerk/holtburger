@@ -65,9 +65,10 @@ Sent to sync object velocity and angular velocity.
 ### `0x02CD` PrivateUpdatePropertyInt (S2C)
 Updates an integer property on the player.
 - `uint32` `Sequence`.
-- `uint8` `PropertyID`. (Note: Some implementations see this as `uint16` or `uint32`).
+- `uint32` `PropertyID` (use values from `PropertyInt` enum in server source).
 - `int32` `Value`.
 
+Note: `PropertyID=0` maps to `PropertyInt.Undef` and may be used for internal counters or server-specific values; consult server code where `GameMessagePrivateUpdatePropertyInt` is invoked for the authoritative meaning.
 ### `0xF7B0` GameEvent (Multiplexer)
 The primary multiplexer for world state updates and social events.
 

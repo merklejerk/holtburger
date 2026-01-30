@@ -1,5 +1,6 @@
 use crate::crypto::Isaac;
 use crate::protocol::*;
+use crate::properties;
 use crate::session::Session;
 use anyhow::Result;
 use byteorder::{ByteOrder, LittleEndian};
@@ -16,9 +17,69 @@ enum ClientState {
 use tokio::sync::mpsc;
 use crate::ui::{ChatMessage, MessageKind};
 
+#[derive(Debug, Clone)]
+struct RetryState {
+    active: bool,
+    next_time: Option<std::time::Instant>,
+    backoff_secs: u64,
+    attempts: u32,
+    max_attempts: u32,
+}
+
+impl RetryState {
+    fn new(max_attempts: u32) -> Self {
+        Self {
+            active: false,
+            next_time: None,
+            backoff_secs: 5,
+            attempts: 0,
+            max_attempts,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.active = false;
+        self.next_time = None;
+        self.attempts = 0;
+        self.backoff_secs = 5;
+    }
+
+    fn schedule(&mut self) {
+        if !self.active {
+            self.active = true;
+            self.attempts = 0;
+            self.backoff_secs = 5;
+            self.next_time = Some(std::time::Instant::now() + std::time::Duration::from_secs(self.backoff_secs));
+        }
+    }
+
+    fn tick(&mut self, now: std::time::Instant) -> bool {
+        if self.active && self.next_time.is_some_and(|t| now >= t) {
+            if self.attempts >= self.max_attempts {
+                self.active = false;
+                self.next_time = None;
+                false
+            } else {
+                self.attempts += 1;
+                // Prepare next backoff
+                self.backoff_secs = std::cmp::min(self.backoff_secs * 2, 300);
+                self.next_time = Some(now + std::time::Duration::from_secs(self.backoff_secs));
+                true
+            }
+        } else {
+            false
+        }
+    }
+}
+
 pub enum ClientEvent {
     Message(ChatMessage),
     CharacterList(Vec<(u32, String)>),
+    StatusUpdate {
+        state: String,
+        logon_retry: Option<(u32, u32)>,
+        enter_retry: Option<(u32, u32)>,
+    },
 }
 
 impl Client {
@@ -31,6 +92,36 @@ impl Client {
 
     fn log(&self, msg: &str) {
         self.send_message(MessageKind::Info, msg);
+    }
+
+    fn send_status(&self) {
+        if let Some(tx) = &self.event_tx {
+            let logon_retry = if self.logon_retry.active {
+                Some((self.logon_retry.attempts, self.logon_retry.max_attempts))
+            } else {
+                None
+            };
+            let enter_retry = if self.enter_retry.active {
+                Some((self.enter_retry.attempts, self.enter_retry.max_attempts))
+            } else {
+                None
+            };
+            let _ = tx.send(ClientEvent::StatusUpdate {
+                state: format!("{:?}", self.state),
+                logon_retry,
+                enter_retry,
+            });
+        }
+    }
+
+    fn cancel_retries(&mut self) {
+        let was_retrying = self.logon_retry.active || self.enter_retry.active;
+        self.logon_retry.reset();
+        self.enter_retry.reset();
+
+        if was_retrying {
+            self.send_message(MessageKind::Info, "Login succeeded; cancelled automatic retries.");
+        }
     }
 }
 pub enum ClientCommand {
@@ -50,6 +141,11 @@ pub struct Client {
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     // Handshake state
     connection_cookie: u64,
+
+    // Auto-reconnect on logon or character-in-world errors
+    password: Option<String>,
+    logon_retry: RetryState,
+    enter_retry: RetryState,
 }
 
 impl Client {
@@ -71,6 +167,9 @@ impl Client {
             event_tx: None,
             command_rx: None,
             connection_cookie: 0,
+            password: None,
+            logon_retry: RetryState::new(6),
+            enter_retry: RetryState::new(6),
         })
     }
 
@@ -90,6 +189,7 @@ impl Client {
                     ClientState::CharacterSelection(chars) if (1..=chars.len()).contains(&idx) => {
                         let char_id = chars[idx - 1].0;
                         self.state = ClientState::EnteringWorld;
+                        self.send_status();
                         self.select_character(char_id).await
                     }
                     _ => Ok(()),
@@ -132,10 +232,17 @@ impl Client {
 
 
     pub async fn run(&mut self, password: &str) -> Result<()> {
+        // Store password for potential retries
+        self.password = Some(password.to_string());
+        self.logon_retry.reset();
+        self.enter_retry.reset();
+
         self.send_message(MessageKind::Info, &format!("Connecting to {}...", self.session.server_addr));
         self.send_login_request(password).await?;
+        self.send_status();
 
         let mut buf = [0u8; MAX_PACKET_SIZE];
+        let mut retry_tick = tokio::time::interval(std::time::Duration::from_secs(1));
 
         loop {
             tokio::select! {
@@ -154,6 +261,45 @@ impl Client {
                     }
                 } => {
                     self.handle_command(cmd).await?;
+                }
+
+                // Retry tick: perform scheduled reconnect/login retries when appropriate
+                _ = retry_tick.tick() => {
+                    let now = std::time::Instant::now();
+
+                    // Handle scheduled reconnect/login retries
+                    if self.logon_retry.tick(now) {
+                        self.send_message(MessageKind::Info, &format!("Retrying login attempt {}/{}...", self.logon_retry.attempts, self.logon_retry.max_attempts));
+                        self.send_status();
+                        if let Some(pw) = self.password.clone() {
+                            if let Err(e) = self.send_login_request(&pw).await {
+                                log::debug!("Retry login attempt failed to send: {}", e);
+                            }
+                        }
+                    } else if self.logon_retry.attempts >= self.logon_retry.max_attempts && self.logon_retry.active {
+                        self.send_message(MessageKind::Error, &format!("Giving up after {} reconnect attempts.", self.logon_retry.attempts));
+                        self.logon_retry.active = false;
+                        self.send_status();
+                    }
+
+                    // Handle scheduled retries for entering a character that's still in the world
+                    if self.enter_retry.tick(now) {
+                        self.send_message(MessageKind::Info, &format!("Retrying enter attempt {}/{}...", self.enter_retry.attempts, self.enter_retry.max_attempts));
+                        self.send_status();
+                        if let Some(char_id) = self.character_id {
+                            if let Err(e) = self.send_character_enter_world(char_id).await {
+                                log::debug!("Retry enter attempt failed to send: {}", e);
+                            }
+                        } else {
+                            self.send_message(MessageKind::Warning, "No character selected; cannot retry enter automatically.");
+                            self.enter_retry.reset();
+                            self.send_status();
+                        }
+                    } else if self.enter_retry.attempts >= self.enter_retry.max_attempts && self.enter_retry.active {
+                        self.send_message(MessageKind::Error, &format!("Giving up after {} enter attempts.", self.enter_retry.attempts));
+                        self.enter_retry.active = false;
+                        self.send_status();
+                    }
                 }
             }
         }
@@ -349,201 +495,200 @@ impl Client {
         log::debug!("<<< GameMessage: {:?}", message);
 
         match message {
-            GameMessage::CharacterList { characters } => {
-                self.send_message(MessageKind::Info, &format!(
-                    "Character List received ({} characters)",
-                    characters.len()
-                ));
-
-                // If we have a preference, try searching for it
-                if let Some(pref) = &self.character_preference {
-                    match pref.parse::<usize>() {
-                        Ok(idx) if (1..=characters.len()).contains(&idx) => {
-                            let char_id = characters[idx - 1].0;
-                            let _ = self.select_character(char_id).await;
-                            return Ok(());
-                        }
-                        _ => {}
-                    }
-                    if let Some(c) = characters
-                        .iter()
-                        .find(|(_, name)| name.to_lowercase() == pref.to_lowercase())
-                    {
-                        let _ = self.select_character(c.0).await;
-                        return Ok(());
-                    }
-                }
-                
-                self.state = ClientState::CharacterSelection(characters.clone());
-                if let Some(tx) = &self.event_tx {
-                    let _ = tx.send(ClientEvent::CharacterList(characters));
-                }
-            }
+            GameMessage::CharacterList { characters } => self.handle_character_list(characters).await,
             GameMessage::CharacterEnterWorldServerReady => {
                 self.send_message(MessageKind::System, "Server ready for world entry. Sending CharacterEnterWorld...");
                 if let Some(char_id) = self.character_id {
-                    self.send_character_enter_world(char_id).await?;
+                    self.send_character_enter_world(char_id).await
+                } else {
+                    Ok(())
                 }
             }
-            GameMessage::PlayerCreate { player_id } => {
-                self.send_message(MessageKind::System, &format!("You have been created with GUID: {:08X}", player_id));
-                self.send_login_complete().await?;
-                self.send_message(MessageKind::System, "Login complete! (Transitioning to InWorld)");
-                self.state = ClientState::InWorld;
-            }
+            GameMessage::PlayerCreate { player_id } => self.handle_player_create(player_id).await,
             GameMessage::ObjectCreate { guid } => {
                 log::debug!("Object Created: {:08X}", guid);
+                Ok(())
             }
             GameMessage::ObjectDelete { guid } => {
                 log::debug!("Object Deleted: {:08X}", guid);
+                Ok(())
             }
             GameMessage::ObjectStatUpdate { guid, .. } => {
                 log::debug!("Object Stat Update: {:08X}", guid);
+                Ok(())
             }
             GameMessage::PlayEffect { guid } => {
                 log::debug!("Play Effect on: {:08X}", guid);
+                Ok(())
             }
             GameMessage::UpdatePropertyInt { property, value } => {
-                // Many properties are noisy or irrelevant, but some like Level (25) could be cool.
-                let name = match property {
-                    0 => "Internal/Health", // ACE uses 0 for Undef, but it often carries vitals/internal state
-                    25 => "Level",
-                    5 => "Encumbrance",
-                    12 => "StackSize",
-                    19 => "Value",
-                    _ => "Property",
-                };
-                self.log(&format!("[Stats] {} ({}) updated to {}", name, property, value));
+                let name = properties::property_name(property);
+                self.send_message(MessageKind::Info, &format!("[Stats] {} ({}) updated to {}", name, property, value));
+                Ok(())
             }
-            GameMessage::UpdateMotion { .. } => {
-                // Ignore motion updates to avoid spamming the log
-                log::debug!("Received UpdateMotion event (suppressed)");
-            }
-            GameMessage::UpdatePosition { .. } => {
-                // Ignore position updates to avoid spamming the log
-                log::debug!("Received UpdatePosition event (suppressed)");
-            }
-            GameMessage::VectorUpdate { .. } => {
-                // Ignore vector updates to avoid spamming the log
-                log::debug!("Received VectorUpdate event (suppressed)");
-            }
-            GameMessage::GameEvent {
-                event_type,
-                guid,
-                sequence,
-                data,
-            } => {
-                let type_name = match event_type {
-                    game_event_opcodes::PLAYER_DESCRIPTION => {
-                        if self.state == ClientState::EnteringWorld {
-                            self.state = ClientState::InWorld;
-                            self.log("Received PlayerDescription. Transitioning to InWorld.");
-                        }
-                        "PlayerDescription"
-                    }
-                    game_event_opcodes::CHANNEL_BROADCAST => "ChannelBroadcast",
-                    game_event_opcodes::VIEW_CONTENTS => "ViewContents",
-                    game_event_opcodes::START_GAME => {
-                        if self.state == ClientState::EnteringWorld {
-                            self.state = ClientState::InWorld;
-                            self.log("Received StartGame. Transitioning to InWorld.");
-                        }
-                        "StartGame"
-                    }
-                    game_event_opcodes::WEENIE_ERROR => "WeenieError",
-                    game_event_opcodes::CHARACTER_TITLE => "CharacterTitle",
-                    game_event_opcodes::FRIENDS_LIST_UPDATE => "FriendsListUpdate",
-                    game_event_opcodes::FELLOWSHIP_UPDATE_FELLOW => "FellowshipUpdateFellow",
-                    game_event_opcodes::TELL => "Tell",
-                    _ => "UnknownEvent",
-                };
-
-                // Special handling for some events
-                if event_type == game_event_opcodes::CHANNEL_BROADCAST {
-                    let mut offset = 0;
-                    if data.len() >= 4 {
-                        let _channel = LittleEndian::read_u32(&data[0..4]);
-                        offset += 4;
-                        let sender = read_string16(&data, &mut offset);
-                        let message = read_string16(&data, &mut offset);
-                        
-                        let display_sender = if sender.is_empty() { "You" } else { &sender };
-                        self.send_message(MessageKind::Chat, &format!("{}: {}", display_sender, message));
-                    }
-                } else if event_type == game_event_opcodes::TELL {
-                    let mut offset = 0;
-                    let message = read_string16(&data, &mut offset);
-                    let sender = read_string16(&data, &mut offset);
-                    self.send_message(MessageKind::Tell, &format!("{}: {}", sender, message));
-                } else {
-                    log::debug!(
-                        "GameEvent: {} (Type: 0x{:04X}, GUID: {:016X}, Seq: {})",
-                        type_name, event_type, guid, sequence
-                    );
-                }
-            }
-            GameMessage::GameAction { action, .. } => {
-                let action_name = match action {
-                    action_opcodes::LOGIN_COMPLETE => "LoginComplete",
-                    action_opcodes::TALK => "Talk",
-                    _ => "UnknownAction",
-                };
-
-                if action == action_opcodes::LOGIN_COMPLETE {
-                    self.send_message(MessageKind::System, "Received LoginComplete confirmation from server.");
-                    self.state = ClientState::InWorld;
-                }
-                log::debug!("<<< GameAction: {} (Type: 0x{:04X})", action_name, action);
-            }
+            GameMessage::UpdateMotion { .. } | GameMessage::UpdatePosition { .. } | GameMessage::VectorUpdate { .. } => Ok(()),
+            GameMessage::GameEvent { event_type, guid, sequence, data } => self.handle_game_event(event_type, guid, sequence, data).await,
+            GameMessage::GameAction { action, data } => self.handle_game_action(action, data).await,
             GameMessage::ServerMessage { message } => {
                 self.send_message(MessageKind::System, &message);
+                Ok(())
             }
-            GameMessage::CharacterError { error_code } => {
-                let msg = match error_code {
-                    character_error_codes::ACCOUNT_ALREADY_LOGGED_ON => {
-                        "Account already logged on (Logon Error)".to_string()
-                    }
-                    character_error_codes::CHARACTER_ALREADY_LOGGED_ON => {
-                        "Character already logged on (Character in World)".to_string()
-                    }
-                    character_error_codes::CHARACTER_LIMIT_REACHED => {
-                        "Character limit reached".to_string()
-                    }
-                    _ => format!("0x{:08X}", error_code),
-                };
-                self.send_message(MessageKind::Error, &format!("Character Error: {}", msg));
-            }
+            GameMessage::CharacterError { error_code } => self.handle_character_error(error_code),
             GameMessage::DddInterrogation => {
                 log::debug!("Received DDD Interrogation. Sending response (English).");
                 let resp = GameMessage::DddInterrogationResponse { language: 1 };
-                self.session.send_message(&resp).await?;
+                self.session.send_message(&resp).await
             }
-            GameMessage::ServerName {
-                name, online_count, ..
-            } => {
-                self.send_message(MessageKind::System, &format!(
-                    "Connected to server: {} ({} players online)",
-                    name, online_count
-                ));
+            GameMessage::ServerName { name, online_count, .. } => {
+                self.send_message(MessageKind::System, &format!("Connected to server: {} ({} players online)", name, online_count));
+                Ok(())
             }
             GameMessage::HearSpeech { message, sender } => {
                 self.send_message(MessageKind::Chat, &format!("{}: {}", sender, message));
+                Ok(())
             }
-            GameMessage::SoulEmote { sender_id: _, sender_name, text } => {
-                // Trim leading '+' prefixes from name (server uses it sometimes)
-                let pretty_name = if let Some(stripped) = sender_name.strip_prefix('+') { stripped.to_string() } else { sender_name.clone() };
-                self.send_message(MessageKind::Emote, &format!("{} {}", pretty_name, text));
-            }
+            GameMessage::SoulEmote { sender_name, text, .. } => self.handle_soul_emote(sender_name, text),
             GameMessage::Unknown { opcode, data } => {
-                log::debug!(
-                    "Unknown message received: 0x{:08X} (Size: {}) Data: {:02X?}",
-                    opcode,
-                    data.len(),
-                    data
-                );
+                log::debug!("Unknown message received: 0x{:08X} (Size: {}) Data: {:02X?}", opcode, data.len(), data);
+                Ok(())
             }
-            _ => {}
+            _ => Ok(()),
         }
+    }
+
+    async fn handle_character_list(&mut self, characters: Vec<(u32, String)>) -> Result<()> {
+        self.send_message(MessageKind::Info, &format!("Character List received ({} characters)", characters.len()));
+        self.cancel_retries();
+
+        if let Some(pref) = &self.character_preference {
+            if let Ok(idx) = pref.parse::<usize>() {
+                if (1..=characters.len()).contains(&idx) {
+                    return self.select_character(characters[idx - 1].0).await;
+                }
+            }
+            if let Some(c) = characters.iter().find(|(_, name)| name.to_lowercase() == pref.to_lowercase()) {
+                return self.select_character(c.0).await;
+            }
+        }
+        
+        self.state = ClientState::CharacterSelection(characters.clone());
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientEvent::CharacterList(characters));
+        }
+        Ok(())
+    }
+
+    async fn handle_player_create(&mut self, player_id: u32) -> Result<()> {
+        self.send_message(MessageKind::System, &format!("You have been created with GUID: {:08X}", player_id));
+        self.send_login_complete().await?;
+        self.send_message(MessageKind::System, "Login complete! (Transitioning to InWorld)");
+        self.state = ClientState::InWorld;
+        self.cancel_retries();
+        self.send_status();
+        Ok(())
+    }
+
+    async fn handle_game_event(&mut self, event_type: u32, guid: u64, sequence: u32, data: Vec<u8>) -> Result<()> {
+        let type_name = match event_type {
+            game_event_opcodes::PLAYER_DESCRIPTION => {
+                if self.state == ClientState::EnteringWorld {
+                    self.state = ClientState::InWorld;
+                    self.log("Received PlayerDescription. Transitioning to InWorld.");
+                    self.cancel_retries();
+                    self.send_status();
+                }
+                "PlayerDescription"
+            }
+            game_event_opcodes::CHANNEL_BROADCAST => "ChannelBroadcast",
+            game_event_opcodes::VIEW_CONTENTS => "ViewContents",
+            game_event_opcodes::START_GAME => {
+                if self.state == ClientState::EnteringWorld {
+                    self.state = ClientState::InWorld;
+                    self.log("Received StartGame. Transitioning to InWorld.");
+                    self.cancel_retries();
+                    self.send_status();
+                }
+                "StartGame"
+            }
+            game_event_opcodes::WEENIE_ERROR => "WeenieError",
+            game_event_opcodes::CHARACTER_TITLE => "CharacterTitle",
+            game_event_opcodes::FRIENDS_LIST_UPDATE => "FriendsListUpdate",
+            game_event_opcodes::FELLOWSHIP_UPDATE_FELLOW => "FellowshipUpdateFellow",
+            game_event_opcodes::TELL => "Tell",
+            _ => "UnknownEvent",
+        };
+
+        if event_type == game_event_opcodes::CHANNEL_BROADCAST {
+            let mut offset = 0;
+            if data.len() >= 4 {
+                let _channel = LittleEndian::read_u32(&data[0..4]);
+                offset += 4;
+                let sender = read_string16(&data, &mut offset);
+                let message = read_string16(&data, &mut offset);
+                let display_sender = if sender.is_empty() { "You" } else { &sender };
+                self.send_message(MessageKind::Chat, &format!("{}: {}", display_sender, message));
+            }
+        } else if event_type == game_event_opcodes::TELL {
+            let mut offset = 0;
+            let message = read_string16(&data, &mut offset);
+            let sender = read_string16(&data, &mut offset);
+            self.send_message(MessageKind::Tell, &format!("{}: {}", sender, message));
+        } else {
+            log::debug!("GameEvent: {} (Type: 0x{:04X}, GUID: {:016X}, Seq: {})", type_name, event_type, guid, sequence);
+        }
+        Ok(())
+    }
+
+    async fn handle_game_action(&mut self, action: u32, _data: Vec<u8>) -> Result<()> {
+        let action_name = match action {
+            action_opcodes::LOGIN_COMPLETE => "LoginComplete",
+            action_opcodes::TALK => "Talk",
+            _ => "UnknownAction",
+        };
+
+        if action == action_opcodes::LOGIN_COMPLETE {
+            self.send_message(MessageKind::System, "Received LoginComplete confirmation from server.");
+            self.state = ClientState::InWorld;
+            self.cancel_retries();
+            self.send_status();
+        }
+        log::debug!("<<< GameAction: {} (Type: 0x{:04X})", action_name, action);
+        Ok(())
+    }
+
+    fn handle_character_error(&mut self, error_code: u32) -> Result<()> {
+        let msg = match error_code {
+            character_error_codes::ACCOUNT_ALREADY_LOGGED_ON => "Account already logged on (Logon Error)".to_string(),
+            character_error_codes::CHARACTER_ALREADY_LOGGED_ON => "Character already logged on (Character in World)".to_string(),
+            character_error_codes::CHARACTER_LIMIT_REACHED => "Character limit reached".to_string(),
+            _ => format!("0x{:08X}", error_code),
+        };
+
+        if error_code == character_error_codes::ACCOUNT_ALREADY_LOGGED_ON {
+            if !self.logon_retry.active {
+                self.logon_retry.schedule();
+                self.send_message(MessageKind::Warning, "Account already logged on. Will retry login automatically.");
+                self.send_status();
+            } else {
+                self.send_message(MessageKind::Info, &format!("Account still logged on. Next retry in {}s.", self.logon_retry.backoff_secs));
+            }
+        }
+
+        if error_code == character_error_codes::ENTER_GAME_CHARACTER_IN_WORLD {
+            if !self.enter_retry.active {
+                self.enter_retry.schedule();
+                self.send_message(MessageKind::Warning, "Character still in world. Will retry entering automatically.");                self.send_status();            } else {
+                self.send_message(MessageKind::Info, &format!("Character still in world. Next enter attempt in {}s.", self.enter_retry.backoff_secs));
+            }
+        }
+
+        self.send_message(MessageKind::Error, &format!("Character Error: {}", msg));
+        Ok(())
+    }
+
+    fn handle_soul_emote(&mut self, sender_name: String, text: String) -> Result<()> {
+        let pretty_name = if let Some(stripped) = sender_name.strip_prefix('+') { stripped.to_string() } else { sender_name };
+        self.send_message(MessageKind::Emote, &format!("{} {}", pretty_name, text));
         Ok(())
     }
 

@@ -62,6 +62,8 @@ async fn main() -> Result<()> {
         state: ui::UIState::Chat, // Default to chat
         selected_character_index: 0,
         scroll_offset: 0,
+        client_status: None,
+        retry_status: None,
     };
 
     // Run client in background
@@ -201,6 +203,23 @@ async fn main() -> Result<()> {
                     app_state.characters = chars;
                     app_state.state = ui::UIState::CharacterSelection;
                     app_state.selected_character_index = 0;
+                }
+                ClientEvent::StatusUpdate { state, logon_retry, enter_retry } => {
+                    app_state.client_status = Some(state);
+                    
+                    let mut retries = Vec::new();
+                    if let Some((attempt, max)) = logon_retry {
+                        retries.push(format!("Login Retry {}/{}", attempt, max));
+                    }
+                    if let Some((attempt, max)) = enter_retry {
+                        retries.push(format!("Enter Retry {}/{}", attempt, max));
+                    }
+                    
+                    if retries.is_empty() {
+                        app_state.retry_status = Some("No active retries".to_string());
+                    } else {
+                        app_state.retry_status = Some(retries.join(" | "));
+                    }
                 }
             }
         }

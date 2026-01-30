@@ -44,23 +44,39 @@ pub struct AppState {
     pub state: UIState,
     pub selected_character_index: usize,
     pub scroll_offset: usize,
+    pub client_status: Option<String>,
+    pub retry_status: Option<String>,
 }
 
 pub fn ui(f: &mut Frame, state: &AppState) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Status Bar (HUD)
+            Constraint::Min(1),    // Main Content
+            Constraint::Length(3), // Input Area
+        ])
+        .split(f.size());
+
+    // Render Status Bar (HUD)
+    let state_desc = state.client_status.as_deref().unwrap_or("Disconnected");
+    let retry_desc = state.retry_status.as_deref().unwrap_or("No active retries");
+    
+    let status_text = format!(" State: {} | {}", state_desc, retry_desc);
+    let status_bar = Paragraph::new(status_text)
+        .style(Style::default().fg(Color::Yellow))
+        .block(Block::default().borders(Borders::ALL).title("Status"));
+    f.render_widget(status_bar, chunks[0]);
+
     match state.state {
-        UIState::Chat => ui_chat(f, state),
-        UIState::CharacterSelection => ui_character_selection(f, state),
+        UIState::Chat => ui_chat(f, state, chunks[1], chunks[2]),
+        UIState::CharacterSelection => ui_character_selection(f, state, chunks[1], chunks[2]),
     }
 }
 
-fn ui_chat(f: &mut Frame, state: &AppState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
-        .split(f.size());
-
+fn ui_chat(f: &mut Frame, state: &AppState, content_area: ratatui::layout::Rect, input_area: ratatui::layout::Rect) {
     // Messages Area
-    let height = chunks[0].height.saturating_sub(2) as usize; // Account for borders
+    let height = content_area.height.saturating_sub(2) as usize; // Account for borders
     let total_messages = state.messages.len();
     let scroll = state.scroll_offset;
 
@@ -99,31 +115,16 @@ fn ui_chat(f: &mut Frame, state: &AppState) {
             .borders(Borders::ALL)
             .title(title),
     );
-    f.render_widget(messages_list, chunks[0]);
+    f.render_widget(messages_list, content_area);
 
     // Input Area
     let input = Paragraph::new(state.input.as_str())
         .style(Style::default().fg(Color::Yellow))
         .block(Block::default().borders(Borders::ALL).title("Input"));
-    f.render_widget(input, chunks[1]);
+    f.render_widget(input, input_area);
 }
 
-fn ui_character_selection(f: &mut Frame, state: &AppState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(1),
-            Constraint::Length(3),
-        ])
-        .split(f.size());
-
-    let title = Paragraph::new("Character Selection")
-        .style(Style::default().fg(Color::Cyan))
-        .block(Block::default().borders(Borders::ALL));
-    f.render_widget(title, chunks[0]);
-
+fn ui_character_selection(f: &mut Frame, state: &AppState, content_area: ratatui::layout::Rect, input_area: ratatui::layout::Rect) {
     let items: Vec<ListItem> = state
         .characters
         .iter()
@@ -139,9 +140,9 @@ fn ui_character_selection(f: &mut Frame, state: &AppState) {
         .collect();
 
     let list = List::new(items).block(Block::default().borders(Borders::ALL).title("Characters"));
-    f.render_widget(list, chunks[1]);
+    f.render_widget(list, content_area);
 
     let footer = Paragraph::new("Use [UP/DOWN] to select, [ENTER] to login, [ESC] to quit")
         .block(Block::default().borders(Borders::ALL));
-    f.render_widget(footer, chunks[2]);
+    f.render_widget(footer, input_area);
 }

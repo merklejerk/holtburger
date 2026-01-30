@@ -59,6 +59,7 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                    _ => {}
                 }
             }
             _ = &mut timeout => {

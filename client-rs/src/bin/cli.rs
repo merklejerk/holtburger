@@ -123,6 +123,7 @@ async fn main() -> Result<()> {
                                     let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(1));
                                 }
                             }
+                            _ => {}
                         }
                     }
                     _ = tokio::signal::ctrl_c() => {

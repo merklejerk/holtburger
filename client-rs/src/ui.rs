@@ -15,9 +15,12 @@ pub enum UIState {
 pub struct AppState {
     pub messages: Vec<String>,
     pub input: String,
+    pub input_history: Vec<String>,
+    pub history_index: Option<usize>,
     pub characters: Vec<(u32, String)>,
     pub state: UIState,
     pub selected_character_index: usize,
+    pub scroll_offset: usize,
 }
 
 pub fn ui(f: &mut Frame, state: &AppState) {
@@ -34,22 +37,35 @@ fn ui_chat(f: &mut Frame, state: &AppState) {
         .split(f.size());
 
     // Messages Area
+    let height = chunks[0].height.saturating_sub(2) as usize; // Account for borders
+    let total_messages = state.messages.len();
+    let scroll = state.scroll_offset;
+
+    let start = total_messages
+        .saturating_sub(height)
+        .saturating_sub(scroll);
+    
     let messages: Vec<ListItem> = state
         .messages
         .iter()
-        .rev()
-        .take(chunks[0].height as usize)
-        .rev()
+        .skip(start)
+        .take(height)
         .map(|m| {
             let content = Line::from(Span::raw(m));
             ListItem::new(content)
         })
         .collect();
 
+    let title = if scroll > 0 {
+        format!("Chat (Paused - {} lines up) | Shift+End to resume", scroll)
+    } else {
+        "Chat (History: Up/Down | Scroll: PgUp/PgDn or Mouse)".to_string()
+    };
+
     let messages_list = List::new(messages).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Asheron's Call Chat (Type /quit to exit)"),
+            .title(title),
     );
     f.render_widget(messages_list, chunks[0]);
 

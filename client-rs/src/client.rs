@@ -14,12 +14,25 @@ enum ClientState {
 }
 
 use tokio::sync::mpsc;
+use crate::ui::{ChatMessage, MessageKind};
 
 pub enum ClientEvent {
-    Message(String),
+    Message(ChatMessage),
     CharacterList(Vec<(u32, String)>),
 }
 
+impl Client {
+    fn send_message(&self, kind: MessageKind, text: &str) {
+        log::info!("{}", text);
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientEvent::Message(ChatMessage { kind, text: text.to_string() }));
+        }
+    }
+
+    fn log(&self, msg: &str) {
+        self.send_message(MessageKind::Info, msg);
+    }
+}
 pub enum ClientCommand {
     SelectCharacter(u32),
     SelectCharacterByIndex(usize),
@@ -87,7 +100,7 @@ impl Client {
                     log::debug!("Handling Talk command: '{}'", text);
                     return self.send_talk(&text).await;
                 } else {
-                    self.log(&format!(
+                    self.send_message(MessageKind::Warning, &format!(
                         "Discarding chat message (Not in world yet. State: {:?})",
                         self.state
                     ));
@@ -102,7 +115,7 @@ impl Client {
     }
 
     pub async fn disconnect(&mut self) -> Result<()> {
-        self.log("Sending disconnect signal to server...");
+        self.send_message(MessageKind::Info, "Sending disconnect signal to server...");
         let header = PacketHeader {
             flags: flags::DISCONNECT,
             sequence: self.session.packet_sequence,
@@ -116,15 +129,10 @@ impl Client {
         Ok(())
     }
 
-    fn log(&self, msg: &str) {
-        log::info!("{}", msg);
-        if let Some(tx) = &self.event_tx {
-            let _ = tx.send(ClientEvent::Message(msg.to_string()));
-        }
-    }
+
 
     pub async fn run(&mut self, password: &str) -> Result<()> {
-        self.log(&format!("Connecting to {}...", self.session.server_addr));
+        self.send_message(MessageKind::Info, &format!("Connecting to {}...", self.session.server_addr));
         self.send_login_request(password).await?;
 
         let mut buf = [0u8; MAX_PACKET_SIZE];
@@ -238,7 +246,7 @@ impl Client {
         self.session.packet_sequence += 1;
 
         self.session.send_packet(header, &payload).await?;
-        self.log(&format!("Sent LoginRequest (Payload: {})", payload.len()));
+        log::debug!("Sent LoginRequest (Payload: {})", payload.len());
         Ok(())
     }
 
@@ -296,7 +304,7 @@ impl Client {
         ))
         .await;
 
-        self.log(&format!(
+        self.send_message(MessageKind::Info, &format!(
             "Sending ConnectResponse to {} (Activation)...",
             activation_addr
         ));
@@ -308,7 +316,7 @@ impl Client {
             .await?;
 
         // packet_sequence already set to 2 at start of this function
-        self.log("Sent ConnectResponse. Connection established.");
+        self.send_message(MessageKind::Info, "Sent ConnectResponse. Connection established.");
 
         Ok(())
     }
@@ -342,7 +350,7 @@ impl Client {
 
         match message {
             GameMessage::CharacterList { characters } => {
-                self.log(&format!(
+                self.send_message(MessageKind::Info, &format!(
                     "Character List received ({} characters)",
                     characters.len()
                 ));
@@ -372,28 +380,52 @@ impl Client {
                 }
             }
             GameMessage::CharacterEnterWorldServerReady => {
-                self.log("Server ready for world entry. Sending CharacterEnterWorld...");
+                self.send_message(MessageKind::System, "Server ready for world entry. Sending CharacterEnterWorld...");
                 if let Some(char_id) = self.character_id {
                     self.send_character_enter_world(char_id).await?;
                 }
             }
             GameMessage::PlayerCreate { player_id } => {
-                self.log(&format!("You have been created with GUID: {:08X}", player_id));
+                self.send_message(MessageKind::System, &format!("You have been created with GUID: {:08X}", player_id));
                 self.send_login_complete().await?;
-                self.log("Login complete! (Transitioning to InWorld)");
+                self.send_message(MessageKind::System, "Login complete! (Transitioning to InWorld)");
                 self.state = ClientState::InWorld;
             }
             GameMessage::ObjectCreate { guid } => {
-                self.log(&format!("Object Created: {:08X}", guid));
+                log::debug!("Object Created: {:08X}", guid);
             }
             GameMessage::ObjectDelete { guid } => {
-                self.log(&format!("Object Deleted: {:08X}", guid));
+                log::debug!("Object Deleted: {:08X}", guid);
             }
             GameMessage::ObjectStatUpdate { guid, .. } => {
-                self.log(&format!("Object Stat Update: {:08X}", guid));
+                log::debug!("Object Stat Update: {:08X}", guid);
             }
             GameMessage::PlayEffect { guid } => {
-                self.log(&format!("Play Effect on: {:08X}", guid));
+                log::debug!("Play Effect on: {:08X}", guid);
+            }
+            GameMessage::UpdatePropertyInt { property, value } => {
+                // Many properties are noisy or irrelevant, but some like Level (25) could be cool.
+                let name = match property {
+                    0 => "Internal/Health", // ACE uses 0 for Undef, but it often carries vitals/internal state
+                    25 => "Level",
+                    5 => "Encumbrance",
+                    12 => "StackSize",
+                    19 => "Value",
+                    _ => "Property",
+                };
+                self.log(&format!("[Stats] {} ({}) updated to {}", name, property, value));
+            }
+            GameMessage::UpdateMotion { .. } => {
+                // Ignore motion updates to avoid spamming the log
+                log::debug!("Received UpdateMotion event (suppressed)");
+            }
+            GameMessage::UpdatePosition { .. } => {
+                // Ignore position updates to avoid spamming the log
+                log::debug!("Received UpdatePosition event (suppressed)");
+            }
+            GameMessage::VectorUpdate { .. } => {
+                // Ignore vector updates to avoid spamming the log
+                log::debug!("Received VectorUpdate event (suppressed)");
             }
             GameMessage::GameEvent {
                 event_type,
@@ -436,18 +468,18 @@ impl Client {
                         let message = read_string16(&data, &mut offset);
                         
                         let display_sender = if sender.is_empty() { "You" } else { &sender };
-                        self.log(&format!("{}: {}", display_sender, message));
+                        self.send_message(MessageKind::Chat, &format!("{}: {}", display_sender, message));
                     }
                 } else if event_type == game_event_opcodes::TELL {
                     let mut offset = 0;
                     let message = read_string16(&data, &mut offset);
                     let sender = read_string16(&data, &mut offset);
-                    self.log(&format!("[Tell] {}: {}", sender, message));
+                    self.send_message(MessageKind::Tell, &format!("{}: {}", sender, message));
                 } else {
-                    self.log(&format!(
+                    log::debug!(
                         "GameEvent: {} (Type: 0x{:04X}, GUID: {:016X}, Seq: {})",
                         type_name, event_type, guid, sequence
-                    ));
+                    );
                 }
             }
             GameMessage::GameAction { action, .. } => {
@@ -458,13 +490,13 @@ impl Client {
                 };
 
                 if action == action_opcodes::LOGIN_COMPLETE {
-                    self.log("Received LoginComplete confirmation from server.");
+                    self.send_message(MessageKind::System, "Received LoginComplete confirmation from server.");
                     self.state = ClientState::InWorld;
                 }
                 log::debug!("<<< GameAction: {} (Type: 0x{:04X})", action_name, action);
             }
             GameMessage::ServerMessage { message } => {
-                self.log(&format!("[System] {}", message));
+                self.send_message(MessageKind::System, &message);
             }
             GameMessage::CharacterError { error_code } => {
                 let msg = match error_code {
@@ -479,31 +511,36 @@ impl Client {
                     }
                     _ => format!("0x{:08X}", error_code),
                 };
-                self.log(&format!("Character Error: {}", msg));
+                self.send_message(MessageKind::Error, &format!("Character Error: {}", msg));
             }
             GameMessage::DddInterrogation => {
-                self.log("Received DDD Interrogation. Sending response (English).");
+                log::debug!("Received DDD Interrogation. Sending response (English).");
                 let resp = GameMessage::DddInterrogationResponse { language: 1 };
                 self.session.send_message(&resp).await?;
             }
             GameMessage::ServerName {
                 name, online_count, ..
             } => {
-                self.log(&format!(
+                self.send_message(MessageKind::System, &format!(
                     "Connected to server: {} ({} players online)",
                     name, online_count
                 ));
             }
             GameMessage::HearSpeech { message, sender } => {
-                self.log(&format!("{}: {}", sender, message));
+                self.send_message(MessageKind::Chat, &format!("{}: {}", sender, message));
+            }
+            GameMessage::SoulEmote { sender_id: _, sender_name, text } => {
+                // Trim leading '+' prefixes from name (server uses it sometimes)
+                let pretty_name = if let Some(stripped) = sender_name.strip_prefix('+') { stripped.to_string() } else { sender_name.clone() };
+                self.send_message(MessageKind::Emote, &format!("{} {}", pretty_name, text));
             }
             GameMessage::Unknown { opcode, data } => {
-                self.log(&format!(
+                log::debug!(
                     "Unknown message received: 0x{:08X} (Size: {}) Data: {:02X?}",
                     opcode,
                     data.len(),
                     data
-                ));
+                );
             }
             _ => {}
         }
@@ -512,7 +549,7 @@ impl Client {
 
     async fn select_character(&mut self, char_id: u32) -> Result<()> {
         self.character_id = Some(char_id);
-        self.log(&format!("Selected character ID: {:08X}", char_id));
+        self.send_message(MessageKind::Info, &format!("Selected character ID: {:08X}", char_id));
         self.state = ClientState::EnteringWorld;
 
         let msg = GameMessage::CharacterEnterWorldRequest { char_id };
@@ -521,7 +558,7 @@ impl Client {
     }
 
     async fn send_character_enter_world(&mut self, char_id: u32) -> Result<()> {
-        self.log(&format!(
+        self.send_message(MessageKind::Info, &format!(
             "Sending EnterWorld for character {:08X}...",
             char_id
         ));
@@ -535,7 +572,7 @@ impl Client {
     }
 
     async fn send_login_complete(&mut self) -> Result<()> {
-        self.log("Sending LoginComplete action...");
+        log::debug!("Sending LoginComplete action...");
         let msg = GameMessage::GameAction {
             action: action_opcodes::LOGIN_COMPLETE,
             data: Vec::new(),
@@ -555,7 +592,7 @@ impl Client {
         };
 
         self.session.send_message(&msg).await?;
-        self.log(&format!("Sent: {}", text));
+        log::debug!("Sent: {}", text);
         Ok(())
     }
 }

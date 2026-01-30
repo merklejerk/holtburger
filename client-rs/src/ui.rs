@@ -12,8 +12,31 @@ pub enum UIState {
     CharacterSelection,
 }
 
+#[derive(Clone)]
+pub enum MessageKind {
+    Info,
+    System,
+    Chat,
+    Tell,
+    Emote,
+    Error,
+    Warning,
+}
+
+#[derive(Clone)]
+pub struct ChatMessage {
+    pub kind: MessageKind,
+    pub text: String,
+}
+
+impl std::fmt::Display for ChatMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.text)
+    }
+}
+
 pub struct AppState {
-    pub messages: Vec<String>,
+    pub messages: Vec<ChatMessage>,
     pub input: String,
     pub input_history: Vec<String>,
     pub history_index: Option<usize>,
@@ -51,7 +74,16 @@ fn ui_chat(f: &mut Frame, state: &AppState) {
         .skip(start)
         .take(height)
         .map(|m| {
-            let content = Line::from(Span::raw(m));
+            let (style, prefix) = match m.kind {
+                MessageKind::Chat => (Style::default().fg(Color::White), ""),
+                MessageKind::Tell => (Style::default().fg(Color::Magenta), "[Tell] "),
+                MessageKind::Emote => (Style::default().fg(Color::Green), ""),
+                MessageKind::System => (Style::default().fg(Color::Cyan), "[System] "),
+                MessageKind::Info => (Style::default().fg(Color::Blue), ""),
+                MessageKind::Error => (Style::default().fg(Color::Red), "[Error] "),
+                MessageKind::Warning => (Style::default().fg(Color::Yellow), "[Warn] "),
+            };
+            let content = Line::from(Span::styled(format!("{}{}", prefix, m.text), style));
             ListItem::new(content)
         })
         .collect();

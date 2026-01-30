@@ -9,6 +9,7 @@ pub const CHECKSUM_SEED: u32 = 0xBADD70DD;
 pub const ACE_HANDSHAKE_RACE_DELAY_MS: u64 = 200;
 
 // Handshake Offsets (ConnectRequest) - Relative to payload
+pub const OFF_CONNECT_TIME: usize = 0;
 pub const OFF_CONNECT_COOKIE: usize = 8;
 pub const OFF_CONNECT_CLIENT_ID: usize = 16;
 pub const OFF_CONNECT_SERVER_SEED: usize = 20;
@@ -54,16 +55,13 @@ impl PacketHeader {
         LittleEndian::write_u16(&mut data[18..20], self.iteration);
     }
 
-    pub fn calculate_checksum(&self, payload: &[u8]) -> u32 {
+    pub fn calculate_checksum(&self) -> u32 {
         let mut header_data = [0u8; HEADER_SIZE];
         let mut header_copy = self.clone();
         header_copy.checksum = CHECKSUM_SEED;
         header_copy.pack(&mut header_data);
 
-        let header_hash = crate::crypto::Hash32::compute(&header_data);
-        let payload_hash = crate::crypto::Hash32::compute(payload);
-
-        header_hash.wrapping_add(payload_hash)
+        crate::crypto::Hash32::compute(&header_data)
     }
 }
 
@@ -78,9 +76,8 @@ impl ConnectRequestData {
     pub fn unpack(data: &[u8]) -> Self {
         ConnectRequestData {
             cookie: LittleEndian::read_u64(&data[OFF_CONNECT_COOKIE..OFF_CONNECT_COOKIE + 8]),
-            client_id: LittleEndian::read_u32(
-                &data[OFF_CONNECT_CLIENT_ID..OFF_CONNECT_CLIENT_ID + 4],
-            ) as u16,
+            client_id: LittleEndian::read_u32(&data[OFF_CONNECT_CLIENT_ID..OFF_CONNECT_CLIENT_ID + 4])
+                as u16,
             server_seed: LittleEndian::read_u32(
                 &data[OFF_CONNECT_SERVER_SEED..OFF_CONNECT_SERVER_SEED + 4],
             ),
@@ -130,13 +127,19 @@ pub mod flags {
     pub const RETRANSMISSION: u32 = 0x00000001;
     pub const ENCRYPTED_CHECKSUM: u32 = 0x00000002;
     pub const BLOB_FRAGMENTS: u32 = 0x00000004;
+    pub const SERVER_SWITCH: u32 = 0x00000100;
+    pub const REQUEST_RETRANSMIT: u32 = 0x00001000;
+    pub const REJECT_RETRANSMIT: u32 = 0x00002000;
     pub const ACK_SEQUENCE: u32 = 0x00004000;
+    pub const DISCONNECT: u32 = 0x00008000;
     pub const LOGIN_REQUEST: u32 = 0x00010000;
     pub const CONNECT_REQUEST: u32 = 0x00040000;
     pub const CONNECT_RESPONSE: u32 = 0x00080000;
+    pub const CICMD: u32 = 0x00400000;
     pub const TIME_SYNC: u32 = 0x01000000;
     pub const ECHO_REQUEST: u32 = 0x02000000;
     pub const ECHO_RESPONSE: u32 = 0x04000000;
+    pub const FLOW: u32 = 0x08000000;
 }
 
 pub mod queues {
@@ -149,11 +152,20 @@ pub mod opcodes {
     pub const CHARACTER_ENTER_WORLD_REQUEST: u32 = 0xF7C8;
     pub const CHARACTER_ENTER_WORLD_SERVER_READY: u32 = 0xF7DF;
     pub const CHARACTER_ENTER_WORLD: u32 = 0xF657;
+    pub const OBJECT_CREATE: u32 = 0xF745;
+    pub const PLAYER_CREATE: u32 = 0xF746;
+    pub const OBJECT_DELETE: u32 = 0xF747;
+    pub const OBJECT_STAT_UPDATE: u32 = 0xF74B;
+    pub const PLAY_EFFECT: u32 = 0xF755;
+    pub const GAME_EVENT: u32 = 0xF7B0;
     pub const GAME_ACTION: u32 = 0xF7B1;
     pub const SERVER_MESSAGE: u32 = 0xF7E0;
     pub const HEAR_SPEECH: u32 = 0x02BB;
     pub const CHARACTER_ERROR: u32 = 0xF659;
     pub const SERVER_NAME: u32 = 0xF7E1;
+    pub const BOOT_ACCOUNT: u32 = 0xF7DC;
+    pub const DDD_INTERROGATION: u32 = 0xF7E5;
+    pub const DDD_INTERROGATION_RESPONSE: u32 = 0xF7E6;
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +180,28 @@ pub enum GameMessage {
     CharacterEnterWorld {
         id: u32,
         account: String,
+    },
+    PlayerCreate {
+        player_id: u32,
+    },
+    ObjectCreate {
+        guid: u32,
+    },
+    ObjectDelete {
+        guid: u32,
+    },
+    ObjectStatUpdate {
+        guid: u32,
+        data: Vec<u8>,
+    },
+    PlayEffect {
+        guid: u32,
+    },
+    GameEvent {
+        guid: u64,
+        sequence: u32,
+        event_type: u32,
+        data: Vec<u8>,
     },
     GameAction {
         action: u32,
@@ -209,20 +243,6 @@ impl GameMessage {
         let opcode = LittleEndian::read_u32(&data[0..4]);
 
         match opcode {
-            0xF7E5 => GameMessage::DddInterrogation,
-            opcodes::SERVER_NAME => {
-                let mut offset = 4;
-                let online_count = LittleEndian::read_u32(&data[offset..offset + 4]);
-                offset += 4;
-                let max_sessions = LittleEndian::read_u32(&data[offset..offset + 4]);
-                offset += 4;
-                let name = read_string16(data, &mut offset);
-                GameMessage::ServerName {
-                    name,
-                    online_count,
-                    max_sessions,
-                }
-            }
             opcodes::HEAR_SPEECH => {
                 let mut offset = 4;
                 let message = read_string16(data, &mut offset);
@@ -270,17 +290,96 @@ impl GameMessage {
                     GameMessage::CharacterEnterWorldRequest { char_id: 0 }
                 }
             }
-            opcodes::GAME_ACTION => {
-                if data.len() < 8 {
+            opcodes::PLAYER_CREATE => {
+                if data.len() >= 8 {
+                    GameMessage::PlayerCreate {
+                        player_id: LittleEndian::read_u32(&data[4..8]),
+                    }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
+                    }
+                }
+            }
+            opcodes::OBJECT_CREATE => {
+                if data.len() >= 8 {
+                    GameMessage::ObjectCreate {
+                        guid: LittleEndian::read_u32(&data[4..8]),
+                    }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
+                    }
+                }
+            }
+            opcodes::OBJECT_DELETE => {
+                if data.len() >= 8 {
+                    GameMessage::ObjectDelete {
+                        guid: LittleEndian::read_u32(&data[4..8]),
+                    }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
+                    }
+                }
+            }
+            opcodes::OBJECT_STAT_UPDATE => {
+                if data.len() >= 8 {
+                    GameMessage::ObjectStatUpdate {
+                        guid: LittleEndian::read_u32(&data[4..8]),
+                        data: data[8..].to_vec(),
+                    }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
+                    }
+                }
+            }
+            opcodes::PLAY_EFFECT => {
+                if data.len() >= 8 {
+                    GameMessage::PlayEffect {
+                        guid: LittleEndian::read_u32(&data[4..8]),
+                    }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
+                    }
+                }
+            }
+            opcodes::GAME_EVENT => {
+                if data.len() < 20 {
                     return GameMessage::Unknown {
                         opcode,
                         data: data.to_vec(),
                     };
                 }
-                let action = LittleEndian::read_u32(&data[4..8]);
+                let guid = LittleEndian::read_u64(&data[4..12]);
+                let sequence = LittleEndian::read_u32(&data[12..16]);
+                let event_type = LittleEndian::read_u32(&data[16..20]);
+                GameMessage::GameEvent {
+                    guid,
+                    sequence,
+                    event_type,
+                    data: data[20..].to_vec(),
+                }
+            }
+            opcodes::GAME_ACTION => {
+                if data.len() < 12 {
+                    return GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
+                    };
+                }
+                let _sequence = LittleEndian::read_u32(&data[4..8]);
+                let action = LittleEndian::read_u32(&data[8..12]);
                 GameMessage::GameAction {
                     action,
-                    data: data[8..].to_vec(),
+                    data: data[12..].to_vec(),
                 }
             }
             opcodes::SERVER_MESSAGE => {
@@ -297,6 +396,18 @@ impl GameMessage {
                     GameMessage::CharacterError { error_code: 0 }
                 }
             }
+            opcodes::BOOT_ACCOUNT => {
+                let mut offset = 4;
+                let message = read_string16(data, &mut offset);
+                GameMessage::ServerMessage { message: format!("Terminated: {}", message) }
+            }
+            opcodes::DDD_INTERROGATION => GameMessage::DddInterrogation,
+            opcodes::SERVER_NAME => {
+                let mut offset = 4;
+                let name = read_string16(data, &mut offset);
+                // online/max are sometimes here too
+                GameMessage::ServerName { name, online_count: 0, max_sessions: 1000 }
+            }
             _ => GameMessage::Unknown {
                 opcode,
                 data: data[4..].to_vec(),
@@ -310,7 +421,10 @@ impl GameMessage {
             GameMessage::DddInterrogationResponse { language } => {
                 buf.extend_from_slice(&0xF7E6u32.to_le_bytes());
                 buf.extend_from_slice(&language.to_le_bytes());
-                buf.extend_from_slice(&0u32.to_le_bytes()); // iteration count
+                buf.extend_from_slice(&0u32.to_le_bytes()); // iteration count (numElements in CAllIterationList)
+                // buf.extend_from_slice(&0u32.to_le_bytes()); // m_dwFlags (Server doesn't read this anymore?)
+                // Actually server reads ReadCAllIterationList, which is count + count Elements.
+                // Our current code sends count=0, so it's correct for an empty list.
             }
             GameMessage::CharacterEnterWorldRequest { .. } => {
                 buf.extend_from_slice(&opcodes::CHARACTER_ENTER_WORLD_REQUEST.to_le_bytes());
@@ -334,8 +448,26 @@ impl GameMessage {
 
 #[allow(dead_code)]
 pub mod action_opcodes {
-    pub const TALK: u32 = 0x0015;
+    pub const TALK: u32 = 0x0015; // Client -> Server talk
     pub const LOGIN_COMPLETE: u32 = 0x00A1;
+}
+
+pub mod game_event_opcodes {
+    pub const PLAYER_DESCRIPTION: u32 = 0x0013;
+    pub const FRIENDS_LIST_UPDATE: u32 = 0x0021;
+    pub const CHARACTER_TITLE: u32 = 0x0029;
+    pub const CHANNEL_BROADCAST: u32 = 0x0147;
+    pub const VIEW_CONTENTS: u32 = 0x0196;
+    pub const START_GAME: u32 = 0x0282;
+    pub const WEENIE_ERROR: u32 = 0x028A;
+    pub const TELL: u32 = 0x02BD;
+    pub const FELLOWSHIP_UPDATE_FELLOW: u32 = 0x02C0;
+}
+
+pub mod character_error_codes {
+    pub const ACCOUNT_ALREADY_LOGGED_ON: u32 = 0x1;
+    pub const CHARACTER_ALREADY_LOGGED_ON: u32 = 0x2;
+    pub const CHARACTER_LIMIT_REACHED: u32 = 0x10;
 }
 
 pub fn write_string16(buf: &mut Vec<u8>, s: &str) {
@@ -377,8 +509,8 @@ pub fn write_string32(buf: &mut Vec<u8>, s: &str) {
     buf.push(s_len as u8); // Packed word prefix
     buf.extend_from_slice(s.as_bytes());
 
-    // ACE ReadString32L pads based on (4 + s_len) NOT (4 + 1 + s_len)
-    let pad = align_to_4(4 + s_len as usize);
+    let cur = buf.len();
+    let pad = align_to_4(cur) - cur;
     for _ in 0..pad {
         buf.push(0);
     }
@@ -450,6 +582,23 @@ mod tests {
     }
 
     #[test]
+    fn test_game_action_unpack() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&opcodes::GAME_ACTION.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes()); // sequence
+        data.extend_from_slice(&action_opcodes::LOGIN_COMPLETE.to_le_bytes());
+        data.extend_from_slice(&[1, 2, 3, 4]); // payload
+
+        let msg = GameMessage::unpack(&data);
+        if let GameMessage::GameAction { action, data: payload } = msg {
+            assert_eq!(action, action_opcodes::LOGIN_COMPLETE);
+            assert_eq!(payload, vec![1, 2, 3, 4]);
+        } else {
+            panic!("Failed to unpack GameAction");
+        }
+    }
+
+    #[test]
     fn test_write_string16_padding() {
         let mut buf = Vec::new();
         write_string16(&mut buf, "abc"); // 2 bytes len + 3 bytes "abc" = 5 bytes. Next mult of 4 is 8.
@@ -464,8 +613,8 @@ mod tests {
     #[test]
     fn test_write_string32_padding() {
         let mut buf = Vec::new();
-        write_string32(&mut buf, "a"); // 4 bytes len + 1 byte "a" = 5. Next is 8.
+        write_string32(&mut buf, "a"); // 4 bytes len + 1 byte packed + 1 byte "a" = 6. Pad to 8.
         assert_eq!(buf.len(), 8);
-        assert_eq!(LittleEndian::read_u32(&buf[0..4]), 1);
+        assert_eq!(LittleEndian::read_u32(&buf[0..4]), 2);
     }
 }

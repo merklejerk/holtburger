@@ -40,7 +40,17 @@ The server periodically sends `UpdatePosition` to correct the client's position 
 | `uint32` | `ObjectGUID` | The character's unique ID. |
 | `Position` | `Position` | The authoritative new position. |
 
-## 3. Position Structure (8+24 = 32 bytes)
+## 3. Initial Spawning: `CreateObject` (`0xF745`)
+
+When a character enters the world or an object enters the player's 3D relevancy bubble, the server sends `CreateObject`. This message contains the full `Position` struct at its start.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `ObjectGUID` | Unique identifier. |
+| `Position` | `Position` | Initial spawn location. |
+| ... | ... | Followed by physics/render data. |
+
+## 4. Position Structure (8+24 = 32 bytes)
 
 | Offset | Type | Name | Description |
 | :--- | :--- | :--- | :--- |

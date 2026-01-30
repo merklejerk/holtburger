@@ -45,59 +45,61 @@ Used to spawn objects in the client's view.
 - `uint32` `GUID`: The unique ID of the object.
 
 ### `0xF7B0` GameEvent (Multiplexer)
-Used for atmospheric effects, chat, and logic updates that don't change core physics.
-- `uint64` `TargetGUID`: The entity affected.
-- `uint32` `Sequence`: World event sequence (separate from fragment sequence).
-- `uint32` `EventType`: The actual event (e.g., `0x0013 PlayerDescription`).
-- `...` Event-specific data follows.
+The primary multiplexer for world state updates and social events.
 
-## 2. Common Client-to-Server (C2S) Messages
+| Offset | Type | Name | Description |
+| :--- | :--- | :--- | :--- |
+| `0` | `uint32` | `Opcode` | `0xF7B0`. |
+| `4` | `uint32` | `GUID` | The entity affected by the event. |
+| `8` | `uint32` | `Sequence` | The world event sequence number. |
+| `12` | `uint32` | `EventType` | The specific event opcode (see below). |
+| `16` | `byte[]` | `Data` | Event-specific content. |
 
-### `0xF7B1` GameAction (Multiplexer)
-Used for all user-initiated interactions (e.g., login complete, examine object, use skill).
-- `uint32` `ActionType`: (e.g. `0x00A1` LoginComplete).
-- `...` Action-specific payload data follows.
-
-### `0xF74B` ObjectStatUpdate (S2C)
-Updates status information for an object (weight, health, value, etc).
-
-### `0xF7DF` ServerReady (S2C)
-Sent by the server to acknowledge `CharacterEnterWorldRequest`. No payload.
-
-### `0xF7B1` GameAction (C2S/S2C)
-A generic wrapper for actions.
-- `uint32` `ActionID`: The specific action (e.g., `0x00A1` LoginComplete).
-- `byte[]` `Data`: Action-specific payload.
-
-### `0xF7B0` GameEvent (S2C)
-The primary multiplexer for world state updates.
-- `uint64` `GUID`: The entity affected by the event.
-- `uint32` `Sequence`: The world event sequence number.
-- `uint32` `EventType`: The specific event opcode (e.g., `0x0013` PlayerDescription).
-- `byte[]` `Data`: Event-specific content.
+#### Common Event Types:
+- **`0x0013` PlayerDescription:** Sent once during the login sequence.
+- **`0x0147` ChannelBroadcast:** Used for public chat channels.
+  - `uint32` Chat Channel ID (e.g., General=1, Trade=2).
+  - `String16L` Sender Name (Empty if you are the sender).
+  - `String16L` Message Text.
+- **`0x02BD` Tell:** Private messages.
+  - `String16L` Message Text.
+  - `String16L` Sender Name.
+  - `uint32` Target GUID.
+  - `uint32` Sender GUID.
+  - `uint32` ChatMessageType.
+- **`0x0282` StartGame:** Sent at the end of the login sequence.
+- **`0x028A` WeenieError:** Server notifications/errors.
+  - `uint32` Error Code (e.g. `0x051D` TurbineChatIsEnabled).
 
 ---
 
 ## 2. Common Client-to-Server (C2S) Messages
 
 ### `0xF7C8` CharacterEnterWorldRequest
-Sent after receiving `CharacterList`.
-- `uint32` `CharacterID`: The character to select.
+Initial request to select a character slot.
+- `uint32` `CharacterID`.
 
 ### `0xF657` CharacterEnterWorld
-Sent to finalize world entry.
-- `uint32` `CharacterID`
-- `String16L` `AccountName`
+Final handshake for world admission.
+- `uint32` `CharacterID`.
+- `String16L` `AccountName`.
 
 ---
 
 ## 3. Game Actions (`0xF7B1`)
-Primary way clients send commands.
+Primary way clients send commands and interactions to the server.
 
-| Opcode | Name | Description |
-| :--- | :--- | :--- |
-| `0x00A1` | `LoginComplete` | Required to enter the world. |
-| `0x0015` | `Talk` | `String16L` Message. |
+| Offset | Type | Name | Description |
+| :--- | :--- | :--- | :--- |
+| `0` | `uint32` | `Opcode` | `0xF7B1`. |
+| `4` | `uint32` | `Sequence` | Action sequence number. |
+| `8` | `uint32` | `ActionType` | The specific action (see below). |
+| `12` | `byte[]` | `Data` | Action-specific payload. |
+
+#### Common Action Types:
+- **`0x00A1` LoginComplete:** Signals character is ready to spawn.
+- **`0x0015` Talk:** Sends a message to the public channel or a specific person.
+  - `String16L` Message Text.
 
 ---
 

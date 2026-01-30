@@ -133,6 +133,7 @@ pub mod flags {
     pub const ACK_SEQUENCE: u32 = 0x00004000;
     pub const DISCONNECT: u32 = 0x00008000;
     pub const LOGIN_REQUEST: u32 = 0x00010000;
+    pub const WORLD_LOGIN_REQUEST: u32 = 0x00020000;
     pub const CONNECT_REQUEST: u32 = 0x00040000;
     pub const CONNECT_RESPONSE: u32 = 0x00080000;
     pub const CICMD: u32 = 0x00400000;
@@ -247,6 +248,7 @@ impl GameMessage {
                 let mut offset = 4;
                 let message = read_string16(data, &mut offset);
                 let sender = read_string16(data, &mut offset);
+                // Also has senderID (4) and chatMessageType (4)
                 GameMessage::HearSpeech { message, sender }
             }
             opcodes::CHARACTER_LIST => {
@@ -352,20 +354,20 @@ impl GameMessage {
                 }
             }
             opcodes::GAME_EVENT => {
-                if data.len() < 20 {
+                if data.len() < 16 {
                     return GameMessage::Unknown {
                         opcode,
                         data: data.to_vec(),
                     };
                 }
-                let guid = LittleEndian::read_u64(&data[4..12]);
-                let sequence = LittleEndian::read_u32(&data[12..16]);
-                let event_type = LittleEndian::read_u32(&data[16..20]);
+                let guid = LittleEndian::read_u32(&data[4..8]) as u64;
+                let sequence = LittleEndian::read_u32(&data[8..12]);
+                let event_type = LittleEndian::read_u32(&data[12..16]);
                 GameMessage::GameEvent {
                     guid,
                     sequence,
                     event_type,
-                    data: data[20..].to_vec(),
+                    data: data[16..].to_vec(),
                 }
             }
             opcodes::GAME_ACTION => {
@@ -616,5 +618,30 @@ mod tests {
         write_string32(&mut buf, "a"); // 4 bytes len + 1 byte packed + 1 byte "a" = 6. Pad to 8.
         assert_eq!(buf.len(), 8);
         assert_eq!(LittleEndian::read_u32(&buf[0..4]), 2);
+    }
+
+    #[test]
+    fn test_game_event_unpack() {
+        // Opcode: 0xF7B0, GUID: 0x50000001, Seq: 14, Type: 0x02BD (Tell)
+        // Data: ushort(2) + "hi" + padding
+        let data = vec![
+            0xB0, 0xF7, 0x00, 0x00, // Opcode
+            0x01, 0x00, 0x00, 0x50, // GUID
+            0x0E, 0x00, 0x00, 0x00, // Seq
+            0xBD, 0x02, 0x00, 0x00, // Type
+            0x02, 0x00, 0x68, 0x69, // "hi"
+            0x00, 0x00, // padding
+        ];
+
+        let msg = GameMessage::unpack(&data);
+        if let GameMessage::GameEvent { guid, sequence, event_type, data: event_data } = msg {
+            assert_eq!(guid, 0x50000001);
+            assert_eq!(sequence, 14);
+            assert_eq!(event_type, 0x02BD);
+            assert_eq!(event_data.len(), 6);
+            assert_eq!(event_data[0], 0x02);
+        } else {
+            panic!("Expected GameEvent, got {:?}", msg);
+        }
     }
 }

@@ -5,6 +5,7 @@ use anyhow::Result;
 use byteorder::{ByteOrder, LittleEndian};
 use std::net::SocketAddr;
 
+#[derive(Debug, PartialEq, Clone)]
 enum ClientState {
     Connected,
     CharacterSelection(Vec<(u32, String)>),
@@ -83,9 +84,15 @@ impl Client {
             }
             ClientCommand::Talk(text) => {
                 if matches!(self.state, ClientState::InWorld) {
+                    log::debug!("Handling Talk command: '{}'", text);
                     return self.send_talk(&text).await;
+                } else {
+                    self.log(&format!(
+                        "Discarding chat message (Not in world yet. State: {:?})",
+                        self.state
+                    ));
+                    Ok(())
                 }
-                Ok(())
             }
             ClientCommand::Quit => {
                 self.disconnect().await?;
@@ -180,26 +187,42 @@ impl Client {
                     offset += 4 + (count as usize * 4);
                 }
                 if header.flags & flags::ACK_SEQUENCE != 0 && offset + 4 <= data.len() {
-                    let ack_seq = LittleEndian::read_u32(&data[offset..offset + 4]);
-                    log::debug!("<<< Received ACK for Seq:{}", ack_seq);
                     offset += 4;
                 }
-
+                if header.flags & (flags::LOGIN_REQUEST | flags::WORLD_LOGIN_REQUEST) != 0 {
+                    // These flags mean the WHOLE payload is the login request, 
+                    // no optional header fields to skip.
+                }
+                if header.flags & flags::CONNECT_RESPONSE != 0 {
+                    offset += 8;
+                }
+                if header.flags & flags::CICMD != 0 {
+                    offset += 8;
+                }
                 if header.flags & flags::TIME_SYNC != 0 {
                     offset += 8;
                 }
+                if header.flags & flags::ECHO_REQUEST != 0 {
+                    offset += 4;
+                }
+                if header.flags & flags::ECHO_RESPONSE != 0 {
+                    offset += 8;
+                }
+                if header.flags & flags::FLOW != 0 {
+                    offset += 6;
+                }
 
-            if header.flags & flags::ECHO_REQUEST != 0 {
-                offset += 4;
-                let mut resp = header.clone();
-                resp.flags = flags::ECHO_RESPONSE;
-                let _ = self.session.send_packet(resp, &[]).await;
-            }
+                // Echo Response logic
+                if header.flags & flags::ECHO_REQUEST != 0 {
+                    let mut resp = header.clone();
+                    resp.flags = flags::ECHO_RESPONSE;
+                    let _ = self.session.send_packet(resp, &[]).await;
+                }
 
-            if header.flags & flags::BLOB_FRAGMENTS != 0 && offset < data.len() {
-                self.handle_fragments(header, &data[offset..]).await?;
+                if header.flags & flags::BLOB_FRAGMENTS != 0 && offset < data.len() {
+                    self.handle_fragments(header, &data[offset..]).await?;
+                }
             }
-        }
 
         Ok(())
     }
@@ -352,12 +375,13 @@ impl Client {
                 self.log("Server ready for world entry. Sending CharacterEnterWorld...");
                 if let Some(char_id) = self.character_id {
                     self.send_character_enter_world(char_id).await?;
-                    self.state = ClientState::EnteringWorld;
                 }
             }
             GameMessage::PlayerCreate { player_id } => {
                 self.log(&format!("You have been created with GUID: {:08X}", player_id));
                 self.send_login_complete().await?;
+                self.log("Login complete! (Transitioning to InWorld)");
+                self.state = ClientState::InWorld;
             }
             GameMessage::ObjectCreate { guid } => {
                 self.log(&format!("Object Created: {:08X}", guid));
@@ -375,13 +399,25 @@ impl Client {
                 event_type,
                 guid,
                 sequence,
-                ..
+                data,
             } => {
                 let type_name = match event_type {
-                    game_event_opcodes::PLAYER_DESCRIPTION => "PlayerDescription",
+                    game_event_opcodes::PLAYER_DESCRIPTION => {
+                        if self.state == ClientState::EnteringWorld {
+                            self.state = ClientState::InWorld;
+                            self.log("Received PlayerDescription. Transitioning to InWorld.");
+                        }
+                        "PlayerDescription"
+                    }
                     game_event_opcodes::CHANNEL_BROADCAST => "ChannelBroadcast",
                     game_event_opcodes::VIEW_CONTENTS => "ViewContents",
-                    game_event_opcodes::START_GAME => "StartGame",
+                    game_event_opcodes::START_GAME => {
+                        if self.state == ClientState::EnteringWorld {
+                            self.state = ClientState::InWorld;
+                            self.log("Received StartGame. Transitioning to InWorld.");
+                        }
+                        "StartGame"
+                    }
                     game_event_opcodes::WEENIE_ERROR => "WeenieError",
                     game_event_opcodes::CHARACTER_TITLE => "CharacterTitle",
                     game_event_opcodes::FRIENDS_LIST_UPDATE => "FriendsListUpdate",
@@ -389,23 +425,43 @@ impl Client {
                     game_event_opcodes::TELL => "Tell",
                     _ => "UnknownEvent",
                 };
-                self.log(&format!(
-                    "GameEvent: {} (Type: 0x{:04X}, GUID: {:016X}, Seq: {})",
-                    type_name, event_type, guid, sequence
-                ));
+
+                // Special handling for some events
+                if event_type == game_event_opcodes::CHANNEL_BROADCAST {
+                    let mut offset = 0;
+                    if data.len() >= 4 {
+                        let _channel = LittleEndian::read_u32(&data[0..4]);
+                        offset += 4;
+                        let sender = read_string16(&data, &mut offset);
+                        let message = read_string16(&data, &mut offset);
+                        
+                        let display_sender = if sender.is_empty() { "You" } else { &sender };
+                        self.log(&format!("{}: {}", display_sender, message));
+                    }
+                } else if event_type == game_event_opcodes::TELL {
+                    let mut offset = 0;
+                    let message = read_string16(&data, &mut offset);
+                    let sender = read_string16(&data, &mut offset);
+                    self.log(&format!("[Tell] {}: {}", sender, message));
+                } else {
+                    self.log(&format!(
+                        "GameEvent: {} (Type: 0x{:04X}, GUID: {:016X}, Seq: {})",
+                        type_name, event_type, guid, sequence
+                    ));
+                }
             }
             GameMessage::GameAction { action, .. } => {
                 let action_name = match action {
                     action_opcodes::LOGIN_COMPLETE => "LoginComplete",
+                    action_opcodes::TALK => "Talk",
                     _ => "UnknownAction",
                 };
 
                 if action == action_opcodes::LOGIN_COMPLETE {
-                    self.log("Login complete! You are now in the world.");
-                    self.log("Type anything to chat, or /quit to exit.");
+                    self.log("Received LoginComplete confirmation from server.");
                     self.state = ClientState::InWorld;
                 }
-                self.log(&format!("GameAction: {} (Type: 0x{:04X})", action_name, action));
+                log::debug!("<<< GameAction: {} (Type: 0x{:04X})", action_name, action);
             }
             GameMessage::ServerMessage { message } => {
                 self.log(&format!("[System] {}", message));
@@ -457,6 +513,7 @@ impl Client {
     async fn select_character(&mut self, char_id: u32) -> Result<()> {
         self.character_id = Some(char_id);
         self.log(&format!("Selected character ID: {:08X}", char_id));
+        self.state = ClientState::EnteringWorld;
 
         let msg = GameMessage::CharacterEnterWorldRequest { char_id };
         self.session.send_message(&msg).await?;

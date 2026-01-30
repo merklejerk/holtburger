@@ -95,9 +95,17 @@ See the [DDD Documentation](data_download.md) for detailed packet structures and
 - `uint32` `has_tod_expansion`.
 
 ## Step 5: Character Selection & World Entry
-Entering the world is a three-way handshake after receiving the `CharacterList`.
+Entering the world is a multi-stage process that synchronizes the client and server world-state.
 
-## Step 5: Character Selection & World Entry
+1. **Character Selection (C2S):** The client sends `0xF7C8` (CharacterEnterWorldRequest) for a specific character ID.
+2. **Server Ready (S2C):** The server acknowledges with `0xF7DF` (CharacterEnterWorldServerReady).
+3. **World Admission (C2S):** The client sends `0xF657` (CharacterEnterWorld) with the `CharacterID` and the `AccountName`.
+4. **Database Flood (S2C):** The server sends a burst of `0xF745` (ObjectCreate) and property updates for every item in the player's inventory and surrounding world.
+5. **Initial Player Snapshot (S2C):** Server sends `GameEvent::PlayerDescription` (0x0013) containing character data.
+6. **Login Complete (C2S):** The client sends `GameAction::LoginComplete` (Action 0x00A1). This informs the server that the client has processed the initial database load and is ready to "materialize."
+7. **Game Start (S2C):** Server sends `GameEvent::StartGame` (Action 0x0282) and begins normal world updates.
+
+*Note: If the client does not send `LoginComplete`, the server will keep the character in "teleporting" state (the login pink bubbles) indefinitely.*
 Entering the world is a four-step handshake after receiving the `CharacterList`.
 
 1.  **CharacterEnterWorldRequest (C2S - 0xF7C8):**

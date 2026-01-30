@@ -9,12 +9,17 @@ else
     exit 1
 fi
 
-CONTAINER_NAME="ace-test-db"
+CONTAINER_NAME="ace-holtburger-db"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 usage() {
-    echo "Usage: $0 {backup [file]|restore [file]}"
+    echo "Usage: $0 {backup [file]|restore [file]|shell}"
     exit 1
+}
+
+shell() {
+    echo "Connecting to MariaDB client..."
+    docker exec -it "$CONTAINER_NAME" /usr/bin/mysql -u root --password="$MYSQL_ROOT_PASSWORD"
 }
 
 backup() {
@@ -65,6 +70,9 @@ case "$1" in
         ;;
     restore)
         restore "$2"
+        ;;
+    shell)
+        shell
         ;;
     *)
         usage

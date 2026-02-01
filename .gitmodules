@@ -1,3 +1,6 @@
 [submodule "ACE"]
 	path = ACE
 	url = git@github.com:ACEmulator/ACE.git
+[submodule "ACViewer"]
+	path = ACViewer
+	url = git@github.com:ACEmulator/ACViewer.git

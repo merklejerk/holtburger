@@ -1,0 +1,18 @@
+[package]
+name = "holtburger-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+default-run = "tui"
+
+[dependencies]
+holtburger-core = { workspace = true }
+tokio.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+clap.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
+futures.workspace = true

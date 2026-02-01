@@ -1,6 +1,6 @@
 # Holtburger 🍔
 
-Holtburger is an exploratory project to build a modern, high-performance Asheron's Call client ecosystem in Rust. We are currently in the early experimental stages, focusing heavily on reverse-engineering the protocol and developing a functional, reusable client library.
+Holtburger is an exploratory project to build a modern, high-performance Asheron's Call client ecosystem in Rust. We are currently in the early experimental stages, focusing heavily on reverse-engineering the protocol and developing a robust, reusable client library.
 
 ## Project Vision
 
@@ -25,12 +25,6 @@ To test the current TUI client:
 ```bash
 cargo run --package holtburger-cli
 ```
-
-## Goals
-
-- **Modular Architecture**: A core library that can be reused for different frontends (TUI, 3D, etc.).
-- **Protocol Documentation**: Implementing the Asheron's Call protocol from the ground up.
-- **Cross-Platform**: Built with Rust to run wherever you need it.
 
 ## License
 

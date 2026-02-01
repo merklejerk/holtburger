@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/holtburger-core",
+    "apps/holtburger-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["holtburger contributors"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/cluracan/holtburger"
+
+[workspace.dependencies]
+holtburger-core = { path = "crates/holtburger-core" }
+tokio = { version = "1", features = ["full"] }
+byteorder = "1.5"
+anyhow = "1.0"
+rand = "0.8"
+log = "0.4"
+env_logger = "0.10"
+encoding_rs = "0.8"
+clap = { version = "4.0", features = ["derive"] }
+ratatui = "0.26"
+crossterm = { version = "0.27", features = ["event-stream"] }
+futures = "0.3"
+binrw = "0.14"
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+strum = { version = "0.26", features = ["derive"] }
+strum_macros = "0.26"
+async-trait = "0.1"
+glam = "0.25"
+bitflags = { version = "2.6", features = ["serde"] }

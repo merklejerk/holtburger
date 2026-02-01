@@ -48,3 +48,28 @@ Used exclusively in the `LoginRequest`.
 
 ### 3.3 Enums
 Enums are typically serialized as their underlying integer type (usually `uint32` for Opcodes).
+
+### 3.4 Geometry & Position
+
+#### `Vector3` (12 bytes)
+Three `float32` values: `x`, `y`, `z`.
+
+#### `Quaternion` (16 bytes)
+Four `float32` values: `w` (scalar), `x`, `y`, `z` (vector).
+**Note:** Asheron's Call serializes the `w` component first.
+
+#### `Position` (Complex)
+Asheron's Call uses a hierarchical coordinate system based on **Landblocks**.
+
+| Name | Type | Size | Description |
+| :--- | :--- | :--- | :--- |
+| `objcell_id` | `uint32` | 4 | The ID of the cell (Landblock + Grid). |
+| `frame` | `Vector3` | 12 | Local coordinates within the cell. |
+| `orientation`| `Quaternion`| 16 | Rotation relative to the cell's frame (W, X, Y, Z). |
+
+A `Position` can be serialized in two ways:
+1. **Raw (32 bytes):** Used in `ObjectCreate` (`0xF745`). Fixed format: `objcell_id`, `frame`, `orientation`.
+2. **Variable-Length (`PositionPack`):** Used in `UpdatePosition` (`0xF748`) and other real-time updates. A bitmask determines if velocity, placement, or individual quaternion components are included. See [movement.md](movement.md) for full details.
+
+---
+**Pro-Tip:** The high bit of the `objcell_id` indicates if the entity is in an **interior** (dungeon/building) or **dynamic** cell.

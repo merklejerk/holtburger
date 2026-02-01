@@ -50,8 +50,76 @@ Data Download response from client. See [DDD Documentation](data_download.md).
 Sent after login. Details in [handshake.md](handshake.md).
 
 ### `0xF745` ObjectCreate (S2C)
-Used to spawn objects in the client's view.
-- `uint32` `GUID`: The unique ID of the object.
+Used to spawn objects in the client's view. This is a complex bitmask-driven message consisting of four major sections.
+
+#### 1. `ModelDescription` Structure
+The `ModelDescription` always appears first:
+1. `uint8`: Model Marker (usually 0x11).
+2. `uint8`: Number of SubPalettes.
+3. `uint8`: Number of Texture Changes.
+4. `uint8`: Number of AnimPart Changes.
+5. `SubPalettesVector`: For each, a `PackedDword` ID (PaletteID) and 2 bytes (Offset, Length).
+6. `TexturesVector`: For each, 1-byte index and two `PackedDword` IDs (OldID/NewID).
+7. `AnimPartsVector`: For each, 1-byte index and one `PackedDword` ID (AnimID).
+8. **Alignment:** Align cursor to 4-byte boundary after this section.
+
+#### 2. `PhysicsDescription` Header
+Determines the physical state and position of the object.
+1. `uint32`: `PhysicsFlags` (Ordered processing below).
+2. `uint32`: `PhysicsState` (Bitmask for collisions, gravity, etc.).
+
+Optional fields follow in this precise order based on `PhysicsFlags`:
+
+| Bitmask | Field | Type | Description |
+| :--- | :--- | :--- | :--- |
+| `0x010000` | `MovementData` | `Variable` | Size-prefixed move record (Autonomous flag follows data). |
+| `0x020000` | `AnimationFrame` | `uint32` | Exclusive with MovementData. |
+| `0x008000` | `Position` | `32 bytes` | Fixed position: `CellID` (u32), `Vector3` (3xf32), `Quaternion` (4xf32: W, X, Y, Z). |
+| `0x000002` | `MTable` | `uint32` | Motion Table. |
+| `0x000800` | `STable` | `uint32` | Sound Table. |
+| `0x001000` | `PeTable` | `uint32` | Physical Effects Table. |
+| `0x000001` | `CSetup` | `uint32` | Combat Setup. |
+| `0x000020` | `Parent` | `uint64` | Parent GUID + LocationID. |
+| `0x000040` | `Children` | `Vector` | Count + (GUID + LocationID) per child. |
+| `0x000080` | `ObjScale` | `float` | Scaling factor. |
+| `0x000100` | `Friction` | `float` | Movement friction. |
+| `0x000200` | `Elasticity` | `float` | Bounciness. |
+| `0x040000` | `Translucency` | `float` | Alpha/Transparency. |
+| `0x000004` | `Velocity` | `Vector3` | Current XYZ velocity. |
+| `0x000008` | `Acceleration` | `Vector3` | Current XYZ acceleration. |
+| `0x000010` | `Omega` | `Vector3` | Angular velocity. |
+| `0x002000` | `DefaultScript`| `uint32` | Script ID. |
+| `0x004000` | `ScriptInt` | `uint32` | Script intensity. |
+
+**Sequence Block:** After all flag-fields, a mandatory **18-byte block** (9x `uint16`) of sequence counters follows.
+**Alignment:** Align cursor to 4-byte boundary after this sequence block.
+
+#### 3. `WeenieHeader`
+The core identity and metadata for the object.
+1. `uint32`: `WeenieHeaderFlags` (ordered fields below).
+2. `String16L`: `Name` (Object name).
+3. `PackedDword`: `WeenieClassID` (Template ID).
+4. `PackedDword`: `IconID`.
+5. `uint32`: `ItemType` (Bitmask e.g. 0x02 Armor, 0x10 Creature).
+6. `uint32`: `ObjectDescriptionFlags`.
+
+**Second Header:** If `ObjectDescriptionFlags` includes `0x04000000`, a `uint32 WeenieHeaderFlags2` follows immediately.
+**Alignment:** Any `String16L` in this section requires the reader to align to the next 4-byte boundary.
+
+#### 4. Optional Weenie Fields
+Fields appear in order of bits set in `WeenieHeaderFlags`:
+| Bit | Name | Type |
+| :--- | :--- | :--- |
+| `0x00000001` | `PluralName` | `String16L` |
+| `0x00000002` | `ItemsCapacity`| `uint32` |
+| `0x00000008` | `Value` | `uint32` |
+| `0x00000010` | `Usable` | `uint32` |
+| `0x00001000` | `StackSize` | `uint16` |
+| `0x00004000` | `Container` | `uint32` (Parent GUID) |
+| `0x00200000` | `Burden` | `uint16` |
+| `0x00400000` | `Spell` | `uint16` |
+
+*Note: This is an abbreviated table. See Pylance/ACE source for the full 32-bit bitmask logic.*
 
 ### `0xF748` UpdatePosition (S2C)
 Sent frequently to sync object locations. Contains `PositionPack`.
@@ -68,7 +136,21 @@ Updates an integer property on the player.
 - `uint32` `PropertyID` (use values from `PropertyInt` enum in server source).
 - `int32` `Value`.
 
-Note: `PropertyID=0` maps to `PropertyInt.Undef` and may be used for internal counters or server-specific values; consult server code where `GameMessagePrivateUpdatePropertyInt` is invoked for the authoritative meaning.
+### `0x02CF` PrivateUpdatePropertyInt64 (S2C)
+- `uint32` `Sequence`.
+- `uint32` `PropertyID`.
+- `int64` `Value`.
+
+### `0x02D1` PrivateUpdatePropertyBool (S2C)
+- `uint32` `Sequence`.
+- `uint32` `PropertyID`.
+- `uint32` `Value` (0 or 1).
+
+### `0x02D5` PrivateUpdatePropertyString (S2C)
+- `uint32` `Sequence`.
+- `uint32` `PropertyID`.
+- `String16L` `Value`.
+
 ### `0xF7B0` GameEvent (Multiplexer)
 The primary multiplexer for world state updates and social events.
 
@@ -81,7 +163,8 @@ The primary multiplexer for world state updates and social events.
 | `16` | `byte[]` | `Data` | Event-specific content. |
 
 #### Common Event Types:
-- **`0x0013` PlayerDescription:** Sent once during the login sequence.
+- **`0x0013` PlayerDescription:** Sent during the login sequence. Contains the full state of the character (Weenie type, property tables, attributes, skills, and spells).
+  - Note: This is a complex composite message. It includes multiple property hash tables (Int, Int64, Bool, String, DID, IID) followed by Attribute and Skill vectors.
 - **`0x0147` ChannelBroadcast:** Used for public chat channels.
   - `uint32` Chat Channel ID (e.g., General=1, Trade=2).
   - `String16L` Sender Name (Empty if you are the sender).
@@ -96,15 +179,42 @@ The primary multiplexer for world state updates and social events.
 - **`0x028A` WeenieError:** Server notifications/errors.
   - `uint32` Error Code (e.g. `0x051D` TurbineChatIsEnabled).
 
+## 2. Real-time Stat Updates (S2C)
+
+While `0x0013 PlayerDescription` provides the initial state, stats can change during gameplay via specific update messages.
+
+### `0x02DD` PrivateUpdateSkill
+Updates a single skill. See [stats.md](stats.md) for SkillID mappings.
+- `uint32` `Sequence`.
+- `uint32` `SkillID`.
+- `uint32` `Ranks`.
+- `uint16` `AdjustPP`.
+- `uint32` `Status` (Training level).
+- `uint32` `ExperienceSpent`.
+- `uint32` `InitLevel`.
+- `uint32` `Resistance`.
+- `uint64` `LastUsedTime`.
+
+### `0x02E3` PrivateUpdateAttribute
+Updates a primary attribute. See [stats.md](stats.md) for AttributeID mappings.
+- `uint32` `Sequence`.
+- `uint32` `AttributeID`.
+- `uint32` `Ranks`.
+- `uint32` `StartingValue`.
+- `uint32` `ExperienceSpent`.
+
+### `0x02E7` PrivateUpdateVital
+Updates a secondary attribute (Health, Stamina, Mana). See [stats.md](stats.md) for VitalID mappings.
+- `uint32` `Sequence`.
+- `uint32` `VitalID`.
+- `uint32` `Ranks`.
+- `uint32` `StartingValue`.
+- `uint32` `ExperienceSpent`.
+- `uint32` `CurrentValue`.
+
 ---
 
 ## 4. Other Game Messages
-
-### `0x02CD` PrivateUpdatePropertyInt
-Updates an integer property for the player's character.
-- `uint32` `Sequence`.
-- `byte` `PropertyID` (Based on observation).
-- `uint32` `Value`.
 
 ### `0xF74C` UpdateMotion
 Synchronizes movement and animation states for objects.

@@ -63,7 +63,22 @@ ACE (and other emulators) perform the database verification in an asynchronous t
 ---
 
 ## Step 3: Connect Response (C2S)
-The client confirms receipt. 
+The client confirms receipt of the seeds and "activates" the session. This packet MUST be sent to the **Login Port + 1** (Game Port).
+
+**Important:** The client MUST Wait **200ms** before sending this, or ACE may not be ready to receive it on the game port.
+
+**Packet Structure:**
+- **Header Flags:** `0x00000001` (Connect Response flag set).
+- **Optional Header:** Contains the `8-byte Cookie` received in Step 2.
+- **ISAAC Initialization:** Immediately after sending this packet, the client initializes its ISAAC ciphers using the `Server Seed`, `Client Seed`, and `Cookie`.
+
+| Offset | Type | Name | Description |
+|---|---|---|---|
+| `0` | `uint32` | `Header Flags` | `0x00000001` (Optional Header present) |
+| `4` | `uint32` | `Cookie Low` | First 4 bytes of Cookie from Step 2. |
+| `8` | `uint32` | `Cookie High` | Last 4 bytes of Cookie from Step 2. |
+
+Wait for `200ms` before proceeding to the Game Port.
 
 ## Step 4: Authentication & Character List
 Once the `ConnectResponse` is accepted, the server starts sending game messages. Note that almost all packets now require an **Encrypted Checksum** (Header Flag `0x00000002`).

@@ -1,0 +1,25 @@
+[package]
+name = "holtburger-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+byteorder.workspace = true
+anyhow.workspace = true
+rand.workspace = true
+log.workspace = true
+encoding_rs.workspace = true
+binrw.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+glam.workspace = true
+bitflags.workspace = true
+async-trait.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+
+[dev-dependencies]
+hex = "0.4.3"

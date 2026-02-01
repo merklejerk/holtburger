@@ -37,34 +37,47 @@ Standard packets have a maximum size of **1024 bytes**.
 | `Flow` | `0x08000000` | Congestion control metadata. |
 
 ## 3. Optional Headers
-If specific flags are set, the header is extended by optional fields in the following order:
+If specific flags are set, the header is extended by optional fields. In the Asheron's Call protocol, these are "optional" in name but are often processed as the primary payload for handshake packets. 
 
-1. **`ServerSwitch` (0x100):** Not documented here (8 bytes).
-2. **`RequestRetransmit` (0x1000):**
-   - `count`: `uint32`
-   - `sequences`: `count * uint32`
-3. **`RejectRetransmit` (0x2000):**
-   - `count`: `uint32`
-   - `sequences`: `count * uint32`
-4. **`AckSequence` (0x4000):**
-   - `seq`: `uint32`
-   - **Crucial:** This informs the peer that all packets up to and including `seq` have been received.
-5. **`LoginRequest` (0x10000):**
-   - No optional header field (data is in payload).
-6. **`WorldLoginRequest` (0x20000):** 8 bytes.
-7. **`ConnectResponse` (0x80000):** 8 bytes (Cookie).
-8. **`TimeSync` (0x1000000):**
-   - `time`: `double`
-9. **`EchoRequest` (0x2000000):**
-   - `clientTime`: `float`
-10. **`EchoResponse` (0x4000000):**
-   - `clientTime`: `float`
-   - `serverTime`: `float`
-11. **`Flow` (0x8000000):**
-    - `bytes`: `uint32`
-    - `interval`: `uint16`
+Checksums are calculated by summing the hash of the Header with the hash of the "Optional Headers" section (which may include the entire payload for certain types).
 
-## 4. Dual Sequencing System
+### 3.1 Optional Header Ordering & Sizes
+
+1. **`ServerSwitch` (0x100):** 8 bytes.
+2. **`RequestRetransmit` (0x1000):** `4 + (count * 4)` bytes.
+3. **`RejectRetransmit` (0x2000):** `4 + (count * 4)` bytes.
+4. **`AckSequence` (0x4000):** 4 bytes (Current sequence ack).
+5. **`ConnectRequest` (0x40000):** 32 bytes.
+   - *Note: While labeled as a handshake flag, these 32 bytes are summed into the payload checksum.*
+6. **`LoginRequest` (0x10000):** Remainder of payload.
+   - *Logic: Hashing consumes all bytes from current offset to EOF.*
+7. **`WorldLoginRequest` (0x20000):** 8 bytes.
+8. **`ConnectResponse` (0x80000):** 8 bytes (Echoed Cookie).
+9. **`TimeSync` (0x1000000):** 8 bytes.
+10. **`EchoRequest` (0x2000000):** 4 bytes.
+11. **`EchoResponse` (0x4000000):** 8 bytes (Echoed time + server delta).
+12. **`Flow` (0x8000000):** 6 bytes.
+
+---
+
+## 4. Checksum Calculation
+The `Checksum` field in the `PacketHeader` is the 32-bit sum of:
+1.  **Header Hash:** `Hash32(Header)` where the checksum field is set to `0xBADD70DD`.
+2.  **Payload Hash:** A composite hash derived from the Optional Headers and Message Fragments.
+
+### 4.1 Payload Checksum Logic
+The payload hash is NOT a single hash of the entire buffer. Instead, it is the sum of hashes of individual components:
+- `checksum += Hash32(OptionalHeaderBytes)`
+- For each Fragment:
+    - `checksum += Hash32(FragmentHeader)`
+    - `checksum += Hash32(FragmentData)`
+
+When `EncryptedChecksum` (0x02) is set, the Payload Hash part of the addition is XORed with the current ISAAC key:
+`FinalChecksum = HeaderHash + (PayloadHash ^ ISAACKey)`
+
+---
+
+## 5. Dual Sequencing System
 
 Asheron's Call uses two independent sequence-tracking systems. 
 

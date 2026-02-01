@@ -1,0 +1,18 @@
+# Rust
+target/
+
+# Dats
+dats/*.dat
+
+# Logs
+logs/
+*.log
+
+# Captures
+caps/
+
+# OS
+.DS_Store
+
+# Keep agent instructions personal
+.github/*.md

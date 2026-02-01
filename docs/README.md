@@ -6,23 +6,16 @@ This document provides a breakdown of the network protocol used by Asheron's Cal
 
 The protocol is structured in layers, operating over **UDP**:
 
+0.  **[Glossary](glossary.md):** Common terms like Weenies, GUIDs, and Landblocks.
 1.  **Transport Layer:** Handles UDP framing, packet sequencing, and retransmission (NAK/PAK). It uses a fixed 20-byte header on every packet.
 2.  **Session Layer:** Manages connection state, handshakes, and port switching. A session begins on a primary port (e.g. 9000) and uses a secondary port (+1) for handshake activation.
 3.  **Cryptographic Layer:** Employs the **ISAAC** stream cipher. Once the handshake verifies the peers, ISAAC is used to "mask" the 32-bit checksum of every packet, providing basic security and integrity.
 4.  **Fragmentation Layer:** Since game messages can exceed the 1024-byte UDP packet limit, the protocol includes a fragmentation system to split and reassemble large "blobs".
-5.  **Application (Message) Layer:** The top level where game logic resides. This layer uses **Opcodes** to identify message types (e.g., `CharacterList`, `Movement`) and further specializes into **GameActions** (client-to-server) and **GameEvents** (server-to-client).
+5.  **Application (Message) Layer:** The top level where game logic resides. This layer uses **Opcodes** to identify message types (e.g., `CharacterList`, `Movement`) and further specializes into **GameActions** (client-to-server) and **GameEvents** (server-to-client). See [stats.md](stats.md) for character data and [properties.md](properties.md) for object traits.
+6.  **Physics & Collision Layer:** Handles environment traversal using BSP trees, slope validation, and portal transitions. See [physics.md](physics.md) for concepts and [bsp_format.md](bsp_format.md) for the binary format.
+7.  **Data Layer (Assets):** The client stores static game data in B-Tree indexed database files (DATs). See [dat_format.md](dat_format.md) for details on parsing and categorization.
 
 ---
-
-## Project Implementation Status
-
-As of January 2026, the `holtburger` Rust client has achieved a functional "Headless World State" status.
-
-- [x] **Transport Layer**: Completed. Correctly handles split sequencing (Packet vs Fragment) and ACK-based keep-alives.
-- [x] **Cryptography**: Completed. Full ISAAC S2C/C2S implementation matching ACE logic.
-- [x] **Handshake**: Completed. Successfully handles DDD Interrogation and Character World Entry handshake.
-- [x] **World Entry**: Completed. Client receives and acknowledges the initial world data flood and sends `LoginComplete`.
-- [ ] **World State Reification**: In Progress. Initial mapping of `ObjectCreate` and `GameEvent` types is documented; further parsing of specific entity payloads is required.
 
 ## Quick Start for Scratch Implementation
 

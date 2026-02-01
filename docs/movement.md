@@ -1,6 +1,6 @@
 # Asheron's Call Protocol: Movement & Physics
 
-Movement in Asheron's Call is a mix of client-authoritative positioning and server-authoritative physics validation.
+Movement in Asheron's Call is a mix of client-authoritative positioning and server-authoritative physics validation. For a deep dive into how the engine handles environment collision and terrain, see [physics.md](physics.md).
 
 ## 1. Client-to-Server Movement: `MoveToState` (`0xF61C`)
 
@@ -33,32 +33,58 @@ This uses a complex bitmask for efficiency. If a bit is set, the corresponding d
 
 ## 2. Server-to-Client Movement: `UpdatePosition` (`0xF748`)
 
-The server periodically sends `UpdatePosition` to correct the client's position or to notify other clients of player movement.
+The server periodically sends `UpdatePosition` to correct the client's position or to notify other clients of player movement. This message uses the variable-length `PositionPack` structure.
 
 | Type | Name | Description |
 | :--- | :--- | :--- |
 | `uint32` | `ObjectGUID` | The character's unique ID. |
-| `Position` | `Position` | The authoritative new position. |
+| `PositionPack` | `Position` | The authoritative new position with sequences. |
+
+### `PositionPack` Structure
+The `PositionPack` is used in many S2C messages and is highly optimized using bitmasks.
+
+1. `uint32`: `PositionFlags` (Determines which optional fields follow).
+2. `uint32`: `CellID` (0xLLLLCCCC).
+3. `float`: `X` (Local X).
+4. `float`: `Y` (Local Y).
+5. `float`: `Z` (Local Z).
+6. **Optional Optional Fields** (based on `PositionFlags` bits):
+   - `float` `Rotation.W` (if `0x08` bit is NOT set).
+   - `float` `Rotation.X` (if `0x10` bit is NOT set).
+   - `float` `Rotation.Y` (if `0x20` bit is NOT set).
+   - `float` `Rotation.Z` (if `0x40` bit is NOT set).
+   - `Vector3` `Velocity` (if `0x01` bit is set).
+   - `uint32` `PlacementID` (if `0x02` bit is set).
+7. **Sequence Block**:
+   - `uint16` `InstanceSequence`.
+   - `uint16` `PositionSequence`.
+   - `uint16` `TeleportSequence`.
+   - `uint16` `ForcePositionSequence`.
+
+| Bitmask | Name | Description |
+| :--- | :--- | :--- |
+| `0x01` | `HasVelocity` | Velocity Vector3 follows. |
+| `0x02` | `HasPlacementID` | Placement ID follows. |
+| `0x04` | `IsGrounded` | Object is in contact with the ground. |
+| `0x08` | `OrientationHasNoW` | Rotation.W is `0.0` and omitted. |
+| `0x10` | `OrientationHasNoX` | Rotation.X is `0.0` and omitted. |
+| `0x20` | `OrientationHasNoY` | Rotation.Y is `0.0` and omitted. |
+| `0x40` | `OrientationHasNoZ` | Rotation.Z is `0.0` and omitted. |
 
 ## 3. Initial Spawning: `CreateObject` (`0xF745`)
 
-When a character enters the world or an object enters the player's 3D relevancy bubble, the server sends `CreateObject`. This message contains the full `Position` struct at its start.
+When a character enters the world or an object enters the player's 3D relevancy bubble, the server sends `CreateObject`. This message contains a **Fixed-Length Position** (32 bytes) within its physics section.
 
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `uint32` | `ObjectGUID` | Unique identifier. |
-| `Position` | `Position` | Initial spawn location. |
-| ... | ... | Followed by physics/render data. |
-
-## 4. Position Structure (8+24 = 32 bytes)
+### Fixed-Length Position (32 bytes)
+Used in `ObjectCreate` and some other static contexts.
 
 | Offset | Type | Name | Description |
 | :--- | :--- | :--- | :--- |
-| 0 | `uint32` | `Landblock` | 0xRRRRWWWW (Region/World coords). |
-| 4 | `float` | `X` | Local X within landblock. |
-| 8 | `float` | `Y` | Local Y within landblock. |
+| 0 | `uint32` | `CellID` | 0xLLLLCCCC (Landblock + Cell). |
+| 4 | `float` | `X` | Local X within cell. |
+| 8 | `float` | `Y` | Local Y within cell. |
 | 12 | `float` | `Z` | Local Z (height). |
-| 16 | `float` | `QX` | Quaternion X. |
-| 20 | `float` | `QY` | Quaternion Y. |
-| 24 | `float` | `QZ` | Quaternion Z. |
-| 28 | `float` | `QW` | Quaternion W (Rotation). |
+| 16 | `float` | `QW` | Quaternion W (Rotation). |
+| 20 | `float` | `QX` | Quaternion X. |
+| 24 | `float` | `QY` | Quaternion Y. |
+| 28 | `float` | `QZ` | Quaternion Z. |

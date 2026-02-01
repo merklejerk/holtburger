@@ -25,21 +25,20 @@ jobs:
       - name: Backport Main into Dev 🔙
         run: |
           # Merge main into dev
-          # We don't commit immediately so we can fix Cargo.toml
+          # We don't commit immediately so we can fix Cargo.toml and restore dirs
           git merge origin/main --no-commit --no-ff || true
           
           # PROTECT THE VIBE 🛡️
-          # Restore dev's version of Cargo.toml to keep the workspace members
-          # This ensures holtburger-debug-harness doesn't get snatched from dev
-          git checkout HEAD -- Cargo.toml
+          # Restore dev's version of everything that 'main' wants to delete
+          git checkout HEAD -- ACE/ ACViewer/ docs/ ace-root/ crates/holtburger-debug-harness/ .gitmodules Cargo.toml
           
           # Stage fixes
-          git add Cargo.toml
+          git add .
           
           # Commit the merge
           if git diff-index --quiet HEAD; then
             echo "Nothing to backport. Main and dev are synced. 🤝"
           else
-            git commit -m "chore: backport from main [skip ci]"
+            git commit -m "chore: backport from main (restoring dev-only folders) [skip ci]"
             git push origin dev
           fi

@@ -1,0 +1,45 @@
+name: Backward Sync (Main to Dev)
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync-to-dev:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout dev 🚀
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: dev
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Config Git 🛠️
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Backport Main into Dev 🔙
+        run: |
+          # Merge main into dev
+          # We don't commit immediately so we can fix Cargo.toml
+          git merge origin/main --no-commit --no-ff || true
+          
+          # PROTECT THE VIBE 🛡️
+          # Restore dev's version of Cargo.toml to keep the workspace members
+          # This ensures holtburger-debug-harness doesn't get snatched from dev
+          git checkout HEAD -- Cargo.toml
+          
+          # Stage fixes
+          git add Cargo.toml
+          
+          # Commit the merge
+          if git diff-index --quiet HEAD; then
+            echo "Nothing to backport. Main and dev are synced. 🤝"
+          else
+            git commit -m "chore: backport from main [skip ci]"
+            git push origin dev
+          fi

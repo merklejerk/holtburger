@@ -1,0 +1,61 @@
+name: Forward Sync (Dev to Main)
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  sync-to-main:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout dev 🚀
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Config Git 🛠️
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Prepare Clean Main ✨
+        run: |
+          # Fetch main and create a local tracking branch if it exists, otherwise create it
+          git fetch origin main:main || git branch main
+          git checkout main
+          
+          # Merge dev into main but don't commit yet
+          # We use -X theirs to favor new changes from dev
+          git merge dev --no-commit --no-ff -X theirs
+          
+          # THE PURGE 🧹
+          echo "Purging the clutter... 🤫"
+          rm -rf ACE/
+          rm -rf ACViewer/
+          rm -rf docs/
+          rm -rf ace-root/
+          rm -rf crates/holtburger-debug-harness/
+          rm -f .gitmodules
+          
+          # Scrub Cargo.toml (remove the harness member)
+          # We use a pattern that matches the specific line with its trailing comma if present
+          sed -i '/"crates\/holtburger-debug-harness",/d' Cargo.toml
+          # Also match it if it's the last item without a comma
+          sed -i '/"crates\/holtburger-debug-harness"/d' Cargo.toml
+          
+          # Clean up any potential empty lines left in Cargo.toml members array
+          # (Optional, but keeps it looking fresh)
+          
+          # Stage the cleanup
+          git add .
+          
+          # Only commit and push if there are actual changes
+          if git diff-index --quiet HEAD; then
+            echo "No changes to sync, main is already vibing. 💅"
+          else
+            git commit -m "chore: clean sync from dev [skip ci]"
+            git push origin main
+          fi

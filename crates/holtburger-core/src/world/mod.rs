@@ -60,7 +60,6 @@ pub struct WorldState {
     pub player_guid: u32,
     pub player_attributes: std::collections::HashMap<stats::AttributeType, u32>,
     pub player_vitals: std::collections::HashMap<stats::VitalType, stats::Vital>,
-    pub player_skills: std::collections::HashMap<stats::SkillType, stats::Skill>,
     pub player_enchantments: Vec<Enchantment>,
     pub server_time: Option<(f64, std::time::Instant)>,
     pub dat: Option<Arc<DatDatabase>>,
@@ -75,261 +74,11 @@ impl WorldState {
             player_guid: 0,
             player_attributes: std::collections::HashMap::new(),
             player_vitals: std::collections::HashMap::new(),
-            player_skills: std::collections::HashMap::new(),
             player_enchantments: Vec::new(),
             server_time: None,
             dat,
             scene: SpatialScene::new(),
         }
-    }
-
-    pub fn get_effective_attribute(&self, attr: stats::AttributeType) -> u32 {
-        use crate::world::properties::EnchantmentTypeFlags;
-
-        let base = self.player_attributes.get(&attr).cloned().unwrap_or(0);
-        let mut multiplier = 1.0f32;
-        let mut additive = 0f32;
-
-        // Multiplicative
-        let mults = self.get_top_layer_enchantments(
-            EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::MULTIPLICATIVE,
-            attr as u32,
-        );
-        for e in mults {
-            multiplier *= e.stat_mod_value;
-        }
-
-        // Additive
-        let adds = self.get_top_layer_enchantments(
-            EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE,
-            attr as u32,
-        );
-        for e in adds {
-            additive += e.stat_mod_value;
-        }
-
-        ((base as f32 * multiplier) + additive).max(0.0).round() as u32
-    }
-
-    pub fn get_effective_vital_max(&self, vital_type: stats::VitalType) -> u32 {
-        use crate::world::properties::EnchantmentTypeFlags;
-
-        let base_max = self
-            .player_vitals
-            .get(&vital_type)
-            .map(|v| v.base)
-            .unwrap_or(0);
-        let mut multiplier = 1.0f32;
-        let mut additive = 0f32;
-
-        // Multiplicative
-        let mults = self.get_top_layer_enchantments(
-            EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::MULTIPLICATIVE,
-            vital_type as u32,
-        );
-        for e in mults {
-            multiplier *= e.stat_mod_value;
-        }
-
-        // Additive
-        let adds = self.get_top_layer_enchantments(
-            EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::ADDITIVE,
-            vital_type as u32,
-        );
-        for e in adds {
-            additive += e.stat_mod_value;
-        }
-
-        // Also, vital maxes are derived from attributes.
-        // If an attribute is buffed, the "Base" max of the vital increases.
-        // Health = (Endurance / 2) + HealthBonus
-        // Stamina = Endurance + StaminaBonus
-        // Mana = Self + ManaBonus
-
-        // To calculate this precisely, we'd need to know the 'bonus' part (HealthStep etc)
-        // because we only have 'base_max' which is (BaseEnd / 2) + HealthStep.
-        // EffectiveMax = (EffectiveEnd / 2) + HealthStep
-        //              = base_max + (EffectiveEnd - BaseEnd) / 2
-
-        let end_base = self
-            .player_attributes
-            .get(&stats::AttributeType::EnduranceAttr)
-            .cloned()
-            .unwrap_or(0);
-        let end_eff = self.get_effective_attribute(stats::AttributeType::EnduranceAttr);
-
-        let self_base = self
-            .player_attributes
-            .get(&stats::AttributeType::SelfAttr)
-            .cloned()
-            .unwrap_or(0);
-        let self_eff = self.get_effective_attribute(stats::AttributeType::SelfAttr);
-
-        let derived_bonus = match vital_type {
-            stats::VitalType::Health => {
-                (end_eff as f32 / 2.0).round() as i32 - (end_base as f32 / 2.0).round() as i32
-            }
-            stats::VitalType::Stamina => end_eff as i32 - end_base as i32,
-            stats::VitalType::Mana => self_eff as i32 - self_base as i32,
-        };
-
-        let current_base_max = (base_max as i32 + derived_bonus).max(0) as u32;
-
-        ((current_base_max as f32 * multiplier) + additive)
-            .max(0.0)
-            .round() as u32
-    }
-
-    pub fn get_effective_skill(&self, skill_type: stats::SkillType) -> u32 {
-        use crate::world::properties::EnchantmentTypeFlags;
-
-        let skill = match self.player_skills.get(&skill_type) {
-            Some(s) => s,
-            None => return 0,
-        };
-
-        let mut multiplier = 1.0f32;
-        let mut additive = 0f32;
-
-        // Multiplicative
-        let mults = self.get_top_layer_enchantments(
-            EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::MULTIPLICATIVE,
-            skill_type as u32,
-        );
-        for e in mults {
-            multiplier *= e.stat_mod_value;
-        }
-
-        // Additive
-        let adds = self.get_top_layer_enchantments(
-            EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::ADDITIVE,
-            skill_type as u32,
-        );
-        for e in adds {
-            additive += e.stat_mod_value;
-        }
-
-        // Skill Maxes are derived from attributes.
-        // BaseMax = (Attr1 + Attr2) / Divisor + InvestedRanks.
-        // If an attribute is buffed, the base part of the skill increases.
-        let (a1, a2, div) = match skill_type {
-            stats::SkillType::WarMagic
-            | stats::SkillType::LifeMagic
-            | stats::SkillType::CreatureEnchantment
-            | stats::SkillType::ItemEnchantment
-            | stats::SkillType::VoidMagic => (
-                Some(stats::AttributeType::FocusAttr),
-                Some(stats::AttributeType::SelfAttr),
-                4,
-            ),
-            stats::SkillType::MeleeDefense => (
-                Some(stats::AttributeType::QuicknessAttr),
-                Some(stats::AttributeType::CoordinationAttr),
-                3,
-            ),
-            stats::SkillType::MissileDefense => (
-                Some(stats::AttributeType::QuicknessAttr),
-                Some(stats::AttributeType::CoordinationAttr),
-                5,
-            ),
-            stats::SkillType::MagicDefense => (
-                Some(stats::AttributeType::FocusAttr),
-                Some(stats::AttributeType::SelfAttr),
-                7,
-            ),
-            stats::SkillType::ManaConversion => (
-                Some(stats::AttributeType::FocusAttr),
-                Some(stats::AttributeType::SelfAttr),
-                6,
-            ),
-            stats::SkillType::ArcaneLore => (
-                Some(stats::AttributeType::FocusAttr),
-                Some(stats::AttributeType::SelfAttr),
-                3,
-            ),
-            stats::SkillType::HeavyWeapons
-            | stats::SkillType::LightWeapons
-            | stats::SkillType::FinesseWeapons
-            | stats::SkillType::TwoHandedCombat => (
-                Some(stats::AttributeType::StrengthAttr),
-                Some(stats::AttributeType::CoordinationAttr),
-                3,
-            ),
-            stats::SkillType::MissileWeapons => (
-                Some(stats::AttributeType::QuicknessAttr),
-                Some(stats::AttributeType::CoordinationAttr),
-                3,
-            ),
-            stats::SkillType::Healing => (
-                Some(stats::AttributeType::FocusAttr),
-                Some(stats::AttributeType::CoordinationAttr),
-                3,
-            ),
-            stats::SkillType::Jump => (
-                Some(stats::AttributeType::StrengthAttr),
-                Some(stats::AttributeType::QuicknessAttr),
-                2,
-            ),
-            stats::SkillType::Run => (Some(stats::AttributeType::QuicknessAttr), None, 1),
-            _ => (None, None, 1),
-        };
-
-        let calculate_derived = |at1: Option<stats::AttributeType>,
-                                 at2: Option<stats::AttributeType>,
-                                 div: u32,
-                                 eff: bool|
-         -> i32 {
-            let v1 = at1
-                .map(|at| {
-                    if eff {
-                        self.get_effective_attribute(at)
-                    } else {
-                        self.player_attributes.get(&at).cloned().unwrap_or(0)
-                    }
-                })
-                .unwrap_or(0);
-            let v2 = at2
-                .map(|at| {
-                    if eff {
-                        self.get_effective_attribute(at)
-                    } else {
-                        self.player_attributes.get(&at).cloned().unwrap_or(0)
-                    }
-                })
-                .unwrap_or(0);
-            ((v1 + v2) as f32 / div as f32).round() as i32
-        };
-
-        let base_derived = calculate_derived(a1, a2, div, false);
-        let eff_derived = calculate_derived(a1, a2, div, true);
-        let derived_bonus = eff_derived - base_derived;
-
-        let current_base = (skill.base as i32 + derived_bonus).max(0) as u32;
-
-        ((current_base as f32 * multiplier) + additive)
-            .max(0.0)
-            .round() as u32
-    }
-
-    fn get_top_layer_enchantments(
-        &self,
-        stat_mod_type_mask: crate::world::properties::EnchantmentTypeFlags,
-        stat_mod_key: u32,
-    ) -> Vec<&Enchantment> {
-        let mut best: std::collections::HashMap<u16, &Enchantment> =
-            std::collections::HashMap::new();
-
-        for e in &self.player_enchantments {
-            if (e.stat_mod_type & stat_mod_type_mask.bits()) == stat_mod_type_mask.bits()
-                && e.stat_mod_key == stat_mod_key
-            {
-                let entry = best.entry(e.spell_category).or_insert(e);
-                if e.power_level > entry.power_level {
-                    *entry = e;
-                }
-            }
-        }
-        best.into_values().collect()
     }
 
     pub fn current_server_time(&self) -> f64 {
@@ -348,57 +97,60 @@ impl WorldState {
         }
     }
 
-    pub fn get_all_effective_stats(
-        &self,
-    ) -> (Vec<stats::Attribute>, Vec<stats::Vital>, Vec<stats::Skill>) {
-        let mut attributes = Vec::new();
-        for i in 1..=6 {
-            if let Some(attr_type) = stats::AttributeType::from_repr(i) {
-                attributes.push(stats::Attribute {
-                    attr_type,
-                    base: self.get_effective_attribute(attr_type),
-                });
-            }
-        }
+    fn derive_skill_value(&self, skill_type: stats::SkillType, ranks: u32, init: u32) -> u32 {
+        use stats::AttributeType::*;
+        use stats::SkillType::*;
 
-        let mut vitals = Vec::new();
-        for vt in [
-            stats::VitalType::Health,
-            stats::VitalType::Stamina,
-            stats::VitalType::Mana,
-        ] {
-            if let Some(v) = self.player_vitals.get(&vt) {
-                vitals.push(stats::Vital {
-                    vital_type: vt,
-                    base: self.get_effective_vital_max(vt),
-                    current: v.current,
-                });
+        let (a1, a2, div) = match skill_type {
+            MeleeDefense | MissileDefense | FinesseWeapons | DualWield | Shield | Recklessness
+            | DirtyFighting | SneakAttack => (Some(QuicknessAttr), Some(CoordinationAttr), 3),
+            ArcaneLore | MagicDefense | ManaConversion | Spellcraft | CreatureEnchantment
+            | ItemEnchantment | LifeMagic | WarMagic | VoidMagic | Summoning | Deception
+            | AssessPerson | AssessCreature => (
+                Some(FocusAttr),
+                Some(SelfAttr),
+                match skill_type {
+                    MagicDefense => 7,
+                    ManaConversion | ArcaneLore => 6,
+                    Deception => 4,
+                    AssessPerson | AssessCreature => 2,
+                    _ => 4,
+                },
+            ),
+            Axe | Dagger | Mace | Spear | Staff | Sword | UnarmedCombat | HeavyWeapons
+            | LightWeapons | TwoHandedCombat => (Some(StrengthAttr), Some(CoordinationAttr), 3),
+            Bow | Crossbow | MissileWeapons | ThrownWeapon | Sling => {
+                (Some(CoordinationAttr), None, 2)
             }
-        }
-
-        let mut skills = Vec::new();
-        let mut skill_types: Vec<_> = self.player_skills.keys().cloned().collect();
-        skill_types.sort_by_key(|s| *s as u32);
-        for st in skill_types {
-            if let Some(s) = self.player_skills.get(&st) {
-                let effective = self.get_effective_skill(st);
-                skills.push(stats::Skill {
-                    skill_type: st,
-                    base: s.base, // Keep invested ranks + base attributes as "base"
-                    current: effective,
-                    training: s.training,
-                });
+            Healing | Lockpick | Fletching | Alchemy | Cooking | ItemTinkering
+            | WeaponTinkering | ArmorTinkering | MagicItemTinkering | Gearcraft | Salvaging => {
+                (Some(FocusAttr), Some(CoordinationAttr), 3)
             }
-        }
+            Run => (Some(QuicknessAttr), None, 1),
+            Jump => (Some(StrengthAttr), Some(QuicknessAttr), 2),
+            Leadership | Loyalty | Awareness | ArmsAndArmorRepair => {
+                (Some(FocusAttr), Some(SelfAttr), 4)
+            }
+            Challenge => (Some(StrengthAttr), Some(SelfAttr), 4),
+        };
 
-        (attributes, vitals, skills)
+        let val1 = a1
+            .and_then(|a| self.player_attributes.get(&a))
+            .cloned()
+            .unwrap_or(0);
+        let val2 = a2
+            .and_then(|a| self.player_attributes.get(&a))
+            .cloned()
+            .unwrap_or(0);
+
+        let bonus = (val1 + val2) as f32 / div as f32;
+        bonus.round() as u32 + ranks + init
     }
 
     /// Primary entry point for messages reassembled by the Session.
     /// Returns a list of side-effects/events for the UI to consume.
     pub fn handle_message(&mut self, msg: GameMessage) -> Vec<WorldEvent> {
         let mut events = Vec::new();
-        let mut stats_changed = false;
 
         match msg {
             GameMessage::ObjectCreate {
@@ -475,7 +227,6 @@ impl WorldState {
             } => {
                 self.player_guid = guid;
                 self.player_enchantments = enchantments;
-                stats_changed = true;
 
                 // Ensure player entity exists
                 let mut player_entity = if let Some(entity) = self.entities.get(guid) {
@@ -568,14 +319,14 @@ impl WorldState {
                             3 => stats::TrainingLevel::Specialized,
                             _ => stats::TrainingLevel::Unusable,
                         };
-                        let skill = stats::Skill {
+
+                        let val = self.derive_skill_value(skill_type, ranks, init);
+                        skill_objs.push(stats::Skill {
                             skill_type,
-                            base: init + ranks,
-                            current: init + ranks, // Base current same as base initially
+                            base: val,
+                            current: val,
                             training,
-                        };
-                        self.player_skills.insert(skill_type, skill.clone());
-                        skill_objs.push(skill);
+                        });
                     }
                 }
 
@@ -601,7 +352,6 @@ impl WorldState {
                 };
                 let base = start + ranks;
                 self.player_attributes.insert(attr_type, base);
-                stats_changed = true;
 
                 events.push(WorldEvent::AttributeUpdated(stats::Attribute {
                     attr_type,
@@ -625,16 +375,13 @@ impl WorldState {
                     3 => stats::TrainingLevel::Specialized,
                     _ => stats::TrainingLevel::Unusable,
                 };
-                let skill_obj = stats::Skill {
+                let val = self.derive_skill_value(skill_type, ranks, init);
+                events.push(WorldEvent::SkillUpdated(stats::Skill {
                     skill_type,
-                    base: init + ranks,
-                    current: init + ranks,
+                    base: val,
+                    current: val,
                     training,
-                };
-                self.player_skills.insert(skill_type, skill_obj.clone());
-                stats_changed = true;
-
-                events.push(WorldEvent::SkillUpdated(skill_obj));
+                }));
             }
             GameMessage::UpdateVital {
                 vital,
@@ -687,7 +434,6 @@ impl WorldState {
                     current,
                 };
                 self.player_vitals.insert(vital_type, vital_obj.clone());
-                stats_changed = true;
 
                 events.push(WorldEvent::VitalUpdated(vital_obj));
             }
@@ -709,7 +455,6 @@ impl WorldState {
                         current
                     );
                     vital_obj.current = current;
-                    stats_changed = true;
                     events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
                 } else {
                     log::warn!(
@@ -731,7 +476,6 @@ impl WorldState {
                     } else {
                         self.player_enchantments.push(enchantment.clone());
                     }
-                    stats_changed = true;
                     events.push(WorldEvent::EnchantmentUpdated(enchantment));
                 }
             }
@@ -750,7 +494,6 @@ impl WorldState {
                         }
                         events.push(WorldEvent::EnchantmentUpdated(enchantment));
                     }
-                    stats_changed = true;
                 }
             }
             GameMessage::MagicRemoveEnchantment {
@@ -761,7 +504,6 @@ impl WorldState {
                 if target == self.player_guid as u64 {
                     self.player_enchantments
                         .retain(|e| e.spell_id != spell_id || e.layer != layer);
-                    stats_changed = true;
                     events.push(WorldEvent::EnchantmentRemoved { spell_id, layer });
                 }
             }
@@ -775,13 +517,11 @@ impl WorldState {
                             layer: spell.layer,
                         });
                     }
-                    stats_changed = true;
                 }
             }
             GameMessage::MagicPurgeEnchantments { target } => {
                 if target == self.player_guid as u64 {
                     self.player_enchantments.clear();
-                    stats_changed = true;
                     events.push(WorldEvent::EnchantmentsPurged);
                 }
             }
@@ -791,7 +531,6 @@ impl WorldState {
                     self.player_enchantments.retain(|e| {
                         (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
                     });
-                    stats_changed = true;
                     events.push(WorldEvent::EnchantmentsPurged);
                 }
             }
@@ -803,7 +542,6 @@ impl WorldState {
                 if target == self.player_guid as u64 {
                     self.player_enchantments
                         .retain(|e| e.spell_id != spell_id || e.layer != layer);
-                    stats_changed = true;
                     events.push(WorldEvent::EnchantmentRemoved { spell_id, layer });
                 }
             }
@@ -817,7 +555,6 @@ impl WorldState {
                             layer: spell.layer,
                         });
                     }
-                    stats_changed = true;
                 }
             }
             GameMessage::UpdateHealth { target, health } => {
@@ -964,15 +701,6 @@ impl WorldState {
                 });
             }
             _ => {}
-        }
-
-        if stats_changed {
-            let (attributes, vitals, skills) = self.get_all_effective_stats();
-            events.push(WorldEvent::DerivedStatsUpdated {
-                attributes,
-                vitals,
-                skills,
-            });
         }
 
         events

@@ -261,7 +261,12 @@ Updates the current value of a vital (e.g., during health regeneration).
 - `uint8` `Sequence`.
 - `uint32` `VitalID`.
 - `uint32` `CurrentValue`.
-
+- `uint32` `Sequence`.
+- `uint32` `VitalID`.
+- `uint32` `Ranks`.
+- `uint32` `StartingValue`.
+- `uint32` `ExperienceSpent`.
+- `uint32` `CurrentValue`.
 
 ---
 

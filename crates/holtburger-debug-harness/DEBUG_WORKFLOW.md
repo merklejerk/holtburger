@@ -51,6 +51,11 @@ Don't just read the C# code—run it. Static analysis (reading) assumes you unde
 2. **Serialize to Hex:** Instantiate the struct or message, populate it with known values, serialize it using ACE's own writers, and print the hex.
 3. **Compare & Conquer:** This gives you the "Gold Standard" bytes. If your Rust parser reads these bytes and produces a different result, your parser is wrong. If the "Gold Standard" bytes don't match `repro.hex`, then ACE handles that scenario differently than you think.
 
+**Pro-Tip: The "Writer Scan":** When reading C# `Pack` methods, pay close attention to the `Writer.Write` argument type. 
+- `Writer.Write(intVal)` is 4 bytes.
+- `Writer.Write((ushort)intVal)` is 2 bytes. 
+- A common mistake is seeing a field name like `Ranks` and assuming it's a `uint32` just because most numbers in AC are. If you see a cast to `ushort` or `byte`, that's your smoking gun for a potential "Drift Bug."
+
 ## 3. Advanced Diagnostic Techniques
 
 ### The "Drift Calculation"
@@ -59,7 +64,7 @@ If your parser reads garbage data after a list/vector, you have a size mismatch 
 2. Identify where your parser *currently* is.
 3. Calculate `Diff = Actual_Offset - Expected_Offset`.
 4. Divide `Diff` by the `Item_Count` of the list.
-   - *Example:* We drifted 76 bytes / 38 skills = 2 bytes per skill. That's exactly the size of a `ushort`. Look for a missing `ushort` field!
+   - *Example:* We drifted 76 bytes / 38 skills = 2 bytes per skill. That's exactly the size of a `ushort`. We probably missed (or over-read) a field like `Status`. Skills are exactly 32 bytes in the `PlayerDescription` vector.
 
 ### The Corruption Sanity Check
 Before blaming the parser logic, rule out reassembly failures. Scan your `repro.hex` for protocol headers that shouldn't be there.

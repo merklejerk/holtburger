@@ -75,3 +75,37 @@ A `Position` can be serialized in two ways:
 
 ---
 **Pro-Tip:** The high bit of the `objcell_id` indicates if the entity is in an **interior** (dungeon/building) or **dynamic** cell.
+
+## 4. Complex Structs
+
+### 4.1 `Skill` Struct (32 bytes)
+The skill record is a fixed-width 32-byte block used in `PlayerDescription` (`0xF7B0:0x0013`) and `UpdateSkill` (`0x02DD`).
+
+| Offset | Type | Name | Description |
+| :--- | :--- | :--- | :--- |
+| 0 | `uint32` | `skill_id` | Unique ID of the skill. |
+| 4 | `uint16` | `ranks` | Number of times the skill has been raised by spending XP. |
+| 6 | `uint16` | `status` | Often `0x0001`. In `UpdateSkill`, bit flags (like `adjustPP`). |
+| 8 | `uint32` | `sac` | Skill Advancement Class (Inactive=0, Untrained=1, Trained=2, Specialized=3). |
+| 12 | `uint32` | `xp` | Total experience spent on this skill. |
+| 16 | `uint32` | `init_level` | Base training bonus (+5 for Trained, +10 for Specialized). |
+| 20 | `uint32` | `resistance` | Last check resistance or task difficulty (usually 0). |
+| 24 | `double` | `last_used` | Timestamp of last skill usage. |
+
+**Pitfall:** Do not read `ranks` and `status` as a single `uint32`. This results in correctly aligned offsets but garbage values for the rank level.
+
+### 4.2 `Attribute` Struct (12-16 bytes)
+Attributes and Vitals use similar structures but vary in whether `current` value is included.
+
+- **Primary Attributes (12 bytes):** `ranks` (4), `starting_value` (4), `xp_spent` (4).
+- **Vitals (16 bytes):** `ranks` (4), `starting_value` (4), `xp_spent` (4), `current_value` (4).
+
+## 5. Common Pitfalls & Drift Check
+
+1.  **Alignment Smashing:** Always sum up the byte counts of fields in a struct. If you are parsing a vector of structs and drift by even 2 bytes, the next struct will be unparseable.
+2.  **Implicit Padding:** The server often calls `Align()` or `Writer.WritePosition` which can insert 1-3 bytes of zero-padding to reach a 4-byte boundary. Most major message groups (UI, GameEvent) start on 4-byte boundaries.
+3.  **Hash Table Exceptions:** Property Hash Tables (`Bool`, `Int`, `Float`, `String`, etc.) are high-density and **do not pad lengths or strings**. Pointers/Refs inside them are raw.
+4.  **Field Type Mismatches:** C# `Writer.Write(bool)` writes 4 bytes (mapping to `uint32`), whereas `Writer.Write((ushort)1)` writes 2 bytes. Always check the explicit cast in the `Pack` method!
+
+---
+**Standard Drift Test:** If your parser successfully reads a list of 10 items but crashes on the 11th, you have a 1-byte or 2-byte error in your item struct definition. Calculate: `(Actual_Offset_After_List - Expected_Offset_After_List) / Item_Count` to find the per-item "leak".

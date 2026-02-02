@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
+use std::collections::{HashMap, HashSet};
 
 // Layout constants
 pub const STATUS_BAR_HEIGHT: u16 = 3;
@@ -208,8 +209,8 @@ impl AppState {
 
     pub fn get_filtered_nearby_entities(
         &self,
-    ) -> Vec<(&holtburger_core::world::entity::Entity, f32)> {
-        let mut nearby: Vec<_> = self
+    ) -> Vec<(&holtburger_core::world::entity::Entity, f32, usize)> {
+        let candidates: Vec<_> = self
             .entities
             .values()
             .filter(|e| {
@@ -221,25 +222,88 @@ impl AppState {
                     false
                 }
             })
-            .map(|e| {
-                let dist = if let Some(p) = &self.player_pos {
-                    e.position.distance_to(p)
+            .collect();
+
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        // Build parent-child mapping for the subset
+        let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut roots = Vec::new();
+
+        let candidate_guids: HashSet<u32> = candidates.iter().map(|e| e.guid).collect();
+
+        for e in &candidates {
+            let parent_id = match self.nearby_tab {
+                NearbyTab::Inventory => e.container_id,
+                NearbyTab::Entities => e.container_id.or(e.wielder_id).or(e.physics_parent_id),
+                _ => None,
+            };
+
+            let is_root = if let Some(pid) = parent_id {
+                if Some(pid) == self.player_guid {
+                    true
+                } else {
+                    !candidate_guids.contains(&pid)
+                }
+            } else {
+                true
+            };
+
+            if is_root {
+                roots.push(e.guid);
+            } else {
+                children_map
+                    .entry(parent_id.unwrap())
+                    .or_default()
+                    .push(e.guid);
+            }
+        }
+
+        // Sort roots (by distance for Entities, by name for Inventory)
+        roots.sort_by(|&a, &b| {
+            let ea = &self.entities[&a];
+            let eb = &self.entities[&b];
+            if self.nearby_tab == NearbyTab::Entities {
+                let da = if let Some(p) = &self.player_pos {
+                    ea.position.distance_to(p)
                 } else {
                     0.0
                 };
-                (e, dist)
-            })
-            .collect();
-
-        nearby.sort_by(|a, b| {
-            if self.nearby_tab == NearbyTab::Entities {
-                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                let db = if let Some(p) = &self.player_pos {
+                    eb.position.distance_to(p)
+                } else {
+                    0.0
+                };
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             } else {
-                a.0.name.cmp(&b.0.name)
+                ea.name.cmp(&eb.name)
             }
         });
 
-        nearby
+        // Flatten with depth using DFS
+        let mut result = Vec::new();
+        let mut stack: Vec<(u32, usize)> = roots.into_iter().rev().map(|id| (id, 0)).collect();
+
+        while let Some((guid, depth)) = stack.pop() {
+            let e = &self.entities[&guid];
+            let dist = if let Some(p) = &self.player_pos {
+                e.position.distance_to(p)
+            } else {
+                0.0
+            };
+            result.push((e, dist, depth));
+
+            if let Some(mut children) = children_map.remove(&guid) {
+                children.sort_by(|&a, &b| self.entities[&a].name.cmp(&self.entities[&b].name));
+                for child_guid in children.into_iter().rev() {
+                    stack.push((child_guid, depth + 1));
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -419,7 +483,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                 nearby
                     .iter()
                     .enumerate()
-                    .map(|(i, (e, _dist))| {
+                    .map(|(i, (e, dist, depth))| {
                         let color_val = e
                             .int_properties
                             .get(&(PropertyInt::RadarBlipColor as u32))
@@ -464,20 +528,21 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                         } else {
                             e.name.clone()
                         };
+
+                        let indent = "  ".repeat(*depth);
+
                         if state.nearby_tab == NearbyTab::Entities {
-                            let dist = if let Some(p) = &state.player_pos {
-                                e.position.distance_to(p)
-                            } else {
-                                0.0
-                            };
                             ListItem::new(format!(
-                                "[{}] {:<15} [{:.1}m]",
-                                type_marker, display_name, dist
+                                "{}[{}] {:<15} [{:.1}m]",
+                                indent, type_marker, display_name, dist
                             ))
                             .style(style)
                         } else {
-                            ListItem::new(format!("[{}] {:<15}", type_marker, display_name))
-                                .style(style)
+                            ListItem::new(format!(
+                                "{}[{}] {:<15}",
+                                indent, type_marker, display_name
+                            ))
+                            .style(style)
                         }
                     })
                     .collect()
@@ -795,7 +860,7 @@ fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
     match state.nearby_tab {
         NearbyTab::Entities | NearbyTab::Inventory => {
             let nearby = state.get_filtered_nearby_entities();
-            if let Some((selected_e, _)) = nearby.get(state.selected_nearby_index) {
+            if let Some((selected_e, _, _)) = nearby.get(state.selected_nearby_index) {
                 tools.push(Span::raw("[A]ssess "));
                 let flags = selected_e.flags;
 

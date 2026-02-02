@@ -188,6 +188,59 @@ impl AppState {
                 .as_secs_f64(),
         }
     }
+
+    pub fn nearby_item_count(&self) -> usize {
+        match self.nearby_tab {
+            NearbyTab::Entities => self
+                .entities
+                .values()
+                .filter(|e| classification::is_targetable(e) && e.position.landblock_id != 0)
+                .count(),
+            NearbyTab::Inventory => self
+                .entities
+                .values()
+                .filter(|e| e.position.landblock_id == 0 && !e.name.is_empty())
+                .count(),
+            NearbyTab::Effects => self.player_enchantments.len(),
+            NearbyTab::Character => 0,
+        }
+    }
+
+    pub fn get_filtered_nearby_entities(
+        &self,
+    ) -> Vec<(&holtburger_core::world::entity::Entity, f32)> {
+        let mut nearby: Vec<_> = self
+            .entities
+            .values()
+            .filter(|e| {
+                if self.nearby_tab == NearbyTab::Entities {
+                    classification::is_targetable(e) && e.position.landblock_id != 0
+                } else if self.nearby_tab == NearbyTab::Inventory {
+                    e.position.landblock_id == 0 && !e.name.is_empty()
+                } else {
+                    false
+                }
+            })
+            .map(|e| {
+                let dist = if let Some(p) = &self.player_pos {
+                    e.position.distance_to(p)
+                } else {
+                    0.0
+                };
+                (e, dist)
+            })
+            .collect();
+
+        nearby.sort_by(|a, b| {
+            if self.nearby_tab == NearbyTab::Entities {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+            } else {
+                a.0.name.cmp(&b.0.name)
+            }
+        });
+
+        nearby
+    }
 }
 
 pub fn ui(f: &mut Frame, state: &mut AppState) {
@@ -285,15 +338,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             let main_chunks = &main_chunks_vec;
 
             // --- Nearby Entities / Inventory / Effects Pane ---
-            let mut nearby = Vec::new();
             let nearby_items: Vec<ListItem> = if state.nearby_tab == NearbyTab::Effects {
-                // Clamp index for effects
-                if state.selected_nearby_index >= state.player_enchantments.len()
-                    && !state.player_enchantments.is_empty()
-                {
-                    state.selected_nearby_index = state.player_enchantments.len().saturating_sub(1);
-                }
-
                 state
                     .player_enchantments
                     .iter()
@@ -370,43 +415,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                     })
                     .collect()
             } else {
-                let nearby_filtered: Vec<_> = state
-                    .entities
-                    .values()
-                    .filter(|e| {
-                        if state.nearby_tab == NearbyTab::Entities {
-                            classification::is_targetable(e) && e.position.landblock_id != 0
-                        } else if state.nearby_tab == NearbyTab::Inventory {
-                            // Inventory items or things without coordinates
-                            e.position.landblock_id == 0 && !e.name.is_empty()
-                        } else {
-                            false
-                        }
-                    })
-                    .map(|e| {
-                        let dist = if let Some(p) = &state.player_pos {
-                            e.position.distance_to(p)
-                        } else {
-                            0.0
-                        };
-                        (e, dist)
-                    })
-                    .collect();
-
-                nearby = nearby_filtered;
-                nearby.sort_by(|a, b| {
-                    if state.nearby_tab == NearbyTab::Entities {
-                        a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                    } else {
-                        a.0.name.cmp(&b.0.name)
-                    }
-                });
-
-                // Clamp index
-                if state.selected_nearby_index >= nearby.len() && !nearby.is_empty() {
-                    state.selected_nearby_index = nearby.len().saturating_sub(1);
-                }
-
+                let nearby = state.get_filtered_nearby_entities();
                 nearby
                     .iter()
                     .enumerate()
@@ -565,44 +574,11 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
 
             f.render_widget(nearby_block, main_chunks[0]);
 
-            // Tooltip logic
-            if state.nearby_tab == NearbyTab::Effects && !state.player_enchantments.is_empty() {
-                let tools = vec![Span::raw("[D]ebug ")];
-                let tools_para = Paragraph::new(Line::from(tools))
-                    .block(Block::default().borders(Borders::NONE))
-                    .alignment(ratatui::layout::Alignment::Center);
-                f.render_widget(tools_para, nearby_inner_chunks[1]);
-            } else if (state.nearby_tab == NearbyTab::Entities
-                || state.nearby_tab == NearbyTab::Inventory)
-                && let Some((selected_e, _)) = nearby.get(state.selected_nearby_index)
-            {
-                let mut tools = vec![Span::raw("[A]ssess ")];
-                let flags = selected_e.flags;
+            // Tooltip / Action Bar logic
+            let action_bar = render_action_bar(state);
 
-                // Interact logic: Vendor check or Pickable check
-                let is_vendor = flags.intersects(ObjectDescriptionFlag::VENDOR);
-                let is_pickable = selected_e
-                    .int_properties
-                    .get(&16)
-                    .map(|&u| (u & 0x20) != 0)
-                    .unwrap_or(false);
-
-                if is_vendor {
-                    tools.push(Span::raw("[V]endor "));
-                }
-                if is_pickable {
-                    tools.push(Span::raw("[I]tem "));
-                }
-
-                if flags.intersects(ObjectDescriptionFlag::ATTACKABLE) {
-                    tools.push(Span::raw("[K]ill "));
-                }
-
-                tools.push(Span::raw("[D]ebug"));
-
-                let tooltip =
-                    Paragraph::new(Line::from(tools)).block(Block::default().borders(Borders::TOP));
-                f.render_widget(tooltip, nearby_inner_chunks[1]);
+            if let Some(action_bar) = action_bar {
+                f.render_widget(action_bar, nearby_inner_chunks[1]);
             }
 
             // --- Chat Pane ---
@@ -641,7 +617,8 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             }
             state.chat_total_lines = total_lines;
             let max_scroll = total_lines.saturating_sub(height);
-            let effective_scroll = state.scroll_offset.min(max_scroll);
+            state.scroll_offset = state.scroll_offset.min(max_scroll);
+            let effective_scroll = state.scroll_offset;
 
             let end = total_lines.saturating_sub(effective_scroll);
             let start = end.saturating_sub(height);
@@ -690,7 +667,8 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             let total_ctx = state.context_buffer.len();
 
             let max_ctx_scroll = total_ctx.saturating_sub(ctx_height);
-            let effective_ctx_scroll = state.context_scroll_offset.min(max_ctx_scroll);
+            state.context_scroll_offset = state.context_scroll_offset.min(max_ctx_scroll);
+            let effective_ctx_scroll = state.context_scroll_offset;
 
             let ctx_end = total_ctx.saturating_sub(effective_ctx_scroll);
             let ctx_start = ctx_end.saturating_sub(ctx_height);
@@ -809,4 +787,46 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         }
     }
     result
+}
+
+fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
+    let mut tools = Vec::new();
+
+    match state.nearby_tab {
+        NearbyTab::Entities | NearbyTab::Inventory => {
+            let nearby = state.get_filtered_nearby_entities();
+            if let Some((selected_e, _)) = nearby.get(state.selected_nearby_index) {
+                tools.push(Span::raw("[A]ssess "));
+                let flags = selected_e.flags;
+
+                // For items in packs, we can always "Use" them.
+                // For items on the ground, we check if they are "pickable" (ObjectDescriptionFlag is better for this).
+                if state.nearby_tab == NearbyTab::Inventory {
+                    tools.push(Span::raw("[I]nteract "));
+                } else {
+                    let is_pickable = !flags.intersects(ObjectDescriptionFlag::STUCK);
+                    if is_pickable {
+                        tools.push(Span::raw("[I]tem "));
+                    }
+                }
+
+                if flags.intersects(ObjectDescriptionFlag::ATTACKABLE) {
+                    tools.push(Span::raw("[K]ill "));
+                }
+                tools.push(Span::raw("[D]ebug"));
+            }
+        }
+        NearbyTab::Effects => {
+            if !state.player_enchantments.is_empty() {
+                tools.push(Span::raw("[D]ebug"));
+            }
+        }
+        NearbyTab::Character => {}
+    }
+
+    if tools.is_empty() {
+        None
+    } else {
+        Some(Paragraph::new(Line::from(tools)).block(Block::default().borders(Borders::TOP)))
+    }
 }

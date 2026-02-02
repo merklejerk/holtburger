@@ -214,11 +214,7 @@ async fn main() -> Result<()> {
         last_tick = Instant::now();
 
         // Clamp nearby selection index before drawing
-        let nearby_count = app_state
-            .entities
-            .values()
-            .filter(|e| classification::is_targetable(e))
-            .count();
+        let nearby_count = app_state.nearby_item_count();
         if app_state.selected_nearby_index >= nearby_count && nearby_count > 0 {
             app_state.selected_nearby_index = nearby_count - 1;
         } else if nearby_count == 0 {
@@ -407,279 +403,282 @@ async fn main() -> Result<()> {
                                             continue;
                                         }
 
-                                        let mut nearby: Vec<_> = app_state
-                                            .entities
-                                            .values()
-                                            .filter(|e| {
-                                                if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                                    classification::is_targetable(e)
-                                                        && e.position.landblock_id != 0
-                                                } else {
-                                                    e.position.landblock_id == 0
-                                                        && !e.name.is_empty()
-                                                }
-                                            })
-                                            .map(|e| {
-                                                let dist = if let Some(p) = &app_state.player_pos {
-                                                    e.position.distance_to(p)
-                                                } else {
-                                                    0.0
-                                                };
-                                                (e, dist)
-                                            })
-                                            .collect();
+                                        let guid = {
+                                            let nearby = app_state.get_filtered_nearby_entities();
+                                            nearby
+                                                .get(app_state.selected_nearby_index)
+                                                .map(|(e, _)| e.guid)
+                                        };
 
-                                        nearby.sort_by(|a, b| {
-                                            if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                                a.1.partial_cmp(&b.1)
-                                                    .unwrap_or(std::cmp::Ordering::Equal)
-                                            } else {
-                                                a.0.name.cmp(&b.0.name)
-                                            }
-                                        });
-
-                                        if let Some((e, _)) =
-                                            nearby.get(app_state.selected_nearby_index)
-                                        {
+                                        if let Some(guid) = guid {
                                             match c {
                                                 'a' | 'A' => {
                                                     let _ = command_tx
-                                                        .send(ClientCommand::Identify(e.guid));
+                                                        .send(ClientCommand::Identify(guid));
                                                 }
                                                 'i' | 'I' => {
                                                     let _ =
-                                                        command_tx.send(ClientCommand::Use(e.guid));
+                                                        command_tx.send(ClientCommand::Use(guid));
                                                 }
                                                 'k' | 'K' => {
                                                     let _ = command_tx
-                                                        .send(ClientCommand::Attack(e.guid));
+                                                        .send(ClientCommand::Attack(guid));
                                                 }
                                                 'd' | 'D' => {
-                                                    app_state.context_buffer.clear();
-                                                    app_state
-                                                        .context_buffer
-                                                        .push(format!("DEBUG INFO: {}", e.name));
-                                                    app_state
-                                                        .context_buffer
-                                                        .push(format!("GUID:   {:08X}", e.guid));
-
-                                                    if let Some(parent_id) = e.physics_parent_id {
-                                                        let parent_name = if let Some(p) =
-                                                            app_state.entities.get(&parent_id)
-                                                        {
-                                                            p.name.clone()
-                                                        } else if Some(parent_id)
-                                                            == app_state.player_guid
-                                                        {
-                                                            "You".to_string()
-                                                        } else {
-                                                            "Unknown".to_string()
-                                                        };
-                                                        app_state.context_buffer.push(format!(
-                                                            "Phys Parent: {:08X} ({})",
-                                                            parent_id, parent_name
+                                                    let mut lines = Vec::new();
+                                                    if let Some(e) = app_state.entities.get(&guid) {
+                                                        lines.push(format!(
+                                                            "DEBUG INFO: {}",
+                                                            e.name
                                                         ));
-                                                    }
-
-                                                    if let Some(container_id) = e.container_id {
-                                                        let container_name = if let Some(p) =
-                                                            app_state.entities.get(&container_id)
-                                                        {
-                                                            p.name.clone()
-                                                        } else if Some(container_id)
-                                                            == app_state.player_guid
-                                                        {
-                                                            "You".to_string()
-                                                        } else {
-                                                            "Unknown".to_string()
-                                                        };
-                                                        app_state.context_buffer.push(format!(
-                                                            "Container:   {:08X} ({})",
-                                                            container_id, container_name
+                                                        lines.push(format!(
+                                                            "GUID:   {:08X}",
+                                                            e.guid
                                                         ));
-                                                    }
 
-                                                    if let Some(wielder_id) = e.wielder_id {
-                                                        let wielder_name = if let Some(p) =
-                                                            app_state.entities.get(&wielder_id)
+                                                        if let Some(parent_id) = e.physics_parent_id
                                                         {
-                                                            p.name.clone()
-                                                        } else if Some(wielder_id)
-                                                            == app_state.player_guid
+                                                            let parent_name = if let Some(p) =
+                                                                app_state.entities.get(&parent_id)
+                                                            {
+                                                                p.name.clone()
+                                                            } else if Some(parent_id)
+                                                                == app_state.player_guid
+                                                            {
+                                                                "You".to_string()
+                                                            } else {
+                                                                "Unknown".to_string()
+                                                            };
+                                                            lines.push(format!(
+                                                                "Phys Parent: {:08X} ({})",
+                                                                parent_id, parent_name
+                                                            ));
+                                                        }
+
+                                                        if let Some(container_id) = e.container_id {
+                                                            let container_name = if let Some(p) =
+                                                                app_state
+                                                                    .entities
+                                                                    .get(&container_id)
+                                                            {
+                                                                p.name.clone()
+                                                            } else if Some(container_id)
+                                                                == app_state.player_guid
+                                                            {
+                                                                "You".to_string()
+                                                            } else {
+                                                                "Unknown".to_string()
+                                                            };
+                                                            lines.push(format!(
+                                                                "Container:   {:08X} ({})",
+                                                                container_id, container_name
+                                                            ));
+                                                        }
+
+                                                        if let Some(wielder_id) = e.wielder_id {
+                                                            let wielder_name = if let Some(p) =
+                                                                app_state.entities.get(&wielder_id)
+                                                            {
+                                                                p.name.clone()
+                                                            } else if Some(wielder_id)
+                                                                == app_state.player_guid
+                                                            {
+                                                                "You".to_string()
+                                                            } else {
+                                                                "Unknown".to_string()
+                                                            };
+                                                            lines.push(format!(
+                                                                "Wielder:     {:08X} ({})",
+                                                                wielder_id, wielder_name
+                                                            ));
+                                                        }
+
+                                                        lines.push(format!("WCID:   {:?}", e.wcid));
+                                                        lines.push(format!(
+                                                            "Class:  {:?}",
+                                                            classification::classify_entity(e)
+                                                        ));
+                                                        lines.push(format!(
+                                                            "GfxID:  {:?}",
+                                                            e.gfx_id
+                                                        ));
+                                                        lines.push(format!(
+                                                            "Vel:    {:?}",
+                                                            e.velocity
+                                                        ));
+                                                        lines.push(format!(
+                                                            "Flags:  {:08X}",
+                                                            e.flags.bits()
+                                                        ));
+                                                        for (name, _) in e.flags.iter_names() {
+                                                            lines.push(format!("  [X] {}", name));
+                                                        }
+
+                                                        lines.push(format!(
+                                                            "Phys:   {:08X}",
+                                                            e.physics_state.bits()
+                                                        ));
+                                                        for (name, _) in
+                                                            e.physics_state.iter_names()
                                                         {
-                                                            "You".to_string()
-                                                        } else {
-                                                            "Unknown".to_string()
-                                                        };
-                                                        app_state.context_buffer.push(format!(
-                                                            "Wielder:     {:08X} ({})",
-                                                            wielder_id, wielder_name
+                                                            lines.push(format!("  [X] {}", name));
+                                                        }
+
+                                                        if let Some(it) = e.item_type {
+                                                            lines.push(format!(
+                                                                "IType:  {:08X}",
+                                                                it.bits()
+                                                            ));
+                                                            for (name, _) in it.iter_names() {
+                                                                lines.push(format!(
+                                                                    "  [X] {}",
+                                                                    name
+                                                                ));
+                                                            }
+                                                        }
+                                                        lines.push(format!(
+                                                            "Pos:    {}",
+                                                            e.position.to_world_coords()
                                                         ));
-                                                    }
-
-                                                    app_state
-                                                        .context_buffer
-                                                        .push(format!("WCID:   {:?}", e.wcid));
-                                                    app_state.context_buffer.push(format!(
-                                                        "Class:  {:?}",
-                                                        classification::classify_entity(e)
-                                                    ));
-                                                    app_state
-                                                        .context_buffer
-                                                        .push(format!("GfxID:  {:?}", e.gfx_id));
-                                                    app_state
-                                                        .context_buffer
-                                                        .push(format!("Vel:    {:?}", e.velocity));
-                                                    app_state.context_buffer.push(format!(
-                                                        "Flags:  {:08X}",
-                                                        e.flags.bits()
-                                                    ));
-                                                    for (name, _) in e.flags.iter_names() {
-                                                        app_state
-                                                            .context_buffer
-                                                            .push(format!("  [X] {}", name));
-                                                    }
-
-                                                    app_state.context_buffer.push(format!(
-                                                        "Phys:   {:08X}",
-                                                        e.physics_state.bits()
-                                                    ));
-                                                    for (name, _) in e.physics_state.iter_names() {
-                                                        app_state
-                                                            .context_buffer
-                                                            .push(format!("  [X] {}", name));
-                                                    }
-
-                                                    if let Some(it) = e.item_type {
-                                                        app_state.context_buffer.push(format!(
-                                                            "IType:  {:08X}",
-                                                            it.bits()
+                                                        lines.push(format!(
+                                                            "LB:     {:08X}",
+                                                            e.position.landblock_id
                                                         ));
-                                                        for (name, _) in it.iter_names() {
-                                                            app_state
-                                                                .context_buffer
-                                                                .push(format!("  [X] {}", name));
-                                                        }
-                                                    }
-                                                    app_state.context_buffer.push(format!(
-                                                        "Pos:    {}",
-                                                        e.position.to_world_coords()
-                                                    ));
-                                                    app_state.context_buffer.push(format!(
-                                                        "LB:     {:08X}",
-                                                        e.position.landblock_id
-                                                    ));
-                                                    app_state.context_buffer.push(format!(
-                                                        "Coords: {:?}",
-                                                        e.position.coords
-                                                    ));
+                                                        lines.push(format!(
+                                                            "Coords: {:?}",
+                                                            e.position.coords
+                                                        ));
 
-                                                    if !e.int_properties.is_empty() {
-                                                        app_state.context_buffer.push(
-                                                            "-- Int Properties --".to_string(),
-                                                        );
-                                                        let mut sorted_keys: Vec<_> =
-                                                            e.int_properties.keys().collect();
-                                                        sorted_keys.sort();
-                                                        for &k in sorted_keys {
-                                                            let name = PropertyInt::from_repr(k)
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or_else(|| k.to_string());
-                                                            app_state.context_buffer.push(format!(
-                                                                "  {}: {}",
-                                                                name, e.int_properties[&k]
-                                                            ));
+                                                        if !e.int_properties.is_empty() {
+                                                            lines.push(
+                                                                "-- Int Properties --".to_string(),
+                                                            );
+                                                            let mut sorted_keys: Vec<_> =
+                                                                e.int_properties.keys().collect();
+                                                            sorted_keys.sort();
+                                                            for &k in sorted_keys {
+                                                                let name =
+                                                                    PropertyInt::from_repr(k)
+                                                                        .map(|p| p.to_string())
+                                                                        .unwrap_or_else(|| {
+                                                                            k.to_string()
+                                                                        });
+                                                                lines.push(format!(
+                                                                    "  {}: {}",
+                                                                    name, e.int_properties[&k]
+                                                                ));
+                                                            }
                                                         }
-                                                    }
-                                                    if !e.bool_properties.is_empty() {
-                                                        app_state.context_buffer.push(
-                                                            "-- Bool Properties --".to_string(),
-                                                        );
-                                                        let mut sorted_keys: Vec<_> =
-                                                            e.bool_properties.keys().collect();
-                                                        sorted_keys.sort();
-                                                        for &k in sorted_keys {
-                                                            let name = PropertyBool::from_repr(k)
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or_else(|| k.to_string());
-                                                            app_state.context_buffer.push(format!(
-                                                                "  {}: {}",
-                                                                name, e.bool_properties[&k]
-                                                            ));
+                                                        if !e.bool_properties.is_empty() {
+                                                            lines.push(
+                                                                "-- Bool Properties --".to_string(),
+                                                            );
+                                                            let mut sorted_keys: Vec<_> =
+                                                                e.bool_properties.keys().collect();
+                                                            sorted_keys.sort();
+                                                            for &k in sorted_keys {
+                                                                let name =
+                                                                    PropertyBool::from_repr(k)
+                                                                        .map(|p| p.to_string())
+                                                                        .unwrap_or_else(|| {
+                                                                            k.to_string()
+                                                                        });
+                                                                lines.push(format!(
+                                                                    "  {}: {}",
+                                                                    name, e.bool_properties[&k]
+                                                                ));
+                                                            }
                                                         }
-                                                    }
-                                                    if !e.float_properties.is_empty() {
-                                                        app_state.context_buffer.push(
-                                                            "-- Float Properties --".to_string(),
-                                                        );
-                                                        let mut sorted_keys: Vec<_> =
-                                                            e.float_properties.keys().collect();
-                                                        sorted_keys.sort();
-                                                        for &k in sorted_keys {
-                                                            let name = PropertyFloat::from_repr(k)
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or_else(|| k.to_string());
-                                                            app_state.context_buffer.push(format!(
-                                                                "  {}: {:.4}",
-                                                                name, e.float_properties[&k]
-                                                            ));
+                                                        if !e.float_properties.is_empty() {
+                                                            lines.push(
+                                                                "-- Float Properties --"
+                                                                    .to_string(),
+                                                            );
+                                                            let mut sorted_keys: Vec<_> =
+                                                                e.float_properties.keys().collect();
+                                                            sorted_keys.sort();
+                                                            for &k in sorted_keys {
+                                                                let name =
+                                                                    PropertyFloat::from_repr(k)
+                                                                        .map(|p| p.to_string())
+                                                                        .unwrap_or_else(|| {
+                                                                            k.to_string()
+                                                                        });
+                                                                lines.push(format!(
+                                                                    "  {}: {:.4}",
+                                                                    name, e.float_properties[&k]
+                                                                ));
+                                                            }
                                                         }
-                                                    }
-                                                    if !e.string_properties.is_empty() {
-                                                        app_state.context_buffer.push(
-                                                            "-- String Properties --".to_string(),
-                                                        );
-                                                        let mut sorted_keys: Vec<_> =
-                                                            e.string_properties.keys().collect();
-                                                        sorted_keys.sort();
-                                                        for &k in sorted_keys {
-                                                            let name = PropertyString::from_repr(k)
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or_else(|| k.to_string());
-                                                            app_state.context_buffer.push(format!(
-                                                                "  {}: {}",
-                                                                name, e.string_properties[&k]
-                                                            ));
+                                                        if !e.string_properties.is_empty() {
+                                                            lines.push(
+                                                                "-- String Properties --"
+                                                                    .to_string(),
+                                                            );
+                                                            let mut sorted_keys: Vec<_> = e
+                                                                .string_properties
+                                                                .keys()
+                                                                .collect();
+                                                            sorted_keys.sort();
+                                                            for &k in sorted_keys {
+                                                                let name =
+                                                                    PropertyString::from_repr(k)
+                                                                        .map(|p| p.to_string())
+                                                                        .unwrap_or_else(|| {
+                                                                            k.to_string()
+                                                                        });
+                                                                lines.push(format!(
+                                                                    "  {}: {}",
+                                                                    name, e.string_properties[&k]
+                                                                ));
+                                                            }
                                                         }
-                                                    }
-                                                    if !e.did_properties.is_empty() {
-                                                        app_state.context_buffer.push(
-                                                            "-- DataID Properties --".to_string(),
-                                                        );
-                                                        let mut sorted_keys: Vec<_> =
-                                                            e.did_properties.keys().collect();
-                                                        sorted_keys.sort();
-                                                        for &k in sorted_keys {
-                                                            let name = PropertyDataId::from_repr(k)
-                                                                .map(|p| p.to_string())
-                                                                .unwrap_or_else(|| k.to_string());
-                                                            app_state.context_buffer.push(format!(
-                                                                "  {}: {:08X}",
-                                                                name, e.did_properties[&k]
-                                                            ));
+                                                        if !e.did_properties.is_empty() {
+                                                            lines.push(
+                                                                "-- DataID Properties --"
+                                                                    .to_string(),
+                                                            );
+                                                            let mut sorted_keys: Vec<_> =
+                                                                e.did_properties.keys().collect();
+                                                            sorted_keys.sort();
+                                                            for &k in sorted_keys {
+                                                                let name =
+                                                                    PropertyDataId::from_repr(k)
+                                                                        .map(|p| p.to_string())
+                                                                        .unwrap_or_else(|| {
+                                                                            k.to_string()
+                                                                        });
+                                                                lines.push(format!(
+                                                                    "  {}: {:08X}",
+                                                                    name, e.did_properties[&k]
+                                                                ));
+                                                            }
                                                         }
-                                                    }
-                                                    if !e.iid_properties.is_empty() {
-                                                        app_state.context_buffer.push(
-                                                            "-- InstanceID Properties --"
-                                                                .to_string(),
-                                                        );
-                                                        let mut sorted_keys: Vec<_> =
-                                                            e.iid_properties.keys().collect();
-                                                        sorted_keys.sort();
-                                                        for &k in sorted_keys {
-                                                            let name =
-                                                                PropertyInstanceId::from_repr(k)
+                                                        if !e.iid_properties.is_empty() {
+                                                            lines.push(
+                                                                "-- InstanceID Properties --"
+                                                                    .to_string(),
+                                                            );
+                                                            let mut sorted_keys: Vec<_> =
+                                                                e.iid_properties.keys().collect();
+                                                            sorted_keys.sort();
+                                                            for &k in sorted_keys {
+                                                                let name =
+                                                                    PropertyInstanceId::from_repr(
+                                                                        k,
+                                                                    )
                                                                     .map(|p| p.to_string())
                                                                     .unwrap_or_else(|| {
                                                                         k.to_string()
                                                                     });
-                                                            app_state.context_buffer.push(format!(
-                                                                "  {}: {:08X}",
-                                                                name, e.iid_properties[&k]
-                                                            ));
+                                                                lines.push(format!(
+                                                                    "  {}: {:08X}",
+                                                                    name, e.iid_properties[&k]
+                                                                ));
+                                                            }
                                                         }
                                                     }
+                                                    app_state.context_buffer = lines;
                                                     app_state.context_scroll_offset = 0;
                                                 }
                                                 _ => {}
@@ -752,27 +751,7 @@ async fn main() -> Result<()> {
                                         app_state.context_scroll_offset.saturating_sub(1);
                                 }
                                 ui::FocusedPane::Nearby => {
-                                    let nearby_count = match app_state.nearby_tab {
-                                        ui::NearbyTab::Entities => app_state
-                                            .entities
-                                            .values()
-                                            .filter(|e| {
-                                                classification::is_targetable(e)
-                                                    && e.position.landblock_id != 0
-                                            })
-                                            .count(),
-                                        ui::NearbyTab::Inventory => app_state
-                                            .entities
-                                            .values()
-                                            .filter(|e| {
-                                                e.position.landblock_id == 0 && !e.name.is_empty()
-                                            })
-                                            .count(),
-                                        ui::NearbyTab::Effects => {
-                                            app_state.player_enchantments.len()
-                                        }
-                                        _ => 0,
-                                    };
+                                    let nearby_count = app_state.nearby_item_count();
                                     if nearby_count > 0
                                         && app_state.selected_nearby_index + 1 < nearby_count
                                     {
@@ -796,20 +775,11 @@ async fn main() -> Result<()> {
                                         app_state.scroll_offset = app_state
                                             .scroll_offset
                                             .saturating_add(ui::PAGE_SCROLL_STEP);
-                                        let max_scroll = app_state.messages.len().saturating_sub(1);
-                                        if app_state.scroll_offset > max_scroll {
-                                            app_state.scroll_offset = max_scroll;
-                                        }
                                     }
                                     ui::FocusedPane::Context => {
                                         app_state.context_scroll_offset = app_state
                                             .context_scroll_offset
                                             .saturating_add(ui::PAGE_SCROLL_STEP);
-                                        let max_scroll =
-                                            app_state.context_buffer.len().saturating_sub(1);
-                                        if app_state.context_scroll_offset > max_scroll {
-                                            app_state.context_scroll_offset = max_scroll;
-                                        }
                                     }
                                     ui::FocusedPane::Nearby => {
                                         app_state.selected_nearby_index = app_state
@@ -834,19 +804,7 @@ async fn main() -> Result<()> {
                                             .saturating_sub(ui::PAGE_SCROLL_STEP);
                                     }
                                     ui::FocusedPane::Nearby => {
-                                        let nearby_count = app_state
-                                            .entities
-                                            .values()
-                                            .filter(|e| {
-                                                if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                                    classification::is_targetable(e)
-                                                        && e.position.landblock_id != 0
-                                                } else {
-                                                    e.position.landblock_id == 0
-                                                        && !e.name.is_empty()
-                                                }
-                                            })
-                                            .count();
+                                        let nearby_count = app_state.nearby_item_count();
                                         app_state.selected_nearby_index = (app_state
                                             .selected_nearby_index
                                             + ui::PAGE_SCROLL_STEP)

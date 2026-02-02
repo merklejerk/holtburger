@@ -45,6 +45,12 @@ Never guess. Guessing is cringe. Use the ACE Server submodule as the source of t
   - Useful for checking the fixed-width size of structs.
   - **WARNING:** ACE Entity structs often map to Database storage, which may differ from the Wire format! Always cross-reference `GameEvent` code to see if fields like `Status` or timestamps are actually skipped during serialization.
 
+### The "Active Verification" Strategy
+Don't just read the C# code—run it. Static analysis (reading) assumes you understand the inheritance and extension methods perfectly. You probably don't.
+1. **Create a Test:** Add a temporary test in `ACE/Source/ACE.Server.Tests/`.
+2. **Serialize to Hex:** Instantiate the struct or message, populate it with known values, serialize it using ACE's own writers, and print the hex.
+3. **Compare & Conquer:** This gives you the "Gold Standard" bytes. If your Rust parser reads these bytes and produces a different result, your parser is wrong. If the "Gold Standard" bytes don't match `repro.hex`, then ACE handles that scenario differently than you think.
+
 ## 3. Advanced Diagnostic Techniques
 
 ### The "Drift Calculation"

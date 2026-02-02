@@ -347,6 +347,66 @@ async fn main() -> Result<()> {
                                             _ => {}
                                         }
 
+                                        if app_state.nearby_tab == ui::NearbyTab::Effects {
+                                            if let Some(enchant) = app_state
+                                                .player_enchantments
+                                                .get(app_state.selected_nearby_index)
+                                            {
+                                                match c {
+                                                    'd' | 'D' => {
+                                                        app_state.context_buffer.clear();
+                                                        app_state.context_buffer.push(format!(
+                                                            "DEBUG ENCHANTMENT: Spell #{}",
+                                                            enchant.spell_id
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Layer:          {}",
+                                                            enchant.layer
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Category:       {}",
+                                                            enchant.spell_category
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Power Level:    {}",
+                                                            enchant.power_level
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Duration:       {:.1}s",
+                                                            enchant.duration
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Stat Mod Type:  0x{:08X}",
+                                                            enchant.stat_mod_type
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Stat Mod Key:   {}",
+                                                            enchant.stat_mod_key
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Stat Mod Value: {:.2}",
+                                                            enchant.stat_mod_value
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Caster GUID:    {:08X}",
+                                                            enchant.caster_guid
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Degrade Limit:  {:.2}",
+                                                            enchant.degrade_limit
+                                                        ));
+                                                        app_state.context_buffer.push(format!(
+                                                            "Last Degraded:  {:.1}",
+                                                            enchant.last_time_degraded
+                                                        ));
+                                                        app_state.context_scroll_offset = 0;
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
+                                            continue;
+                                        }
+
                                         let mut nearby: Vec<_> = app_state
                                             .entities
                                             .values()
@@ -1025,6 +1085,16 @@ async fn main() -> Result<()> {
                         }
                         WorldEvent::EnchantmentsPurged => {
                             app_state.player_enchantments.clear();
+                        }
+                        WorldEvent::DerivedStatsUpdated {
+                            attributes,
+                            vitals,
+                            skills,
+                        } => {
+                            app_state.attributes = attributes;
+                            app_state.vitals = vitals;
+                            app_state.skills = skills;
+                            refresh_context_buffer(&mut app_state);
                         }
                         WorldEvent::ServerTimeUpdate(t) => {
                             app_state.server_time = Some((t, std::time::Instant::now()));

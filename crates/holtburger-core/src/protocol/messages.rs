@@ -198,7 +198,7 @@ pub mod opcodes {
     pub const VECTOR_UPDATE: u32 = 0xF74E;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Enchantment {
     pub spell_id: u16,
     pub layer: u16,
@@ -269,7 +269,7 @@ impl Enchantment {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct LayeredSpell {
     pub spell_id: u16,
     pub layer: u16,
@@ -417,6 +417,15 @@ pub enum GameMessage {
     },
     MagicPurgeBadEnchantments {
         target: u64,
+    },
+    MagicDispelEnchantment {
+        target: u64,
+        spell_id: u16,
+        layer: u16,
+    },
+    MagicDispelMultipleEnchantments {
+        target: u64,
+        spells: Vec<LayeredSpell>,
     },
     UpdateHealth {
         target: u32,
@@ -1118,6 +1127,38 @@ impl GameMessage {
 
                 if event_type == game_event_opcodes::MAGIC_PURGE_BAD_ENCHANTMENTS {
                     return GameMessage::MagicPurgeBadEnchantments { target: guid };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_DISPEL_ENCHANTMENT
+                    && data.len() >= 16 + 4
+                {
+                    let spell_id = LittleEndian::read_u16(&data[16..18]);
+                    let layer = LittleEndian::read_u16(&data[18..20]);
+                    return GameMessage::MagicDispelEnchantment {
+                        target: guid,
+                        spell_id,
+                        layer,
+                    };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_DISPEL_MULTIPLE_ENCHANTMENTS
+                    && data.len() >= 20
+                {
+                    let mut offset = 16;
+                    let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    offset += 4;
+                    let mut spells = Vec::with_capacity(count as usize);
+                    for _ in 0..count {
+                        if let Some(s) = LayeredSpell::read(data, &mut offset) {
+                            spells.push(s);
+                        } else {
+                            break;
+                        }
+                    }
+                    return GameMessage::MagicDispelMultipleEnchantments {
+                        target: guid,
+                        spells,
+                    };
                 }
 
                 GameMessage::GameEvent {
@@ -2250,6 +2291,26 @@ mod tests {
             assert_eq!(layer, 1);
         } else {
             panic!("Expected MagicRemoveEnchantment, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_magic_dispel_multiple_enchantments() {
+        // GameEventHeader: Target(4)=0x50000001, Seq(4)=0x0000002B, EventType(4)=0x02C8
+        // Payload: Count(4)=2, Spell1(2)=1, Layer1(2)=1, Spell2(2)=2, Layer2(2)=1
+        let hex = "B0F70000010000502B000000C8020000020000000100010002000100";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+
+        if let GameMessage::MagicDispelMultipleEnchantments { target, spells } = msg {
+            assert_eq!(target, 0x50000001);
+            assert_eq!(spells.len(), 2);
+            assert_eq!(spells[0].spell_id, 1);
+            assert_eq!(spells[0].layer, 1);
+            assert_eq!(spells[1].spell_id, 2);
+            assert_eq!(spells[1].layer, 1);
+        } else {
+            panic!("Expected MagicDispelMultipleEnchantments, got {:?}", msg);
         }
     }
 

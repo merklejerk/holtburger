@@ -188,84 +188,98 @@ Sent to sync object velocity and angular velocity.
 
 ### `0x02CD` PrivateUpdatePropertyInt (S2C)
 Updates an integer property on the player.
-- `uint32` `Sequence`.
+- **CRITICAL:** Private update messages use a **1-byte sequence number** (uint8).
+- `uint32` `Opcode`.
+- `uint8` `Sequence`.
 - `uint32` `PropertyID`.
 - `int32` `Value`.
 
 ### `0x02CF` PrivateUpdatePropertyInt64 (S2C)
-- `uint32` `Sequence`.
+- `uint8` `Sequence`.
 - `uint32` `PropertyID`.
 - `int64` `Value`.
 
 ### `0x02D1` PrivateUpdatePropertyBool (S2C)
-- `uint32` `Sequence`.
+- `uint8` `Sequence`.
 - `uint32` `PropertyID`.
-- `bool` `Value` (1 byte).
+- `uint32` `Value` (0 for false, 1 for true).
 
 ### `0x02D3` PrivateUpdatePropertyFloat (S2C)
-- `uint32` `Sequence`.
+- `uint8` `Sequence`.
 - `uint32` `PropertyID`.
 - `double` `Value` (8 bytes).
 
 ### `0x02D5` PrivateUpdatePropertyString (S2C)
-- `uint32` `Sequence`.
+- `uint8` `Sequence`.
 - `uint32` `PropertyID`.
 - `String16L` `Value`.
 
 ### `0x02D7` PrivateUpdatePropertyDID (S2C)
-- `uint32` `Sequence`.
+- `uint8` `Sequence`.
 - `uint32` `PropertyID`.
 - `uint32` `Value`.
 
 ### `0x02D9` PrivateUpdatePropertyIID (S2C)
-- `uint32` `Sequence`.
+- `uint8` `Sequence`.
 - `uint32` `PropertyID`.
 - `uint32` `Value`.
 
 ## 2. Real-time Stat Updates (S2C)
 
-While `0x0013 PlayerDescription` provides the initial state, stats can change during gameplay via specific update messages. These "Private" updates always include a sequence number for reliability.
+While `0x0013 PlayerDescription` provides the initial state, stats can change during gameplay via specific update messages. These "Private" updates always include a **1-byte sequence number** (uint8) for reliability.
 
 ### `0x02DD` PrivateUpdateSkill
 Updates a single skill. See [stats.md](stats.md) for SkillID mappings.
-- `uint32` `Sequence`.
+- `uint8` `Sequence`.
 - `uint32` `SkillID`.
 - `uint32` `Ranks`.
-- `uint32` `Start`.
+- `uint16` `AdjustPP` (Typically 1).
+- `uint32` `AdvancementClass` (Training level).
+- `uint32` `ExperienceSpent`.
+- `uint32` `InitLevel`.
 - `uint32` `Resistance`.
-- `uint32` `XP`.
+- `double` `LastUsedTime`.
 
 ### `0x02E3` PrivateUpdateAttribute
 Updates a single attribute.
-- `uint32` `Sequence`.
-- `uint32` `AttributeID`.
-- `uint32` `Ranks`.
-- `uint32` `Start`.
-- `uint32` `XP`.
-
-### `0x02E7` PrivateUpdateVital
-Updates a single vital.
-- `uint32` `Sequence`.
-- `uint32` `VitalID`.
-- `uint32` `Ranks`.
-- `uint32` `Start`.
-- `uint32` `XP`.
-- `uint32` `Current`.
-
-### `0x02E3` PrivateUpdateAttribute
-Updates a primary attribute. See [stats.md](stats.md) for AttributeID mappings.
+- `uint8` `Sequence`.
 - `uint32` `AttributeID`.
 - `uint32` `Ranks`.
 - `uint32` `StartingValue`.
 - `uint32` `ExperienceSpent`.
 
-### `0x02E7` PrivateUpdateVital
-Updates a secondary attribute (Health, Stamina, Mana). See [stats.md](stats.md) for VitalID mappings.
+### `0x02E7` PrivateUpdateVital (Maximum)
+Updates a single vital's maximum potential. Use `VitalID` mappings: Health=2, Stamina=4, Mana=6.
+- `uint8` `Sequence`.
+- `uint32` `VitalID`.
+- `uint32` `Ranks`.
+- `uint32` `StartingValue`.
+- `uint32` `ExperienceSpent`.
+
+### `0x02E9` PrivateUpdateVitalCurrent
+Updates the current value of a vital (e.g., during health regeneration).
+- `uint8` `Sequence`.
+- `uint32` `VitalID`.
+- `uint32` `CurrentValue`.
+- `uint32` `Sequence`.
 - `uint32` `VitalID`.
 - `uint32` `Ranks`.
 - `uint32` `StartingValue`.
 - `uint32` `ExperienceSpent`.
 - `uint32` `CurrentValue`.
+
+---
+
+## 3. Position and Physics (S2C)
+
+### `0xF748` UpdatePosition
+Sent frequently to sync object locations. Contains `PositionPack`.
+
+### `0xF74C` UpdateMotion
+Sent for object animations and movement state changes.
+
+### `0xF74E` VectorUpdate
+Sent to sync object velocity and angular velocity.
 
 ---
 

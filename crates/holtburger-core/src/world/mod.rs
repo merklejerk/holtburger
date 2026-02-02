@@ -45,6 +45,8 @@ pub enum WorldEvent {
 pub struct WorldState {
     pub entities: EntityManager,
     pub player_guid: u32,
+    pub player_attributes: std::collections::HashMap<stats::AttributeType, u32>,
+    pub player_vitals: std::collections::HashMap<stats::VitalType, stats::Vital>,
     pub dat: Option<Arc<DatDatabase>>,
 
     pub scene: SpatialScene,
@@ -55,6 +57,8 @@ impl WorldState {
         Self {
             entities: EntityManager::new(),
             player_guid: 0,
+            player_attributes: std::collections::HashMap::new(),
+            player_vitals: std::collections::HashMap::new(),
             dat,
             scene: SpatialScene::new(),
         }
@@ -165,24 +169,56 @@ impl WorldState {
                 let mut attr_objs = Vec::new();
                 let mut vital_objs = Vec::new();
 
-                for (at_type, ranks, start, _xp, current) in attributes {
-                    // IDs 1-6 are Attributes, 7-9 are Vitals (mapping to 1-3 in VitalType)
+                // Sort attributes first so we have them for vitals
+                let mut sorted_attrs = attributes;
+                sorted_attrs.sort_by_key(|a| a.0);
+
+                for (at_type, ranks, start, _xp, current) in sorted_attrs {
+                    // IDs 1-6 are Attributes, 101-103 are Vitals (mapping to 2, 4, 6 in VitalType)
                     if at_type <= 6 {
                         if let Some(attr_type) = stats::AttributeType::from_repr(at_type) {
-                            attr_objs.push(stats::Attribute {
-                                attr_type,
-                                base: ranks + start,
-                            });
+                            let base = ranks + start;
+                            self.player_attributes.insert(attr_type, base);
+                            attr_objs.push(stats::Attribute { attr_type, base });
                         }
-                    } else if at_type <= 9 {
-                        #[allow(clippy::collapsible_if)]
-                        if let Some(vital_type) = stats::VitalType::from_repr(at_type - 6) {
-                            vital_objs.push(stats::Vital {
-                                vital_type,
-                                base: ranks + start,
-                                current,
-                            });
-                        }
+                    } else if at_type >= 101 && at_type <= 103 {
+                        let vital_type = match at_type {
+                            101 => stats::VitalType::Health,
+                            102 => stats::VitalType::Stamina,
+                            103 => stats::VitalType::Mana,
+                            _ => continue,
+                        };
+
+                        let bonus = match vital_type {
+                            stats::VitalType::Health => {
+                                self.player_attributes
+                                    .get(&stats::AttributeType::EnduranceAttr)
+                                    .cloned()
+                                    .unwrap_or(0)
+                                    / 2
+                            }
+                            stats::VitalType::Stamina => self
+                                .player_attributes
+                                .get(&stats::AttributeType::EnduranceAttr)
+                                .cloned()
+                                .unwrap_or(0),
+                            stats::VitalType::Mana => self
+                                .player_attributes
+                                .get(&stats::AttributeType::SelfAttr)
+                                .cloned()
+                                .unwrap_or(0),
+                        };
+
+                        let base = ranks + start + bonus;
+                        let final_base = if base == 0 { current } else { base };
+
+                        let vital = stats::Vital {
+                            vital_type,
+                            base: final_base,
+                            current,
+                        };
+                        self.player_vitals.insert(vital_type, vital.clone());
+                        vital_objs.push(vital);
                     }
                 }
 
@@ -223,9 +259,12 @@ impl WorldState {
                     Some(a) => a,
                     None => return events,
                 };
+                let base = start + ranks;
+                self.player_attributes.insert(attr_type, base);
+
                 events.push(WorldEvent::AttributeUpdated(stats::Attribute {
                     attr_type,
-                    base: start + ranks,
+                    base,
                 }));
             }
             GameMessage::UpdateSkill {
@@ -259,16 +298,80 @@ impl WorldState {
                 xp: _,
                 current,
             } => {
+                log::debug!("UpdateVital: vital={}, ranks={}, start={}, current={}", vital, ranks, start, current);
                 let vital_type = match stats::VitalType::from_repr(vital) {
                     Some(v) => v,
-                    None => return events,
+                    None => {
+                        log::warn!("Unknown vital ID: {}", vital);
+                        return events;
+                    }
                 };
 
-                events.push(WorldEvent::VitalUpdated(stats::Vital {
+                let bonus = match vital_type {
+                    stats::VitalType::Health => {
+                        self.player_attributes
+                            .get(&stats::AttributeType::EnduranceAttr)
+                            .cloned()
+                            .unwrap_or(0)
+                            / 2
+                    }
+                    stats::VitalType::Stamina => self
+                        .player_attributes
+                        .get(&stats::AttributeType::EnduranceAttr)
+                        .cloned()
+                        .unwrap_or(0),
+                    stats::VitalType::Mana => self
+                        .player_attributes
+                        .get(&stats::AttributeType::SelfAttr)
+                        .cloned()
+                        .unwrap_or(0),
+                };
+
+                let base = start + ranks + bonus;
+                let final_base = if base == 0 { current } else { base };
+
+                let vital_obj = stats::Vital {
                     vital_type,
-                    base: start + ranks,
+                    base: final_base,
                     current,
-                }));
+                };
+                self.player_vitals.insert(vital_type, vital_obj.clone());
+
+                events.push(WorldEvent::VitalUpdated(vital_obj));
+            }
+            GameMessage::UpdateVitalCurrent { vital, current } => {
+                log::debug!("UpdateVitalCurrent: vital={}, current={}", vital, current);
+                let vital_type = match stats::VitalType::from_repr(vital) {
+                    Some(v) => v,
+                    None => {
+                        log::warn!("Unknown vital current ID: {}", vital);
+                        return events;
+                    }
+                };
+
+                if let Some(vital_obj) = self.player_vitals.get_mut(&vital_type) {
+                    log::debug!("Updating vital {} from {} to {}", vital_type, vital_obj.current, current);
+                    vital_obj.current = current;
+                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                } else {
+                    log::warn!("Received UpdateVitalCurrent for {} but vital not in cache", vital_type);
+                }
+            }
+            GameMessage::UpdateHealth { target, health } => {
+                let target_guid = if target == 0 { self.player_guid } else { target };
+                
+                if let Some(_entity) = self.entities.get_mut(target_guid) {
+                    // Update health property if we want to track it on entities
+                }
+
+                if target_guid == self.player_guid && target_guid != 0 {
+                    if let Some(vital_obj) = self.player_vitals.get_mut(&stats::VitalType::Health) {
+                        let new_current = (health * vital_obj.base as f32) as u32;
+                        log::debug!("UpdateHealth (self): percent={}, new_current={}", health, new_current);
+                        vital_obj.current = new_current;
+                        events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                    }
+                }
             }
             GameMessage::SetState { guid, state } => {
                 if let Some(entity) = self.entities.get_mut(guid) {

@@ -17,13 +17,27 @@ Attributes are the foundational stats of a character. In `0x0013 PlayerDescripti
 ---
 
 ## 2. Vitals
-Vitals are secondary attributes that have "current" and "maximum" values. In `0x02E7 PrivateUpdateVital`, they use IDs 1-3. However, in the composite `PlayerDescription` attribute vector, they are often mapped to IDs 7-9.
+Vitals are secondary attributes that have "current" and "maximum" values. 
 
-| ID (Standard) | ID (Mapped) | Name    |
-| ------------- | ----------- | ------- |
-| 1             | 7           | Health  |
-| 2             | 8           | Stamina |
-| 3             | 9           | Mana    |
+### Internal Mapping (PlayerDescription)
+In the initial `0x0013 PlayerDescription` message, vitals are sent in a specific order and are often mapped internally (e.g., adding +100 to the index) to distinguish them from primary attributes during processing.
+
+| Index | Name    | Internal ID | World ID | Base Attribute | Formula |
+| ----- | ------- | ----------- | -------- | -------------- | ------- |
+| 0     | Health  | 101         | 2        | Endurance      | `Endurance / 2` |
+| 1     | Stamina | 102         | 4        | Endurance      | `Endurance` |
+| 2     | Mana    | 103         | 6        | Self           | `Self` |
+
+### Real-time Updates
+In `0x02E7 PrivateUpdateVital` and `0x02E9 PrivateUpdateVitalCurrent`, vitals are identified by their **World ID** (2, 4, 6).
+
+| ID  | Name    | Description |
+| --- | ------- | ----------- |
+| 2   | Health  | Current and maximum health. |
+| 4   | Stamina | Current and maximum stamina. |
+| 6   | Mana    | Current and maximum mana. |
+
+*Note: IDs 1, 3, and 5 correspond to `MaxHealth`, `MaxStamina`, and `MaxMana` base values, but the "Current" updates use the even-numbered IDs.*
 
 ---
 

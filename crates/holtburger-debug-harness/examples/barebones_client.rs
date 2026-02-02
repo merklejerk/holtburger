@@ -6,6 +6,6 @@ async fn main() -> Result<()> {
     println!("Use this area to test specific packet flows or protocol handshakes.");
 
     // TODO: Implement a targeted test here
-    
+
     Ok(())
 }

@@ -447,15 +447,9 @@ impl Client {
             }
             GameMessage::UpdatePropertyInt {
                 guid: _,
-                property,
-                value,
-            } => {
-                self.send_message_event(
-                    MessageKind::Info,
-                    &format!("[Stats] #{} = {}", property, value),
-                );
-                Ok(())
-            }
+                property: _,
+                value: _,
+            } => Ok(()),
             GameMessage::GameEvent {
                 event_type,
                 guid,

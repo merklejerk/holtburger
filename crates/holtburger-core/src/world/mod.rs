@@ -108,7 +108,10 @@ impl WorldState {
                     events.push(WorldEvent::EntityDespawned(guid));
                 }
             }
-            GameMessage::ParentEvent { child_guid, parent_guid } => {
+            GameMessage::ParentEvent {
+                child_guid,
+                parent_guid,
+            } => {
                 if let Some(entity) = self.entities.get_mut(child_guid) {
                     entity.physics_parent_id = Some(parent_guid);
                 }
@@ -181,7 +184,7 @@ impl WorldState {
                             self.player_attributes.insert(attr_type, base);
                             attr_objs.push(stats::Attribute { attr_type, base });
                         }
-                    } else if at_type >= 101 && at_type <= 103 {
+                    } else if (101..=103).contains(&at_type) {
                         let vital_type = match at_type {
                             101 => stats::VitalType::Health,
                             102 => stats::VitalType::Stamina,
@@ -298,7 +301,13 @@ impl WorldState {
                 xp: _,
                 current,
             } => {
-                log::debug!("UpdateVital: vital={}, ranks={}, start={}, current={}", vital, ranks, start, current);
+                log::debug!(
+                    "UpdateVital: vital={}, ranks={}, start={}, current={}",
+                    vital,
+                    ranks,
+                    start,
+                    current
+                );
                 let vital_type = match stats::VitalType::from_repr(vital) {
                     Some(v) => v,
                     None => {
@@ -350,32 +359,50 @@ impl WorldState {
                 };
 
                 if let Some(vital_obj) = self.player_vitals.get_mut(&vital_type) {
-                    log::debug!("Updating vital {} from {} to {}", vital_type, vital_obj.current, current);
+                    log::debug!(
+                        "Updating vital {} from {} to {}",
+                        vital_type,
+                        vital_obj.current,
+                        current
+                    );
                     vital_obj.current = current;
                     events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
                 } else {
-                    log::warn!("Received UpdateVitalCurrent for {} but vital not in cache", vital_type);
+                    log::warn!(
+                        "Received UpdateVitalCurrent for {} but vital not in cache",
+                        vital_type
+                    );
                 }
             }
             GameMessage::UpdateHealth { target, health } => {
-                let target_guid = if target == 0 { self.player_guid } else { target };
-                
+                let target_guid = if target == 0 {
+                    self.player_guid
+                } else {
+                    target
+                };
+
                 if let Some(_entity) = self.entities.get_mut(target_guid) {
                     // Update health property if we want to track it on entities
                 }
 
-                if target_guid == self.player_guid && target_guid != 0 {
-                    if let Some(vital_obj) = self.player_vitals.get_mut(&stats::VitalType::Health) {
-                        let new_current = (health * vital_obj.base as f32) as u32;
-                        log::debug!("UpdateHealth (self): percent={}, new_current={}", health, new_current);
-                        vital_obj.current = new_current;
-                        events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
-                    }
+                if target_guid == self.player_guid
+                    && target_guid != 0
+                    && let Some(vital_obj) = self.player_vitals.get_mut(&stats::VitalType::Health)
+                {
+                    let new_current = (health * vital_obj.base as f32) as u32;
+                    log::debug!(
+                        "UpdateHealth (self): percent={}, new_current={}",
+                        health,
+                        new_current
+                    );
+                    vital_obj.current = new_current;
+                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
                 }
             }
             GameMessage::SetState { guid, state } => {
                 if let Some(entity) = self.entities.get_mut(guid) {
-                    entity.physics_state = crate::world::properties::PhysicsState::from_bits_retain(state);
+                    entity.physics_state =
+                        crate::world::properties::PhysicsState::from_bits_retain(state);
                 }
             }
             GameMessage::UpdatePropertyInt {

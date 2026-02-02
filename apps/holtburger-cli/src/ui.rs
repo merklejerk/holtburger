@@ -1,13 +1,123 @@
 use crate::classification::{self, EntityClass};
 use holtburger_core::world::properties::{ObjectDescriptionFlag, PropertyInt, RadarColor};
+use holtburger_core::world::stats::VitalType;
 use holtburger_core::{ChatMessage, ClientState, MessageKind};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
+
+// Layout constants
+pub const STATUS_BAR_HEIGHT: u16 = 3;
+pub const INPUT_AREA_HEIGHT: u16 = 3;
+pub const MIN_MAIN_AREA_HEIGHT: u16 = 10;
+pub const WIDTH_BREAKPOINT: u16 = 150;
+
+pub const LAYOUT_WIDE_NEARBY_PCT: u16 = 25;
+pub const LAYOUT_WIDE_CHAT_PCT: u16 = 50;
+pub const LAYOUT_WIDE_CONTEXT_PCT: u16 = 25;
+
+pub const LAYOUT_NARROW_TOP_ROW_PCT: u16 = 50;
+pub const LAYOUT_NARROW_BOTTOM_ROW_PCT: u16 = 50;
+pub const LAYOUT_NARROW_NEARBY_PCT: u16 = 50;
+pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
+
+// Chat constants
+pub const CHAT_HISTORY_WINDOW_SIZE: usize = 200;
+
+// Interaction constants
+pub const SCROLL_STEP: usize = 3;
+pub const PAGE_SCROLL_STEP: usize = 10;
+
+pub fn get_next_pane(current: FocusedPane, width: u16) -> FocusedPane {
+    if width < WIDTH_BREAKPOINT {
+        // Narrow: Nearby -> Context -> Chat
+        match current {
+            FocusedPane::Nearby => FocusedPane::Context,
+            FocusedPane::Context => FocusedPane::Chat,
+            FocusedPane::Chat => FocusedPane::Nearby,
+            _ => FocusedPane::Nearby,
+        }
+    } else {
+        // Wide: Nearby -> Chat -> Context
+        match current {
+            FocusedPane::Nearby => FocusedPane::Chat,
+            FocusedPane::Chat => FocusedPane::Context,
+            FocusedPane::Context => FocusedPane::Nearby,
+            _ => FocusedPane::Nearby,
+        }
+    }
+}
+
+pub fn get_prev_pane(current: FocusedPane, width: u16) -> FocusedPane {
+    if width < WIDTH_BREAKPOINT {
+        // Narrow reverse: Nearby -> Chat -> Context
+        match current {
+            FocusedPane::Nearby => FocusedPane::Chat,
+            FocusedPane::Chat => FocusedPane::Context,
+            FocusedPane::Context => FocusedPane::Nearby,
+            _ => FocusedPane::Nearby,
+        }
+    } else {
+        // Wide reverse: Nearby -> Context -> Chat
+        match current {
+            FocusedPane::Nearby => FocusedPane::Context,
+            FocusedPane::Context => FocusedPane::Chat,
+            FocusedPane::Chat => FocusedPane::Nearby,
+            _ => FocusedPane::Nearby,
+        }
+    }
+}
+
+pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(STATUS_BAR_HEIGHT),
+            Constraint::Min(MIN_MAIN_AREA_HEIGHT),
+            Constraint::Length(INPUT_AREA_HEIGHT),
+        ])
+        .split(area);
+
+    let main_chunks = if area.width < WIDTH_BREAKPOINT {
+        let vertical_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(LAYOUT_NARROW_TOP_ROW_PCT),
+                Constraint::Percentage(LAYOUT_NARROW_BOTTOM_ROW_PCT),
+            ])
+            .split(chunks[1]);
+
+        let top_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(LAYOUT_NARROW_NEARBY_PCT),
+                Constraint::Percentage(LAYOUT_NARROW_CONTEXT_PCT),
+            ])
+            .split(vertical_chunks[0]);
+
+        vec![top_chunks[0], vertical_chunks[1], top_chunks[1]]
+    } else {
+        let horizontal_chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(LAYOUT_WIDE_NEARBY_PCT),
+                Constraint::Percentage(LAYOUT_WIDE_CHAT_PCT),
+                Constraint::Percentage(LAYOUT_WIDE_CONTEXT_PCT),
+            ])
+            .split(chunks[1]);
+        vec![
+            horizontal_chunks[0],
+            horizontal_chunks[1],
+            horizontal_chunks[2],
+        ]
+    };
+
+    (chunks.to_vec(), main_chunks)
+}
 
 #[derive(PartialEq, Debug)]
 pub enum UIState {
@@ -61,29 +171,13 @@ pub struct AppState {
 }
 
 pub fn ui(f: &mut Frame, state: &mut AppState) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Status bar
-            Constraint::Min(10),   // Main area
-            Constraint::Length(3), // Input area
-        ])
-        .split(f.size());
-
-    let char_info = if let Some(name) = &state.character_name {
-        if let Some(guid) = state.player_guid {
-            format!("{} [{:08X}]", name, guid)
-        } else {
-            name.clone()
-        }
-    } else {
-        "Selecting Character...".to_string()
-    };
+    let (chunks, main_chunks_vec) = get_layout(f.size());
+    let chunks = &chunks;
 
     let pos_info = if let Some(pos) = &state.player_pos {
-        pos.to_world_coords()
+        pos.to_world_coords().to_string_with_precision(2)
     } else {
-        "No Pos".to_string()
+        "0.00N, 0.00E".to_string()
     };
 
     let mut retry_info = String::new();
@@ -92,35 +186,83 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         let secs = next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
-        retry_info.push_str(&format!("[Logon Retry {}/{} ({}s)] ", current, max, secs));
+        retry_info.push_str(&format!("[Logon:{}/{} {}s] ", current, max, secs));
     }
     if let Some((current, max, next_time)) = state.enter_retry {
         let secs = next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
-        retry_info.push_str(&format!("[Enter Retry {}/{} ({}s)] ", current, max, secs));
+        retry_info.push_str(&format!("[Enter:{}/{} {}s] ", current, max, secs));
     }
 
-    let status_line = format!(
-        " [Account: {}] [Char: {}] [Pos: {}] [State: {:?}] {}",
-        state.account_name, char_info, pos_info, state.core_state, retry_info
+    let status_emoji = match state.core_state {
+        ClientState::Connected => "🔌",
+        ClientState::CharacterSelection(_) => "👥",
+        ClientState::EnteringWorld => "🚪",
+        ClientState::InWorld => "🌍",
+    };
+
+    let current_char = state.character_name.as_deref().unwrap_or("Selecting...");
+    let info_line = format!(
+        "{}:{} <{}> {} {}",
+        state.account_name, current_char, pos_info, status_emoji, retry_info
     );
 
-    let status_block = Block::default().borders(Borders::ALL).title("Status");
-    let status_para = Paragraph::new(status_line).block(status_block);
-    f.render_widget(status_para, chunks[0]);
+    let status_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[0]);
+
+    // Render Vitals (Left Half)
+    let health = state
+        .vitals
+        .iter()
+        .find(|v| v.vital_type == VitalType::Health);
+    let stamina = state
+        .vitals
+        .iter()
+        .find(|v| v.vital_type == VitalType::Stamina);
+    let mana = state
+        .vitals
+        .iter()
+        .find(|v| v.vital_type == VitalType::Mana);
+
+    let health_str = if let Some(h) = health {
+        format!("H {}/{}", h.current, h.base)
+    } else {
+        "H --/--".to_string()
+    };
+    let stamina_str = if let Some(s) = stamina {
+        format!("S {}/{}", s.current, s.base)
+    } else {
+        "S --/--".to_string()
+    };
+    let mana_str = if let Some(m) = mana {
+        format!("M {}/{}", m.current, m.base)
+    } else {
+        "M --/--".to_string()
+    };
+
+    let vitals_para = Paragraph::new(Line::from(vec![
+        Span::styled(health_str, Style::default().fg(Color::Red)),
+        Span::raw("  "),
+        Span::styled(stamina_str, Style::default().fg(Color::Yellow)),
+        Span::raw("  "),
+        Span::styled(mana_str, Style::default().fg(Color::Blue)),
+    ]))
+    .block(Block::default().borders(Borders::ALL).title("Vitals"));
+    f.render_widget(vitals_para, status_chunks[0]);
+
+    // Render Info (Right Half)
+    let info_para = Paragraph::new(info_line)
+        .block(Block::default().borders(Borders::ALL).title("Status"))
+        .alignment(ratatui::layout::Alignment::Right);
+    f.render_widget(info_para, status_chunks[1]);
 
     // 2. Main Area
     match state.state {
         UIState::Chat => {
-            let main_chunks = Layout::default()
-                .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(25), // Nearby Entities
-                    Constraint::Percentage(50), // Chat
-                    Constraint::Percentage(25), // Context
-                ])
-                .split(chunks[1]);
+            let main_chunks = &main_chunks_vec;
 
             // --- Nearby Entities / Inventory Pane ---
             let nearby_filtered: Vec<_> = state
@@ -348,7 +490,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             let height = main_chunks[1].height.saturating_sub(2) as usize;
 
             // Use a sliding window of recent messages for wrapping performance
-            let window_size = 200;
+            let window_size = CHAT_HISTORY_WINDOW_SIZE;
             let m_len = state.messages.len();
             let window_start = m_len.saturating_sub(window_size);
 

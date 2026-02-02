@@ -192,6 +192,7 @@ pub mod opcodes {
     pub const PRIVATE_UPDATE_SKILL: u32 = 0x02DD;
     pub const PRIVATE_UPDATE_ATTRIBUTE: u32 = 0x02E3;
     pub const PRIVATE_UPDATE_VITAL: u32 = 0x02E7;
+    pub const PRIVATE_UPDATE_VITAL_CURRENT: u32 = 0x02E9;
     pub const UPDATE_MOTION: u32 = 0xF74C;
     pub const UPDATE_POSITION: u32 = 0xF748;
     pub const VECTOR_UPDATE: u32 = 0xF74E;
@@ -301,6 +302,14 @@ pub enum GameMessage {
         xp: u32,
         current: u32,
     },
+    UpdateVitalCurrent {
+        vital: u32,
+        current: u32,
+    },
+    UpdateHealth {
+        target: u32,
+        health: f32,
+    },
     UpdateMotion {
         guid: u32,
         data: Vec<u8>,
@@ -374,9 +383,10 @@ impl GameMessage {
         }
         let opcode = LittleEndian::read_u32(&data[0..4]);
         log::info!(
-            "Unpacking GameMessage opcode: 0x{:04X}, len: {}",
+            "Unpacking GameMessage opcode: 0x{:04X}, len: {}, bytes: {:02X?}",
             opcode,
-            data.len()
+            data.len(),
+            &data[..data.len().min(32)]
         );
 
         match opcode {
@@ -548,9 +558,10 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_INT => {
-                if data.len() >= 16 {
-                    let property = LittleEndian::read_u32(&data[8..12]);
-                    let value = LittleEndian::read_i32(&data[12..16]);
+                if data.len() >= 13 {
+                    // Sequence at data[4] (1 byte)
+                    let property = LittleEndian::read_u32(&data[5..9]);
+                    let value = LittleEndian::read_i32(&data[9..13]);
                     GameMessage::UpdatePropertyInt {
                         guid: 0,
                         property,
@@ -581,9 +592,10 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_INT64 => {
-                if data.len() >= 20 {
-                    let property = LittleEndian::read_u32(&data[8..12]);
-                    let value = LittleEndian::read_i64(&data[12..20]);
+                if data.len() >= 17 {
+                    // Sequence at data[4]
+                    let property = LittleEndian::read_u32(&data[5..9]);
+                    let value = LittleEndian::read_i64(&data[9..17]);
                     GameMessage::UpdatePropertyInt64 {
                         guid: 0,
                         property,
@@ -615,8 +627,9 @@ impl GameMessage {
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_BOOL => {
                 if data.len() >= 13 {
-                    let property = LittleEndian::read_u32(&data[8..12]);
-                    let value = data[12] != 0;
+                    // Sequence at data[4]
+                    let property = LittleEndian::read_u32(&data[5..9]);
+                    let value = LittleEndian::read_u32(&data[9..13]) != 0;
                     GameMessage::UpdatePropertyBool {
                         guid: 0,
                         property,
@@ -630,10 +643,10 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_BOOL => {
-                if data.len() >= 13 {
+                if data.len() >= 16 {
                     let guid = LittleEndian::read_u32(&data[4..8]);
                     let property = LittleEndian::read_u32(&data[8..12]);
-                    let value = data[12] != 0;
+                    let value = LittleEndian::read_u32(&data[12..16]) != 0;
                     GameMessage::UpdatePropertyBool {
                         guid,
                         property,
@@ -647,9 +660,10 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_FLOAT => {
-                if data.len() >= 20 {
-                    let property = LittleEndian::read_u32(&data[8..12]);
-                    let value = LittleEndian::read_f64(&data[12..20]);
+                if data.len() >= 17 {
+                    // Sequence at data[4]
+                    let property = LittleEndian::read_u32(&data[5..9]);
+                    let value = LittleEndian::read_f64(&data[9..17]);
                     GameMessage::UpdatePropertyFloat {
                         guid: 0,
                         property,
@@ -680,7 +694,7 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_STRING => {
-                let mut offset = 8;
+                let mut offset = 5; // Skip Opcode(4) + Seq(1)
                 let property = LittleEndian::read_u32(&data[offset..offset + 4]);
                 offset += 4;
                 let value = read_string16(data, &mut offset);
@@ -691,7 +705,7 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_STRING => {
-                let mut offset = 4;
+                let mut offset = 4; // Opcode only
                 let guid = LittleEndian::read_u32(&data[offset..offset + 4]);
                 offset += 4;
                 let property = LittleEndian::read_u32(&data[offset..offset + 4]);
@@ -704,9 +718,9 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_DID => {
-                if data.len() >= 16 {
-                    let property = LittleEndian::read_u32(&data[8..12]);
-                    let value = LittleEndian::read_u32(&data[12..16]);
+                if data.len() >= 13 {
+                    let property = LittleEndian::read_u32(&data[5..9]);
+                    let value = LittleEndian::read_u32(&data[9..13]);
                     GameMessage::UpdatePropertyDataId {
                         guid: 0,
                         property,
@@ -737,9 +751,9 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_PROPERTY_IID => {
-                if data.len() >= 16 {
-                    let property = LittleEndian::read_u32(&data[8..12]);
-                    let value = LittleEndian::read_u32(&data[12..16]);
+                if data.len() >= 13 {
+                    let property = LittleEndian::read_u32(&data[5..9]);
+                    let value = LittleEndian::read_u32(&data[9..13]);
                     GameMessage::UpdatePropertyInstanceId {
                         guid: 0,
                         property,
@@ -770,12 +784,14 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_SKILL => {
-                if data.len() >= 28 {
-                    let skill = LittleEndian::read_u32(&data[8..12]);
-                    let ranks = LittleEndian::read_u32(&data[12..16]);
-                    let status = LittleEndian::read_u32(&data[16..20]);
-                    let xp = LittleEndian::read_u32(&data[20..24]);
-                    let init = LittleEndian::read_u32(&data[24..28]);
+                if data.len() >= 35 {
+                    let skill = LittleEndian::read_u32(&data[5..9]);
+                    let ranks = LittleEndian::read_u32(&data[9..13]);
+                    // offset + 13: adjustPP (ushort)
+                    let status = LittleEndian::read_u32(&data[15..19]);
+                    let xp = LittleEndian::read_u32(&data[19..23]);
+                    let init = LittleEndian::read_u32(&data[23..27]);
+                    // rest is resistance (4) and last_used (8)
                     GameMessage::UpdateSkill {
                         skill,
                         ranks,
@@ -791,11 +807,11 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_ATTRIBUTE => {
-                if data.len() >= 24 {
-                    let attribute = LittleEndian::read_u32(&data[8..12]);
-                    let ranks = LittleEndian::read_u32(&data[12..16]);
-                    let start = LittleEndian::read_u32(&data[16..20]);
-                    let xp = LittleEndian::read_u32(&data[20..24]);
+                if data.len() >= 21 {
+                    let attribute = LittleEndian::read_u32(&data[5..9]);
+                    let ranks = LittleEndian::read_u32(&data[9..13]);
+                    let start = LittleEndian::read_u32(&data[13..17]);
+                    let xp = LittleEndian::read_u32(&data[17..21]);
                     GameMessage::UpdateAttribute {
                         attribute,
                         ranks,
@@ -810,12 +826,14 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_VITAL => {
-                if data.len() >= 28 {
-                    let vital = LittleEndian::read_u32(&data[8..12]);
-                    let ranks = LittleEndian::read_u32(&data[12..16]);
-                    let start = LittleEndian::read_u32(&data[16..20]);
-                    let xp = LittleEndian::read_u32(&data[20..24]);
-                    let current = LittleEndian::read_u32(&data[24..28]);
+                log::debug!("PRIVATE_UPDATE_VITAL payload (first 25 bytes): {:02X?}", &data[..std::cmp::min(data.len(), 25)]);
+                if data.len() >= 25 {
+                    let vital = LittleEndian::read_u32(&data[5..9]);
+                    let ranks = LittleEndian::read_u32(&data[9..13]);
+                    let start = LittleEndian::read_u32(&data[13..17]);
+                    let xp = LittleEndian::read_u32(&data[17..21]);
+                    let current = LittleEndian::read_u32(&data[21..25]);
+                    log::info!("UpdateVital: id={}, ranks={}, start={}, xp={}, current={}", vital, ranks, start, xp, current);
                     GameMessage::UpdateVital {
                         vital,
                         ranks,
@@ -823,6 +841,20 @@ impl GameMessage {
                         xp,
                         current,
                     }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data[4..].to_vec(),
+                    }
+                }
+            }
+            opcodes::PRIVATE_UPDATE_VITAL_CURRENT => {
+                log::debug!("PRIVATE_UPDATE_VITAL_CURRENT payload: {:02X?}", &data);
+                if data.len() >= 13 {
+                    let vital = LittleEndian::read_u32(&data[5..9]);
+                    let current = LittleEndian::read_u32(&data[9..13]);
+                    log::info!("UpdateVitalCurrent: id={}, current={}", vital, current);
+                    GameMessage::UpdateVitalCurrent { vital, current }
                 } else {
                     GameMessage::Unknown {
                         opcode,
@@ -887,6 +919,17 @@ impl GameMessage {
                     }
                 }
 
+                if event_type == game_event_opcodes::UPDATE_HEALTH {
+                    if data.len() >= 24 {
+                        let target = LittleEndian::read_u32(&data[16..20]);
+                        let health = LittleEndian::read_f32(&data[20..24]);
+                        return GameMessage::UpdateHealth {
+                            target,
+                            health,
+                        };
+                    }
+                }
+
                 GameMessage::GameEvent {
                     guid,
                     sequence,
@@ -940,10 +983,13 @@ impl GameMessage {
                     max_sessions: 1000,
                 }
             }
-            _ => GameMessage::Unknown {
-                opcode,
-                data: data[4..].to_vec(),
-            },
+            _ => {
+                log::warn!("Unhandled GameMessage opcode: 0x{:08X}", opcode);
+                GameMessage::Unknown {
+                    opcode,
+                    data: data[4..].to_vec(),
+                }
+            }
         }
     }
 
@@ -983,6 +1029,7 @@ pub mod action_opcodes {
 
 pub mod game_event_opcodes {
     pub const PLAYER_DESCRIPTION: u32 = 0x0013;
+    pub const UPDATE_HEALTH: u32 = 0x01C0;
     pub const FRIENDS_LIST_UPDATE: u32 = 0x0021;
     pub const CHARACTER_TITLE: u32 = 0x0029;
     pub const CHANNEL_BROADCAST: u32 = 0x0147;
@@ -1250,7 +1297,8 @@ fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
                 let xp = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
                 let current = LittleEndian::read_u32(&data[offset + 12..offset + 16]);
                 // For vitals, base is effectively 0 if no ranks/start, but let's send what we have
-                attributes.push(((i + 6) as u32, ranks, start, xp, current));
+                // Use +100 to avoid overlap with attributes 1-6
+                attributes.push(((i + 100) as u32, ranks, start, xp, current));
                 offset += 16;
             }
         }
@@ -1866,6 +1914,30 @@ mod tests {
             assert_eq!(item_type, ItemType::MISC);
         } else {
             panic!("Expected ObjectCreate, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_private_update_vital() {
+        // Opcode(4) + Seq(1) + Vital(4) + Ranks(4) + Start(4) + XP(4) + Current(4) = 25 bytes
+        let hex = "e702000078020000000a0000005a000000f40100004b000000";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+        if let GameMessage::UpdateVital {
+            vital,
+            ranks,
+            start,
+            xp,
+            current,
+        } = msg
+        {
+            assert_eq!(vital, 2);
+            assert_eq!(ranks, 10);
+            assert_eq!(start, 90);
+            assert_eq!(xp, 500);
+            assert_eq!(current, 75);
+        } else {
+            panic!("Expected UpdateVital, got {:?}", msg);
         }
     }
 }

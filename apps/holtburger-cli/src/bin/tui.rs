@@ -14,11 +14,15 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
 };
-use std::io;
+use std::io::{self, Write};
+use std::fs::File;
+use std::sync::Mutex;
 use tokio::sync::mpsc;
 
 struct TuiLogger {
     tx: mpsc::UnboundedSender<ClientEvent>,
+    file: Option<Mutex<File>>,
+    verbose_tui: bool,
 }
 
 impl log::Log for TuiLogger {
@@ -28,20 +32,38 @@ impl log::Log for TuiLogger {
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
-            let _ = self
-                .tx
-                .send(ClientEvent::Message(holtburger_core::ChatMessage {
-                    kind: match record.level() {
-                        log::Level::Error => holtburger_core::MessageKind::Error,
-                        log::Level::Warn => holtburger_core::MessageKind::Warning,
-                        _ => holtburger_core::MessageKind::System,
-                    },
-                    text: format!("[{}] {}", record.level(), record.args()),
-                }));
+            let log_msg = format!("[{}] {}", record.level(), record.args());
+
+            if let Some(file_mutex) = &self.file {
+                if let Ok(mut file) = file_mutex.lock() {
+                    let _ = writeln!(file, "{}", log_msg);
+                    let _ = file.flush();
+                }
+            }
+
+            // Only send to TUI if verbose is enabled or it's a high level message
+            if self.verbose_tui || record.level() <= log::Level::Info {
+                let _ = self
+                    .tx
+                    .send(ClientEvent::Message(holtburger_core::ChatMessage {
+                        kind: match record.level() {
+                            log::Level::Error => holtburger_core::MessageKind::Error,
+                            log::Level::Warn => holtburger_core::MessageKind::Warning,
+                            _ => holtburger_core::MessageKind::System,
+                        },
+                        text: log_msg,
+                    }));
+            }
         }
     }
 
-    fn flush(&self) {}
+    fn flush(&self) {
+        if let Some(file_mutex) = &self.file {
+            if let Ok(mut file) = file_mutex.lock() {
+                let _ = file.flush();
+            }
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -59,6 +81,8 @@ struct Args {
     character: Option<String>,
     #[arg(long)]
     capture: Option<String>,
+    #[arg(short, long)]
+    log: Option<String>,
     #[arg(short, long)]
     verbose: bool,
 }
@@ -85,9 +109,23 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-    if args.verbose {
+    if args.verbose || args.log.is_some() {
+        let file = if let Some(path) = &args.log {
+            match File::create(path) {
+                Ok(f) => Some(Mutex::new(f)),
+                Err(e) => {
+                    eprintln!("Failed to create log file: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let logger = TuiLogger {
             tx: event_tx.clone(),
+            file,
+            verbose_tui: args.verbose,
         };
         log::set_boxed_logger(Box::new(logger)).ok();
         log::set_max_level(log::LevelFilter::Debug);

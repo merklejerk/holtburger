@@ -1,21 +1,23 @@
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind, MouseButton},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseButton, MouseEventKind,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use holtburger_cli::ui::{self, AppState};
 use holtburger_cli::classification::{self, EntityClass};
-use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
+use holtburger_cli::ui::{self, AppState};
 use holtburger_core::protocol::properties::*;
+use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
 use ratatui::{
     Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
 };
-use std::io::{self, Write};
 use std::fs::File;
+use std::io::{self, Write};
 use std::sync::Mutex;
 use tokio::sync::mpsc;
 
@@ -34,11 +36,11 @@ impl log::Log for TuiLogger {
         if self.enabled(record.metadata()) {
             let log_msg = format!("[{}] {}", record.level(), record.args());
 
-            if let Some(file_mutex) = &self.file {
-                if let Ok(mut file) = file_mutex.lock() {
-                    let _ = writeln!(file, "{}", log_msg);
-                    let _ = file.flush();
-                }
+            if let Some(file_mutex) = &self.file
+                && let Ok(mut file) = file_mutex.lock()
+            {
+                let _ = writeln!(file, "{}", log_msg);
+                let _ = file.flush();
             }
 
             // Only send to TUI if verbose is enabled or it's a high level message
@@ -58,10 +60,10 @@ impl log::Log for TuiLogger {
     }
 
     fn flush(&self) {
-        if let Some(file_mutex) = &self.file {
-            if let Ok(mut file) = file_mutex.lock() {
-                let _ = file.flush();
-            }
+        if let Some(file_mutex) = &self.file
+            && let Ok(mut file) = file_mutex.lock()
+        {
+            let _ = file.flush();
         }
     }
 }
@@ -182,6 +184,7 @@ async fn main() -> Result<()> {
         selected_nearby_index: 0,
         nearby_list_state: ratatui::widgets::ListState::default().with_selected(Some(0)),
         scroll_offset: 0,
+        chat_total_lines: 0,
         nearby_tab: ui::NearbyTab::Entities,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
@@ -238,563 +241,591 @@ async fn main() -> Result<()> {
                     }
 
                     match key.code {
-                KeyCode::Tab | KeyCode::BackTab => {
-                    use ui::FocusedPane;
-                    if key
-                        .modifiers
-                        .contains(crossterm::event::KeyModifiers::CONTROL)
-                        || key.code == KeyCode::BackTab
-                    {
-                        // Cycle back
-                        app_state.focused_pane = match app_state.focused_pane {
-                            FocusedPane::Input => FocusedPane::Context,
-                            FocusedPane::Context => FocusedPane::Chat,
-                            FocusedPane::Chat => FocusedPane::Nearby,
-                            FocusedPane::Nearby => FocusedPane::Context,
-                        };
-                    } else {
-                        // Cycle forward
-                        app_state.focused_pane = match app_state.focused_pane {
-                            FocusedPane::Input => FocusedPane::Nearby,
-                            FocusedPane::Nearby => FocusedPane::Chat,
-                            FocusedPane::Chat => FocusedPane::Context,
-                            FocusedPane::Context => FocusedPane::Nearby,
-                        };
-                    }
-                }
-                KeyCode::Esc => {
-                    if app_state.focused_pane == ui::FocusedPane::Input {
-                        app_state.focused_pane = app_state.previous_focused_pane;
-                    } else if app_state.state == ui::UIState::CharacterSelection {
-                        app_state.state = ui::UIState::Chat;
-                    }
-                }
-                KeyCode::Enter => match app_state.state {
-                    ui::UIState::Chat => {
-                        if app_state.focused_pane == ui::FocusedPane::Input {
-                            let input = app_state.input.drain(..).collect::<String>();
-                            if input.is_empty() {
-                                app_state.focused_pane = app_state.previous_focused_pane;
-                                continue;
+                        KeyCode::Tab | KeyCode::BackTab => {
+                            use ui::FocusedPane;
+                            if key
+                                .modifiers
+                                .contains(crossterm::event::KeyModifiers::CONTROL)
+                                || key.code == KeyCode::BackTab
+                            {
+                                // Cycle back
+                                app_state.focused_pane = match app_state.focused_pane {
+                                    FocusedPane::Input => FocusedPane::Context,
+                                    FocusedPane::Context => FocusedPane::Chat,
+                                    FocusedPane::Chat => FocusedPane::Nearby,
+                                    FocusedPane::Nearby => FocusedPane::Context,
+                                };
+                            } else {
+                                // Cycle forward
+                                app_state.focused_pane = match app_state.focused_pane {
+                                    FocusedPane::Input => FocusedPane::Nearby,
+                                    FocusedPane::Nearby => FocusedPane::Chat,
+                                    FocusedPane::Chat => FocusedPane::Context,
+                                    FocusedPane::Context => FocusedPane::Nearby,
+                                };
                             }
-                            if input == "/quit" || input == "/exit" {
-                                let _ = command_tx.send(ClientCommand::Quit);
-                                break;
-                            }
-                            if input == "/nearby" || input == "/l" || input == "/nearby -a" {
-                                let show_all = input == "/nearby -a";
-                                app_state.messages.push(holtburger_core::ChatMessage {
-                                    kind: holtburger_core::MessageKind::System,
-                                    text: if show_all {
-                                        "--- All Nearby Entities ---"
-                                    } else {
-                                        "--- Nearby Entities (Interactable) ---"
-                                    }
-                                    .to_string(),
-                                });
-                                let mut count = 0;
-                                for entity in app_state.entities.values() {
-                                    if !show_all && !classification::is_targetable(entity) {
-                                        continue;
-                                    }
-                                    let class = classification::classify_entity(entity);
-                                    let class_str = match class {
-                                        EntityClass::Player => "Player",
-                                        EntityClass::Npc => "NPC",
-                                        EntityClass::Monster => "Monster",
-                                        EntityClass::Weapon => "Weapon",
-                                        EntityClass::Armor => "Armor",
-                                        EntityClass::Jewelry => "Jewelry",
-                                        EntityClass::Apparel => "Apparel",
-                                        EntityClass::Door => "Door",
-                                        EntityClass::Portal => "Portal",
-                                        EntityClass::LifeStone => "LifeStone",
-                                        EntityClass::Chest => "Chest",
-                                        EntityClass::Tool => "Tool",
-                                        EntityClass::Dynamic => "Dynamic",
-                                        EntityClass::StaticObject => "Static",
-                                        EntityClass::Unknown => "Unknown",
-                                    };
-                                    app_state.messages.push(holtburger_core::ChatMessage {
-                                        kind: holtburger_core::MessageKind::Info,
-                                        text: format!(
-                                            "[{:08X}] ({}) {}",
-                                            entity.guid, class_str, entity.name
-                                        ),
-                                    });
-                                    count += 1;
-                                }
-                                if count == 0 {
-                                    app_state.messages.push(holtburger_core::ChatMessage {
-                                        kind: holtburger_core::MessageKind::Info,
-                                        text: "No entities nearby.".to_string(),
-                                    });
-                                }
-                                app_state.focused_pane = app_state.previous_focused_pane;
-                                continue;
-                            }
-                            app_state.input_history.push(input.clone());
-                            app_state.history_index = None;
-                            let _ = command_tx.send(ClientCommand::Talk(input));
-                            app_state.scroll_offset = 0;
-                            app_state.focused_pane = app_state.previous_focused_pane;
-                        } else {
-                            app_state.previous_focused_pane = app_state.focused_pane;
-                            app_state.focused_pane = ui::FocusedPane::Input;
                         }
-                    }
-                    ui::UIState::CharacterSelection => {
-                        if !app_state.characters.is_empty() {
-                            let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(
-                                app_state.selected_character_index + 1,
-                            ));
-                            app_state.state = ui::UIState::Chat;
-                        }
-                    }
-                },
-                KeyCode::Char(c) => {
-                    if let ui::UIState::Chat = app_state.state {
-                        match app_state.focused_pane {
-                            ui::FocusedPane::Input => {
-                                app_state.input.push(c);
+                        KeyCode::Esc => {
+                            if app_state.focused_pane == ui::FocusedPane::Input {
+                                app_state.focused_pane = app_state.previous_focused_pane;
+                            } else if app_state.state == ui::UIState::CharacterSelection {
+                                app_state.state = ui::UIState::Chat;
                             }
-                            ui::FocusedPane::Nearby => {
-                                match c {
-                                    '1' => {
-                                        app_state.nearby_tab = ui::NearbyTab::Entities;
-                                        app_state.selected_nearby_index = 0;
+                        }
+                        KeyCode::Enter => match app_state.state {
+                            ui::UIState::Chat => {
+                                if app_state.focused_pane == ui::FocusedPane::Input {
+                                    let input = app_state.input.drain(..).collect::<String>();
+                                    if input.is_empty() {
+                                        app_state.focused_pane = app_state.previous_focused_pane;
                                         continue;
                                     }
-                                    '2' => {
-                                        app_state.nearby_tab = ui::NearbyTab::Inventory;
-                                        app_state.selected_nearby_index = 0;
+                                    if input == "/quit" || input == "/exit" {
+                                        let _ = command_tx.send(ClientCommand::Quit);
+                                        break;
+                                    }
+                                    if input == "/nearby" || input == "/l" || input == "/nearby -a"
+                                    {
+                                        let show_all = input == "/nearby -a";
+                                        app_state.messages.push(holtburger_core::ChatMessage {
+                                            kind: holtburger_core::MessageKind::System,
+                                            text: if show_all {
+                                                "--- All Nearby Entities ---"
+                                            } else {
+                                                "--- Nearby Entities (Interactable) ---"
+                                            }
+                                            .to_string(),
+                                        });
+                                        let mut count = 0;
+                                        for entity in app_state.entities.values() {
+                                            if !show_all && !classification::is_targetable(entity) {
+                                                continue;
+                                            }
+                                            let class = classification::classify_entity(entity);
+                                            let class_str = match class {
+                                                EntityClass::Player => "Player",
+                                                EntityClass::Npc => "NPC",
+                                                EntityClass::Monster => "Monster",
+                                                EntityClass::Weapon => "Weapon",
+                                                EntityClass::Armor => "Armor",
+                                                EntityClass::Jewelry => "Jewelry",
+                                                EntityClass::Apparel => "Apparel",
+                                                EntityClass::Door => "Door",
+                                                EntityClass::Portal => "Portal",
+                                                EntityClass::LifeStone => "LifeStone",
+                                                EntityClass::Chest => "Chest",
+                                                EntityClass::Tool => "Tool",
+                                                EntityClass::Dynamic => "Dynamic",
+                                                EntityClass::StaticObject => "Static",
+                                                EntityClass::Unknown => "Unknown",
+                                            };
+                                            app_state.messages.push(holtburger_core::ChatMessage {
+                                                kind: holtburger_core::MessageKind::Info,
+                                                text: format!(
+                                                    "[{:08X}] ({}) {}",
+                                                    entity.guid, class_str, entity.name
+                                                ),
+                                            });
+                                            count += 1;
+                                        }
+                                        if count == 0 {
+                                            app_state.messages.push(holtburger_core::ChatMessage {
+                                                kind: holtburger_core::MessageKind::Info,
+                                                text: "No entities nearby.".to_string(),
+                                            });
+                                        }
+                                        app_state.focused_pane = app_state.previous_focused_pane;
                                         continue;
                                     }
-                                    '3' => {
-                                        app_state.nearby_tab = ui::NearbyTab::Character;
-                                        app_state.selected_nearby_index = 0;
-                                        continue;
+                                    app_state.input_history.push(input.clone());
+                                    app_state.history_index = None;
+                                    let _ = command_tx.send(ClientCommand::Talk(input));
+                                    app_state.scroll_offset = 0;
+                                    app_state.focused_pane = app_state.previous_focused_pane;
+                                } else {
+                                    app_state.previous_focused_pane = app_state.focused_pane;
+                                    app_state.focused_pane = ui::FocusedPane::Input;
+                                }
+                            }
+                            ui::UIState::CharacterSelection => {
+                                if !app_state.characters.is_empty() {
+                                    let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(
+                                        app_state.selected_character_index + 1,
+                                    ));
+                                    app_state.state = ui::UIState::Chat;
+                                }
+                            }
+                        },
+                        KeyCode::Char(c) => {
+                            if let ui::UIState::Chat = app_state.state {
+                                match app_state.focused_pane {
+                                    ui::FocusedPane::Input => {
+                                        app_state.input.push(c);
+                                    }
+                                    ui::FocusedPane::Nearby => {
+                                        match c {
+                                            '1' => {
+                                                app_state.nearby_tab = ui::NearbyTab::Entities;
+                                                app_state.selected_nearby_index = 0;
+                                                continue;
+                                            }
+                                            '2' => {
+                                                app_state.nearby_tab = ui::NearbyTab::Inventory;
+                                                app_state.selected_nearby_index = 0;
+                                                continue;
+                                            }
+                                            '3' => {
+                                                app_state.nearby_tab = ui::NearbyTab::Character;
+                                                app_state.selected_nearby_index = 0;
+                                                continue;
+                                            }
+                                            _ => {}
+                                        }
+
+                                        let mut nearby: Vec<_> = app_state
+                                            .entities
+                                            .values()
+                                            .filter(|e| {
+                                                if app_state.nearby_tab == ui::NearbyTab::Entities {
+                                                    classification::is_targetable(e)
+                                                        && e.position.landblock_id != 0
+                                                } else {
+                                                    e.position.landblock_id == 0
+                                                        && !e.name.is_empty()
+                                                }
+                                            })
+                                            .map(|e| {
+                                                let dist = if let Some(p) = &app_state.player_pos {
+                                                    e.position.distance_to(p)
+                                                } else {
+                                                    0.0
+                                                };
+                                                (e, dist)
+                                            })
+                                            .collect();
+
+                                        nearby.sort_by(|a, b| {
+                                            if app_state.nearby_tab == ui::NearbyTab::Entities {
+                                                a.1.partial_cmp(&b.1)
+                                                    .unwrap_or(std::cmp::Ordering::Equal)
+                                            } else {
+                                                a.0.name.cmp(&b.0.name)
+                                            }
+                                        });
+
+                                        if let Some((e, _)) =
+                                            nearby.get(app_state.selected_nearby_index)
+                                        {
+                                            match c {
+                                                'a' | 'A' => {
+                                                    let _ = command_tx
+                                                        .send(ClientCommand::Identify(e.guid));
+                                                }
+                                                'i' | 'I' => {
+                                                    let _ =
+                                                        command_tx.send(ClientCommand::Use(e.guid));
+                                                }
+                                                'k' | 'K' => {
+                                                    let _ = command_tx
+                                                        .send(ClientCommand::Attack(e.guid));
+                                                }
+                                                'd' | 'D' => {
+                                                    app_state.context_buffer.clear();
+                                                    app_state
+                                                        .context_buffer
+                                                        .push(format!("DEBUG INFO: {}", e.name));
+                                                    app_state
+                                                        .context_buffer
+                                                        .push(format!("GUID:   {:08X}", e.guid));
+
+                                                    if let Some(parent_id) = e.physics_parent_id {
+                                                        let parent_name = if let Some(p) =
+                                                            app_state.entities.get(&parent_id)
+                                                        {
+                                                            p.name.clone()
+                                                        } else if Some(parent_id)
+                                                            == app_state.player_guid
+                                                        {
+                                                            "You".to_string()
+                                                        } else {
+                                                            "Unknown".to_string()
+                                                        };
+                                                        app_state.context_buffer.push(format!(
+                                                            "Phys Parent: {:08X} ({})",
+                                                            parent_id, parent_name
+                                                        ));
+                                                    }
+
+                                                    if let Some(container_id) = e.container_id {
+                                                        let container_name = if let Some(p) =
+                                                            app_state.entities.get(&container_id)
+                                                        {
+                                                            p.name.clone()
+                                                        } else if Some(container_id)
+                                                            == app_state.player_guid
+                                                        {
+                                                            "You".to_string()
+                                                        } else {
+                                                            "Unknown".to_string()
+                                                        };
+                                                        app_state.context_buffer.push(format!(
+                                                            "Container:   {:08X} ({})",
+                                                            container_id, container_name
+                                                        ));
+                                                    }
+
+                                                    if let Some(wielder_id) = e.wielder_id {
+                                                        let wielder_name = if let Some(p) =
+                                                            app_state.entities.get(&wielder_id)
+                                                        {
+                                                            p.name.clone()
+                                                        } else if Some(wielder_id)
+                                                            == app_state.player_guid
+                                                        {
+                                                            "You".to_string()
+                                                        } else {
+                                                            "Unknown".to_string()
+                                                        };
+                                                        app_state.context_buffer.push(format!(
+                                                            "Wielder:     {:08X} ({})",
+                                                            wielder_id, wielder_name
+                                                        ));
+                                                    }
+
+                                                    app_state
+                                                        .context_buffer
+                                                        .push(format!("WCID:   {:?}", e.wcid));
+                                                    app_state.context_buffer.push(format!(
+                                                        "Class:  {:?}",
+                                                        classification::classify_entity(e)
+                                                    ));
+                                                    app_state
+                                                        .context_buffer
+                                                        .push(format!("GfxID:  {:?}", e.gfx_id));
+                                                    app_state
+                                                        .context_buffer
+                                                        .push(format!("Vel:    {:?}", e.velocity));
+                                                    app_state.context_buffer.push(format!(
+                                                        "Flags:  {:08X}",
+                                                        e.flags.bits()
+                                                    ));
+                                                    for (name, _) in e.flags.iter_names() {
+                                                        app_state
+                                                            .context_buffer
+                                                            .push(format!("  [X] {}", name));
+                                                    }
+
+                                                    app_state.context_buffer.push(format!(
+                                                        "Phys:   {:08X}",
+                                                        e.physics_state.bits()
+                                                    ));
+                                                    for (name, _) in e.physics_state.iter_names() {
+                                                        app_state
+                                                            .context_buffer
+                                                            .push(format!("  [X] {}", name));
+                                                    }
+
+                                                    if let Some(it) = e.item_type {
+                                                        app_state.context_buffer.push(format!(
+                                                            "IType:  {:08X}",
+                                                            it.bits()
+                                                        ));
+                                                        for (name, _) in it.iter_names() {
+                                                            app_state
+                                                                .context_buffer
+                                                                .push(format!("  [X] {}", name));
+                                                        }
+                                                    }
+                                                    app_state.context_buffer.push(format!(
+                                                        "Pos:    {}",
+                                                        e.position.to_world_coords()
+                                                    ));
+                                                    app_state.context_buffer.push(format!(
+                                                        "LB:     {:08X}",
+                                                        e.position.landblock_id
+                                                    ));
+                                                    app_state.context_buffer.push(format!(
+                                                        "Coords: {:?}",
+                                                        e.position.coords
+                                                    ));
+
+                                                    if !e.int_properties.is_empty() {
+                                                        app_state.context_buffer.push(
+                                                            "-- Int Properties --".to_string(),
+                                                        );
+                                                        let mut sorted_keys: Vec<_> =
+                                                            e.int_properties.keys().collect();
+                                                        sorted_keys.sort();
+                                                        for &k in sorted_keys {
+                                                            let name = PropertyInt::from_repr(k)
+                                                                .map(|p| p.to_string())
+                                                                .unwrap_or_else(|| k.to_string());
+                                                            app_state.context_buffer.push(format!(
+                                                                "  {}: {}",
+                                                                name, e.int_properties[&k]
+                                                            ));
+                                                        }
+                                                    }
+                                                    if !e.bool_properties.is_empty() {
+                                                        app_state.context_buffer.push(
+                                                            "-- Bool Properties --".to_string(),
+                                                        );
+                                                        let mut sorted_keys: Vec<_> =
+                                                            e.bool_properties.keys().collect();
+                                                        sorted_keys.sort();
+                                                        for &k in sorted_keys {
+                                                            let name = PropertyBool::from_repr(k)
+                                                                .map(|p| p.to_string())
+                                                                .unwrap_or_else(|| k.to_string());
+                                                            app_state.context_buffer.push(format!(
+                                                                "  {}: {}",
+                                                                name, e.bool_properties[&k]
+                                                            ));
+                                                        }
+                                                    }
+                                                    if !e.float_properties.is_empty() {
+                                                        app_state.context_buffer.push(
+                                                            "-- Float Properties --".to_string(),
+                                                        );
+                                                        let mut sorted_keys: Vec<_> =
+                                                            e.float_properties.keys().collect();
+                                                        sorted_keys.sort();
+                                                        for &k in sorted_keys {
+                                                            let name = PropertyFloat::from_repr(k)
+                                                                .map(|p| p.to_string())
+                                                                .unwrap_or_else(|| k.to_string());
+                                                            app_state.context_buffer.push(format!(
+                                                                "  {}: {:.4}",
+                                                                name, e.float_properties[&k]
+                                                            ));
+                                                        }
+                                                    }
+                                                    if !e.string_properties.is_empty() {
+                                                        app_state.context_buffer.push(
+                                                            "-- String Properties --".to_string(),
+                                                        );
+                                                        let mut sorted_keys: Vec<_> =
+                                                            e.string_properties.keys().collect();
+                                                        sorted_keys.sort();
+                                                        for &k in sorted_keys {
+                                                            let name = PropertyString::from_repr(k)
+                                                                .map(|p| p.to_string())
+                                                                .unwrap_or_else(|| k.to_string());
+                                                            app_state.context_buffer.push(format!(
+                                                                "  {}: {}",
+                                                                name, e.string_properties[&k]
+                                                            ));
+                                                        }
+                                                    }
+                                                    if !e.did_properties.is_empty() {
+                                                        app_state.context_buffer.push(
+                                                            "-- DataID Properties --".to_string(),
+                                                        );
+                                                        let mut sorted_keys: Vec<_> =
+                                                            e.did_properties.keys().collect();
+                                                        sorted_keys.sort();
+                                                        for &k in sorted_keys {
+                                                            let name = PropertyDataId::from_repr(k)
+                                                                .map(|p| p.to_string())
+                                                                .unwrap_or_else(|| k.to_string());
+                                                            app_state.context_buffer.push(format!(
+                                                                "  {}: {:08X}",
+                                                                name, e.did_properties[&k]
+                                                            ));
+                                                        }
+                                                    }
+                                                    if !e.iid_properties.is_empty() {
+                                                        app_state.context_buffer.push(
+                                                            "-- InstanceID Properties --"
+                                                                .to_string(),
+                                                        );
+                                                        let mut sorted_keys: Vec<_> =
+                                                            e.iid_properties.keys().collect();
+                                                        sorted_keys.sort();
+                                                        for &k in sorted_keys {
+                                                            let name =
+                                                                PropertyInstanceId::from_repr(k)
+                                                                    .map(|p| p.to_string())
+                                                                    .unwrap_or_else(|| {
+                                                                        k.to_string()
+                                                                    });
+                                                            app_state.context_buffer.push(format!(
+                                                                "  {}: {:08X}",
+                                                                name, e.iid_properties[&k]
+                                                            ));
+                                                        }
+                                                    }
+                                                    app_state.context_scroll_offset = 0;
+                                                }
+                                                _ => {}
+                                            }
+                                        }
                                     }
                                     _ => {}
                                 }
-
-                                let mut nearby: Vec<_> = app_state
-                                    .entities
-                                    .values()
-                                    .filter(|e| {
-                                        if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                            classification::is_targetable(e) && e.position.landblock_id != 0
-                                        } else {
-                                            e.position.landblock_id == 0 && !e.name.is_empty()
-                                        }
-                                    })
-                                    .map(|e| {
-                                        let dist = if let Some(p) = &app_state.player_pos {
-                                            e.position.distance_to(p)
-                                        } else {
-                                            0.0
-                                        };
-                                        (e, dist)
-                                    })
-                                    .collect();
-
-                                nearby.sort_by(|a, b| {
-                                    if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                        a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                                    } else {
-                                        a.0.name.cmp(&b.0.name)
-                                    }
-                                });
-
-                                if let Some((e, _)) = nearby.get(app_state.selected_nearby_index) {
-                                    match c {
-                                        'a' | 'A' => {
-                                            let _ =
-                                                command_tx.send(ClientCommand::Identify(e.guid));
-                                        }
-                                        'i' | 'I' => {
-                                            let _ = command_tx.send(ClientCommand::Use(e.guid));
-                                        }
-                                        'k' | 'K' => {
-                                            let _ = command_tx.send(ClientCommand::Attack(e.guid));
-                                        }
-                                        'd' | 'D' => {
-                                            app_state.context_buffer.clear();
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("DEBUG INFO: {}", e.name));
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("GUID:   {:08X}", e.guid));
-
-                                            if let Some(parent_id) = e.physics_parent_id {
-                                                let parent_name = if let Some(p) =
-                                                    app_state.entities.get(&parent_id)
-                                                {
-                                                    p.name.clone()
-                                                } else if Some(parent_id) == app_state.player_guid {
-                                                    "You".to_string()
-                                                } else {
-                                                    "Unknown".to_string()
-                                                };
-                                                app_state.context_buffer.push(format!(
-                                                    "Phys Parent: {:08X} ({})",
-                                                    parent_id, parent_name
-                                                ));
-                                            }
-
-                                            if let Some(container_id) = e.container_id {
-                                                let container_name = if let Some(p) =
-                                                    app_state.entities.get(&container_id)
-                                                {
-                                                    p.name.clone()
-                                                } else if Some(container_id) == app_state.player_guid
-                                                {
-                                                    "You".to_string()
-                                                } else {
-                                                    "Unknown".to_string()
-                                                };
-                                                app_state.context_buffer.push(format!(
-                                                    "Container:   {:08X} ({})",
-                                                    container_id, container_name
-                                                ));
-                                            }
-
-                                            if let Some(wielder_id) = e.wielder_id {
-                                                let wielder_name = if let Some(p) =
-                                                    app_state.entities.get(&wielder_id)
-                                                {
-                                                    p.name.clone()
-                                                } else if Some(wielder_id) == app_state.player_guid
-                                                {
-                                                    "You".to_string()
-                                                } else {
-                                                    "Unknown".to_string()
-                                                };
-                                                app_state.context_buffer.push(format!(
-                                                    "Wielder:     {:08X} ({})",
-                                                    wielder_id, wielder_name
-                                                ));
-                                            }
-
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("WCID:   {:?}", e.wcid));
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("Class:  {:?}", classification::classify_entity(e)));
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("GfxID:  {:?}", e.gfx_id));
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("Vel:    {:?}", e.velocity));
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("Flags:  {:08X}", e.flags.bits()));
-                                            for (name, _) in e.flags.iter_names() {
-                                                app_state
-                                                    .context_buffer
-                                                    .push(format!("  [X] {}", name));
-                                            }
-
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("Phys:   {:08X}", e.physics_state.bits()));
-                                            for (name, _) in e.physics_state.iter_names() {
-                                                app_state
-                                                    .context_buffer
-                                                    .push(format!("  [X] {}", name));
-                                            }
-
-                                            if let Some(it) = e.item_type {
-                                                app_state
-                                                    .context_buffer
-                                                    .push(format!("IType:  {:08X}", it.bits()));
-                                                for (name, _) in it.iter_names() {
-                                                    app_state
-                                                        .context_buffer
-                                                        .push(format!("  [X] {}", name));
-                                                }
-                                            }
-                                            app_state.context_buffer.push(format!(
-                                                "Pos:    {}",
-                                                e.position.to_world_coords()
-                                            ));
-                                            app_state.context_buffer.push(format!(
-                                                "LB:     {:08X}",
-                                                e.position.landblock_id
-                                            ));
-                                            app_state
-                                                .context_buffer
-                                                .push(format!("Coords: {:?}", e.position.coords));
-
-                                            if !e.int_properties.is_empty() {
-                                                app_state
-                                                    .context_buffer
-                                                    .push("-- Int Properties --".to_string());
-                                                let mut sorted_keys: Vec<_> =
-                                                    e.int_properties.keys().collect();
-                                                sorted_keys.sort();
-                                                for &k in sorted_keys {
-                                                    let name = PropertyInt::from_repr(k)
-                                                        .map(|p| p.to_string())
-                                                        .unwrap_or_else(|| k.to_string());
-                                                    app_state.context_buffer.push(format!(
-                                                        "  {}: {}",
-                                                        name, e.int_properties[&k]
-                                                    ));
-                                                }
-                                            }
-                                            if !e.bool_properties.is_empty() {
-                                                app_state
-                                                    .context_buffer
-                                                    .push("-- Bool Properties --".to_string());
-                                                let mut sorted_keys: Vec<_> =
-                                                    e.bool_properties.keys().collect();
-                                                sorted_keys.sort();
-                                                for &k in sorted_keys {
-                                                    let name = PropertyBool::from_repr(k)
-                                                        .map(|p| p.to_string())
-                                                        .unwrap_or_else(|| k.to_string());
-                                                    app_state.context_buffer.push(format!(
-                                                        "  {}: {}",
-                                                        name, e.bool_properties[&k]
-                                                    ));
-                                                }
-                                            }
-                                            if !e.float_properties.is_empty() {
-                                                app_state
-                                                    .context_buffer
-                                                    .push("-- Float Properties --".to_string());
-                                                let mut sorted_keys: Vec<_> =
-                                                    e.float_properties.keys().collect();
-                                                sorted_keys.sort();
-                                                for &k in sorted_keys {
-                                                    let name = PropertyFloat::from_repr(k)
-                                                        .map(|p| p.to_string())
-                                                        .unwrap_or_else(|| k.to_string());
-                                                    app_state.context_buffer.push(format!(
-                                                        "  {}: {:.4}",
-                                                        name, e.float_properties[&k]
-                                                    ));
-                                                }
-                                            }
-                                            if !e.string_properties.is_empty() {
-                                                app_state
-                                                    .context_buffer
-                                                    .push("-- String Properties --".to_string());
-                                                let mut sorted_keys: Vec<_> =
-                                                    e.string_properties.keys().collect();
-                                                sorted_keys.sort();
-                                                for &k in sorted_keys {
-                                                    let name = PropertyString::from_repr(k)
-                                                        .map(|p| p.to_string())
-                                                        .unwrap_or_else(|| k.to_string());
-                                                    app_state.context_buffer.push(format!(
-                                                        "  {}: {}",
-                                                        name, e.string_properties[&k]
-                                                    ));
-                                                }
-                                            }
-                                            if !e.did_properties.is_empty() {
-                                                app_state
-                                                    .context_buffer
-                                                    .push("-- DataID Properties --".to_string());
-                                                let mut sorted_keys: Vec<_> =
-                                                    e.did_properties.keys().collect();
-                                                sorted_keys.sort();
-                                                for &k in sorted_keys {
-                                                    let name = PropertyDataId::from_repr(k)
-                                                        .map(|p| p.to_string())
-                                                        .unwrap_or_else(|| k.to_string());
-                                                    app_state.context_buffer.push(format!(
-                                                        "  {}: {:08X}",
-                                                        name, e.did_properties[&k]
-                                                    ));
-                                                }
-                                            }
-                                            if !e.iid_properties.is_empty() {
-                                                app_state.context_buffer.push(
-                                                    "-- InstanceID Properties --".to_string(),
-                                                );
-                                                let mut sorted_keys: Vec<_> =
-                                                    e.iid_properties.keys().collect();
-                                                sorted_keys.sort();
-                                                for &k in sorted_keys {
-                                                    let name = PropertyInstanceId::from_repr(k)
-                                                        .map(|p| p.to_string())
-                                                        .unwrap_or_else(|| k.to_string());
-                                                    app_state.context_buffer.push(format!(
-                                                        "  {}: {:08X}",
-                                                        name, e.iid_properties[&k]
-                                                    ));
-                                                }
-                                            }
-                                            app_state.context_scroll_offset = 0;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                KeyCode::Backspace => {
-                    if app_state.state == ui::UIState::Chat
-                        && app_state.focused_pane == ui::FocusedPane::Input
-                    {
-                        app_state.input.pop();
-                    }
-                }
-                KeyCode::Up => match app_state.state {
-                    ui::UIState::Chat => match app_state.focused_pane {
-                        ui::FocusedPane::Input => {
-                            if !app_state.input_history.is_empty() {
-                                let idx = app_state
-                                    .history_index
-                                    .map(|i| i.saturating_sub(1))
-                                    .unwrap_or(app_state.input_history.len() - 1);
-                                app_state.history_index = Some(idx);
-                                app_state.input = app_state.input_history[idx].clone();
                             }
                         }
-                        ui::FocusedPane::Chat => {
-                            app_state.scroll_offset = app_state.scroll_offset.saturating_add(1);
-                        }
-                        ui::FocusedPane::Context => {
-                            app_state.context_scroll_offset =
-                                app_state.context_scroll_offset.saturating_add(1);
-                        }
-                        ui::FocusedPane::Nearby => {
-                            if app_state.selected_nearby_index > 0 {
-                                app_state.selected_nearby_index -= 1;
-                            }
-                        }
-                    },
-                    ui::UIState::CharacterSelection => {
-                        if app_state.selected_character_index > 0 {
-                            app_state.selected_character_index -= 1;
-                        }
-                    }
-                },
-                KeyCode::Down => match app_state.state {
-                    ui::UIState::Chat => match app_state.focused_pane {
-                        ui::FocusedPane::Input => {
-                            if let Some(idx) = app_state.history_index {
-                                if idx + 1 < app_state.input_history.len() {
-                                    let next = idx + 1;
-                                    app_state.history_index = Some(next);
-                                    app_state.input = app_state.input_history[next].clone();
-                                } else {
-                                    app_state.history_index = None;
-                                    app_state.input.clear();
-                                }
-                            }
-                        }
-                        ui::FocusedPane::Chat => {
-                            app_state.scroll_offset = app_state.scroll_offset.saturating_sub(1);
-                        }
-                        ui::FocusedPane::Context => {
-                            app_state.context_scroll_offset =
-                                app_state.context_scroll_offset.saturating_sub(1);
-                        }
-                        ui::FocusedPane::Nearby => {
-                            let nearby_count = app_state
-                                .entities
-                                .values()
-                                .filter(|e| {
-                                    if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                        classification::is_targetable(e) && e.position.landblock_id != 0
-                                    } else {
-                                        e.position.landblock_id == 0 && !e.name.is_empty()
-                                    }
-                                })
-                                .count();
-                            if nearby_count > 0
-                                && app_state.selected_nearby_index + 1 < nearby_count
+                        KeyCode::Backspace => {
+                            if app_state.state == ui::UIState::Chat
+                                && app_state.focused_pane == ui::FocusedPane::Input
                             {
-                                app_state.selected_nearby_index += 1;
+                                app_state.input.pop();
                             }
                         }
-                    },
-                    ui::UIState::CharacterSelection => {
-                        if !app_state.characters.is_empty()
-                            && app_state.selected_character_index + 1 < app_state.characters.len()
-                        {
-                            app_state.selected_character_index += 1;
-                        }
-                    }
-                },
-                KeyCode::PageUp => {
-                    if let ui::UIState::Chat = app_state.state {
-                        match app_state.focused_pane {
-                            ui::FocusedPane::Chat => {
-                                app_state.scroll_offset =
-                                    app_state.scroll_offset.saturating_add(10);
-                                let max_scroll = app_state.messages.len().saturating_sub(1);
-                                if app_state.scroll_offset > max_scroll {
-                                    app_state.scroll_offset = max_scroll;
+                        KeyCode::Up => match app_state.state {
+                            ui::UIState::Chat => match app_state.focused_pane {
+                                ui::FocusedPane::Input => {
+                                    if !app_state.input_history.is_empty() {
+                                        let idx = app_state
+                                            .history_index
+                                            .map(|i| i.saturating_sub(1))
+                                            .unwrap_or(app_state.input_history.len() - 1);
+                                        app_state.history_index = Some(idx);
+                                        app_state.input = app_state.input_history[idx].clone();
+                                    }
+                                }
+                                ui::FocusedPane::Chat => {
+                                    app_state.scroll_offset =
+                                        app_state.scroll_offset.saturating_add(1);
+                                }
+                                ui::FocusedPane::Context => {
+                                    app_state.context_scroll_offset =
+                                        app_state.context_scroll_offset.saturating_add(1);
+                                }
+                                ui::FocusedPane::Nearby => {
+                                    if app_state.selected_nearby_index > 0 {
+                                        app_state.selected_nearby_index -= 1;
+                                    }
+                                }
+                            },
+                            ui::UIState::CharacterSelection => {
+                                if app_state.selected_character_index > 0 {
+                                    app_state.selected_character_index -= 1;
                                 }
                             }
-                            ui::FocusedPane::Context => {
-                                app_state.context_scroll_offset =
-                                    app_state.context_scroll_offset.saturating_add(10);
-                                let max_scroll = app_state.context_buffer.len().saturating_sub(1);
-                                if app_state.context_scroll_offset > max_scroll {
-                                    app_state.context_scroll_offset = max_scroll;
-                                }
-                            }
-                            ui::FocusedPane::Nearby => {
-                                app_state.selected_nearby_index =
-                                    app_state.selected_nearby_index.saturating_sub(10);
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                KeyCode::PageDown => {
-                    if let ui::UIState::Chat = app_state.state {
-                        match app_state.focused_pane {
-                            ui::FocusedPane::Chat => {
-                                app_state.scroll_offset =
-                                    app_state.scroll_offset.saturating_sub(10);
-                            }
-                            ui::FocusedPane::Context => {
-                                app_state.context_scroll_offset =
-                                    app_state.context_scroll_offset.saturating_sub(10);
-                            }
-                            ui::FocusedPane::Nearby => {
-                                let nearby_count = app_state
-                                    .entities
-                                    .values()
-                                    .filter(|e| {
-                                        if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                            classification::is_targetable(e) && e.position.landblock_id != 0
+                        },
+                        KeyCode::Down => match app_state.state {
+                            ui::UIState::Chat => match app_state.focused_pane {
+                                ui::FocusedPane::Input => {
+                                    if let Some(idx) = app_state.history_index {
+                                        if idx + 1 < app_state.input_history.len() {
+                                            let next = idx + 1;
+                                            app_state.history_index = Some(next);
+                                            app_state.input = app_state.input_history[next].clone();
                                         } else {
-                                            e.position.landblock_id == 0 && !e.name.is_empty()
+                                            app_state.history_index = None;
+                                            app_state.input.clear();
                                         }
-                                    })
-                                    .count();
-                                app_state.selected_nearby_index = (app_state.selected_nearby_index
-                                    + 10)
-                                    .min(nearby_count.saturating_sub(1));
+                                    }
+                                }
+                                ui::FocusedPane::Chat => {
+                                    app_state.scroll_offset =
+                                        app_state.scroll_offset.saturating_sub(1);
+                                }
+                                ui::FocusedPane::Context => {
+                                    app_state.context_scroll_offset =
+                                        app_state.context_scroll_offset.saturating_sub(1);
+                                }
+                                ui::FocusedPane::Nearby => {
+                                    let nearby_count = app_state
+                                        .entities
+                                        .values()
+                                        .filter(|e| {
+                                            if app_state.nearby_tab == ui::NearbyTab::Entities {
+                                                classification::is_targetable(e)
+                                                    && e.position.landblock_id != 0
+                                            } else {
+                                                e.position.landblock_id == 0 && !e.name.is_empty()
+                                            }
+                                        })
+                                        .count();
+                                    if nearby_count > 0
+                                        && app_state.selected_nearby_index + 1 < nearby_count
+                                    {
+                                        app_state.selected_nearby_index += 1;
+                                    }
+                                }
+                            },
+                            ui::UIState::CharacterSelection => {
+                                if !app_state.characters.is_empty()
+                                    && app_state.selected_character_index + 1
+                                        < app_state.characters.len()
+                                {
+                                    app_state.selected_character_index += 1;
+                                }
                             }
-                            _ => {}
+                        },
+                        KeyCode::PageUp => {
+                            if let ui::UIState::Chat = app_state.state {
+                                match app_state.focused_pane {
+                                    ui::FocusedPane::Chat => {
+                                        app_state.scroll_offset =
+                                            app_state.scroll_offset.saturating_add(10);
+                                        let max_scroll = app_state.messages.len().saturating_sub(1);
+                                        if app_state.scroll_offset > max_scroll {
+                                            app_state.scroll_offset = max_scroll;
+                                        }
+                                    }
+                                    ui::FocusedPane::Context => {
+                                        app_state.context_scroll_offset =
+                                            app_state.context_scroll_offset.saturating_add(10);
+                                        let max_scroll =
+                                            app_state.context_buffer.len().saturating_sub(1);
+                                        if app_state.context_scroll_offset > max_scroll {
+                                            app_state.context_scroll_offset = max_scroll;
+                                        }
+                                    }
+                                    ui::FocusedPane::Nearby => {
+                                        app_state.selected_nearby_index =
+                                            app_state.selected_nearby_index.saturating_sub(10);
+                                    }
+                                    _ => {}
+                                }
+                            }
                         }
-                    }
-                }
-                KeyCode::Home => {
-                    if let ui::UIState::Chat = app_state.state {
-                        match app_state.focused_pane {
-                            ui::FocusedPane::Chat => app_state.scroll_offset = 0,
-                            ui::FocusedPane::Context => app_state.context_scroll_offset = 0,
-                            _ => {}
+                        KeyCode::PageDown => {
+                            if let ui::UIState::Chat = app_state.state {
+                                match app_state.focused_pane {
+                                    ui::FocusedPane::Chat => {
+                                        app_state.scroll_offset =
+                                            app_state.scroll_offset.saturating_sub(10);
+                                    }
+                                    ui::FocusedPane::Context => {
+                                        app_state.context_scroll_offset =
+                                            app_state.context_scroll_offset.saturating_sub(10);
+                                    }
+                                    ui::FocusedPane::Nearby => {
+                                        let nearby_count = app_state
+                                            .entities
+                                            .values()
+                                            .filter(|e| {
+                                                if app_state.nearby_tab == ui::NearbyTab::Entities {
+                                                    classification::is_targetable(e)
+                                                        && e.position.landblock_id != 0
+                                                } else {
+                                                    e.position.landblock_id == 0
+                                                        && !e.name.is_empty()
+                                                }
+                                            })
+                                            .count();
+                                        app_state.selected_nearby_index =
+                                            (app_state.selected_nearby_index + 10)
+                                                .min(nearby_count.saturating_sub(1));
+                                    }
+                                    _ => {}
+                                }
+                            }
                         }
-                    }
-                }
-                _ => {}
+                        KeyCode::Home => {
+                            if let ui::UIState::Chat = app_state.state {
+                                match app_state.focused_pane {
+                                    ui::FocusedPane::Chat => app_state.scroll_offset = 0,
+                                    ui::FocusedPane::Context => app_state.context_scroll_offset = 0,
+                                    _ => {}
+                                }
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 Event::Mouse(mouse) => {
@@ -902,10 +933,9 @@ async fn main() -> Result<()> {
             match event {
                 ClientEvent::Message(msg) => {
                     app_state.messages.push(msg);
-                    // auto-scroll when new messages arrive if we're near the bottom
-                    if app_state.scroll_offset < 5 {
-                        app_state.scroll_offset = 0;
-                    }
+                    // Only auto-scroll to bottom if we are already at the bottom.
+                    // If we are scrolled up, we stay at the current scroll_offset.
+                    // Note: This still causes text to slide up because scroll_offset is from the bottom.
                 }
                 ClientEvent::CharacterList(chars) => {
                     app_state.characters = chars;
@@ -973,72 +1003,12 @@ async fn main() -> Result<()> {
                             refresh_context_buffer(&mut app_state);
                         }
                         WorldEvent::PropertyUpdated {
-                            guid,
-                            property_id,
-                            value,
+                            guid: _,
+                            property_id: _,
+                            value: _,
                         } => {
-                            use holtburger_core::protocol::properties::*;
-                            use holtburger_core::world::properties::PropertyValue;
-
-                            let target_name = if let Some(entity) = app_state.entities.get(&guid) {
-                                entity.name.clone()
-                            } else if Some(guid) == app_state.player_guid {
-                                "You".to_string()
-                            } else if guid == 0 {
-                                "Self".to_string()
-                            } else {
-                                format!("{:08X}", guid)
-                            };
-
-                            let (name, val_str) = match value {
-                                PropertyValue::Int(v) => (
-                                    PropertyInt::from_repr(property_id)
-                                        .map(|p| p.to_string())
-                                        .unwrap_or_else(|| format!("Int#{}", property_id)),
-                                    v.to_string(),
-                                ),
-                                PropertyValue::Bool(v) => (
-                                    PropertyBool::from_repr(property_id)
-                                        .map(|p| p.to_string())
-                                        .unwrap_or_else(|| format!("Bool#{}", property_id)),
-                                    v.to_string(),
-                                ),
-                                PropertyValue::Int64(v) => (
-                                    PropertyInt64::from_repr(property_id)
-                                        .map(|p| p.to_string())
-                                        .unwrap_or_else(|| format!("Int64#{}", property_id)),
-                                    v.to_string(),
-                                ),
-                                PropertyValue::Float(v) => (
-                                    PropertyFloat::from_repr(property_id)
-                                        .map(|p| p.to_string())
-                                        .unwrap_or_else(|| format!("Float#{}", property_id)),
-                                    v.to_string(),
-                                ),
-                                PropertyValue::String(v) => (
-                                    PropertyString::from_repr(property_id)
-                                        .map(|p| p.to_string())
-                                        .unwrap_or_else(|| format!("String#{}", property_id)),
-                                    v,
-                                ),
-                                PropertyValue::DID(v) => (
-                                    PropertyDataId::from_repr(property_id)
-                                        .map(|p| p.to_string())
-                                        .unwrap_or_else(|| format!("DID#{}", property_id)),
-                                    format!("{:08X}", v),
-                                ),
-                                PropertyValue::IID(v) => (
-                                    PropertyInstanceId::from_repr(property_id)
-                                        .map(|p| p.to_string())
-                                        .unwrap_or_else(|| format!("IID#{}", property_id)),
-                                    format!("{:08X}", v),
-                                ),
-                            };
-
-                            app_state.messages.push(holtburger_core::ChatMessage {
-                                kind: holtburger_core::MessageKind::Info,
-                                text: format!("[Update] {} {}: {}", target_name, name, val_str),
-                            });
+                            // Currently we don't do anything with property updates in the TUI,
+                            // we just ignore them to keep the chat clean.
                         }
                         WorldEvent::EntitySpawned(entity) => {
                             let name = entity.name.clone();

@@ -49,6 +49,7 @@ pub struct AppState {
     pub selected_nearby_index: usize,
     pub nearby_list_state: ratatui::widgets::ListState,
     pub scroll_offset: usize,
+    pub chat_total_lines: usize,
     pub nearby_tab: NearbyTab,
     pub context_buffer: Vec<String>,
     pub context_scroll_offset: usize,
@@ -267,7 +268,10 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                 let mut sorted_attrs = state.attributes.clone();
                 sorted_attrs.sort_by_key(|a| a.attr_type as u32);
                 for attr in sorted_attrs {
-                    lines.push(Line::from(format!("  {:<10} {:>3}", attr.attr_type, attr.base)));
+                    lines.push(Line::from(format!(
+                        "  {:<10} {:>3}",
+                        attr.attr_type, attr.base
+                    )));
                 }
 
                 lines.push(Line::from(""));
@@ -307,36 +311,36 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             f.render_widget(nearby_block, main_chunks[0]);
 
             // Tooltip logic
-            if state.nearby_tab != NearbyTab::Character {
-                if let Some((selected_e, _)) = nearby.get(state.selected_nearby_index) {
-                    let mut tools = vec![Span::raw("[A]ssess ")];
-                    let flags = selected_e.flags;
+            if state.nearby_tab != NearbyTab::Character
+                && let Some((selected_e, _)) = nearby.get(state.selected_nearby_index)
+            {
+                let mut tools = vec![Span::raw("[A]ssess ")];
+                let flags = selected_e.flags;
 
-                    // Interact logic: Vendor check or Pickable check
-                    let is_vendor = flags.intersects(ObjectDescriptionFlag::VENDOR);
-                    let is_pickable = selected_e
-                        .int_properties
-                        .get(&16)
-                        .map(|&u| (u & 0x20) != 0)
-                        .unwrap_or(false);
+                // Interact logic: Vendor check or Pickable check
+                let is_vendor = flags.intersects(ObjectDescriptionFlag::VENDOR);
+                let is_pickable = selected_e
+                    .int_properties
+                    .get(&16)
+                    .map(|&u| (u & 0x20) != 0)
+                    .unwrap_or(false);
 
-                    if is_vendor {
-                        tools.push(Span::raw("[V]endor "));
-                    }
-                    if is_pickable {
-                        tools.push(Span::raw("[I]tem "));
-                    }
-
-                    if flags.intersects(ObjectDescriptionFlag::ATTACKABLE) {
-                        tools.push(Span::raw("[K]ill "));
-                    }
-
-                    tools.push(Span::raw("[D]ebug"));
-
-                    let tooltip = Paragraph::new(Line::from(tools))
-                        .block(Block::default().borders(Borders::TOP));
-                    f.render_widget(tooltip, nearby_inner_chunks[1]);
+                if is_vendor {
+                    tools.push(Span::raw("[V]endor "));
                 }
+                if is_pickable {
+                    tools.push(Span::raw("[I]tem "));
+                }
+
+                if flags.intersects(ObjectDescriptionFlag::ATTACKABLE) {
+                    tools.push(Span::raw("[K]ill "));
+                }
+
+                tools.push(Span::raw("[D]ebug"));
+
+                let tooltip =
+                    Paragraph::new(Line::from(tools)).block(Block::default().borders(Borders::TOP));
+                f.render_widget(tooltip, nearby_inner_chunks[1]);
             }
 
             // --- Chat Pane ---
@@ -367,6 +371,13 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             }
 
             let total_lines = all_lines.len();
+            if state.chat_total_lines > 0
+                && total_lines > state.chat_total_lines
+                && state.scroll_offset > 0
+            {
+                state.scroll_offset += total_lines - state.chat_total_lines;
+            }
+            state.chat_total_lines = total_lines;
             let max_scroll = total_lines.saturating_sub(height);
             let effective_scroll = state.scroll_offset.min(max_scroll);
 
@@ -398,10 +409,16 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                 Style::default()
             };
 
+            let chat_title = if state.scroll_offset > 0 {
+                format!(" World Chat ({} lines up) [SCROLLED] ", state.scroll_offset)
+            } else {
+                " World Chat ".to_string()
+            };
+
             let chat_list = List::new(messages).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title("World Chat")
+                    .title(chat_title)
                     .border_style(chat_style),
             );
             f.render_widget(chat_list, main_chunks[1]);

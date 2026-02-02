@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_core::{Client, ClientCommand, ClientEvent};
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -30,7 +30,7 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    
+
     let out_dir = PathBuf::from(&args.out_dir);
     if !out_dir.exists() {
         std::fs::create_dir_all(&out_dir)?;
@@ -83,32 +83,29 @@ async fn main() -> Result<()> {
     loop {
         tokio::select! {
             Some(event) = event_rx.recv() => {
-                match event {
-                    ClientEvent::CharacterList(chars) => {
-                        println!("Characters received:");
-                        for (id, name) in &chars { println!("  - {} ({:08X})", name, id); }
+                if let ClientEvent::CharacterList(chars) = event {
+                    println!("Characters received:");
+                    for (id, name) in &chars { println!("  - {} ({:08X})", name, id); }
 
-                        let target_name = args.character.as_deref().unwrap_or("");
-                        if !chars.is_empty() {
-                            let mut selected_id = None;
-                            if target_name.is_empty() {
-                                selected_id = Some(chars[0].0);
-                            } else {
-                                for (id, name) in &chars {
-                                    if name.to_lowercase().contains(&target_name.to_lowercase()) {
-                                        selected_id = Some(*id);
-                                        break;
-                                    }
+                    let target_name = args.character.as_deref().unwrap_or("");
+                    if !chars.is_empty() {
+                        let mut selected_id = None;
+                        if target_name.is_empty() {
+                            selected_id = Some(chars[0].0);
+                        } else {
+                            for (id, name) in &chars {
+                                if name.to_lowercase().contains(&target_name.to_lowercase()) {
+                                    selected_id = Some(*id);
+                                    break;
                                 }
                             }
+                        }
 
-                            if let Some(id) = selected_id {
-                                println!("Selecting character ID {:08X}...", id);
-                                let _ = command_tx.send(ClientCommand::SelectCharacter(id));
-                            }
+                        if let Some(id) = selected_id {
+                            println!("Selecting character ID {:08X}...", id);
+                            let _ = command_tx.send(ClientCommand::SelectCharacter(id));
                         }
                     }
-                    _ => {}
                 }
             }
             _ = &mut timeout => {

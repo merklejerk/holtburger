@@ -1,7 +1,7 @@
 //! Debug Harness for Asheron's Call Reverse Engineering
 //!
-//! This crate is a dedicated space for temporary research, debugging, and 
-//! throwaway test harnesses. Use this to validate network traffic, 
+//! This crate is a dedicated space for temporary research, debugging, and
+//! throwaway test harnesses. Use this to validate network traffic,
 //! experiment with protocol logic, or test file format parsers in isolation.
 //!
 //! Recommended usage:

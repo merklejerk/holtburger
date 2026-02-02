@@ -1,5 +1,5 @@
-use holtburger_core::session::Session;
 use holtburger_core::protocol::messages::FragmentHeader;
+use holtburger_core::session::Session;
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("Feeding fragment 1/2...");
     let res_final = session.process_fragment(&header1, &frag1_data);
-    
+
     if let Some(total) = res_final {
         println!("Full message size: {}", total.len());
         assert_eq!(total.len(), 448 + 156);

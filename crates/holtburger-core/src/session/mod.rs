@@ -304,7 +304,13 @@ impl Session {
     }
 
     pub fn process_fragment(&mut self, header: &FragmentHeader, data: &[u8]) -> Option<Vec<u8>> {
-        log::debug!("Processing fragment Seq={} {}/{} size={}", header.sequence, header.index + 1, header.count, data.len());
+        log::debug!(
+            "Processing fragment Seq={} {}/{} size={}",
+            header.sequence,
+            header.index + 1,
+            header.count,
+            data.len()
+        );
         if header.count == 1 {
             return Some(data.to_vec());
         }
@@ -320,7 +326,12 @@ impl Session {
 
         // SAFETY: Handle server restart or ID reuse with different fragment count
         if header.count != entry.count {
-            log::warn!("Fragment count mismatch for Seq {}: expected {}, got {}. Resetting reassembler.", header.sequence, entry.count, header.count);
+            log::warn!(
+                "Fragment count mismatch for Seq {}: expected {}, got {}. Resetting reassembler.",
+                header.sequence,
+                entry.count,
+                header.count
+            );
             entry.count = header.count;
             entry.fragments = vec![None; header.count as usize];
             entry.received_count = 0;
@@ -417,8 +428,9 @@ impl Session {
             self.last_server_seq = header.sequence;
         }
 
-        if (header.flags & flags::ENCRYPTED_CHECKSUM != 0) && self.isaac_s2c.is_some() {
-            let isaac = self.isaac_s2c.as_mut().unwrap();
+        if header.flags & flags::ENCRYPTED_CHECKSUM != 0
+            && let Some(isaac) = self.isaac_s2c.as_mut()
+        {
             isaac.consume_key();
         }
 

@@ -826,14 +826,24 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_VITAL => {
-                log::debug!("PRIVATE_UPDATE_VITAL payload (first 25 bytes): {:02X?}", &data[..std::cmp::min(data.len(), 25)]);
+                log::debug!(
+                    "PRIVATE_UPDATE_VITAL payload (first 25 bytes): {:02X?}",
+                    &data[..std::cmp::min(data.len(), 25)]
+                );
                 if data.len() >= 25 {
                     let vital = LittleEndian::read_u32(&data[5..9]);
                     let ranks = LittleEndian::read_u32(&data[9..13]);
                     let start = LittleEndian::read_u32(&data[13..17]);
                     let xp = LittleEndian::read_u32(&data[17..21]);
                     let current = LittleEndian::read_u32(&data[21..25]);
-                    log::info!("UpdateVital: id={}, ranks={}, start={}, xp={}, current={}", vital, ranks, start, xp, current);
+                    log::info!(
+                        "UpdateVital: id={}, ranks={}, start={}, xp={}, current={}",
+                        vital,
+                        ranks,
+                        start,
+                        xp,
+                        current
+                    );
                     GameMessage::UpdateVital {
                         vital,
                         ranks,
@@ -919,15 +929,10 @@ impl GameMessage {
                     }
                 }
 
-                if event_type == game_event_opcodes::UPDATE_HEALTH {
-                    if data.len() >= 24 {
-                        let target = LittleEndian::read_u32(&data[16..20]);
-                        let health = LittleEndian::read_f32(&data[20..24]);
-                        return GameMessage::UpdateHealth {
-                            target,
-                            health,
-                        };
-                    }
+                if event_type == game_event_opcodes::UPDATE_HEALTH && data.len() >= 24 {
+                    let target = LittleEndian::read_u32(&data[16..20]);
+                    let health = LittleEndian::read_f32(&data[20..24]);
+                    return GameMessage::UpdateHealth { target, health };
                 }
 
                 GameMessage::GameEvent {
@@ -1488,7 +1493,12 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
 
     // 3. WeenieHeader
     if data.len() < offset + 4 {
-        log::warn!("guid={:08X} failed to read weenie_flags, offset={}, len={}", guid, offset, data.len());
+        log::warn!(
+            "guid={:08X} failed to read weenie_flags, offset={}, len={}",
+            guid,
+            offset,
+            data.len()
+        );
         return None;
     }
     let weenie_flags = LittleEndian::read_u32(&data[offset..offset + 4]);

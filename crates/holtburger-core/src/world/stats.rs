@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, FromRepr};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr, Hash)]
 #[repr(u32)]
 pub enum AttributeType {
     #[strum(serialize = "Strength")]
@@ -18,12 +18,12 @@ pub enum AttributeType {
     SelfAttr = 6,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr, Hash)]
 #[repr(u32)]
 pub enum VitalType {
-    Health = 1,
-    Stamina = 2,
-    Mana = 3,
+    Health = 2,
+    Stamina = 4,
+    Mana = 6,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

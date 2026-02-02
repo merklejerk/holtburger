@@ -278,3 +278,14 @@ pub enum RadarColor {
     Cyan = 0x09,
     BrightGreen = 0x10,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PropertyValue {
+    Int(i32),
+    Int64(i64),
+    Bool(bool),
+    Float(f64),
+    String(String),
+    DID(u32),
+    IID(u32),
+}

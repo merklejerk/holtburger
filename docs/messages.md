@@ -325,14 +325,79 @@ Primary way clients send commands and interactions to the server.
 
 ## 4. Game Events (`0xF7B0`)
 
-| Opcode | Name | Description |
+The `GameEvent` message is a multiplexer for a wide variety of UI, magic, and world events.
+
+**Structure:**
+1. `uint32`: Truncated Target GUID (4 bytes).
+2. `uint32`: Sequence Number.
+3. `uint32`: Sub-Opcode (`EventType`).
+4. `Byte[]`: Payload.
+
+| Sub-Opcode | Name | Description |
 | :--- | :--- | :--- |
-| `0x0013` | `PlayerDescription` | Skills, attributes, and vitals. |
+| `0x0013` | `PlayerDescription` | Sent on login. Detailed below. |
 | `0x0282` | `StartGame` | Signals the client to start the game loop. |
 | `0x0147` | `ChannelBroadcast` | Public channel chat messages. |
 | `0x02BD` | `Tell` | Private message details. |
+| `0x02C2` | `MagicUpdateEnchantment` | See [magic.md](magic.md). |
+| `0x02C3` | `MagicRemoveEnchantment`| See [magic.md](magic.md). |
+
+### `0x0013` PlayerDescription
+
+This message is sent when the player first enters the world. It provides a complete snapshot of the player's character, including properties, status, attributes, skills, and enchantments.
+
+#### Structure
+
+1. **Header**
+   - `uint32`: `propertyFlags` (determines which property tables follow).
+   - `uint32`: `weenieType` (usually `0x0001` for player).
+
+2. **Property Tables**
+   Tables for `Int32`, `Int64`, `Bool`, etc., appear in the order defined by the bits in `propertyFlags`. Each table starts with a 4-byte header: `uint16 count` and `uint16 numBuckets`.
+
+3. **Status Data**
+   - `uint32`: `vectorFlags` (determines which status vectors follow).
+   - `uint32`: `hasHealthStats` (boolean flag).
+
+4. **Status Vectors**
+   Vectors for `Attribute`, `Skill`, etc., appear in the order defined by the bits in `vectorFlags`.
+
+| Bitmask | Vector | Structure |
+| :--- | :--- | :--- |
+| `0x0001` | `Attribute` | `uint32` cache_mask + entry for each set bit (Ranks, StartingValue, ExperienceSpent). |
+| `0x0002` | `Skill` | `uint16` count + `uint16` buckets + `Skill` entries. |
+| `0x0100` | `Spell` | `uint16` count + `uint16` buckets + (u32 SpellID, f32 unk). |
+| `0x0200` | `Enchantment` | See [Enchantment Registry](magic.md#initial-synchronization) in `magic.md`. |
 
 ---
 
 ## 5. Movement and Positioning
 Positioning is handled via specialized messages documented in [movement.md](movement.md).
+
+### `0xF7B0:0x0013` PlayerDescription (S2C)
+The full description of the player's character, including properties, skills, spells, and enchantments.
+Sent during login.
+
+Structure:
+1. `Opcode`: `0xF7B0` + `Sequence` + `EventID 0x0013`.
+2. `PropertyFlags`: `uint32` bitmask determining the presence of property tables.
+3. `WeenieType`: `uint32`.
+4. **Property Tables**: For each flag set (Int32, Int64, Bool, etc.), a `PackableHashTable` follows.
+   - Header: `u16 Count`, `u16 Buckets`.
+   - **Important**: Strings in Property Tables are **NOT padded**.
+5. `VectorFlags`: `uint32` bitmask determining vectors (Attributes, Skills, Spells, Enchantments).
+   - `0x0001` Attributes: Complex structure.
+   - `0x0002` Skills:
+     - Header: `u16 Count`, `u16 Buckets`.
+     - **Skill Entry (32 bytes)**:
+       - `u32` SkillID.
+       - `u32` Ranks.
+       - **Note**: The `Status` field (u16) is **MISSING** in this message compared to ACE server structure.
+       - `u32` AdvancementClass.
+       - `u32` Experience.
+       - `u32` InitLevel.
+       - `u32` TaskDifficulty (or generic).
+       - `f64` LastUsedTime.
+   - `0x0100` Spells.
+   - `0x0200` Enchantments: Starts with an `EnchantmentMask` (u32).
+

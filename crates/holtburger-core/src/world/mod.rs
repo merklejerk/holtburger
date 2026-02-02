@@ -14,7 +14,7 @@ use crate::math::{Quaternion, Vector3};
 use crate::protocol::properties::PropertyInstanceId;
 use std::sync::Arc;
 
-use crate::protocol::messages::GameMessage;
+use crate::protocol::messages::{Enchantment, GameMessage};
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {
@@ -39,7 +39,15 @@ pub enum WorldEvent {
         attributes: Vec<stats::Attribute>,
         vitals: Vec<stats::Vital>,
         skills: Vec<stats::Skill>,
+        enchantments: Vec<Enchantment>,
     },
+    EnchantmentUpdated(Enchantment),
+    EnchantmentRemoved {
+        spell_id: u16,
+        layer: u16,
+    },
+    ServerTimeUpdate(f64),
+    EnchantmentsPurged,
 }
 
 pub struct WorldState {
@@ -47,6 +55,8 @@ pub struct WorldState {
     pub player_guid: u32,
     pub player_attributes: std::collections::HashMap<stats::AttributeType, u32>,
     pub player_vitals: std::collections::HashMap<stats::VitalType, stats::Vital>,
+    pub player_enchantments: Vec<Enchantment>,
+    pub server_time: Option<(f64, std::time::Instant)>,
     pub dat: Option<Arc<DatDatabase>>,
 
     pub scene: SpatialScene,
@@ -59,8 +69,26 @@ impl WorldState {
             player_guid: 0,
             player_attributes: std::collections::HashMap::new(),
             player_vitals: std::collections::HashMap::new(),
+            player_enchantments: Vec::new(),
+            server_time: None,
             dat,
             scene: SpatialScene::new(),
+        }
+    }
+
+    pub fn current_server_time(&self) -> f64 {
+        match self.server_time {
+            Some((server_val, local_then)) => {
+                let elapsed = local_then.elapsed().as_secs_f64();
+                server_val + elapsed
+            }
+            None => {
+                // Fallback to wall clock if no sync yet
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs_f64()
+            }
         }
     }
 
@@ -140,8 +168,10 @@ impl WorldState {
                 pos,
                 attributes,
                 skills,
+                enchantments,
             } => {
                 self.player_guid = guid;
+                self.player_enchantments = enchantments;
 
                 // Ensure player entity exists
                 let mut player_entity = if let Some(entity) = self.entities.get(guid) {
@@ -250,6 +280,7 @@ impl WorldState {
                     attributes: attr_objs,
                     vitals: vital_objs,
                     skills: skill_objs,
+                    enchantments: self.player_enchantments.clone(),
                 });
             }
             GameMessage::UpdateAttribute {
@@ -372,6 +403,77 @@ impl WorldState {
                         "Received UpdateVitalCurrent for {} but vital not in cache",
                         vital_type
                     );
+                }
+            }
+            GameMessage::MagicUpdateEnchantment {
+                target,
+                enchantment,
+            } => {
+                if target == self.player_guid as u64 {
+                    // Update or insert
+                    if let Some(existing) = self.player_enchantments.iter_mut().find(|e| {
+                        e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
+                    }) {
+                        *existing = enchantment.clone();
+                    } else {
+                        self.player_enchantments.push(enchantment.clone());
+                    }
+                    events.push(WorldEvent::EnchantmentUpdated(enchantment));
+                }
+            }
+            GameMessage::MagicUpdateMultipleEnchantments {
+                target,
+                enchantments,
+            } => {
+                if target == self.player_guid as u64 {
+                    for enchantment in enchantments {
+                        if let Some(existing) = self.player_enchantments.iter_mut().find(|e| {
+                            e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
+                        }) {
+                            *existing = enchantment.clone();
+                        } else {
+                            self.player_enchantments.push(enchantment.clone());
+                        }
+                        events.push(WorldEvent::EnchantmentUpdated(enchantment));
+                    }
+                }
+            }
+            GameMessage::MagicRemoveEnchantment {
+                target,
+                spell_id,
+                layer,
+            } => {
+                if target == self.player_guid as u64 {
+                    self.player_enchantments
+                        .retain(|e| e.spell_id != spell_id || e.layer != layer);
+                    events.push(WorldEvent::EnchantmentRemoved { spell_id, layer });
+                }
+            }
+            GameMessage::MagicRemoveMultipleEnchantments { target, spells } => {
+                if target == self.player_guid as u64 {
+                    for spell in spells {
+                        self.player_enchantments
+                            .retain(|e| e.spell_id != spell.spell_id || e.layer != spell.layer);
+                        events.push(WorldEvent::EnchantmentRemoved {
+                            spell_id: spell.spell_id,
+                            layer: spell.layer,
+                        });
+                    }
+                }
+            }
+            GameMessage::MagicPurgeEnchantments { target } => {
+                if target == self.player_guid as u64 {
+                    self.player_enchantments.clear();
+                    events.push(WorldEvent::EnchantmentsPurged);
+                }
+            }
+            GameMessage::MagicPurgeBadEnchantments { target } => {
+                if target == self.player_guid as u64 {
+                    use crate::world::properties::EnchantmentTypeFlags;
+                    self.player_enchantments.retain(|e| {
+                        (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
+                    });
+                    events.push(WorldEvent::EnchantmentsPurged);
                 }
             }
             GameMessage::UpdateHealth { target, health } => {

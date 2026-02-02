@@ -35,6 +35,8 @@ Used for most strings (names, chat, descriptions).
 3. `padding`: 0-3 bytes of `0x00`. **Crucial:** The padding must ensure that the *total* number of bytes used by the string (including the 2-byte length prefix) is a **multiple of 4**.
    - *Example:* A 3-character string ("abc") takes 2 (length) + 3 (data) = 5 bytes. It requires 3 bytes of padding to reach 8 bytes.
 
+**Discrepancy Note:** Strings stored within **Property Hash Tables** (like in `PlayerDescription` 0xF7B0:0x0013) are **NOT PADDED**. They consist only of the 2-byte length and the data. Any attempt to align them to 4 bytes will result in a parsing drift.
+
 #### `String32L` (Login String)
 Used exclusively in the `LoginRequest`.
 1. `data_total_len`: `uint32`. This is the count of all bytes following this field (Length Prefix + Data + Padding).

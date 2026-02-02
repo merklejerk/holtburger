@@ -49,6 +49,7 @@ pub enum SessionEvent {
     Message(Vec<u8>),
     HandshakeRequest(ConnectRequestData),
     HandshakeResponse { cookie: u64, client_id: u16 },
+    TimeSync(f64),
 }
 
 pub struct Session {
@@ -513,7 +514,39 @@ impl Session {
             }
         }
 
-        // 3. Check for Blobs
+        // 3. Check for TimeSync
+        if header.flags & flags::TIME_SYNC != 0 {
+            let mut offset = 0;
+            // TimeSync is an optional header. We need to find its specific offset.
+            // PacketHeaderOptional sequence:
+            // SERVER_SWITCH (8), REQUEST_RETRANSMIT (4+4*n), REJECT_RETRANSMIT (4+4*n), ACK_SEQUENCE (4), CONNECT_RESPONSE (8), CICMD (8), TIME_SYNC (8)
+            if header.flags & flags::SERVER_SWITCH != 0 {
+                offset += 8;
+            }
+            if header.flags & flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
+                let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                offset += 4 + (count as usize * 4);
+            }
+            if header.flags & flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
+                let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                offset += 4 + (count as usize * 4);
+            }
+            if header.flags & flags::ACK_SEQUENCE != 0 {
+                offset += 4;
+            }
+            if header.flags & flags::CONNECT_RESPONSE != 0 {
+                offset += 8;
+            }
+            if header.flags & flags::CICMD != 0 {
+                offset += 8;
+            }
+            if header.flags & flags::TIME_SYNC != 0 && offset + 8 <= data.len() {
+                let server_time = LittleEndian::read_f64(&data[offset..offset + 8]);
+                events.push(SessionEvent::TimeSync(server_time));
+            }
+        }
+
+        // 4. Check for Blobs
         if header.flags & flags::BLOB_FRAGMENTS != 0 {
             let mut offset = self.get_payload_offset(header.flags, &data);
             while offset + FRAGMENT_HEADER_SIZE <= data.len() {

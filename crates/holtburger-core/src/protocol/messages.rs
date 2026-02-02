@@ -906,14 +906,15 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_SKILL => {
-                if data.len() >= 35 {
-                    let skill = LittleEndian::read_u32(&data[5..9]);
-                    let ranks = LittleEndian::read_u32(&data[9..13]);
-                    // offset + 13: adjustPP (ushort)
-                    let status = LittleEndian::read_u32(&data[15..19]);
-                    let xp = LittleEndian::read_u32(&data[19..23]);
-                    let init = LittleEndian::read_u32(&data[23..27]);
-                    // rest is resistance (4) and last_used (8)
+                if data.len() >= 40 {
+                    // Header(4) + Seq(4) + SkillID(4) + Ranks(2) + Status(2) + SAC(4) + XP(4) + Init(4) + Resist(4) + Time(8) = 40
+                    let skill = LittleEndian::read_u32(&data[8..12]);
+                    let ranks = LittleEndian::read_u16(&data[12..14]) as u32;
+                    let status = LittleEndian::read_u16(&data[14..16]) as u32;
+                    let _sac = LittleEndian::read_u32(&data[16..20]);
+                    let xp = LittleEndian::read_u32(&data[20..24]);
+                    let init = LittleEndian::read_u32(&data[24..28]);
+
                     GameMessage::UpdateSkill {
                         skill,
                         ranks,
@@ -1559,19 +1560,21 @@ pub fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> 
         let count = LittleEndian::read_u16(&data[offset..offset + 2]) as usize;
         offset += 4; // Skip count + buckets header
         for _ in 0..count {
-            // Skill struct size is 32 bytes (No Status field on the wire?)
+            // Skill struct size is 32 bytes
+            // Format: type(4), ranks(2), status(2), sac(4), xp(4), init(4), resist(4), last_used(8)
             if data.len() < offset + 32 {
                 log::warn!("Truncated skill vector at offset {}", offset);
                 break;
             }
             let sk_type = LittleEndian::read_u32(&data[offset..offset + 4]);
-            let ranks = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
-            // Status (ushort) is missing compared to ACE?
-            // training/advancement follows immediately
-            let training = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
+            let ranks = LittleEndian::read_u16(&data[offset + 4..offset + 6]) as u32;
+            let status = LittleEndian::read_u16(&data[offset + 6..offset + 8]) as u32;
+            let _sac = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
             let xp = LittleEndian::read_u32(&data[offset + 12..offset + 16]);
             let init = LittleEndian::read_u32(&data[offset + 16..offset + 20]);
-            skills.push((sk_type, ranks, training, xp, init));
+            // Bytes 20..24: Resistance (4)
+            // Bytes 24..32: LastUsed (8)
+            skills.push((sk_type, ranks, status, xp, init));
             offset += 32;
         }
     }
@@ -2407,7 +2410,7 @@ mod tests {
     #[test]
     fn test_unpack_player_description_skills_fixed_width() {
         let mut data = Vec::new();
-        data.extend_from_slice(&0x0000u32.to_le_bytes()); // no property flags
+        data.extend_from_slice(&0x0000_0000u32.to_le_bytes()); // no property flags
         data.extend_from_slice(&0u32.to_le_bytes()); // wee_type
 
         data.extend_from_slice(&0x0002u32.to_le_bytes()); // vector_flags: Skill
@@ -2417,14 +2420,15 @@ mod tests {
         data.extend_from_slice(&0x0001u16.to_le_bytes()); // count: 1
         data.extend_from_slice(&0x0001u16.to_le_bytes()); // buckets: 1
 
-        // Skill entry (32 bytes - Retail Format has NO Status field)
+        // Skill entry (32 bytes - Ground Truth from ACE)
         data.extend_from_slice(&32u32.to_le_bytes()); // type: 32
-        data.extend_from_slice(&100u32.to_le_bytes()); // ranks
-        // REMOVED: Status (2 bytes)
-        data.extend_from_slice(&2u32.to_le_bytes()); // training (trained=2)
+        data.extend_from_slice(&100u16.to_le_bytes()); // ranks
+        data.extend_from_slice(&1u16.to_le_bytes()); // status
+        data.extend_from_slice(&2u32.to_le_bytes()); // sac (trained=2)
         data.extend_from_slice(&1000u32.to_le_bytes()); // xp
         data.extend_from_slice(&10u32.to_le_bytes()); // init
-        data.extend_from_slice(&[0u8; 12]); // remaining bytes (difficulty + time)
+        data.extend_from_slice(&0u32.to_le_bytes()); // resistance
+        data.extend_from_slice(&0.0f64.to_le_bytes()); // last used
 
         let msg = unpack_player_description(0, &data);
         assert!(msg.is_some());
@@ -2432,7 +2436,7 @@ mod tests {
             assert_eq!(skills.len(), 1);
             assert_eq!(skills[0].0, 32); // id
             assert_eq!(skills[0].1, 100); // ranks
-            assert_eq!(skills[0].2, 2); // training
+            assert_eq!(skills[0].2, 1); // status
         } else {
             panic!("Expected PlayerDescription");
         }

@@ -47,8 +47,8 @@ pub enum ClientEvent {
     },
     StatusUpdate {
         state: ClientState,
-        logon_retry: Option<(u32, u32)>,
-        enter_retry: Option<(u32, u32)>,
+        logon_retry: Option<(u32, u32, Option<Instant>)>,
+        enter_retry: Option<(u32, u32, Option<Instant>)>,
     },
     World(Box<crate::world::WorldEvent>),
 }
@@ -132,6 +132,8 @@ pub struct Client {
     password: Option<String>,
     logon_retry: RetryState,
     enter_retry: RetryState,
+    pub message_dump_dir: Option<std::path::PathBuf>,
+    message_counter: usize,
 }
 
 impl Client {
@@ -152,7 +154,8 @@ impl Client {
         character_preference: Option<String>,
     ) -> Result<Self> {
         // Replay doesn't strictly need a target addr, but we can use a dummy one
-        let target = "127.0.0.1:9000".parse::<SocketAddr>().unwrap();
+        // Use 9001 for World server traffic (player spawns!)
+        let target = "127.0.0.1:9001".parse::<SocketAddr>().unwrap();
         let session = Session::new_replay(replay_path, target)?;
         Self::create_with_session(session, account_name, character_preference)
     }
@@ -188,8 +191,10 @@ impl Client {
             command_rx: None,
             connection_cookie: 0,
             password: None,
-            logon_retry: RetryState::new(6),
-            enter_retry: RetryState::new(6),
+            logon_retry: RetryState::new(5),
+            enter_retry: RetryState::new(5),
+            message_dump_dir: None,
+            message_counter: 0,
         })
     }
 
@@ -213,12 +218,20 @@ impl Client {
     fn send_status_event(&self) {
         if let Some(tx) = &self.event_tx {
             let logon_retry = if self.logon_retry.active {
-                Some((self.logon_retry.attempts, self.logon_retry.max_attempts))
+                Some((
+                    self.logon_retry.attempts,
+                    self.logon_retry.max_attempts,
+                    self.logon_retry.next_time,
+                ))
             } else {
                 None
             };
             let enter_retry = if self.enter_retry.active {
-                Some((self.enter_retry.attempts, self.enter_retry.max_attempts))
+                Some((
+                    self.enter_retry.attempts,
+                    self.enter_retry.max_attempts,
+                    self.enter_retry.next_time,
+                ))
             } else {
                 None
             };
@@ -236,8 +249,6 @@ impl Client {
             ClientCommand::SelectCharacterByIndex(idx) => match &self.state {
                 ClientState::CharacterSelection(chars) if (1..=chars.len()).contains(&idx) => {
                     let char_id = chars[idx - 1].0;
-                    self.state = ClientState::EnteringWorld;
-                    self.send_status_event();
                     self.select_character(char_id).await
                 }
                 _ => Ok(()),
@@ -344,7 +355,8 @@ impl Client {
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
 
-                    self.world.tick(dt);
+                    // TODO: Use actual player radius from DAT/Properties
+                    self.world.tick(dt, 0.35);
                 }
                 _ = retry_tick.tick() => {
                     let now = Instant::now();
@@ -366,6 +378,12 @@ impl Client {
     }
 
     async fn handle_message(&mut self, data: &[u8]) -> Result<()> {
+        if let Some(ref dump_dir) = self.message_dump_dir {
+            let path = dump_dir.join(format!("{:05}.bin", self.message_counter));
+            std::fs::write(path, data)?;
+            self.message_counter += 1;
+        }
+
         let message = GameMessage::unpack(data);
 
         // Pass to world state for tracking positioning and spawning
@@ -499,6 +517,7 @@ impl Client {
             }
         }
         self.state = ClientState::CharacterSelection(characters.clone());
+        self.send_status_event();
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(ClientEvent::CharacterList(characters));
         }
@@ -558,8 +577,10 @@ impl Client {
     fn handle_character_error(&mut self, error_code: u32) -> Result<()> {
         if error_code == character_error_codes::ACCOUNT_ALREADY_LOGGED_ON {
             self.logon_retry.schedule();
+            self.send_status_event();
         } else if error_code == character_error_codes::ENTER_GAME_CHARACTER_IN_WORLD {
             self.enter_retry.schedule();
+            self.send_status_event();
         }
         self.send_message_event(
             MessageKind::Error,
@@ -571,6 +592,7 @@ impl Client {
     async fn select_character(&mut self, char_id: u32) -> Result<()> {
         self.character_id = Some(char_id);
         self.state = ClientState::EnteringWorld;
+        self.send_status_event();
         let msg = GameMessage::CharacterEnterWorldRequest { char_id };
         self.session.send_message(&msg).await?;
         Ok(())

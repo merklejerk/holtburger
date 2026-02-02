@@ -7,10 +7,11 @@ pub mod stats;
 
 use self::entity::{Entity, EntityManager};
 use self::position::WorldPosition;
-use self::properties::ObjectDescriptionFlag;
+use self::properties::{ObjectDescriptionFlag, PropertyValue};
 use self::spatial::SpatialScene;
 use crate::dat::DatDatabase;
 use crate::math::{Quaternion, Vector3};
+use crate::protocol::properties::PropertyInstanceId;
 use std::sync::Arc;
 
 use crate::protocol::messages::GameMessage;
@@ -28,9 +29,8 @@ pub enum WorldEvent {
     SkillUpdated(stats::Skill),
     PropertyUpdated {
         guid: u32,
-        property_type: String,
         property_id: u32,
-        value: String,
+        value: PropertyValue,
     },
     PlayerInfo {
         guid: u32,
@@ -45,6 +45,8 @@ pub enum WorldEvent {
 pub struct WorldState {
     pub entities: EntityManager,
     pub player_guid: u32,
+    pub player_attributes: std::collections::HashMap<stats::AttributeType, u32>,
+    pub player_vitals: std::collections::HashMap<stats::VitalType, stats::Vital>,
     pub dat: Option<Arc<DatDatabase>>,
 
     pub scene: SpatialScene,
@@ -55,6 +57,8 @@ impl WorldState {
         Self {
             entities: EntityManager::new(),
             player_guid: 0,
+            player_attributes: std::collections::HashMap::new(),
+            player_vitals: std::collections::HashMap::new(),
             dat,
             scene: SpatialScene::new(),
         }
@@ -71,6 +75,9 @@ impl WorldState {
                 name,
                 wcid,
                 pos,
+                parent_id,
+                container_id,
+                wielder_id,
                 flags,
                 item_type,
                 ..
@@ -87,14 +94,30 @@ impl WorldState {
                     }),
                 );
                 entity.wcid = wcid;
-                entity.radius = 0.35; // Typical AC player radius
                 entity.flags = flags;
                 entity.item_type = Some(item_type);
+                entity.physics_parent_id = parent_id;
+                entity.container_id = container_id;
+                entity.wielder_id = wielder_id;
 
                 self.add_entity(entity.clone());
                 events.push(WorldEvent::EntitySpawned(Box::new(entity)));
             }
             GameMessage::ObjectDelete { guid } => {
+                if let Some(_entity) = self.remove_entity(guid) {
+                    events.push(WorldEvent::EntityDespawned(guid));
+                }
+            }
+            GameMessage::ParentEvent { child_guid, parent_guid } => {
+                if let Some(entity) = self.entities.get_mut(child_guid) {
+                    entity.physics_parent_id = Some(parent_guid);
+                }
+
+                if let Some(_entity) = self.remove_entity(child_guid) {
+                    events.push(WorldEvent::EntityDespawned(child_guid));
+                }
+            }
+            GameMessage::PickupEvent { guid } => {
                 if let Some(_entity) = self.remove_entity(guid) {
                     events.push(WorldEvent::EntityDespawned(guid));
                 }
@@ -130,7 +153,6 @@ impl WorldState {
                             rotation: Quaternion::identity(),
                         }),
                     );
-                    entity.radius = 0.35;
                     entity.flags = ObjectDescriptionFlag::PLAYER;
                     entity
                 };
@@ -147,24 +169,56 @@ impl WorldState {
                 let mut attr_objs = Vec::new();
                 let mut vital_objs = Vec::new();
 
-                for (at_type, ranks, start, _xp, current) in attributes {
-                    // IDs 1-6 are Attributes, 7-9 are Vitals (mapping to 1-3 in VitalType)
+                // Sort attributes first so we have them for vitals
+                let mut sorted_attrs = attributes;
+                sorted_attrs.sort_by_key(|a| a.0);
+
+                for (at_type, ranks, start, _xp, current) in sorted_attrs {
+                    // IDs 1-6 are Attributes, 101-103 are Vitals (mapping to 2, 4, 6 in VitalType)
                     if at_type <= 6 {
                         if let Some(attr_type) = stats::AttributeType::from_repr(at_type) {
-                            attr_objs.push(stats::Attribute {
-                                attr_type,
-                                base: ranks + start,
-                            });
+                            let base = ranks + start;
+                            self.player_attributes.insert(attr_type, base);
+                            attr_objs.push(stats::Attribute { attr_type, base });
                         }
-                    } else if at_type <= 9 {
-                        #[allow(clippy::collapsible_if)]
-                        if let Some(vital_type) = stats::VitalType::from_repr(at_type - 6) {
-                            vital_objs.push(stats::Vital {
-                                vital_type,
-                                base: ranks + start,
-                                current,
-                            });
-                        }
+                    } else if at_type >= 101 && at_type <= 103 {
+                        let vital_type = match at_type {
+                            101 => stats::VitalType::Health,
+                            102 => stats::VitalType::Stamina,
+                            103 => stats::VitalType::Mana,
+                            _ => continue,
+                        };
+
+                        let bonus = match vital_type {
+                            stats::VitalType::Health => {
+                                self.player_attributes
+                                    .get(&stats::AttributeType::EnduranceAttr)
+                                    .cloned()
+                                    .unwrap_or(0)
+                                    / 2
+                            }
+                            stats::VitalType::Stamina => self
+                                .player_attributes
+                                .get(&stats::AttributeType::EnduranceAttr)
+                                .cloned()
+                                .unwrap_or(0),
+                            stats::VitalType::Mana => self
+                                .player_attributes
+                                .get(&stats::AttributeType::SelfAttr)
+                                .cloned()
+                                .unwrap_or(0),
+                        };
+
+                        let base = ranks + start + bonus;
+                        let final_base = if base == 0 { current } else { base };
+
+                        let vital = stats::Vital {
+                            vital_type,
+                            base: final_base,
+                            current,
+                        };
+                        self.player_vitals.insert(vital_type, vital.clone());
+                        vital_objs.push(vital);
                     }
                 }
 
@@ -205,9 +259,12 @@ impl WorldState {
                     Some(a) => a,
                     None => return events,
                 };
+                let base = start + ranks;
+                self.player_attributes.insert(attr_type, base);
+
                 events.push(WorldEvent::AttributeUpdated(stats::Attribute {
                     attr_type,
-                    base: start + ranks,
+                    base,
                 }));
             }
             GameMessage::UpdateSkill {
@@ -241,16 +298,85 @@ impl WorldState {
                 xp: _,
                 current,
             } => {
+                log::debug!("UpdateVital: vital={}, ranks={}, start={}, current={}", vital, ranks, start, current);
                 let vital_type = match stats::VitalType::from_repr(vital) {
                     Some(v) => v,
-                    None => return events,
+                    None => {
+                        log::warn!("Unknown vital ID: {}", vital);
+                        return events;
+                    }
                 };
 
-                events.push(WorldEvent::VitalUpdated(stats::Vital {
+                let bonus = match vital_type {
+                    stats::VitalType::Health => {
+                        self.player_attributes
+                            .get(&stats::AttributeType::EnduranceAttr)
+                            .cloned()
+                            .unwrap_or(0)
+                            / 2
+                    }
+                    stats::VitalType::Stamina => self
+                        .player_attributes
+                        .get(&stats::AttributeType::EnduranceAttr)
+                        .cloned()
+                        .unwrap_or(0),
+                    stats::VitalType::Mana => self
+                        .player_attributes
+                        .get(&stats::AttributeType::SelfAttr)
+                        .cloned()
+                        .unwrap_or(0),
+                };
+
+                let base = start + ranks + bonus;
+                let final_base = if base == 0 { current } else { base };
+
+                let vital_obj = stats::Vital {
                     vital_type,
-                    base: start + ranks,
+                    base: final_base,
                     current,
-                }));
+                };
+                self.player_vitals.insert(vital_type, vital_obj.clone());
+
+                events.push(WorldEvent::VitalUpdated(vital_obj));
+            }
+            GameMessage::UpdateVitalCurrent { vital, current } => {
+                log::debug!("UpdateVitalCurrent: vital={}, current={}", vital, current);
+                let vital_type = match stats::VitalType::from_repr(vital) {
+                    Some(v) => v,
+                    None => {
+                        log::warn!("Unknown vital current ID: {}", vital);
+                        return events;
+                    }
+                };
+
+                if let Some(vital_obj) = self.player_vitals.get_mut(&vital_type) {
+                    log::debug!("Updating vital {} from {} to {}", vital_type, vital_obj.current, current);
+                    vital_obj.current = current;
+                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                } else {
+                    log::warn!("Received UpdateVitalCurrent for {} but vital not in cache", vital_type);
+                }
+            }
+            GameMessage::UpdateHealth { target, health } => {
+                let target_guid = if target == 0 { self.player_guid } else { target };
+                
+                if let Some(_entity) = self.entities.get_mut(target_guid) {
+                    // Update health property if we want to track it on entities
+                }
+
+                if target_guid == self.player_guid && target_guid != 0 {
+                    if let Some(vital_obj) = self.player_vitals.get_mut(&stats::VitalType::Health) {
+                        let new_current = (health * vital_obj.base as f32) as u32;
+                        log::debug!("UpdateHealth (self): percent={}, new_current={}", health, new_current);
+                        vital_obj.current = new_current;
+                        events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                    }
+                }
+            }
+            GameMessage::SetState { guid, state } => {
+                if let Some(entity) = self.entities.get_mut(guid) {
+                    entity.physics_state = crate::world::properties::PhysicsState::from_bits_retain(state);
+                }
             }
             GameMessage::UpdatePropertyInt {
                 guid,
@@ -263,9 +389,8 @@ impl WorldState {
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid,
-                    property_type: "Int".to_string(),
                     property_id: property,
-                    value: value.to_string(),
+                    value: PropertyValue::Int(value),
                 });
             }
             GameMessage::UpdatePropertyInt64 {
@@ -279,9 +404,8 @@ impl WorldState {
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid,
-                    property_type: "Int64".to_string(),
                     property_id: property,
-                    value: value.to_string(),
+                    value: PropertyValue::Int64(value),
                 });
             }
             GameMessage::UpdatePropertyBool {
@@ -295,9 +419,8 @@ impl WorldState {
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid,
-                    property_type: "Bool".to_string(),
                     property_id: property,
-                    value: value.to_string(),
+                    value: PropertyValue::Bool(value),
                 });
             }
             GameMessage::UpdatePropertyFloat {
@@ -311,9 +434,8 @@ impl WorldState {
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid,
-                    property_type: "Float".to_string(),
                     property_id: property,
-                    value: value.to_string(),
+                    value: PropertyValue::Float(value),
                 });
             }
             GameMessage::UpdatePropertyString {
@@ -327,9 +449,8 @@ impl WorldState {
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid,
-                    property_type: "String".to_string(),
                     property_id: property,
-                    value,
+                    value: PropertyValue::String(value),
                 });
             }
             GameMessage::UpdatePropertyDataId {
@@ -343,9 +464,8 @@ impl WorldState {
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid,
-                    property_type: "DID".to_string(),
                     property_id: property,
-                    value: format!("{:08X}", value),
+                    value: PropertyValue::DID(value),
                 });
             }
             GameMessage::UpdatePropertyInstanceId {
@@ -356,12 +476,18 @@ impl WorldState {
                 let target_guid = if guid == 0 { self.player_guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.iid_properties.insert(property, value);
+
+                    if property == PropertyInstanceId::Container as u32 {
+                        entity.container_id = if value == 0 { None } else { Some(value) };
+                    }
+                    if property == PropertyInstanceId::Wielder as u32 {
+                        entity.wielder_id = if value == 0 { None } else { Some(value) };
+                    }
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid,
-                    property_type: "IID".to_string(),
                     property_id: property,
-                    value: format!("{:08X}", value),
+                    value: PropertyValue::IID(value),
                 });
             }
             _ => {}
@@ -447,17 +573,16 @@ impl WorldState {
     }
 
     /// Advance the world simulation by `dt` seconds.
-    pub fn tick(&mut self, dt: f32) {
+    pub fn tick(&mut self, dt: f32, radius: f32) {
         if self.player_guid == 0 {
             return;
         }
 
-        let (vel, coords, lb, radius) = if let Some(player) = self.entities.get(self.player_guid) {
+        let (vel, coords, lb) = if let Some(player) = self.entities.get(self.player_guid) {
             (
                 player.velocity,
                 player.position.coords,
                 player.position.landblock_id,
-                player.radius,
             )
         } else {
             return;
@@ -516,7 +641,6 @@ mod tests {
             },
         );
         player.velocity = Vector3::new(2.0, 0.0, 0.0);
-        player.radius = 0.5;
         player.flags = ObjectDescriptionFlag::PLAYER;
         world.add_entity(player);
 
@@ -556,7 +680,6 @@ mod tests {
                 rotation: Quaternion::identity(),
             },
         );
-        wall.radius = 1.0;
         wall.gfx_id = Some(0x99);
         world.add_entity(wall);
 
@@ -571,7 +694,7 @@ mod tests {
 
         // Tick 1: Still safe. Pos will move towards wall.
         // Moving at 2.0 m/s for 0.1s -> 0.2m move.
-        world.tick(0.1);
+        world.tick(0.1, 0.5);
         let pos1 = world.entities.get(0x1).unwrap().position.coords;
         assert!(pos1.x > 0.0);
         assert!(pos1.x < 1.0);
@@ -580,7 +703,7 @@ mod tests {
         // Wall boundary is at x=1.0. Player radius is 0.5.
         // Collision should trigger when player center x + 0.5 >= 1.0 (i.e. x >= 0.5)
         for _ in 0..10 {
-            world.tick(0.1);
+            world.tick(0.1, 0.5);
         }
 
         let player = world.entities.get(0x1).unwrap();

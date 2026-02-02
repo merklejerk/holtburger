@@ -3,6 +3,7 @@ use clap::Parser;
 use holtburger_core::{Client, ClientCommand, ClientEvent};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -18,18 +19,33 @@ struct Args {
     #[arg(short, long)]
     character: Option<String>,
     #[arg(long)]
-    capture: Option<String>,
-    #[arg(long)]
     replay: Option<String>,
     #[arg(short, long, default_value_t = 30)]
     timeout: u64,
+    #[arg(short, long, default_value = "extracted_messages")]
+    out_dir: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
-    println!("Diagnostic Harness starting...");
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    
+    let out_dir = PathBuf::from(&args.out_dir);
+    if !out_dir.exists() {
+        std::fs::create_dir_all(&out_dir)?;
+    } else {
+        // Clean out existing messages
+        for entry in std::fs::read_dir(&out_dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                std::fs::remove_file(entry.path())?;
+            }
+        }
+    }
+
+    println!("Message Extractor starting...");
+    println!("Dumping messages to: {}", out_dir.display());
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -46,26 +62,12 @@ async fn main() -> Result<()> {
         .await?
     };
 
-    if let Some(capture_path) = args.capture {
-        let caps_dir = std::path::Path::new("caps");
-        if !caps_dir.exists() {
-            std::fs::create_dir_all(caps_dir)?;
-        }
-
-        let mut final_path = capture_path.clone();
-        let path = std::path::Path::new(&capture_path);
-        if path.parent() == Some(std::path::Path::new("")) {
-            final_path = format!("caps/{}", capture_path);
-        }
-
-        client.session.set_capture(&final_path)?;
-    }
-
+    client.message_dump_dir = Some(out_dir);
     client.set_event_tx(event_tx);
     client.set_command_rx(command_rx);
 
     let password = args.password.clone();
-    let client_handle = tokio::spawn(async move {
+    let mut client_handle = tokio::spawn(async move {
         match client.run(&password).await {
             Err(e) if !e.to_string().contains("Graceful disconnect") => {
                 log::error!("Client error: {}", e);
@@ -74,53 +76,51 @@ async fn main() -> Result<()> {
         }
     });
 
-    let timeout = tokio::time::sleep(Duration::from_secs(args.timeout));
+    let timeout_duration = Duration::from_secs(args.timeout);
+    let timeout = tokio::time::sleep(timeout_duration);
     tokio::pin!(timeout);
 
     loop {
         tokio::select! {
             Some(event) = event_rx.recv() => {
                 match event {
-                    ClientEvent::Message(msg) => println!(">>> {}", msg.text),
                     ClientEvent::CharacterList(chars) => {
                         println!("Characters received:");
                         for (id, name) in &chars { println!("  - {} ({:08X})", name, id); }
 
-                        let target_name = args.character.as_deref().unwrap_or("buddy");
+                        let target_name = args.character.as_deref().unwrap_or("");
                         if !chars.is_empty() {
-                            let mut selected = false;
-                            for (id, name) in &chars {
-                                if name.to_lowercase().contains(&target_name.to_lowercase()) {
-                                    println!("Selecting character {}...", name);
-                                    let _ = command_tx.send(ClientCommand::SelectCharacter(*id));
-                                    selected = true;
-                                    break;
+                            let mut selected_id = None;
+                            if target_name.is_empty() {
+                                selected_id = Some(chars[0].0);
+                            } else {
+                                for (id, name) in &chars {
+                                    if name.to_lowercase().contains(&target_name.to_lowercase()) {
+                                        selected_id = Some(*id);
+                                        break;
+                                    }
                                 }
                             }
-                            if !selected {
-                                println!("No match for '{}', selecting first character...", target_name);
-                                let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(1));
+
+                            if let Some(id) = selected_id {
+                                println!("Selecting character ID {:08X}...", id);
+                                let _ = command_tx.send(ClientCommand::SelectCharacter(id));
                             }
                         }
-                    }
-                    ClientEvent::World(we) => {
-                        println!("World Event: {:?}", we);
                     }
                     _ => {}
                 }
             }
             _ = &mut timeout => {
-                println!("Harness timeout reached.");
+                println!("Timeout reached, exiting.");
                 break;
             }
-            _ = tokio::signal::ctrl_c() => {
-                println!("\nUser interrupt, shutting down.");
+            _ = &mut client_handle => {
+                println!("Client handle finished, exiting.");
                 break;
             }
         }
     }
 
-    let _ = command_tx.send(ClientCommand::Quit);
-    let _ = client_handle.await;
     Ok(())
 }

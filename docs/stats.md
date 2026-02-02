@@ -80,3 +80,31 @@ The `Status` field in skill updates defines the character's training state:
 - `1`: Untrained
 - `2`: Trained
 - `3`: Specialized
+
+## Effective Stat Calculation
+
+The client performs local recalculation of effective stats to ensure the UI remains responsive and accurate even between server updates. 
+
+### Formulas
+
+- **Derived Vitals (Max)**:
+  - `Health = BaseHealth + (EffectiveEndurance - BaseEndurance) / 2`
+  - `Stamina = BaseStamina + (EffectiveEndurance - BaseEndurance)`
+  - `Mana = BaseMana + (EffectiveSelf - BaseSelf)`
+
+- **Derived Skills**:
+  - `EffectiveSkill = (InvestedRanks + (EffectiveAttr1 + EffectiveAttr2) / Divisor) * Multipliers + Additives`
+
+Common skill contributing attributes:
+- Magic (War/Life/Creature/Item/Void): `(Focus + Self) / 4`
+- Melee Defense: `(Quickness + Coordination) / 3`
+- Missile Defense: `(Quickness + Coordination) / 5`
+- Magic Defense: `(Focus + Self) / 7`
+- Arcane Lore/Mana Conversion: `(Focus + Self) / 6 or 3`
+- Weapons: `(Strength + Coordination) / 3` or `(Quickness + Coordination) / 3`
+
+### Stacking Rules
+
+- Only the highest power level enchantment from each `spell_category` is applied to a specific stat mod key.
+- Multipliers are applied first, then additives.
+- Negative values are generally clamped to 0.

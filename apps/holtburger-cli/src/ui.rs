@@ -348,6 +348,12 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                             Style::default()
                         };
 
+                        let duration_color = if i == state.selected_nearby_index {
+                            Color::White
+                        } else {
+                            Color::DarkGray
+                        };
+
                         ListItem::new(Line::from(vec![
                             Span::styled(format!("{:<15} ", name), Style::default().fg(color)),
                             Span::raw(format!("(L{}) -> {} ", enchant.layer, mod_desc)),
@@ -357,7 +363,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                             ),
                             Span::styled(
                                 format!(" [{}]", time_str),
-                                Style::default().fg(Color::DarkGray),
+                                Style::default().fg(duration_color),
                             ),
                         ]))
                         .style(style)
@@ -560,7 +566,14 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             f.render_widget(nearby_block, main_chunks[0]);
 
             // Tooltip logic
-            if (state.nearby_tab == NearbyTab::Entities || state.nearby_tab == NearbyTab::Inventory)
+            if state.nearby_tab == NearbyTab::Effects && !state.player_enchantments.is_empty() {
+                let tools = vec![Span::raw("[D]ebug ")];
+                let tools_para = Paragraph::new(Line::from(tools))
+                    .block(Block::default().borders(Borders::NONE))
+                    .alignment(ratatui::layout::Alignment::Center);
+                f.render_widget(tools_para, nearby_inner_chunks[1]);
+            } else if (state.nearby_tab == NearbyTab::Entities
+                || state.nearby_tab == NearbyTab::Inventory)
                 && let Some((selected_e, _)) = nearby.get(state.selected_nearby_index)
             {
                 let mut tools = vec![Span::raw("[A]ssess ")];

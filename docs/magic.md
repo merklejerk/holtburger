@@ -150,3 +150,17 @@ For each bit set in the `mask`, a list follows in this order:
 - `uint32` count
 - `LayeredSpell[]` array
 
+### `MagicPurgeEnchantments` (`0x02C6`)
+- (No payload)
+
+### `MagicDispelEnchantment` (`0x02C7`)
+- `uint16` spell_id
+- `uint16` layer
+
+### `MagicDispelMultipleEnchantments` (`0x02C8`)
+- `uint32` count
+- `LayeredSpell[]` array
+
+### `MagicPurgeBadEnchantments` (`0x0312`)
+- (No payload)
+

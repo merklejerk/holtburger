@@ -261,12 +261,7 @@ Updates the current value of a vital (e.g., during health regeneration).
 - `uint8` `Sequence`.
 - `uint32` `VitalID`.
 - `uint32` `CurrentValue`.
-- `uint32` `Sequence`.
-- `uint32` `VitalID`.
-- `uint32` `Ranks`.
-- `uint32` `StartingValue`.
-- `uint32` `ExperienceSpent`.
-- `uint32` `CurrentValue`.
+
 
 ---
 
@@ -341,6 +336,12 @@ The `GameEvent` message is a multiplexer for a wide variety of UI, magic, and wo
 | `0x02BD` | `Tell` | Private message details. |
 | `0x02C2` | `MagicUpdateEnchantment` | See [magic.md](magic.md). |
 | `0x02C3` | `MagicRemoveEnchantment`| See [magic.md](magic.md). |
+| `0x02C4` | `MagicUpdateMultipleEnchantments` | See [magic.md](magic.md). |
+| `0x02C5` | `MagicRemoveMultipleEnchantments` | See [magic.md](magic.md). |
+| `0x02C6` | `MagicPurgeEnchantments` | Clear all enchantments. |
+| `0x02C7` | `MagicDispelEnchantment` | Silent removal of a single enchantment. |
+| `0x02C8` | `MagicDispelMultipleEnchantments` | Silent removal of multiple enchantments. |
+| `0x0312` | `MagicPurgeBadEnchantments` | Remove all debuffs. |
 
 ### `0x0013` PlayerDescription
 

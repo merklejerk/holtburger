@@ -38,6 +38,23 @@ Total size is 64 bytes if `has_spell_set_id` is set, otherwise 60.
 | 56 | `float32` | stat_mod_value | The value of the modification. |
 | 60 | `uint32` | spell_set_id | (Optional) The ID of the spell set. |
 
+## Enchantment Layering and Stacking
+
+Asheron's Call uses a layering system to handle multiple spells in the same category (e.g., multiple Strength buffs).
+
+### Layers
+- **Definition**: Each enchantment is assigned a `layer` (usually 1 or 2).
+- **Function**: Layers act as backup slots. If you cast a weaker spell while a stronger one is active, the weaker one is stored in a secondary layer rather than being discarded.
+- **Redundancy**: This allows the server to automatically promote a backup spell if the primary (strongest) one is dispelled or expires.
+
+### Stacking Rules
+Only one enchantment per `spell_category` can be active at a time across all layers. The server determines the "winner" based on:
+1. **Power Level**: The enchantment with the highest `power_level` is active.
+2. **Suppression**: Enchantments with lower power levels are "suppressed" and do not contribute to stats until the higher-power enchantment is removed.
+
+### Layer Sources
+While most player-cast spells occupy standard layers, specific items or quest rewards can sometimes occupy unique layers, allowing them to stack with standard magic (e.g., specific auras or unique item procs).
+
 ### EnchantmentTypeFlags
 
 Determines how enchantments stack and what type of modification is applied.

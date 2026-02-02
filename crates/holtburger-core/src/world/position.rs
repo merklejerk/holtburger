@@ -10,6 +10,46 @@ pub struct WorldPosition {
     pub rotation: Quaternion,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum WorldCoordinates {
+    Indoor {
+        landblock: u16,
+    },
+    Outdoor {
+        lat: f32, // North is positive, South is negative
+        lon: f32, // East is positive, West is negative
+        alt: f32,
+    },
+}
+
+impl WorldCoordinates {
+    pub fn to_string_with_precision(&self, precision: usize) -> String {
+        match self {
+            WorldCoordinates::Indoor { landblock } => format!("Indoors [{:04X}]", landblock),
+            WorldCoordinates::Outdoor { lat, lon, alt } => {
+                let ns = if *lat >= 0.0 { "N" } else { "S" };
+                let ew = if *lon >= 0.0 { "E" } else { "W" };
+                format!(
+                    "{:.*}{}, {:.*}{}, {:.1}Z",
+                    precision,
+                    lat.abs(),
+                    ns,
+                    precision,
+                    lon.abs(),
+                    ew,
+                    alt
+                )
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for WorldCoordinates {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string_with_precision(2))
+    }
+}
+
 impl WorldPosition {
     pub fn is_indoors(&self) -> bool {
         (self.landblock_id & 0xFFFF) >= 0x0100
@@ -21,9 +61,11 @@ impl WorldPosition {
         (x, y)
     }
 
-    pub fn to_world_coords(&self) -> String {
+    pub fn to_world_coords(&self) -> WorldCoordinates {
         if self.is_indoors() {
-            return format!("Indoors [{:04X}]", self.landblock_id & 0xFFFF);
+            return WorldCoordinates::Indoor {
+                landblock: (self.landblock_id & 0xFFFF) as u16,
+            };
         }
 
         let lb_x = ((self.landblock_id >> 24) & 0xFF) as f32;
@@ -41,17 +83,11 @@ impl WorldPosition {
         let lon = total_x - 101.95;
         let lat = total_y - 101.95;
 
-        let ns = if lat >= 0.0 { "N" } else { "S" };
-        let ew = if lon >= 0.0 { "E" } else { "W" };
-
-        format!(
-            "{:.3}{}, {:.3}{}, {:.1}Z",
-            lat.abs(),
-            ns,
-            lon.abs(),
-            ew,
-            self.coords.z
-        )
+        WorldCoordinates::Outdoor {
+            lat,
+            lon,
+            alt: self.coords.z,
+        }
     }
 
     pub fn distance_to(&self, other: &Self) -> f32 {
@@ -182,19 +218,30 @@ mod tests {
             rotation: Quaternion::identity(),
         };
         assert!(pos.is_indoors());
-        assert_eq!(pos.to_world_coords(), "Indoors [0100]");
+        assert_eq!(
+            pos.to_world_coords(),
+            WorldCoordinates::Indoor { landblock: 0x0100 }
+        );
+        assert_eq!(pos.to_world_coords().to_string(), "Indoors [0100]");
     }
 
     #[test]
     fn test_outdoor_format_known() {
-        // Construct landblock bytes x=218 (0xDA), y=85 (0x55) to reproduce 33.500S, 72.800E, 0.0Z
+        // Construct landblock bytes x=218 (0xDA), y=85 (0x55) to reproduce 33.50S, 72.80E, 0.0Z
         let landblock_id = (218u32 << 24) | (85u32 << 16);
         let pos = WorldPosition {
             landblock_id,
             coords: Vector3::new(84.0, 108.0, 0.0),
             rotation: Quaternion::identity(),
         };
-        assert_eq!(pos.to_world_coords(), "33.500S, 72.800E, 0.0Z");
+        let coords = pos.to_world_coords();
+        if let WorldCoordinates::Outdoor { lat, lon, alt: _ } = coords {
+            assert!((lat - (-33.5)).abs() < 1e-4);
+            assert!((lon - 72.8).abs() < 1e-4);
+        } else {
+            panic!("Expected outdoor coordinates");
+        }
+        assert_eq!(coords.to_string(), "33.50S, 72.80E, 0.0Z");
     }
 
     #[test]

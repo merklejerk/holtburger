@@ -11,11 +11,7 @@ use holtburger_cli::classification::{self, EntityClass};
 use holtburger_cli::ui::{self, AppState};
 use holtburger_core::protocol::properties::*;
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
-use ratatui::{
-    Terminal,
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
-};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Mutex;
@@ -242,27 +238,19 @@ async fn main() -> Result<()> {
 
                     match key.code {
                         KeyCode::Tab | KeyCode::BackTab => {
-                            use ui::FocusedPane;
+                            let width = terminal.size()?.width;
                             if key
                                 .modifiers
                                 .contains(crossterm::event::KeyModifiers::CONTROL)
                                 || key.code == KeyCode::BackTab
                             {
                                 // Cycle back
-                                app_state.focused_pane = match app_state.focused_pane {
-                                    FocusedPane::Input => FocusedPane::Context,
-                                    FocusedPane::Context => FocusedPane::Chat,
-                                    FocusedPane::Chat => FocusedPane::Nearby,
-                                    FocusedPane::Nearby => FocusedPane::Context,
-                                };
+                                app_state.focused_pane =
+                                    ui::get_prev_pane(app_state.focused_pane, width);
                             } else {
                                 // Cycle forward
-                                app_state.focused_pane = match app_state.focused_pane {
-                                    FocusedPane::Input => FocusedPane::Nearby,
-                                    FocusedPane::Nearby => FocusedPane::Chat,
-                                    FocusedPane::Chat => FocusedPane::Context,
-                                    FocusedPane::Context => FocusedPane::Nearby,
-                                };
+                                app_state.focused_pane =
+                                    ui::get_next_pane(app_state.focused_pane, width);
                             }
                         }
                         KeyCode::Esc => {
@@ -759,16 +747,18 @@ async fn main() -> Result<()> {
                             if let ui::UIState::Chat = app_state.state {
                                 match app_state.focused_pane {
                                     ui::FocusedPane::Chat => {
-                                        app_state.scroll_offset =
-                                            app_state.scroll_offset.saturating_add(10);
+                                        app_state.scroll_offset = app_state
+                                            .scroll_offset
+                                            .saturating_add(ui::PAGE_SCROLL_STEP);
                                         let max_scroll = app_state.messages.len().saturating_sub(1);
                                         if app_state.scroll_offset > max_scroll {
                                             app_state.scroll_offset = max_scroll;
                                         }
                                     }
                                     ui::FocusedPane::Context => {
-                                        app_state.context_scroll_offset =
-                                            app_state.context_scroll_offset.saturating_add(10);
+                                        app_state.context_scroll_offset = app_state
+                                            .context_scroll_offset
+                                            .saturating_add(ui::PAGE_SCROLL_STEP);
                                         let max_scroll =
                                             app_state.context_buffer.len().saturating_sub(1);
                                         if app_state.context_scroll_offset > max_scroll {
@@ -776,8 +766,9 @@ async fn main() -> Result<()> {
                                         }
                                     }
                                     ui::FocusedPane::Nearby => {
-                                        app_state.selected_nearby_index =
-                                            app_state.selected_nearby_index.saturating_sub(10);
+                                        app_state.selected_nearby_index = app_state
+                                            .selected_nearby_index
+                                            .saturating_sub(ui::PAGE_SCROLL_STEP);
                                     }
                                     _ => {}
                                 }
@@ -787,12 +778,14 @@ async fn main() -> Result<()> {
                             if let ui::UIState::Chat = app_state.state {
                                 match app_state.focused_pane {
                                     ui::FocusedPane::Chat => {
-                                        app_state.scroll_offset =
-                                            app_state.scroll_offset.saturating_sub(10);
+                                        app_state.scroll_offset = app_state
+                                            .scroll_offset
+                                            .saturating_sub(ui::PAGE_SCROLL_STEP);
                                     }
                                     ui::FocusedPane::Context => {
-                                        app_state.context_scroll_offset =
-                                            app_state.context_scroll_offset.saturating_sub(10);
+                                        app_state.context_scroll_offset = app_state
+                                            .context_scroll_offset
+                                            .saturating_sub(ui::PAGE_SCROLL_STEP);
                                     }
                                     ui::FocusedPane::Nearby => {
                                         let nearby_count = app_state
@@ -808,9 +801,10 @@ async fn main() -> Result<()> {
                                                 }
                                             })
                                             .count();
-                                        app_state.selected_nearby_index =
-                                            (app_state.selected_nearby_index + 10)
-                                                .min(nearby_count.saturating_sub(1));
+                                        app_state.selected_nearby_index = (app_state
+                                            .selected_nearby_index
+                                            + ui::PAGE_SCROLL_STEP)
+                                            .min(nearby_count.saturating_sub(1));
                                     }
                                     _ => {}
                                 }
@@ -830,23 +824,7 @@ async fn main() -> Result<()> {
                 }
                 Event::Mouse(mouse) => {
                     let size = terminal.size()?;
-                    let chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .constraints([
-                            Constraint::Length(3), // Status bar
-                            Constraint::Min(10),   // Main area
-                            Constraint::Length(3), // Input area
-                        ])
-                        .split(size);
-
-                    let main_chunks = Layout::default()
-                        .direction(Direction::Horizontal)
-                        .constraints([
-                            Constraint::Percentage(25), // Nearby Entities
-                            Constraint::Percentage(50), // Chat
-                            Constraint::Percentage(25), // Context
-                        ])
-                        .split(chunks[1]);
+                    let (chunks, main_chunks) = ui::get_layout(size);
 
                     match mouse.kind {
                         MouseEventKind::Down(MouseButton::Left) => {
@@ -882,14 +860,16 @@ async fn main() -> Result<()> {
                                 && mouse.column >= main_chunks[1].x
                                 && mouse.column < main_chunks[1].x + main_chunks[1].width
                             {
-                                app_state.scroll_offset = app_state.scroll_offset.saturating_add(3);
+                                app_state.scroll_offset =
+                                    app_state.scroll_offset.saturating_add(ui::SCROLL_STEP);
                             } else if mouse.row >= main_chunks[2].y
                                 && mouse.row < main_chunks[2].y + main_chunks[2].height
                                 && mouse.column >= main_chunks[2].x
                                 && mouse.column < main_chunks[2].x + main_chunks[2].width
                             {
-                                app_state.context_scroll_offset =
-                                    app_state.context_scroll_offset.saturating_add(3);
+                                app_state.context_scroll_offset = app_state
+                                    .context_scroll_offset
+                                    .saturating_add(ui::SCROLL_STEP);
                             } else if mouse.row >= main_chunks[0].y
                                 && mouse.row < main_chunks[0].y + main_chunks[0].height
                                 && mouse.column >= main_chunks[0].x
@@ -905,14 +885,16 @@ async fn main() -> Result<()> {
                                 && mouse.column >= main_chunks[1].x
                                 && mouse.column < main_chunks[1].x + main_chunks[1].width
                             {
-                                app_state.scroll_offset = app_state.scroll_offset.saturating_sub(3);
+                                app_state.scroll_offset =
+                                    app_state.scroll_offset.saturating_sub(ui::SCROLL_STEP);
                             } else if mouse.row >= main_chunks[2].y
                                 && mouse.row < main_chunks[2].y + main_chunks[2].height
                                 && mouse.column >= main_chunks[2].x
                                 && mouse.column < main_chunks[2].x + main_chunks[2].width
                             {
-                                app_state.context_scroll_offset =
-                                    app_state.context_scroll_offset.saturating_sub(3);
+                                app_state.context_scroll_offset = app_state
+                                    .context_scroll_offset
+                                    .saturating_sub(ui::SCROLL_STEP);
                             } else if mouse.row >= main_chunks[0].y
                                 && mouse.row < main_chunks[0].y + main_chunks[0].height
                                 && mouse.column >= main_chunks[0].x

@@ -407,7 +407,7 @@ async fn main() -> Result<()> {
                                             let nearby = app_state.get_filtered_nearby_entities();
                                             nearby
                                                 .get(app_state.selected_nearby_index)
-                                                .map(|(e, _)| e.guid)
+                                                .map(|(e, _, _)| e.guid)
                                         };
 
                                         if let Some(guid) = guid {

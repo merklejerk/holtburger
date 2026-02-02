@@ -473,7 +473,11 @@ name = "holtburger-debug-harness"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "clap",
+ "env_logger",
+ "hex",
  "holtburger-core",
+ "log",
  "tokio",
 ]
 

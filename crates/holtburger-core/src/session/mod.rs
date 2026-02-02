@@ -304,18 +304,27 @@ impl Session {
     }
 
     pub fn process_fragment(&mut self, header: &FragmentHeader, data: &[u8]) -> Option<Vec<u8>> {
+        log::debug!("Processing fragment Seq={} {}/{} size={}", header.sequence, header.index + 1, header.count, data.len());
         if header.count == 1 {
             return Some(data.to_vec());
         }
 
         let entry = self
             .fragment_reassembler
-            .entry(header.id)
+            .entry(header.sequence)
             .or_insert_with(|| PendingMessage {
                 count: header.count,
                 fragments: vec![None; header.count as usize],
                 received_count: 0,
             });
+
+        // SAFETY: Handle server restart or ID reuse with different fragment count
+        if header.count != entry.count {
+            log::warn!("Fragment count mismatch for Seq {}: expected {}, got {}. Resetting reassembler.", header.sequence, entry.count, header.count);
+            entry.count = header.count;
+            entry.fragments = vec![None; header.count as usize];
+            entry.received_count = 0;
+        }
 
         if header.index >= entry.count {
             return None;
@@ -328,7 +337,7 @@ impl Session {
 
         if entry.received_count == entry.count {
             let mut full_message = Vec::new();
-            let pending = self.fragment_reassembler.remove(&header.id)?;
+            let pending = self.fragment_reassembler.remove(&header.sequence)?;
             for f in pending.fragments.into_iter().flatten() {
                 full_message.extend_from_slice(&f);
             }

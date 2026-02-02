@@ -332,6 +332,12 @@ impl Client {
                                     SessionEvent::HandshakeResponse { cookie, client_id } => {
                                         self.handle_handshake_response(cookie, client_id).await?;
                                     }
+                                    SessionEvent::TimeSync(server_time) => {
+                                        self.world.server_time = Some((server_time, Instant::now()));
+                                        if let Some(tx) = &self.event_tx {
+                                            let _ = tx.send(ClientEvent::World(Box::new(crate::world::WorldEvent::ServerTimeUpdate(server_time))));
+                                        }
+                                    }
                                 }
                             }
                         }

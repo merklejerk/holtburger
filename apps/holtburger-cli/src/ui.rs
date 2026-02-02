@@ -1,6 +1,8 @@
 use crate::classification::{self, EntityClass};
-use holtburger_core::world::properties::{ObjectDescriptionFlag, PropertyInt, RadarColor};
-use holtburger_core::world::stats::VitalType;
+use holtburger_core::world::properties::{
+    EnchantmentTypeFlags, ObjectDescriptionFlag, PropertyInt, RadarColor,
+};
+use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
 use holtburger_core::{ChatMessage, ClientState, MessageKind};
 use ratatui::{
     Frame,
@@ -130,6 +132,7 @@ pub enum NearbyTab {
     Entities,
     Inventory,
     Character,
+    Effects,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -167,7 +170,24 @@ pub struct AppState {
     pub enter_retry: Option<(u32, u32, Option<std::time::Instant>)>,
     pub core_state: ClientState,
     pub player_pos: Option<holtburger_core::world::position::WorldPosition>,
+    pub player_enchantments: Vec<holtburger_core::protocol::messages::Enchantment>,
     pub entities: std::collections::HashMap<u32, holtburger_core::world::entity::Entity>,
+    pub server_time: Option<(f64, std::time::Instant)>,
+}
+
+impl AppState {
+    pub fn current_server_time(&self) -> f64 {
+        match self.server_time {
+            Some((server_val, local_then)) => {
+                let elapsed = local_then.elapsed().as_secs_f64();
+                server_val + elapsed
+            }
+            None => std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64(),
+        }
+    }
 }
 
 pub fn ui(f: &mut Frame, state: &mut AppState) {
@@ -264,103 +284,189 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         UIState::Chat => {
             let main_chunks = &main_chunks_vec;
 
-            // --- Nearby Entities / Inventory Pane ---
-            let nearby_filtered: Vec<_> = state
-                .entities
-                .values()
-                .filter(|e| {
-                    if state.nearby_tab == NearbyTab::Entities {
-                        classification::is_targetable(e) && e.position.landblock_id != 0
-                    } else {
-                        // Inventory items or things without coordinates
-                        e.position.landblock_id == 0 && !e.name.is_empty()
-                    }
-                })
-                .map(|e| {
-                    let dist = if let Some(p) = &state.player_pos {
-                        e.position.distance_to(p)
-                    } else {
-                        0.0
-                    };
-                    (e, dist)
-                })
-                .collect();
-
-            let mut nearby = nearby_filtered;
-            nearby.sort_by(|a, b| {
-                if state.nearby_tab == NearbyTab::Entities {
-                    a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
-                } else {
-                    a.0.name.cmp(&b.0.name)
+            // --- Nearby Entities / Inventory / Effects Pane ---
+            let mut nearby = Vec::new();
+            let nearby_items: Vec<ListItem> = if state.nearby_tab == NearbyTab::Effects {
+                // Clamp index for effects
+                if state.selected_nearby_index >= state.player_enchantments.len()
+                    && !state.player_enchantments.is_empty()
+                {
+                    state.selected_nearby_index = state.player_enchantments.len().saturating_sub(1);
                 }
-            });
 
-            // Clamp index
-            if state.selected_nearby_index >= nearby.len() && !nearby.is_empty() {
-                state.selected_nearby_index = nearby.len().saturating_sub(1);
-            }
+                state
+                    .player_enchantments
+                    .iter()
+                    .enumerate()
+                    .map(|(i, enchant)| {
+                        let name = format!("Spell #{}", enchant.spell_id);
+                        let beneficial =
+                            (enchant.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0;
+                        let color = if beneficial { Color::Green } else { Color::Red };
 
-            let _nearby_height = main_chunks[0].height.saturating_sub(4) as usize; // Sub for block + tooltip
-            let nearby_items: Vec<ListItem> = nearby
-                .iter()
-                .enumerate()
-                .map(|(i, (e, dist))| {
-                    let color_val = e
-                        .int_properties
-                        .get(&(PropertyInt::RadarBlipColor as u32))
-                        .cloned()
-                        .unwrap_or(0);
-                    let color = match color_val as u8 {
-                        c if c == RadarColor::Blue as u8 => Color::Blue,
-                        c if c == RadarColor::Gold as u8 => Color::Yellow,
-                        c if c == RadarColor::Purple as u8 => Color::Magenta,
-                        c if c == RadarColor::Red as u8 => Color::Red,
-                        c if c == RadarColor::Green as u8 => Color::Green,
-                        c if c == RadarColor::Yellow as u8 => Color::Yellow,
-                        _ => Color::White,
-                    };
+                        let time_str = if enchant.duration < 0.0 {
+                            "Inf".to_string()
+                        } else {
+                            let remain = enchant.start_time + enchant.duration;
+                            if remain <= 0.0 {
+                                "0s".to_string()
+                            } else if remain > 60.0 {
+                                format!("{}m", (remain / 60.0) as u32)
+                            } else {
+                                format!("{}s", remain as u32)
+                            }
+                        };
 
-                    let style = if i == state.selected_nearby_index {
-                        Style::default().bg(Color::DarkGray).fg(color)
-                    } else {
-                        Style::default().fg(color)
-                    };
+                        let mod_desc = if (enchant.stat_mod_type
+                            & EnchantmentTypeFlags::ATTRIBUTE.bits())
+                            != 0
+                        {
+                            AttributeType::from_repr(enchant.stat_mod_key)
+                                .map(|a| a.to_string())
+                                .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
+                        } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits()) != 0
+                        {
+                            SkillType::from_repr(enchant.stat_mod_key)
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
+                        } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SECOND_ATT.bits())
+                            != 0
+                        {
+                            match enchant.stat_mod_key {
+                                1 => "Health".to_string(),
+                                3 => "Stamina".to_string(),
+                                5 => "Mana".to_string(),
+                                _ => format!("Vital #{}", enchant.stat_mod_key),
+                            }
+                        } else {
+                            format!("Mod #{}", enchant.stat_mod_key)
+                        };
 
-                    let type_marker = match classification::classify_entity(e) {
-                        EntityClass::Player => "Player",
-                        EntityClass::Npc => "NPC",
-                        EntityClass::Monster => "Mob",
-                        EntityClass::Weapon => "Weapon",
-                        EntityClass::Armor => "Armor",
-                        EntityClass::Jewelry => "Jewelry",
-                        EntityClass::Apparel => "Apparel",
-                        EntityClass::Door => "Door",
-                        EntityClass::Portal => "Portal",
-                        EntityClass::LifeStone => "LifeStone",
-                        EntityClass::Chest => "Chest",
-                        EntityClass::Tool => "Tool",
-                        EntityClass::StaticObject => "Static",
-                        EntityClass::Dynamic => "Dynamic",
-                        EntityClass::Unknown => "?",
-                    };
+                        let style = if i == state.selected_nearby_index {
+                            Style::default().bg(Color::DarkGray)
+                        } else {
+                            Style::default()
+                        };
 
-                    let display_name = if e.name.trim().is_empty() {
-                        format!("<{:08X}>", e.guid)
-                    } else {
-                        e.name.clone()
-                    };
-                    if state.nearby_tab == NearbyTab::Entities {
-                        ListItem::new(format!(
-                            "[{}] {:<15} [{:.1}m]",
-                            type_marker, display_name, dist
-                        ))
+                        ListItem::new(Line::from(vec![
+                            Span::styled(format!("{:<15} ", name), Style::default().fg(color)),
+                            Span::raw(format!("(L{}) -> {} ", enchant.layer, mod_desc)),
+                            Span::styled(
+                                format!("{:+}", enchant.stat_mod_value),
+                                Style::default().fg(Color::Cyan),
+                            ),
+                            Span::styled(
+                                format!(" [{}]", time_str),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]))
                         .style(style)
+                    })
+                    .collect()
+            } else {
+                let nearby_filtered: Vec<_> = state
+                    .entities
+                    .values()
+                    .filter(|e| {
+                        if state.nearby_tab == NearbyTab::Entities {
+                            classification::is_targetable(e) && e.position.landblock_id != 0
+                        } else if state.nearby_tab == NearbyTab::Inventory {
+                            // Inventory items or things without coordinates
+                            e.position.landblock_id == 0 && !e.name.is_empty()
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|e| {
+                        let dist = if let Some(p) = &state.player_pos {
+                            e.position.distance_to(p)
+                        } else {
+                            0.0
+                        };
+                        (e, dist)
+                    })
+                    .collect();
+
+                nearby = nearby_filtered;
+                nearby.sort_by(|a, b| {
+                    if state.nearby_tab == NearbyTab::Entities {
+                        a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
                     } else {
-                        ListItem::new(format!("[{}] {:<15}", type_marker, display_name))
-                            .style(style)
+                        a.0.name.cmp(&b.0.name)
                     }
-                })
-                .collect();
+                });
+
+                // Clamp index
+                if state.selected_nearby_index >= nearby.len() && !nearby.is_empty() {
+                    state.selected_nearby_index = nearby.len().saturating_sub(1);
+                }
+
+                nearby
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (e, _dist))| {
+                        let color_val = e
+                            .int_properties
+                            .get(&(PropertyInt::RadarBlipColor as u32))
+                            .cloned()
+                            .unwrap_or(0);
+                        let color = match color_val as u8 {
+                            c if c == RadarColor::Blue as u8 => Color::Blue,
+                            c if c == RadarColor::Gold as u8 => Color::Yellow,
+                            c if c == RadarColor::Purple as u8 => Color::Magenta,
+                            c if c == RadarColor::Red as u8 => Color::Red,
+                            c if c == RadarColor::Green as u8 => Color::Green,
+                            c if c == RadarColor::Yellow as u8 => Color::Yellow,
+                            _ => Color::White,
+                        };
+
+                        let style = if i == state.selected_nearby_index {
+                            Style::default().bg(Color::DarkGray).fg(color)
+                        } else {
+                            Style::default().fg(color)
+                        };
+
+                        let type_marker = match classification::classify_entity(e) {
+                            EntityClass::Player => "Player",
+                            EntityClass::Npc => "NPC",
+                            EntityClass::Monster => "Mob",
+                            EntityClass::Weapon => "Weapon",
+                            EntityClass::Armor => "Armor",
+                            EntityClass::Jewelry => "Jewelry",
+                            EntityClass::Apparel => "Apparel",
+                            EntityClass::Door => "Door",
+                            EntityClass::Portal => "Portal",
+                            EntityClass::LifeStone => "LifeStone",
+                            EntityClass::Chest => "Chest",
+                            EntityClass::Tool => "Tool",
+                            EntityClass::StaticObject => "Static",
+                            EntityClass::Dynamic => "Dynamic",
+                            EntityClass::Unknown => "?",
+                        };
+
+                        let display_name = if e.name.trim().is_empty() {
+                            format!("<{:08X}>", e.guid)
+                        } else {
+                            e.name.clone()
+                        };
+                        if state.nearby_tab == NearbyTab::Entities {
+                            let dist = if let Some(p) = &state.player_pos {
+                                e.position.distance_to(p)
+                            } else {
+                                0.0
+                            };
+                            ListItem::new(format!(
+                                "[{}] {:<15} [{:.1}m]",
+                                type_marker, display_name, dist
+                            ))
+                            .style(style)
+                        } else {
+                            ListItem::new(format!("[{}] {:<15}", type_marker, display_name))
+                                .style(style)
+                        }
+                    })
+                    .collect()
+            };
 
             let nearby_style = if state.focused_pane == FocusedPane::Nearby {
                 Style::default().fg(Color::Yellow)
@@ -369,9 +475,10 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             };
 
             let title = match state.nearby_tab {
-                NearbyTab::Entities => " [1] Nearby |  2  Packs |  3  Stats ",
-                NearbyTab::Inventory => "  1  Nearby | [2] Packs |  3  Stats ",
-                NearbyTab::Character => "  1  Nearby |  2  Packs | [3] Stats ",
+                NearbyTab::Entities => " [1] Nearby |  2  Packs |  3  Stats |  4  Effects ",
+                NearbyTab::Inventory => "  1  Nearby | [2] Packs |  3  Stats |  4  Effects ",
+                NearbyTab::Character => "  1  Nearby |  2  Packs | [3] Stats |  4  Effects ",
+                NearbyTab::Effects => "  1  Nearby |  2  Packs |  3  Stats | [4] Effects ",
             };
 
             let nearby_block = Block::default()
@@ -453,7 +560,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             f.render_widget(nearby_block, main_chunks[0]);
 
             // Tooltip logic
-            if state.nearby_tab != NearbyTab::Character
+            if (state.nearby_tab == NearbyTab::Entities || state.nearby_tab == NearbyTab::Inventory)
                 && let Some((selected_e, _)) = nearby.get(state.selected_nearby_index)
             {
                 let mut tools = vec![Span::raw("[A]ssess ")];

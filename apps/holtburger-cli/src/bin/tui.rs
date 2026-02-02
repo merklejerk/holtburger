@@ -7,7 +7,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use holtburger_cli::classification::{self, EntityClass};
+use holtburger_cli::classification::{self};
 use holtburger_cli::ui::{self, AppState};
 use holtburger_core::protocol::properties::*;
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
@@ -15,6 +15,7 @@ use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Mutex;
+use std::time::Instant;
 use tokio::sync::mpsc;
 
 struct TuiLogger {
@@ -188,7 +189,9 @@ async fn main() -> Result<()> {
         enter_retry: None,
         core_state: ClientState::Connected,
         player_pos: None,
+        player_enchantments: Vec::new(),
         entities: std::collections::HashMap::new(),
+        server_time: None,
     };
 
     refresh_context_buffer(&mut app_state);
@@ -205,7 +208,11 @@ async fn main() -> Result<()> {
         let _ = client.run(&password).await;
     });
 
+    let mut last_tick = Instant::now();
     loop {
+        let elapsed = last_tick.elapsed().as_secs_f64();
+        last_tick = Instant::now();
+
         // Clamp nearby selection index before drawing
         let nearby_count = app_state
             .entities
@@ -216,6 +223,24 @@ async fn main() -> Result<()> {
             app_state.selected_nearby_index = nearby_count - 1;
         } else if nearby_count == 0 {
             app_state.selected_nearby_index = 0;
+        }
+
+        // Proactive enchantment purge
+        app_state.player_enchantments.retain(|e| {
+            if e.duration < 0.0 {
+                return true;
+            }
+            let expires_at = e.start_time + e.duration;
+            expires_at > 0.0
+        });
+
+        // Update enchantment timers locally (interpolate)
+        // Since the server decrements start_time by roughly heartbeatInterval every ~5s,
+        // we can simulate this by decrementing locally.
+        for enchant in &mut app_state.player_enchantments {
+            if enchant.duration >= 0.0 {
+                enchant.start_time -= elapsed;
+            }
         }
 
         terminal.draw(|f| ui::ui(f, &mut app_state))?;
@@ -272,59 +297,6 @@ async fn main() -> Result<()> {
                                         let _ = command_tx.send(ClientCommand::Quit);
                                         break;
                                     }
-                                    if input == "/nearby" || input == "/l" || input == "/nearby -a"
-                                    {
-                                        let show_all = input == "/nearby -a";
-                                        app_state.messages.push(holtburger_core::ChatMessage {
-                                            kind: holtburger_core::MessageKind::System,
-                                            text: if show_all {
-                                                "--- All Nearby Entities ---"
-                                            } else {
-                                                "--- Nearby Entities (Interactable) ---"
-                                            }
-                                            .to_string(),
-                                        });
-                                        let mut count = 0;
-                                        for entity in app_state.entities.values() {
-                                            if !show_all && !classification::is_targetable(entity) {
-                                                continue;
-                                            }
-                                            let class = classification::classify_entity(entity);
-                                            let class_str = match class {
-                                                EntityClass::Player => "Player",
-                                                EntityClass::Npc => "NPC",
-                                                EntityClass::Monster => "Monster",
-                                                EntityClass::Weapon => "Weapon",
-                                                EntityClass::Armor => "Armor",
-                                                EntityClass::Jewelry => "Jewelry",
-                                                EntityClass::Apparel => "Apparel",
-                                                EntityClass::Door => "Door",
-                                                EntityClass::Portal => "Portal",
-                                                EntityClass::LifeStone => "LifeStone",
-                                                EntityClass::Chest => "Chest",
-                                                EntityClass::Tool => "Tool",
-                                                EntityClass::Dynamic => "Dynamic",
-                                                EntityClass::StaticObject => "Static",
-                                                EntityClass::Unknown => "Unknown",
-                                            };
-                                            app_state.messages.push(holtburger_core::ChatMessage {
-                                                kind: holtburger_core::MessageKind::Info,
-                                                text: format!(
-                                                    "[{:08X}] ({}) {}",
-                                                    entity.guid, class_str, entity.name
-                                                ),
-                                            });
-                                            count += 1;
-                                        }
-                                        if count == 0 {
-                                            app_state.messages.push(holtburger_core::ChatMessage {
-                                                kind: holtburger_core::MessageKind::Info,
-                                                text: "No entities nearby.".to_string(),
-                                            });
-                                        }
-                                        app_state.focused_pane = app_state.previous_focused_pane;
-                                        continue;
-                                    }
                                     app_state.input_history.push(input.clone());
                                     app_state.history_index = None;
                                     let _ = command_tx.send(ClientCommand::Talk(input));
@@ -364,6 +336,11 @@ async fn main() -> Result<()> {
                                             }
                                             '3' => {
                                                 app_state.nearby_tab = ui::NearbyTab::Character;
+                                                app_state.selected_nearby_index = 0;
+                                                continue;
+                                            }
+                                            '4' => {
+                                                app_state.nearby_tab = ui::NearbyTab::Effects;
                                                 app_state.selected_nearby_index = 0;
                                                 continue;
                                             }
@@ -715,18 +692,27 @@ async fn main() -> Result<()> {
                                         app_state.context_scroll_offset.saturating_sub(1);
                                 }
                                 ui::FocusedPane::Nearby => {
-                                    let nearby_count = app_state
-                                        .entities
-                                        .values()
-                                        .filter(|e| {
-                                            if app_state.nearby_tab == ui::NearbyTab::Entities {
+                                    let nearby_count = match app_state.nearby_tab {
+                                        ui::NearbyTab::Entities => app_state
+                                            .entities
+                                            .values()
+                                            .filter(|e| {
                                                 classification::is_targetable(e)
                                                     && e.position.landblock_id != 0
-                                            } else {
+                                            })
+                                            .count(),
+                                        ui::NearbyTab::Inventory => app_state
+                                            .entities
+                                            .values()
+                                            .filter(|e| {
                                                 e.position.landblock_id == 0 && !e.name.is_empty()
-                                            }
-                                        })
-                                        .count();
+                                            })
+                                            .count(),
+                                        ui::NearbyTab::Effects => {
+                                            app_state.player_enchantments.len()
+                                        }
+                                        _ => 0,
+                                    };
                                     if nearby_count > 0
                                         && app_state.selected_nearby_index + 1 < nearby_count
                                     {
@@ -937,6 +923,7 @@ async fn main() -> Result<()> {
                             attributes,
                             vitals,
                             skills,
+                            enchantments,
                         } => {
                             app_state.player_guid = Some(guid);
                             app_state.character_name = Some(name);
@@ -946,6 +933,7 @@ async fn main() -> Result<()> {
                             app_state.attributes = attributes;
                             app_state.vitals = vitals;
                             app_state.skills = skills;
+                            app_state.player_enchantments = enchantments;
                             refresh_context_buffer(&mut app_state);
                         }
                         WorldEvent::AttributeUpdated(attr) => {
@@ -1017,6 +1005,29 @@ async fn main() -> Result<()> {
                             if Some(guid) == app_state.player_guid {
                                 app_state.player_pos = Some(pos);
                             }
+                        }
+                        WorldEvent::EnchantmentUpdated(enchantment) => {
+                            if let Some(existing) =
+                                app_state.player_enchantments.iter_mut().find(|e| {
+                                    e.spell_id == enchantment.spell_id
+                                        && e.layer == enchantment.layer
+                                })
+                            {
+                                *existing = enchantment;
+                            } else {
+                                app_state.player_enchantments.push(enchantment);
+                            }
+                        }
+                        WorldEvent::EnchantmentRemoved { spell_id, layer } => {
+                            app_state
+                                .player_enchantments
+                                .retain(|e| e.spell_id != spell_id || e.layer != layer);
+                        }
+                        WorldEvent::EnchantmentsPurged => {
+                            app_state.player_enchantments.clear();
+                        }
+                        WorldEvent::ServerTimeUpdate(t) => {
+                            app_state.server_time = Some((t, std::time::Instant::now()));
                         }
                     }
                 }

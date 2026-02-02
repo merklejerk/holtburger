@@ -46,20 +46,36 @@ To maintain high performance, a client typically implements a tiered physics app
 2.  **Dynamic Objects (Bounding Spheres)**: For other players and monsters, simple radius-based distance checks (AABB/Sphere) are often used instead of full mesh collision to save CPU cycles.
 3.  **Prediction & Reconciliation**: The client predicts movement based on these BSPs. If the server sends an `UpdatePosition` (`0xF748`) that deviates too far, the client "snaps" to the server's result.
 
-### GfxObjFlags (Physics State)
-Used in `ObjectCreate` to define the physical manifestation of an object. This is a bitmask.
+### Physics Description Sequence Trailer
+At the end of the `PhysicsDescription` block (after all optional flag-based fields), there is a mandatory block of sequence counters.
+
+- **Size:** 18 bytes of data (9x `uint16`).
+- **Alignment:** The block is padded to a **20-byte boundary** (aligned to 4 bytes).
+- **Sequences (in order):**
+  1. `ObjectPosition`
+  2. `ObjectMovement`
+  3. `ObjectState`
+  4. `ObjectVector`
+  5. `ObjectTeleport`
+  6. `ObjectServerControl`
+  7. `ObjectForcePosition`
+  8. `ObjectVisualDesc`
+  9. `ObjectInstance`
+
+### PhysicsState (0xF74B)
+The `SetState` message (opcode `0xF74B`) is used to update an object's physical manifestation (e.g., hiding/revealing or ethereal/static).
 
 | Bit (Hex) | Name | Description |
-|---|---|---|
-| 0x01 | IsVisible | Object is rendered. |
-| 0x02 | IsActive | Object is "active" in the physics world. |
-| 0x04 | HasNoStaticCollision | Object does not collide with static environment. |
-| 0x08 | IsEdgeSlide | |
-| 0x10 | HasParticles | Object has particle effects. |
-| 0x20 | IsInert | Object does not move or simulate physics. |
-| 0x40 | IsMini | |
-| 0x100 | IsPlacable | |
-| 0x200 | IsIgnoredByClient | |
+| :--- | :--- | :--- |
+| `0x00000001` | `Static` | Object is immobile terrain. |
+| `0x00000004` | `Ethereal` | No collision. |
+| `0x00000008` | `ReportCollisions` | |
+| `0x00000010` | `IgnoreCollisions` | |
+| `0x00000020` | `NoDraw` | Invisible to client. |
+| `0x00000400` | `Gravity` | Affected by gravity. |
+| `0x00004000` | `Hidden` | Admin/Server-side invisibility. |
+| `0x00100000` | `Cloaked` | Translucent. |
+| `0x00400000` | `EdgeSlide` | |
 
 ---
-*Reference ACE Source: `ACE.Server.Physics.BSP`, `ACE.DatLoader.Entity.BSPNode`*
+*Reference ACE Source: `ACE.Entity.Enum.PhysicsState`, `ACE.Server.Physics.BSP`*

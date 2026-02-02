@@ -1,13 +1,19 @@
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind, MouseButton},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use holtburger_cli::ui::{self, AppState};
+use holtburger_cli::classification::{self, EntityClass};
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
-use ratatui::{Terminal, backend::CrosstermBackend};
+use holtburger_core::protocol::properties::*;
+use ratatui::{
+    Terminal,
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout},
+};
 use std::io;
 use tokio::sync::mpsc;
 
@@ -58,61 +64,18 @@ struct Args {
 }
 
 fn refresh_context_buffer(state: &mut AppState) {
+    // Only clear if we aren't displaying an entity's debug info
+    // For now, let's just make it empty by default until an entity is selected
     state.context_buffer.clear();
-
-    if state.attributes.is_empty() && state.skills.is_empty() && state.vitals.is_empty() {
-        state
-            .context_buffer
-            .push("--- Context Information ---".to_string());
-        state
-            .context_buffer
-            .push("This pane will show entity details,".to_string());
-        state
-            .context_buffer
-            .push("attributes, vitals, and skills.".to_string());
-        state
-            .context_buffer
-            .push("---------------------------".to_string());
-        return;
-    }
-
     state
         .context_buffer
-        .push("--- Character Stats ---".to_string());
-    state.context_buffer.push("Vitals:".to_string());
-    for vital in &state.vitals {
-        state.context_buffer.push(format!(
-            "  {}: {} / {}",
-            vital.vital_type, vital.current, vital.base
-        ));
-    }
-    state.context_buffer.push("".to_string());
-
-    state.context_buffer.push("Attributes:".to_string());
-
-    // Sort attributes by enum value for consistent UI
-    let mut sorted_attrs = state.attributes.clone();
-    sorted_attrs.sort_by_key(|a| a.attr_type as u32);
-
-    for attr in sorted_attrs {
-        state
-            .context_buffer
-            .push(format!("  {}: {}", attr.attr_type, attr.base));
-    }
-    state.context_buffer.push("".to_string());
-    state.context_buffer.push("Skills:".to_string());
-
-    let mut sorted_skills = state.skills.clone();
-    sorted_skills.sort_by_key(|s| s.skill_type as u32);
-
-    for skill in sorted_skills {
-        if skill.skill_type.is_eor() {
-            state.context_buffer.push(format!(
-                "  {}: {} ({})",
-                skill.skill_type, skill.current, skill.training
-            ));
-        }
-    }
+        .push("--- Context Information ---".to_string());
+    state
+        .context_buffer
+        .push("Select an entity to see its details.".to_string());
+    state
+        .context_buffer
+        .push("---------------------------".to_string());
 }
 
 #[tokio::main]
@@ -184,8 +147,8 @@ async fn main() -> Result<()> {
         nearby_tab: ui::NearbyTab::Entities,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
-        client_status: None,
-        retry_status: None,
+        logon_retry: None,
+        enter_retry: None,
         core_state: ClientState::Connected,
         player_pos: None,
         entities: std::collections::HashMap::new(),
@@ -210,7 +173,7 @@ async fn main() -> Result<()> {
         let nearby_count = app_state
             .entities
             .values()
-            .filter(|e| e.is_targetable())
+            .filter(|e| classification::is_targetable(e))
             .count();
         if app_state.selected_nearby_index >= nearby_count && nearby_count > 0 {
             app_state.selected_nearby_index = nearby_count - 1;
@@ -220,23 +183,23 @@ async fn main() -> Result<()> {
 
         terminal.draw(|f| ui::ui(f, &mut app_state))?;
 
-        if event::poll(std::time::Duration::from_millis(100))?
-            && let Event::Key(key) = event::read()?
-        {
-            if key
-                .modifiers
-                .contains(crossterm::event::KeyModifiers::CONTROL)
-            {
-                match key.code {
-                    KeyCode::Char('q') | KeyCode::Char('Q') => {
-                        let _ = command_tx.send(ClientCommand::Quit);
-                        break;
+        if event::poll(std::time::Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) => {
+                    if key
+                        .modifiers
+                        .contains(crossterm::event::KeyModifiers::CONTROL)
+                    {
+                        match key.code {
+                            KeyCode::Char('q') | KeyCode::Char('Q') => {
+                                let _ = command_tx.send(ClientCommand::Quit);
+                                break;
+                            }
+                            _ => {}
+                        }
                     }
-                    _ => {}
-                }
-            }
 
-            match key.code {
+                    match key.code {
                 KeyCode::Tab | KeyCode::BackTab => {
                     use ui::FocusedPane;
                     if key
@@ -293,11 +256,10 @@ async fn main() -> Result<()> {
                                 });
                                 let mut count = 0;
                                 for entity in app_state.entities.values() {
-                                    if !show_all && !entity.is_targetable() {
+                                    if !show_all && !classification::is_targetable(entity) {
                                         continue;
                                     }
-                                    let class = entity.classification();
-                                    use holtburger_core::world::entity::EntityClass;
+                                    let class = classification::classify_entity(entity);
                                     let class_str = match class {
                                         EntityClass::Player => "Player",
                                         EntityClass::Npc => "NPC",
@@ -370,6 +332,11 @@ async fn main() -> Result<()> {
                                         app_state.selected_nearby_index = 0;
                                         continue;
                                     }
+                                    '3' => {
+                                        app_state.nearby_tab = ui::NearbyTab::Character;
+                                        app_state.selected_nearby_index = 0;
+                                        continue;
+                                    }
                                     _ => {}
                                 }
 
@@ -378,7 +345,7 @@ async fn main() -> Result<()> {
                                     .values()
                                     .filter(|e| {
                                         if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                            e.is_targetable() && e.position.landblock_id != 0
+                                            classification::is_targetable(e) && e.position.landblock_id != 0
                                         } else {
                                             e.position.landblock_id == 0 && !e.name.is_empty()
                                         }
@@ -420,27 +387,104 @@ async fn main() -> Result<()> {
                                                 .push(format!("DEBUG INFO: {}", e.name));
                                             app_state
                                                 .context_buffer
-                                                .push(format!("GUID:  {:08X}", e.guid));
+                                                .push(format!("GUID:   {:08X}", e.guid));
+
+                                            if let Some(parent_id) = e.physics_parent_id {
+                                                let parent_name = if let Some(p) =
+                                                    app_state.entities.get(&parent_id)
+                                                {
+                                                    p.name.clone()
+                                                } else if Some(parent_id) == app_state.player_guid {
+                                                    "You".to_string()
+                                                } else {
+                                                    "Unknown".to_string()
+                                                };
+                                                app_state.context_buffer.push(format!(
+                                                    "Phys Parent: {:08X} ({})",
+                                                    parent_id, parent_name
+                                                ));
+                                            }
+
+                                            if let Some(container_id) = e.container_id {
+                                                let container_name = if let Some(p) =
+                                                    app_state.entities.get(&container_id)
+                                                {
+                                                    p.name.clone()
+                                                } else if Some(container_id) == app_state.player_guid
+                                                {
+                                                    "You".to_string()
+                                                } else {
+                                                    "Unknown".to_string()
+                                                };
+                                                app_state.context_buffer.push(format!(
+                                                    "Container:   {:08X} ({})",
+                                                    container_id, container_name
+                                                ));
+                                            }
+
+                                            if let Some(wielder_id) = e.wielder_id {
+                                                let wielder_name = if let Some(p) =
+                                                    app_state.entities.get(&wielder_id)
+                                                {
+                                                    p.name.clone()
+                                                } else if Some(wielder_id) == app_state.player_guid
+                                                {
+                                                    "You".to_string()
+                                                } else {
+                                                    "Unknown".to_string()
+                                                };
+                                                app_state.context_buffer.push(format!(
+                                                    "Wielder:     {:08X} ({})",
+                                                    wielder_id, wielder_name
+                                                ));
+                                            }
+
                                             app_state
                                                 .context_buffer
-                                                .push(format!("WCID:  {:?}", e.wcid));
+                                                .push(format!("WCID:   {:?}", e.wcid));
                                             app_state
                                                 .context_buffer
-                                                .push(format!("Class: {:?}", e.classification()));
+                                                .push(format!("Class:  {:?}", classification::classify_entity(e)));
                                             app_state
                                                 .context_buffer
-                                                .push(format!("Flags: {:?}", e.flags));
+                                                .push(format!("GfxID:  {:?}", e.gfx_id));
+                                            app_state
+                                                .context_buffer
+                                                .push(format!("Vel:    {:?}", e.velocity));
+                                            app_state
+                                                .context_buffer
+                                                .push(format!("Flags:  {:08X}", e.flags.bits()));
+                                            for (name, _) in e.flags.iter_names() {
+                                                app_state
+                                                    .context_buffer
+                                                    .push(format!("  [X] {}", name));
+                                            }
+
+                                            app_state
+                                                .context_buffer
+                                                .push(format!("Phys:   {:08X}", e.physics_state.bits()));
+                                            for (name, _) in e.physics_state.iter_names() {
+                                                app_state
+                                                    .context_buffer
+                                                    .push(format!("  [X] {}", name));
+                                            }
+
                                             if let Some(it) = e.item_type {
                                                 app_state
                                                     .context_buffer
-                                                    .push(format!("IType: {:?}", it));
+                                                    .push(format!("IType:  {:08X}", it.bits()));
+                                                for (name, _) in it.iter_names() {
+                                                    app_state
+                                                        .context_buffer
+                                                        .push(format!("  [X] {}", name));
+                                                }
                                             }
                                             app_state.context_buffer.push(format!(
-                                                "Pos:   {}",
+                                                "Pos:    {}",
                                                 e.position.to_world_coords()
                                             ));
                                             app_state.context_buffer.push(format!(
-                                                "LB:    {:08X}",
+                                                "LB:     {:08X}",
                                                 e.position.landblock_id
                                             ));
                                             app_state
@@ -454,10 +498,13 @@ async fn main() -> Result<()> {
                                                 let mut sorted_keys: Vec<_> =
                                                     e.int_properties.keys().collect();
                                                 sorted_keys.sort();
-                                                for k in sorted_keys {
+                                                for &k in sorted_keys {
+                                                    let name = PropertyInt::from_repr(k)
+                                                        .map(|p| p.to_string())
+                                                        .unwrap_or_else(|| k.to_string());
                                                     app_state.context_buffer.push(format!(
                                                         "  {}: {}",
-                                                        k, e.int_properties[k]
+                                                        name, e.int_properties[&k]
                                                     ));
                                                 }
                                             }
@@ -468,10 +515,30 @@ async fn main() -> Result<()> {
                                                 let mut sorted_keys: Vec<_> =
                                                     e.bool_properties.keys().collect();
                                                 sorted_keys.sort();
-                                                for k in sorted_keys {
+                                                for &k in sorted_keys {
+                                                    let name = PropertyBool::from_repr(k)
+                                                        .map(|p| p.to_string())
+                                                        .unwrap_or_else(|| k.to_string());
                                                     app_state.context_buffer.push(format!(
                                                         "  {}: {}",
-                                                        k, e.bool_properties[k]
+                                                        name, e.bool_properties[&k]
+                                                    ));
+                                                }
+                                            }
+                                            if !e.float_properties.is_empty() {
+                                                app_state
+                                                    .context_buffer
+                                                    .push("-- Float Properties --".to_string());
+                                                let mut sorted_keys: Vec<_> =
+                                                    e.float_properties.keys().collect();
+                                                sorted_keys.sort();
+                                                for &k in sorted_keys {
+                                                    let name = PropertyFloat::from_repr(k)
+                                                        .map(|p| p.to_string())
+                                                        .unwrap_or_else(|| k.to_string());
+                                                    app_state.context_buffer.push(format!(
+                                                        "  {}: {:.4}",
+                                                        name, e.float_properties[&k]
                                                     ));
                                                 }
                                             }
@@ -482,10 +549,47 @@ async fn main() -> Result<()> {
                                                 let mut sorted_keys: Vec<_> =
                                                     e.string_properties.keys().collect();
                                                 sorted_keys.sort();
-                                                for k in sorted_keys {
+                                                for &k in sorted_keys {
+                                                    let name = PropertyString::from_repr(k)
+                                                        .map(|p| p.to_string())
+                                                        .unwrap_or_else(|| k.to_string());
                                                     app_state.context_buffer.push(format!(
                                                         "  {}: {}",
-                                                        k, e.string_properties[k]
+                                                        name, e.string_properties[&k]
+                                                    ));
+                                                }
+                                            }
+                                            if !e.did_properties.is_empty() {
+                                                app_state
+                                                    .context_buffer
+                                                    .push("-- DataID Properties --".to_string());
+                                                let mut sorted_keys: Vec<_> =
+                                                    e.did_properties.keys().collect();
+                                                sorted_keys.sort();
+                                                for &k in sorted_keys {
+                                                    let name = PropertyDataId::from_repr(k)
+                                                        .map(|p| p.to_string())
+                                                        .unwrap_or_else(|| k.to_string());
+                                                    app_state.context_buffer.push(format!(
+                                                        "  {}: {:08X}",
+                                                        name, e.did_properties[&k]
+                                                    ));
+                                                }
+                                            }
+                                            if !e.iid_properties.is_empty() {
+                                                app_state.context_buffer.push(
+                                                    "-- InstanceID Properties --".to_string(),
+                                                );
+                                                let mut sorted_keys: Vec<_> =
+                                                    e.iid_properties.keys().collect();
+                                                sorted_keys.sort();
+                                                for &k in sorted_keys {
+                                                    let name = PropertyInstanceId::from_repr(k)
+                                                        .map(|p| p.to_string())
+                                                        .unwrap_or_else(|| k.to_string());
+                                                    app_state.context_buffer.push(format!(
+                                                        "  {}: {:08X}",
+                                                        name, e.iid_properties[&k]
                                                     ));
                                                 }
                                             }
@@ -564,7 +668,7 @@ async fn main() -> Result<()> {
                                 .values()
                                 .filter(|e| {
                                     if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                        e.is_targetable() && e.position.landblock_id != 0
+                                        classification::is_targetable(e) && e.position.landblock_id != 0
                                     } else {
                                         e.position.landblock_id == 0 && !e.name.is_empty()
                                     }
@@ -629,7 +733,7 @@ async fn main() -> Result<()> {
                                     .values()
                                     .filter(|e| {
                                         if app_state.nearby_tab == ui::NearbyTab::Entities {
-                                            e.is_targetable() && e.position.landblock_id != 0
+                                            classification::is_targetable(e) && e.position.landblock_id != 0
                                         } else {
                                             e.position.landblock_id == 0 && !e.name.is_empty()
                                         }
@@ -650,6 +754,106 @@ async fn main() -> Result<()> {
                             ui::FocusedPane::Context => app_state.context_scroll_offset = 0,
                             _ => {}
                         }
+                    }
+                }
+                _ => {}
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    let size = terminal.size()?;
+                    let chunks = Layout::default()
+                        .direction(Direction::Vertical)
+                        .constraints([
+                            Constraint::Length(3), // Status bar
+                            Constraint::Min(10),   // Main area
+                            Constraint::Length(3), // Input area
+                        ])
+                        .split(size);
+
+                    let main_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([
+                            Constraint::Percentage(25), // Nearby Entities
+                            Constraint::Percentage(50), // Chat
+                            Constraint::Percentage(25), // Context
+                        ])
+                        .split(chunks[1]);
+
+                    match mouse.kind {
+                        MouseEventKind::Down(MouseButton::Left) => {
+                            if mouse.row >= chunks[2].y
+                                && mouse.row < chunks[2].y + chunks[2].height
+                                && mouse.column >= chunks[2].x
+                                && mouse.column < chunks[2].x + chunks[2].width
+                            {
+                                app_state.focused_pane = ui::FocusedPane::Input;
+                            } else if mouse.row >= main_chunks[0].y
+                                && mouse.row < main_chunks[0].y + main_chunks[0].height
+                                && mouse.column >= main_chunks[0].x
+                                && mouse.column < main_chunks[0].x + main_chunks[0].width
+                            {
+                                app_state.focused_pane = ui::FocusedPane::Nearby;
+                            } else if mouse.row >= main_chunks[1].y
+                                && mouse.row < main_chunks[1].y + main_chunks[1].height
+                                && mouse.column >= main_chunks[1].x
+                                && mouse.column < main_chunks[1].x + main_chunks[1].width
+                            {
+                                app_state.focused_pane = ui::FocusedPane::Chat;
+                            } else if mouse.row >= main_chunks[2].y
+                                && mouse.row < main_chunks[2].y + main_chunks[2].height
+                                && mouse.column >= main_chunks[2].x
+                                && mouse.column < main_chunks[2].x + main_chunks[2].width
+                            {
+                                app_state.focused_pane = ui::FocusedPane::Context;
+                            }
+                        }
+                        MouseEventKind::ScrollUp => {
+                            if mouse.row >= main_chunks[1].y
+                                && mouse.row < main_chunks[1].y + main_chunks[1].height
+                                && mouse.column >= main_chunks[1].x
+                                && mouse.column < main_chunks[1].x + main_chunks[1].width
+                            {
+                                app_state.scroll_offset = app_state.scroll_offset.saturating_add(3);
+                            } else if mouse.row >= main_chunks[2].y
+                                && mouse.row < main_chunks[2].y + main_chunks[2].height
+                                && mouse.column >= main_chunks[2].x
+                                && mouse.column < main_chunks[2].x + main_chunks[2].width
+                            {
+                                app_state.context_scroll_offset =
+                                    app_state.context_scroll_offset.saturating_add(3);
+                            } else if mouse.row >= main_chunks[0].y
+                                && mouse.row < main_chunks[0].y + main_chunks[0].height
+                                && mouse.column >= main_chunks[0].x
+                                && mouse.column < main_chunks[0].x + main_chunks[0].width
+                            {
+                                app_state.selected_nearby_index =
+                                    app_state.selected_nearby_index.saturating_sub(1);
+                            }
+                        }
+                        MouseEventKind::ScrollDown => {
+                            if mouse.row >= main_chunks[1].y
+                                && mouse.row < main_chunks[1].y + main_chunks[1].height
+                                && mouse.column >= main_chunks[1].x
+                                && mouse.column < main_chunks[1].x + main_chunks[1].width
+                            {
+                                app_state.scroll_offset = app_state.scroll_offset.saturating_sub(3);
+                            } else if mouse.row >= main_chunks[2].y
+                                && mouse.row < main_chunks[2].y + main_chunks[2].height
+                                && mouse.column >= main_chunks[2].x
+                                && mouse.column < main_chunks[2].x + main_chunks[2].width
+                            {
+                                app_state.context_scroll_offset =
+                                    app_state.context_scroll_offset.saturating_sub(3);
+                            } else if mouse.row >= main_chunks[0].y
+                                && mouse.row < main_chunks[0].y + main_chunks[0].height
+                                && mouse.column >= main_chunks[0].x
+                                && mouse.column < main_chunks[0].x + main_chunks[0].width
+                            {
+                                app_state.selected_nearby_index =
+                                    app_state.selected_nearby_index.saturating_add(1);
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 _ => {}
@@ -732,11 +936,11 @@ async fn main() -> Result<()> {
                         }
                         WorldEvent::PropertyUpdated {
                             guid,
-                            property_type,
                             property_id,
                             value,
                         } => {
                             use holtburger_core::protocol::properties::*;
+                            use holtburger_core::world::properties::PropertyValue;
 
                             let target_name = if let Some(entity) = app_state.entities.get(&guid) {
                                 entity.name.clone()
@@ -748,32 +952,54 @@ async fn main() -> Result<()> {
                                 format!("{:08X}", guid)
                             };
 
-                            let name = match property_type.as_str() {
-                                "Int" => PropertyInt::from_repr(property_id).map(|p| p.to_string()),
-                                "Bool" => {
-                                    PropertyBool::from_repr(property_id).map(|p| p.to_string())
-                                }
-                                "Int64" => {
-                                    PropertyInt64::from_repr(property_id).map(|p| p.to_string())
-                                }
-                                "Float" => {
-                                    PropertyFloat::from_repr(property_id).map(|p| p.to_string())
-                                }
-                                "String" => {
-                                    PropertyString::from_repr(property_id).map(|p| p.to_string())
-                                }
-                                "DID" => {
-                                    PropertyDataId::from_repr(property_id).map(|p| p.to_string())
-                                }
-                                "IID" => PropertyInstanceId::from_repr(property_id)
-                                    .map(|p| p.to_string()),
-                                _ => None,
-                            }
-                            .unwrap_or_else(|| format!("#{}", property_id));
+                            let (name, val_str) = match value {
+                                PropertyValue::Int(v) => (
+                                    PropertyInt::from_repr(property_id)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("Int#{}", property_id)),
+                                    v.to_string(),
+                                ),
+                                PropertyValue::Bool(v) => (
+                                    PropertyBool::from_repr(property_id)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("Bool#{}", property_id)),
+                                    v.to_string(),
+                                ),
+                                PropertyValue::Int64(v) => (
+                                    PropertyInt64::from_repr(property_id)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("Int64#{}", property_id)),
+                                    v.to_string(),
+                                ),
+                                PropertyValue::Float(v) => (
+                                    PropertyFloat::from_repr(property_id)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("Float#{}", property_id)),
+                                    v.to_string(),
+                                ),
+                                PropertyValue::String(v) => (
+                                    PropertyString::from_repr(property_id)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("String#{}", property_id)),
+                                    v,
+                                ),
+                                PropertyValue::DID(v) => (
+                                    PropertyDataId::from_repr(property_id)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("DID#{}", property_id)),
+                                    format!("{:08X}", v),
+                                ),
+                                PropertyValue::IID(v) => (
+                                    PropertyInstanceId::from_repr(property_id)
+                                        .map(|p| p.to_string())
+                                        .unwrap_or_else(|| format!("IID#{}", property_id)),
+                                    format!("{:08X}", v),
+                                ),
+                            };
 
                             app_state.messages.push(holtburger_core::ChatMessage {
                                 kind: holtburger_core::MessageKind::Info,
-                                text: format!("[Update] {} {}: {}", target_name, name, value),
+                                text: format!("[Update] {} {}: {}", target_name, name, val_str),
                             });
                         }
                         WorldEvent::EntitySpawned(entity) => {
@@ -810,18 +1036,8 @@ async fn main() -> Result<()> {
                     enter_retry,
                 } => {
                     app_state.core_state = state;
-                    let mut retry_parts = Vec::new();
-                    if let Some((current, max)) = logon_retry {
-                        retry_parts.push(format!("[Logon Retry {}/{}]", current, max));
-                    }
-                    if let Some((current, max)) = enter_retry {
-                        retry_parts.push(format!("[Enter Retry {}/{}]", current, max));
-                    }
-                    app_state.retry_status = if retry_parts.is_empty() {
-                        None
-                    } else {
-                        Some(retry_parts.join(" "))
-                    };
+                    app_state.logon_retry = logon_retry;
+                    app_state.enter_retry = enter_retry;
                 }
             }
         }

@@ -1,3 +1,4 @@
+use crate::classification::{self, EntityClass};
 use holtburger_core::world::properties::{ObjectDescriptionFlag, PropertyInt, RadarColor};
 use holtburger_core::{ChatMessage, ClientState, MessageKind};
 use ratatui::{
@@ -18,6 +19,7 @@ pub enum UIState {
 pub enum NearbyTab {
     Entities,
     Inventory,
+    Character,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -50,8 +52,8 @@ pub struct AppState {
     pub nearby_tab: NearbyTab,
     pub context_buffer: Vec<String>,
     pub context_scroll_offset: usize,
-    pub client_status: Option<String>,
-    pub retry_status: Option<String>,
+    pub logon_retry: Option<(u32, u32, Option<std::time::Instant>)>,
+    pub enter_retry: Option<(u32, u32, Option<std::time::Instant>)>,
     pub core_state: ClientState,
     pub player_pos: Option<holtburger_core::world::position::WorldPosition>,
     pub entities: std::collections::HashMap<u32, holtburger_core::world::entity::Entity>,
@@ -83,13 +85,24 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         "No Pos".to_string()
     };
 
+    let mut retry_info = String::new();
+    let now = std::time::Instant::now();
+    if let Some((current, max, next_time)) = state.logon_retry {
+        let secs = next_time
+            .map(|t| t.saturating_duration_since(now).as_secs())
+            .unwrap_or(0);
+        retry_info.push_str(&format!("[Logon Retry {}/{} ({}s)] ", current, max, secs));
+    }
+    if let Some((current, max, next_time)) = state.enter_retry {
+        let secs = next_time
+            .map(|t| t.saturating_duration_since(now).as_secs())
+            .unwrap_or(0);
+        retry_info.push_str(&format!("[Enter Retry {}/{} ({}s)] ", current, max, secs));
+    }
+
     let status_line = format!(
         " [Account: {}] [Char: {}] [Pos: {}] [State: {:?}] {}",
-        state.account_name,
-        char_info,
-        pos_info,
-        state.core_state,
-        state.retry_status.as_deref().unwrap_or("")
+        state.account_name, char_info, pos_info, state.core_state, retry_info
     );
 
     let status_block = Block::default().borders(Borders::ALL).title("Status");
@@ -114,7 +127,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                 .values()
                 .filter(|e| {
                     if state.nearby_tab == NearbyTab::Entities {
-                        e.is_targetable() && e.position.landblock_id != 0
+                        classification::is_targetable(e) && e.position.landblock_id != 0
                     } else {
                         // Inventory items or things without coordinates
                         e.position.landblock_id == 0 && !e.name.is_empty()
@@ -170,22 +183,22 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                         Style::default().fg(color)
                     };
 
-                    let type_marker = match e.classification() {
-                        holtburger_core::world::entity::EntityClass::Player => "Player",
-                        holtburger_core::world::entity::EntityClass::Npc => "NPC",
-                        holtburger_core::world::entity::EntityClass::Monster => "Mob",
-                        holtburger_core::world::entity::EntityClass::Weapon => "Weapon",
-                        holtburger_core::world::entity::EntityClass::Armor => "Armor",
-                        holtburger_core::world::entity::EntityClass::Jewelry => "Jewelry",
-                        holtburger_core::world::entity::EntityClass::Apparel => "Apparel",
-                        holtburger_core::world::entity::EntityClass::Door => "Door",
-                        holtburger_core::world::entity::EntityClass::Portal => "Portal",
-                        holtburger_core::world::entity::EntityClass::LifeStone => "LifeStone",
-                        holtburger_core::world::entity::EntityClass::Chest => "Chest",
-                        holtburger_core::world::entity::EntityClass::Tool => "Tool",
-                        holtburger_core::world::entity::EntityClass::StaticObject => "Static",
-                        holtburger_core::world::entity::EntityClass::Dynamic => "Dynamic",
-                        holtburger_core::world::entity::EntityClass::Unknown => "?",
+                    let type_marker = match classification::classify_entity(e) {
+                        EntityClass::Player => "Player",
+                        EntityClass::Npc => "NPC",
+                        EntityClass::Monster => "Mob",
+                        EntityClass::Weapon => "Weapon",
+                        EntityClass::Armor => "Armor",
+                        EntityClass::Jewelry => "Jewelry",
+                        EntityClass::Apparel => "Apparel",
+                        EntityClass::Door => "Door",
+                        EntityClass::Portal => "Portal",
+                        EntityClass::LifeStone => "LifeStone",
+                        EntityClass::Chest => "Chest",
+                        EntityClass::Tool => "Tool",
+                        EntityClass::StaticObject => "Static",
+                        EntityClass::Dynamic => "Dynamic",
+                        EntityClass::Unknown => "?",
                     };
 
                     let display_name = if e.name.trim().is_empty() {
@@ -213,8 +226,9 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             };
 
             let title = match state.nearby_tab {
-                NearbyTab::Entities => " [1] Nearby |  2  Inventory ",
-                NearbyTab::Inventory => "  1  Nearby | [2] Inventory ",
+                NearbyTab::Entities => " [1] Nearby |  2  Packs |  3  Stats ",
+                NearbyTab::Inventory => "  1  Nearby | [2] Packs |  3  Stats ",
+                NearbyTab::Character => "  1  Nearby |  2  Packs | [3] Stats ",
             };
 
             let nearby_block = Block::default()
@@ -231,77 +245,140 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                 ])
                 .split(nearby_block.inner(main_chunks[0]));
 
-            let nearby_list = List::new(nearby_items)
-                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-                .highlight_symbol("> ");
+            if state.nearby_tab == NearbyTab::Character {
+                let mut lines = Vec::new();
+
+                lines.push(Line::from(vec![Span::styled(
+                    "--- Vitals ---",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]));
+                for vital in &state.vitals {
+                    lines.push(Line::from(format!(
+                        "  {:<10} {:>3} / {:>3}",
+                        vital.vital_type, vital.current, vital.base
+                    )));
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![Span::styled(
+                    "--- Attributes ---",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]));
+                let mut sorted_attrs = state.attributes.clone();
+                sorted_attrs.sort_by_key(|a| a.attr_type as u32);
+                for attr in sorted_attrs {
+                    lines.push(Line::from(format!("  {:<10} {:>3}", attr.attr_type, attr.base)));
+                }
+
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![Span::styled(
+                    "--- Skills ---",
+                    Style::default().add_modifier(Modifier::BOLD),
+                )]));
+                let mut sorted_skills = state.skills.clone();
+                sorted_skills.sort_by_key(|s| s.skill_type as u32);
+                for skill in sorted_skills {
+                    if skill.skill_type.is_eor() {
+                        lines.push(Line::from(format!(
+                            "  {:<15} {:>3}",
+                            skill.skill_type.to_string(),
+                            skill.current
+                        )));
+                    }
+                }
+
+                let para = Paragraph::new(lines).block(Block::default());
+                f.render_widget(para, nearby_inner_chunks[0]);
+            } else {
+                let nearby_list = List::new(nearby_items)
+                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                    .highlight_symbol("> ");
+
+                state
+                    .nearby_list_state
+                    .select(Some(state.selected_nearby_index));
+                f.render_stateful_widget(
+                    nearby_list,
+                    nearby_inner_chunks[0],
+                    &mut state.nearby_list_state,
+                );
+            }
 
             f.render_widget(nearby_block, main_chunks[0]);
-            state
-                .nearby_list_state
-                .select(Some(state.selected_nearby_index));
-            f.render_stateful_widget(
-                nearby_list,
-                nearby_inner_chunks[0],
-                &mut state.nearby_list_state,
-            );
 
             // Tooltip logic
-            if let Some((selected_e, _)) = nearby.get(state.selected_nearby_index) {
-                let mut tools = vec![Span::raw("[A]ssess ")];
-                let flags = selected_e.flags;
+            if state.nearby_tab != NearbyTab::Character {
+                if let Some((selected_e, _)) = nearby.get(state.selected_nearby_index) {
+                    let mut tools = vec![Span::raw("[A]ssess ")];
+                    let flags = selected_e.flags;
 
-                // Interact logic: Vendor check or Pickable check
-                let is_vendor = flags.intersects(ObjectDescriptionFlag::VENDOR);
-                let is_pickable = selected_e
-                    .int_properties
-                    .get(&16)
-                    .map(|&u| (u & 0x20) != 0)
-                    .unwrap_or(false); // Usable.Remote
+                    // Interact logic: Vendor check or Pickable check
+                    let is_vendor = flags.intersects(ObjectDescriptionFlag::VENDOR);
+                    let is_pickable = selected_e
+                        .int_properties
+                        .get(&16)
+                        .map(|&u| (u & 0x20) != 0)
+                        .unwrap_or(false);
 
-                if is_vendor || is_pickable {
-                    tools.push(Span::styled(
-                        "[I]nteract ",
-                        Style::default().fg(Color::Cyan),
-                    ));
+                    if is_vendor {
+                        tools.push(Span::raw("[V]endor "));
+                    }
+                    if is_pickable {
+                        tools.push(Span::raw("[I]tem "));
+                    }
+
+                    if flags.intersects(ObjectDescriptionFlag::ATTACKABLE) {
+                        tools.push(Span::raw("[K]ill "));
+                    }
+
+                    tools.push(Span::raw("[D]ebug"));
+
+                    let tooltip = Paragraph::new(Line::from(tools))
+                        .block(Block::default().borders(Borders::TOP));
+                    f.render_widget(tooltip, nearby_inner_chunks[1]);
                 }
-
-                if flags.intersects(ObjectDescriptionFlag::ATTACKABLE) {
-                    tools.push(Span::raw("Attac[k] "));
-                }
-
-                tools.push(Span::styled("[D]ebug", Style::default().fg(Color::Yellow)));
-
-                let tooltip =
-                    Paragraph::new(Line::from(tools)).block(Block::default().borders(Borders::TOP));
-                f.render_widget(tooltip, nearby_inner_chunks[1]);
             }
 
             // --- Chat Pane ---
+            let width = main_chunks[1].width.saturating_sub(2) as usize;
             let height = main_chunks[1].height.saturating_sub(2) as usize;
-            let total_messages = state.messages.len();
 
-            // Constraint scroll offset to prevent clipping and empty screens
-            let max_scroll = total_messages.saturating_sub(height);
+            // Use a sliding window of recent messages for wrapping performance
+            let window_size = 200;
+            let m_len = state.messages.len();
+            let window_start = m_len.saturating_sub(window_size);
+
+            let mut all_lines = Vec::new();
+            for m in &state.messages[window_start..] {
+                let color = match m.kind {
+                    MessageKind::Chat => Color::White,
+                    MessageKind::Tell => Color::Magenta,
+                    MessageKind::Emote => Color::Green,
+                    MessageKind::Info => Color::Cyan,
+                    MessageKind::System => Color::DarkGray,
+                    MessageKind::Error => Color::Red,
+                    MessageKind::Warning => Color::Yellow,
+                };
+
+                let wrapped = wrap_text(&m.text, width);
+                for line in wrapped {
+                    all_lines.push((line, color));
+                }
+            }
+
+            let total_lines = all_lines.len();
+            let max_scroll = total_lines.saturating_sub(height);
             let effective_scroll = state.scroll_offset.min(max_scroll);
 
-            let end = total_messages.saturating_sub(effective_scroll);
+            let end = total_lines.saturating_sub(effective_scroll);
             let start = end.saturating_sub(height);
 
-            let mut messages: Vec<ListItem> = state.messages[start..end]
+            let mut messages: Vec<ListItem> = all_lines[start..end]
                 .iter()
-                .map(|m| {
-                    let color = match m.kind {
-                        MessageKind::Chat => Color::White,
-                        MessageKind::Tell => Color::Magenta,
-                        MessageKind::Emote => Color::Green,
-                        MessageKind::Info => Color::Cyan,
-                        MessageKind::System => Color::DarkGray,
-                        MessageKind::Error => Color::Red,
-                        MessageKind::Warning => Color::Yellow,
-                    };
+                .map(|(text, color)| {
                     ListItem::new(Line::from(vec![Span::styled(
-                        &m.text,
-                        Style::default().fg(color),
+                        text,
+                        Style::default().fg(*color),
                     )]))
                 })
                 .collect();
@@ -404,4 +481,53 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         .border_style(input_style);
     let input_para = Paragraph::new(state.input.as_str()).block(input_block);
     f.render_widget(input_para, chunks[2]);
+}
+
+fn wrap_text(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut result = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            result.push(String::new());
+            continue;
+        }
+        let mut current_line = String::new();
+        for word in line.split(' ') {
+            if current_line.is_empty() {
+                if word.len() > width {
+                    let mut s = word;
+                    while s.len() > width {
+                        let (head, tail) = s.split_at(width);
+                        result.push(head.to_string());
+                        s = tail;
+                    }
+                    current_line = s.to_string();
+                } else {
+                    current_line.push_str(word);
+                }
+            } else if current_line.len() + 1 + word.len() <= width {
+                current_line.push(' ');
+                current_line.push_str(word);
+            } else {
+                result.push(current_line);
+                if word.len() > width {
+                    let mut s = word;
+                    while s.len() > width {
+                        let (head, tail) = s.split_at(width);
+                        result.push(head.to_string());
+                        s = tail;
+                    }
+                    current_line = s.to_string();
+                } else {
+                    current_line = word.to_string();
+                }
+            }
+        }
+        if !current_line.is_empty() {
+            result.push(current_line);
+        }
+    }
+    result
 }

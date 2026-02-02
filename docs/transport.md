@@ -88,25 +88,25 @@ Located in the `PacketHeader.Sequence`.
 - Peers respond with an `AckSequence` (0x4000) containing the highest received sequence.
 - **Keep-Alive:** If a client stops sending ACKs or packets, the server will time out the connection. To prevent this during idle periods, the client must send an "Empty ACK" packet (Flags: `0x4000`, matching `Sequence`).
 
-### 4.2 Fragment Sequence (Ordering)
+### 4.2 Fragment Sequence (Ordering/Reassembly)
 Located in the `FragmentHeader.Sequence`.
-- Used for reassembling multi-packet messages.
-- Increments only when a new *Fragment* is added to the stream.
-- The `FragmentHeader.Id` groups fragments of the same large message.
+- Used for identifying and reassembling multi-packet messages.
+- All fragments of a single large message **must share the same Sequence**.
+- The `FragmentHeader.Id` is a message identifier, but is often a generic value (e.g., `0x80000000`) and should **not** be used for grouping fragments.
 
 ## 5. Message Fragments
-When `BlobFragments` is set, the data portion consists of one or more fragments.
+When `BlobFragments` is set, the data portion consists of one or more fragments. Large messages (like detailed player spawns) are split into chunks of up to 448 bytes of data (464 bytes including the fragment header).
 
 ### 5.1 Fragment Header (16 bytes)
 
 | Offset | Type | Name | Description |
 | :--- | :--- | :--- | :--- |
-| 0 | uint32 | Sequence | Index for data ordering. |
-| 4 | uint32 | Id | Message ID. |
+| 0 | uint32 | Sequence | The message identifier used for reassembly. Shared by all fragments of one message. |
+| 4 | uint32 | Id | Message type/instance ID. Often generic `0x80000000`. |
 | 8 | uint16 | Count | Total fragments for this message. |
-| 10 | uint16 | Size | Size including this header. |
-| 12 | uint16 | Index | 0-based index of this fragment. |
-| 14 | uint16 | Queue | Destination queue (0x01 = Game). |
+| 10 | uint16 | Size | Size of the data payload *plus* the 16-byte header. |
+| 12 | uint16 | Index | 0-based index of this fragment within the message. |
+| 14 | uint16 | Queue | Destination queue (0x01 = Login, 0x02 = Game, 0x10 = World). |
 
 ### 5.2 Fragment Alignment
 Fragments MUST be aligned to 4-byte boundaries within the UDP payload.

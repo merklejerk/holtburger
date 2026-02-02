@@ -48,6 +48,20 @@ Asheron's Call stores its game assets in "DAT" files, which are custom B-Tree in
 ### PackedDword
 A variable-length 32-bit integer encoding. It uses the leading bits to determine if the value is 1, 2, or 4 bytes long. This is ubiquitous in the network protocol to save bandwidth on small values.
 
+## Parenting & Relationships
+
+### Physics Parent
+A physical attachment relationship. When an object has a Physics Parent, its position becomes relative to that parent rather than a world cell. This is used for attached parts (hinges on a chest), objects held in hands, or riding on something.
+- **Protocol:** Defined in the `PhysicsDescription` block (8 bytes: Parent GUID + Location ID).
+
+### Container
+An organizational hierarchy representing inventory. An object in a container does not necessarily have a physical attachment to it in the same way as a physics parent, though the client often hides contained items unless the container is open.
+- **Protocol:** Defined in the `WeenieHeader` (4-byte Instance ID).
+
+### Wielder
+Specifically represents the entity currently "wearing" or "using" an item. While often the same as the Container for equipped items, the Wielder relationship specifically tracks the equipping entity.
+- **Protocol:** Defined in the `WeenieHeader` (4-byte Instance ID).
+
 ### PhysicsState
 A 32-bit bitmask sent in `ObjectCreate` and `UpdatePosition` messages. It tells the client how to simulate the object:
 - **`0x00000001`**: Edge Slide (allows sliding along walls).

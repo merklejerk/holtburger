@@ -160,7 +160,10 @@ pub mod opcodes {
     pub const OBJECT_CREATE: u32 = 0xF745;
     pub const PLAYER_CREATE: u32 = 0xF746;
     pub const OBJECT_DELETE: u32 = 0xF747;
-    pub const OBJECT_STAT_UPDATE: u32 = 0xF74B;
+    pub const PARENT_EVENT: u32 = 0xF749;
+    pub const PICKUP_EVENT: u32 = 0xF74A;
+    pub const SET_STATE: u32 = 0xF74B;
+    pub const UPDATE_OBJECT: u32 = 0xF7DB;
     pub const PLAY_EFFECT: u32 = 0xF755;
     pub const GAME_EVENT: u32 = 0xF7B0;
     pub const GAME_ACTION: u32 = 0xF7B1;
@@ -221,6 +224,9 @@ pub enum GameMessage {
         name: Option<String>,
         wcid: Option<u32>,
         pos: Option<WorldPosition>,
+        parent_id: Option<u32>,
+        container_id: Option<u32>,
+        wielder_id: Option<u32>,
         item_type: ItemType,
         weenie_flags: WeenieHeaderFlag,
         weenie_flags2: WeenieHeaderFlag2,
@@ -229,9 +235,16 @@ pub enum GameMessage {
     ObjectDelete {
         guid: u32,
     },
-    ObjectStatUpdate {
+    ParentEvent {
+        child_guid: u32,
+        parent_guid: u32,
+    },
+    PickupEvent {
         guid: u32,
-        data: Vec<u8>,
+    },
+    SetState {
+        guid: u32,
+        state: u32,
     },
     UpdatePropertyInt {
         guid: u32,
@@ -360,7 +373,7 @@ impl GameMessage {
             };
         }
         let opcode = LittleEndian::read_u32(&data[0..4]);
-        log::debug!(
+        log::info!(
             "Unpacking GameMessage opcode: 0x{:04X}, len: {}",
             opcode,
             data.len()
@@ -446,20 +459,45 @@ impl GameMessage {
                     }
                 }
             }
-            opcodes::OBJECT_CREATE => {
+            opcodes::UPDATE_OBJECT | opcodes::OBJECT_CREATE => {
                 let msg = unpack_object_create(data).unwrap_or(GameMessage::Unknown {
                     opcode,
                     data: data.to_vec(),
                 });
                 if let GameMessage::ObjectCreate { guid, name, .. } = &msg {
-                    log::info!("!!! ObjectCreate guid={:08X} name={:?}", guid, name);
+                    let log_type = if opcode == opcodes::UPDATE_OBJECT {
+                        "UpdateObject"
+                    } else {
+                        "ObjectCreate"
+                    };
+                    log::info!("!!! {} guid={:08X} name={:?}", log_type, guid, name);
                 }
                 msg
             }
             opcodes::OBJECT_DELETE => {
                 if data.len() >= 8 {
-                    GameMessage::ObjectDelete {
-                        guid: LittleEndian::read_u32(&data[4..8]),
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    log::info!("!!! ObjectDelete guid={:08X}", guid);
+                    GameMessage::ObjectDelete { guid }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
+                    }
+                }
+            }
+            opcodes::PARENT_EVENT => {
+                if data.len() >= 12 {
+                    let parent_guid = LittleEndian::read_u32(&data[4..8]);
+                    let child_guid = LittleEndian::read_u32(&data[8..12]);
+                    log::info!(
+                        "!!! ParentEvent child={:08X} parent={:08X}",
+                        child_guid,
+                        parent_guid
+                    );
+                    GameMessage::ParentEvent {
+                        child_guid,
+                        parent_guid,
                     }
                 } else {
                     GameMessage::Unknown {
@@ -468,12 +506,28 @@ impl GameMessage {
                     }
                 }
             }
-            opcodes::OBJECT_STAT_UPDATE => {
+            opcodes::PICKUP_EVENT => {
                 if data.len() >= 8 {
-                    GameMessage::ObjectStatUpdate {
-                        guid: LittleEndian::read_u32(&data[4..8]),
-                        data: data[8..].to_vec(),
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    log::info!("!!! PickupEvent guid={:08X}", guid);
+                    GameMessage::PickupEvent { guid }
+                } else {
+                    GameMessage::Unknown {
+                        opcode,
+                        data: data.to_vec(),
                     }
+                }
+            }
+            opcodes::SET_STATE => {
+                if data.len() >= 8 {
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    let state = if data.len() >= 12 {
+                        LittleEndian::read_u32(&data[8..12])
+                    } else {
+                        0
+                    };
+                    log::info!("!!! SetState guid={:08X} state={:08X}", guid, state);
+                    GameMessage::SetState { guid, state }
                 } else {
                     GameMessage::Unknown {
                         opcode,
@@ -510,10 +564,10 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_INT => {
-                if data.len() >= 20 {
-                    let guid = LittleEndian::read_u32(&data[8..12]);
-                    let property = LittleEndian::read_u32(&data[12..16]);
-                    let value = LittleEndian::read_i32(&data[16..20]);
+                if data.len() >= 16 {
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    let property = LittleEndian::read_u32(&data[8..12]);
+                    let value = LittleEndian::read_i32(&data[12..16]);
                     GameMessage::UpdatePropertyInt {
                         guid,
                         property,
@@ -543,10 +597,10 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_INT64 => {
-                if data.len() >= 24 {
-                    let guid = LittleEndian::read_u32(&data[8..12]);
-                    let property = LittleEndian::read_u32(&data[12..16]);
-                    let value = LittleEndian::read_i64(&data[16..24]);
+                if data.len() >= 20 {
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    let property = LittleEndian::read_u32(&data[8..12]);
+                    let value = LittleEndian::read_i64(&data[12..20]);
                     GameMessage::UpdatePropertyInt64 {
                         guid,
                         property,
@@ -576,10 +630,10 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_BOOL => {
-                if data.len() >= 17 {
-                    let guid = LittleEndian::read_u32(&data[8..12]);
-                    let property = LittleEndian::read_u32(&data[12..16]);
-                    let value = data[16] != 0;
+                if data.len() >= 13 {
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    let property = LittleEndian::read_u32(&data[8..12]);
+                    let value = data[12] != 0;
                     GameMessage::UpdatePropertyBool {
                         guid,
                         property,
@@ -609,10 +663,10 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_FLOAT => {
-                if data.len() >= 24 {
-                    let guid = LittleEndian::read_u32(&data[8..12]);
-                    let property = LittleEndian::read_u32(&data[12..16]);
-                    let value = LittleEndian::read_f64(&data[16..24]);
+                if data.len() >= 20 {
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    let property = LittleEndian::read_u32(&data[8..12]);
+                    let value = LittleEndian::read_f64(&data[12..20]);
                     GameMessage::UpdatePropertyFloat {
                         guid,
                         property,
@@ -637,7 +691,7 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_STRING => {
-                let mut offset = 8;
+                let mut offset = 4;
                 let guid = LittleEndian::read_u32(&data[offset..offset + 4]);
                 offset += 4;
                 let property = LittleEndian::read_u32(&data[offset..offset + 4]);
@@ -666,10 +720,10 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_DID => {
-                if data.len() >= 20 {
-                    let guid = LittleEndian::read_u32(&data[8..12]);
-                    let property = LittleEndian::read_u32(&data[12..16]);
-                    let value = LittleEndian::read_u32(&data[16..20]);
+                if data.len() >= 16 {
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    let property = LittleEndian::read_u32(&data[8..12]);
+                    let value = LittleEndian::read_u32(&data[12..16]);
                     GameMessage::UpdatePropertyDataId {
                         guid,
                         property,
@@ -699,10 +753,10 @@ impl GameMessage {
                 }
             }
             opcodes::PUBLIC_UPDATE_PROPERTY_IID => {
-                if data.len() >= 20 {
-                    let guid = LittleEndian::read_u32(&data[8..12]);
-                    let property = LittleEndian::read_u32(&data[12..16]);
-                    let value = LittleEndian::read_u32(&data[16..20]);
+                if data.len() >= 16 {
+                    let guid = LittleEndian::read_u32(&data[4..8]);
+                    let property = LittleEndian::read_u32(&data[8..12]);
+                    let value = LittleEndian::read_u32(&data[12..16]);
                     GameMessage::UpdatePropertyInstanceId {
                         guid,
                         property,
@@ -716,13 +770,12 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_SKILL => {
-                // [seq:4][id:4][ranks:4][adj:2][status:4][xp:4][init:4][res:4][time:8] = 38 bytes + 4 opcode = 42
-                if data.len() >= 38 {
+                if data.len() >= 28 {
                     let skill = LittleEndian::read_u32(&data[8..12]);
                     let ranks = LittleEndian::read_u32(&data[12..16]);
-                    let status = LittleEndian::read_u32(&data[18..22]);
-                    let xp = LittleEndian::read_u32(&data[22..26]);
-                    let init = LittleEndian::read_u32(&data[26..30]);
+                    let status = LittleEndian::read_u32(&data[16..20]);
+                    let xp = LittleEndian::read_u32(&data[20..24]);
+                    let init = LittleEndian::read_u32(&data[24..28]);
                     GameMessage::UpdateSkill {
                         skill,
                         ranks,
@@ -738,7 +791,6 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_ATTRIBUTE => {
-                // [seq:4][id:4][ranks:4][start:4][xp:4] = 20 bytes + 4 opcode = 24
                 if data.len() >= 24 {
                     let attribute = LittleEndian::read_u32(&data[8..12]);
                     let ranks = LittleEndian::read_u32(&data[12..16]);
@@ -758,7 +810,6 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_VITAL => {
-                // [seq:4][id:4][ranks:4][start:4][xp:4][curr:4] = 24 bytes + 4 opcode = 28
                 if data.len() >= 28 {
                     let vital = LittleEndian::read_u32(&data[8..12]);
                     let ranks = LittleEndian::read_u32(&data[12..16]);
@@ -1325,7 +1376,9 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
     if phys_flags.intersects(PhysicsDescriptionFlag::CSETUP) {
         offset += 4;
     }
+    let mut parent_id = None;
     if phys_flags.intersects(PhysicsDescriptionFlag::PARENT) {
+        parent_id = Some(LittleEndian::read_u32(&data[offset..offset + 4]));
         offset += 8;
     }
     if phys_flags.intersects(PhysicsDescriptionFlag::CHILDREN) && offset + 4 <= data.len() {
@@ -1360,19 +1413,39 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
         offset += 4;
     }
 
-    if data.len() >= offset + 18 {
+    // Sequences (always present at the end of physics)
+    // 9 ushort sequences (18 bytes) + 2 bytes padding = 20 bytes
+    if data.len() >= offset + 20 {
+        let mut sequences = [0u16; 9];
+        for i in 0..9 {
+            sequences[i] = LittleEndian::read_u16(&data[offset + i * 2..offset + i * 2 + 2]);
+        }
+        log::debug!("guid={:08X} sequences: {:?}", guid, sequences);
+        offset += 20;
+    } else if data.len() >= offset + 18 {
+        let mut sequences = [0u16; 9];
+        for i in 0..9 {
+            sequences[i] = LittleEndian::read_u16(&data[offset + i * 2..offset + i * 2 + 2]);
+        }
+        log::debug!("guid={:08X} sequences(18): {:?}", guid, sequences);
         offset += 18;
     }
     offset = align_to_4(offset);
-    log::debug!("guid={:08X} post-physics offset={}", guid, offset);
+    log::info!(
+        "guid={:08X} post-physics offset={} data_len={}",
+        guid,
+        offset,
+        data.len()
+    );
 
     // 3. WeenieHeader
     if data.len() < offset + 4 {
+        log::warn!("guid={:08X} failed to read weenie_flags, offset={}, len={}", guid, offset, data.len());
         return None;
     }
     let weenie_flags = LittleEndian::read_u32(&data[offset..offset + 4]);
     offset += 4;
-    log::debug!(
+    log::info!(
         "guid={:08X} weenie_flags={:08X} offset={}",
         guid,
         weenie_flags,
@@ -1380,7 +1453,7 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
     );
 
     let (name, _) = read_string16_with_len(data, &mut offset);
-    log::debug!("guid={:08X} name={:?} offset={}", guid, name, offset);
+    log::info!("guid={:08X} name={:?} offset={}", guid, name, offset);
     let class_id = read_packed_u32(data, &mut offset);
     let _icon_id = read_packed_u32_with_known_type(data, &mut offset, 0x06000000);
     if offset + 8 > data.len() {
@@ -1441,10 +1514,14 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
     if (weenie_flags & 0x00002000) != 0 {
         offset += 2;
     } // MaxStackSize
+    let mut container_id = None;
     if (weenie_flags & 0x00004000) != 0 {
+        container_id = Some(LittleEndian::read_u32(&data[offset..offset + 4]));
         offset += 4;
     } // Container
+    let mut wielder_id = None;
     if (weenie_flags & 0x00008000) != 0 {
+        wielder_id = Some(LittleEndian::read_u32(&data[offset..offset + 4]));
         offset += 4;
     } // Wielder
     if (weenie_flags & 0x00010000) != 0 {
@@ -1477,7 +1554,19 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
     if (weenie_flags & 0x02000000) != 0 {
         offset += 4;
     } // HouseOwner
-    if (weenie_flags & 0x04000000) != 0 { /* HouseRestrictions - complex, skip? */ }
+    if (weenie_flags & 0x04000000) != 0 {
+        // HouseRestrictions (RestrictionDB)
+        if offset + 12 <= data.len() {
+            offset += 4; // Version
+            offset += 4; // OpenStatus
+            offset += 4; // MonarchID
+            if offset + 4 <= data.len() {
+                let count = LittleEndian::read_u16(&data[offset..offset + 2]) as usize;
+                offset += 4; // Hash Header (count + numBuckets)
+                offset += count * 8; // Table entries (GUID + Value)
+            }
+        }
+    }
     if (weenie_flags & 0x20000000) != 0 {
         offset += 4;
     } // HookItemTypes
@@ -1513,6 +1602,9 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
         name: Some(name),
         wcid: Some(class_id),
         pos,
+        parent_id,
+        container_id,
+        wielder_id,
         item_type: ItemType::from_bits_retain(item_type),
         weenie_flags: WeenieHeaderFlag::from_bits_retain(weenie_flags),
         weenie_flags2: WeenieHeaderFlag2::from_bits_retain(weenie_flags2),

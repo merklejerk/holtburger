@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.merklejerk.holtburger-cli</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>GPL-3.0</project_license>
+  <name>Holtburger CLI</name>
+  <summary>Terminal client for Asheron's Call</summary>
+  <description>
+    <p>
+      Holtburger is a modern, experimental client ecosystem for Asheron's Call.
+      The CLI version provides a functional TUI (Terminal User Interface) for 
+      interacting with the game world.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.merklejerk.holtburger-cli.desktop</launchable>
+  <url type="homepage">https://github.com/cluracan/holtburger</url>
+</component>

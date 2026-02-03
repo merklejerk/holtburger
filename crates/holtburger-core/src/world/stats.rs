@@ -30,13 +30,15 @@ pub enum VitalType {
 pub struct Attribute {
     pub attr_type: AttributeType,
     pub base: u32,
+    pub current: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vital {
     pub vital_type: VitalType,
-    pub base: u32,
-    pub current: u32,
+    pub base: u32, // Max Vital (unbuffed)
+    pub buffed_max: u32, // Max Vital (including enchantments)
+    pub current: u32, // Current pool
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, FromRepr)]

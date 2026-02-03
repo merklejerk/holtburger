@@ -4,15 +4,22 @@ Holtburger is an exploratory project to build a modern Asheron's Call client eco
 
 ## Project Vision
 
-The ultimate goal is to create a fully-featured, cross-platform 3D client for Asheron's Call. However, that's a long way off. Right now, we are building the foundation:
+This project has two ultimate goals:
 
-1.  **Exploration & Research**: Documenting and implementing the AC protocol and file formats.
-2.  **`holtburger-core`**: A low-level Rust library handling networking, cryptography, and game logic. This is our primary focus.
-3.  **`holtburger-cli`**: A WIP functional Terminal User Interface (TUI) client to showcase the client library.
+- Create a fully-featured, cross-platform 3D client for Asheron's Call to replace the aging acclient.exe.
+- Create a powerful, scriptable, multi-character, headless bot client.
 
-## Getting Started
+However, we're still a long way off. Right now, we are building the foundation:
+
+1.  **`holtburger-core`**: A low-level Rust library handling networking, cryptography, and game logic. This is our primary focus.
+2.  **`holtburger-cli`**: A WIP functional Terminal User Interface (TUI) client to showcase and prove the client library.
+
+## Disclaimers
 
 Note: This project is extremely experimental. Expect things to break and APIs to shift.
+
+Development of this project is heavily reliant on AI coding agents, and is therefore subject to characteristic misintepretation and hallucinations (which, to be fair, is also present in human code). Don't treat the codebase as a source of truth for anything until we reach a sate of more rigorous verification.
+
 
 ### Prerequisites
 

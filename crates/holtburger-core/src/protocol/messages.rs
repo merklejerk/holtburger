@@ -198,6 +198,112 @@ pub mod opcodes {
     pub const VECTOR_UPDATE: u32 = 0xF74E;
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Enchantment {
+    pub spell_id: u16,
+    pub layer: u16,
+    pub spell_category: u16,
+    pub has_spell_set_id: u16,
+    pub power_level: u32,
+    pub start_time: f64,
+    pub duration: f64,
+    pub caster_guid: u32,
+    pub degrade_modifier: f32,
+    pub degrade_limit: f32,
+    pub last_time_degraded: f64,
+    pub stat_mod_type: u32,
+    pub stat_mod_key: u32,
+    pub stat_mod_value: f32,
+    pub spell_set_id: Option<u32>,
+}
+
+impl Enchantment {
+    /// Compares two enchantments to see which one is "better" (higher priority)
+    /// based on PowerLevel and StartTime.
+    pub fn is_better_than(&self, other: &Self) -> bool {
+        matches!(self.compare_priority(other), std::cmp::Ordering::Greater)
+    }
+
+    /// Returns the priority ordering of two enchantments.
+    /// Greater means higher priority (better).
+    pub fn compare_priority(&self, other: &Self) -> std::cmp::Ordering {
+        if self.power_level != other.power_level {
+            return self.power_level.cmp(&other.power_level);
+        }
+        self.start_time
+            .partial_cmp(&other.start_time)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }
+
+    pub fn read(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 60 > data.len() {
+            return None;
+        }
+        let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        let spell_category = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]);
+        let has_spell_set_id = LittleEndian::read_u16(&data[*offset + 6..*offset + 8]);
+        let power_level = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
+        let start_time = LittleEndian::read_f64(&data[*offset + 12..*offset + 20]);
+        let duration = LittleEndian::read_f64(&data[*offset + 20..*offset + 28]);
+        let caster_guid = LittleEndian::read_u32(&data[*offset + 28..*offset + 32]);
+        let degrade_modifier = LittleEndian::read_f32(&data[*offset + 32..*offset + 36]);
+        let degrade_limit = LittleEndian::read_f32(&data[*offset + 36..*offset + 40]);
+        let last_time_degraded = LittleEndian::read_f64(&data[*offset + 40..*offset + 48]);
+        let stat_mod_type = LittleEndian::read_u32(&data[*offset + 48..*offset + 52]);
+        let stat_mod_key = LittleEndian::read_u32(&data[*offset + 52..*offset + 56]);
+        let stat_mod_value = LittleEndian::read_f32(&data[*offset + 56..*offset + 60]);
+        *offset += 60;
+
+        let spell_set_id = if has_spell_set_id != 0 {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+            *offset += 4;
+            Some(id)
+        } else {
+            None
+        };
+
+        Some(Enchantment {
+            spell_id,
+            layer,
+            spell_category,
+            has_spell_set_id,
+            power_level,
+            start_time,
+            duration,
+            caster_guid,
+            degrade_modifier,
+            degrade_limit,
+            last_time_degraded,
+            stat_mod_type,
+            stat_mod_key,
+            stat_mod_value,
+            spell_set_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LayeredSpell {
+    pub spell_id: u16,
+    pub layer: u16,
+}
+
+impl LayeredSpell {
+    pub fn read(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        *offset += 4;
+        Some(LayeredSpell { spell_id, layer })
+    }
+}
+
 pub mod actions {
     pub const PICKUP: u32 = 0x0033;
     pub const USE_ITEM: u32 = 0x0036;
@@ -306,6 +412,38 @@ pub enum GameMessage {
         vital: u32,
         current: u32,
     },
+    MagicUpdateEnchantment {
+        target: u64,
+        enchantment: Enchantment,
+    },
+    MagicUpdateMultipleEnchantments {
+        target: u64,
+        enchantments: Vec<Enchantment>,
+    },
+    MagicRemoveEnchantment {
+        target: u64,
+        spell_id: u16,
+        layer: u16,
+    },
+    MagicRemoveMultipleEnchantments {
+        target: u64,
+        spells: Vec<LayeredSpell>,
+    },
+    MagicPurgeEnchantments {
+        target: u64,
+    },
+    MagicPurgeBadEnchantments {
+        target: u64,
+    },
+    MagicDispelEnchantment {
+        target: u64,
+        spell_id: u16,
+        layer: u16,
+    },
+    MagicDispelMultipleEnchantments {
+        target: u64,
+        spells: Vec<LayeredSpell>,
+    },
     UpdateHealth {
         target: u32,
         health: f32,
@@ -338,6 +476,7 @@ pub enum GameMessage {
         pos: Option<WorldPosition>,
         attributes: Vec<(u32, u32, u32, u32, u32)>, // (type, ranks, start, xp, current)
         skills: Vec<(u32, u32, u32, u32, u32)>,     // (type, ranks, status, xp, init)
+        enchantments: Vec<Enchantment>,
     },
     GameAction {
         action: u32,
@@ -784,14 +923,15 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_SKILL => {
-                if data.len() >= 35 {
-                    let skill = LittleEndian::read_u32(&data[5..9]);
-                    let ranks = LittleEndian::read_u32(&data[9..13]);
-                    // offset + 13: adjustPP (ushort)
-                    let status = LittleEndian::read_u32(&data[15..19]);
-                    let xp = LittleEndian::read_u32(&data[19..23]);
-                    let init = LittleEndian::read_u32(&data[23..27]);
-                    // rest is resistance (4) and last_used (8)
+                if data.len() >= 40 {
+                    // Header(4) + Seq(4) + SkillID(4) + Ranks(2) + Status(2) + SAC(4) + XP(4) + Init(4) + Resist(4) + Time(8) = 40
+                    let skill = LittleEndian::read_u32(&data[8..12]);
+                    let ranks = LittleEndian::read_u16(&data[12..14]) as u32;
+                    let status = LittleEndian::read_u16(&data[14..16]) as u32;
+                    let _sac = LittleEndian::read_u32(&data[16..20]);
+                    let xp = LittleEndian::read_u32(&data[20..24]);
+                    let init = LittleEndian::read_u32(&data[24..28]);
+
                     GameMessage::UpdateSkill {
                         skill,
                         ranks,
@@ -826,14 +966,24 @@ impl GameMessage {
                 }
             }
             opcodes::PRIVATE_UPDATE_VITAL => {
-                log::debug!("PRIVATE_UPDATE_VITAL payload (first 25 bytes): {:02X?}", &data[..std::cmp::min(data.len(), 25)]);
+                log::debug!(
+                    "PRIVATE_UPDATE_VITAL payload (first 25 bytes): {:02X?}",
+                    &data[..std::cmp::min(data.len(), 25)]
+                );
                 if data.len() >= 25 {
                     let vital = LittleEndian::read_u32(&data[5..9]);
                     let ranks = LittleEndian::read_u32(&data[9..13]);
                     let start = LittleEndian::read_u32(&data[13..17]);
                     let xp = LittleEndian::read_u32(&data[17..21]);
                     let current = LittleEndian::read_u32(&data[21..25]);
-                    log::info!("UpdateVital: id={}, ranks={}, start={}, xp={}, current={}", vital, ranks, start, xp, current);
+                    log::info!(
+                        "UpdateVital: id={}, ranks={}, start={}, xp={}, current={}",
+                        vital,
+                        ranks,
+                        start,
+                        xp,
+                        current
+                    );
                     GameMessage::UpdateVital {
                         vital,
                         ranks,
@@ -919,15 +1069,114 @@ impl GameMessage {
                     }
                 }
 
-                if event_type == game_event_opcodes::UPDATE_HEALTH {
-                    if data.len() >= 24 {
-                        let target = LittleEndian::read_u32(&data[16..20]);
-                        let health = LittleEndian::read_f32(&data[20..24]);
-                        return GameMessage::UpdateHealth {
-                            target,
-                            health,
+                if event_type == game_event_opcodes::UPDATE_HEALTH && data.len() >= 24 {
+                    let target = LittleEndian::read_u32(&data[16..20]);
+                    let health = LittleEndian::read_f32(&data[20..24]);
+                    return GameMessage::UpdateHealth { target, health };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT
+                    && data.len() >= 16 + 60
+                {
+                    let mut offset = 16;
+                    if let Some(enchantment) = Enchantment::read(data, &mut offset) {
+                        return GameMessage::MagicUpdateEnchantment {
+                            target: guid,
+                            enchantment,
                         };
                     }
+                }
+
+                if event_type == game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS
+                    && data.len() >= 20
+                {
+                    let mut offset = 16;
+                    let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    offset += 4;
+                    let mut enchantments = Vec::with_capacity(count as usize);
+                    for _ in 0..count {
+                        if let Some(e) = Enchantment::read(data, &mut offset) {
+                            enchantments.push(e);
+                        } else {
+                            break;
+                        }
+                    }
+                    return GameMessage::MagicUpdateMultipleEnchantments {
+                        target: guid,
+                        enchantments,
+                    };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_REMOVE_ENCHANTMENT
+                    && data.len() >= 16 + 4
+                {
+                    let spell_id = LittleEndian::read_u16(&data[16..18]);
+                    let layer = LittleEndian::read_u16(&data[18..20]);
+                    return GameMessage::MagicRemoveEnchantment {
+                        target: guid,
+                        spell_id,
+                        layer,
+                    };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS
+                    && data.len() >= 20
+                {
+                    let mut offset = 16;
+                    let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    offset += 4;
+                    let mut spells = Vec::with_capacity(count as usize);
+                    for _ in 0..count {
+                        if let Some(s) = LayeredSpell::read(data, &mut offset) {
+                            spells.push(s);
+                        } else {
+                            break;
+                        }
+                    }
+                    return GameMessage::MagicRemoveMultipleEnchantments {
+                        target: guid,
+                        spells,
+                    };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_PURGE_ENCHANTMENTS {
+                    return GameMessage::MagicPurgeEnchantments { target: guid };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_PURGE_BAD_ENCHANTMENTS {
+                    return GameMessage::MagicPurgeBadEnchantments { target: guid };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_DISPEL_ENCHANTMENT
+                    && data.len() >= 16 + 4
+                {
+                    let spell_id = LittleEndian::read_u16(&data[16..18]);
+                    let layer = LittleEndian::read_u16(&data[18..20]);
+                    return GameMessage::MagicDispelEnchantment {
+                        target: guid,
+                        spell_id,
+                        layer,
+                    };
+                }
+
+                if event_type == game_event_opcodes::MAGIC_DISPEL_MULTIPLE_ENCHANTMENTS
+                    && data.len() >= 20
+                {
+                    let mut offset = 16;
+                    let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    offset += 4;
+                    let mut spells = Vec::with_capacity(count as usize);
+                    for _ in 0..count {
+                        if let Some(s) = LayeredSpell::read(data, &mut offset) {
+                            spells.push(s);
+                        } else {
+                            break;
+                        }
+                    }
+                    return GameMessage::MagicDispelMultipleEnchantments {
+                        target: guid,
+                        spells,
+                    };
                 }
 
                 GameMessage::GameEvent {
@@ -1038,6 +1287,15 @@ pub mod game_event_opcodes {
     pub const WEENIE_ERROR: u32 = 0x028A;
     pub const TELL: u32 = 0x02BD;
     pub const FELLOWSHIP_UPDATE_FELLOW: u32 = 0x02C0;
+    pub const MAGIC_UPDATE_SPELL: u32 = 0x02C1;
+    pub const MAGIC_UPDATE_ENCHANTMENT: u32 = 0x02C2;
+    pub const MAGIC_REMOVE_ENCHANTMENT: u32 = 0x02C3;
+    pub const MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS: u32 = 0x02C4;
+    pub const MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS: u32 = 0x02C5;
+    pub const MAGIC_PURGE_ENCHANTMENTS: u32 = 0x02C6;
+    pub const MAGIC_DISPEL_ENCHANTMENT: u32 = 0x02C7;
+    pub const MAGIC_DISPEL_MULTIPLE_ENCHANTMENTS: u32 = 0x02C8;
+    pub const MAGIC_PURGE_BAD_ENCHANTMENTS: u32 = 0x0312;
 }
 
 pub mod character_error_codes {
@@ -1088,11 +1346,27 @@ pub fn read_string16(data: &[u8], offset: &mut usize) -> String {
     let s = String::from_utf8_lossy(&data[*offset..*offset + len]).to_string();
     *offset += len;
 
-    // ACE pads string16 to 4 byte boundary including the length bytes
+    // ACE pads most string16 to 4 byte boundary including the length bytes
+    // (except inside property tables, which we handle manually)
     let total_read = 2 + len;
     let pad = (4 - (total_read % 4)) % 4;
     *offset += pad;
 
+    s
+}
+
+pub fn read_string16_unpadded(data: &[u8], offset: &mut usize) -> String {
+    if data.len() < *offset + 2 {
+        return String::new();
+    }
+    let len = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
+    *offset += 2;
+
+    if data.len() < *offset + len {
+        return String::new();
+    }
+    let s = String::from_utf8_lossy(&data[*offset..*offset + len]).to_string();
+    *offset += len;
     s
 }
 
@@ -1135,7 +1409,7 @@ pub fn build_login_payload(account: &str, password: &str, sequence: u32) -> Vec<
     payload
 }
 
-fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
+pub fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
     let mut offset = 0;
     let mut name = "Unknown".to_string();
     if data.len() < 8 {
@@ -1185,22 +1459,19 @@ fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
         offset += 4 + (count * 12); // 4 key + 8 val
     }
     // 0x0010: PropertyString
-    if property_flags & 0x0010 != 0 {
-        if data.len() < offset + 4 {
-            return None;
-        }
+    if property_flags & 0x0010 != 0 && data.len() >= offset + 4 {
         let count = LittleEndian::read_u16(&data[offset..offset + 2]) as usize;
         offset += 4;
         for _ in 0..count {
             if data.len() < offset + 6 {
-                return None;
+                break;
             }
             let key = LittleEndian::read_u32(&data[offset..offset + 4]);
-            offset += 4; // key
+            offset += 4;
             let len = LittleEndian::read_u16(&data[offset..offset + 2]) as usize;
             offset += 2;
             if data.len() < offset + len {
-                return None;
+                break;
             }
             let val = String::from_utf8_lossy(&data[offset..offset + len]).to_string();
             offset += len;
@@ -1209,7 +1480,7 @@ fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
                 // PropertyString::Name
                 name = val;
             }
-            // No alignment inside hash tables for ACE
+            // ACE property strings in hash tables are NOT padded
         }
     }
     // 0x0008: PropertyDid
@@ -1265,66 +1536,119 @@ fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
 
     let mut attributes = Vec::new();
     // 0x0001: Attribute
-    if vector_flags & 0x0001 != 0 {
-        if data.len() < offset + 4 {
-            return None;
-        }
+    if vector_flags & 0x0001 != 0 && data.len() >= offset + 4 {
         let attr_cache = LittleEndian::read_u32(&data[offset..offset + 4]);
         offset += 4;
 
         // Primary attributes (Str, End, Qui, Coo, Foc, Self)
         for i in 1..=6 {
             if attr_cache & (1 << (i - 1)) != 0 {
-                if data.len() < offset + 12 {
-                    return None;
+                if data.len() >= offset + 12 {
+                    let ranks = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    let start = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
+                    let xp = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
+                    attributes.push((i as u32, ranks, start, xp, ranks + start));
+                    offset += 12;
+                } else {
+                    break;
                 }
-                let ranks = LittleEndian::read_u32(&data[offset..offset + 4]);
-                let start = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
-                let xp = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
-                // For primaries, current isn't sent, it's just ranks + start + bonuses (which we don't have yet)
-                attributes.push((i as u32, ranks, start, xp, ranks + start));
-                offset += 12;
             }
         }
         // Vitals (Health, Stamina, Mana)
         for i in 1..=3 {
             if attr_cache & (1 << (i + 5)) != 0 {
-                if data.len() < offset + 16 {
-                    return None;
+                if data.len() >= offset + 16 {
+                    let ranks = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    let start = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
+                    let xp = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
+                    let current = LittleEndian::read_u32(&data[offset + 12..offset + 16]);
+                    attributes.push(((i + 100) as u32, ranks, start, xp, current));
+                    offset += 16;
+                } else {
+                    break;
                 }
-                let ranks = LittleEndian::read_u32(&data[offset..offset + 4]);
-                let start = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
-                let xp = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
-                let current = LittleEndian::read_u32(&data[offset + 12..offset + 16]);
-                // For vitals, base is effectively 0 if no ranks/start, but let's send what we have
-                // Use +100 to avoid overlap with attributes 1-6
-                attributes.push(((i + 100) as u32, ranks, start, xp, current));
-                offset += 16;
             }
         }
     }
 
     let mut skills = Vec::new();
     // 0x0002: Skill
-    if vector_flags & 0x0002 != 0 {
-        if data.len() < offset + 4 {
-            return None;
-        }
+    if vector_flags & 0x0002 != 0 && data.len() >= offset + 4 {
         let count = LittleEndian::read_u16(&data[offset..offset + 2]) as usize;
         offset += 4; // Skip count + buckets header
         for _ in 0..count {
-            if data.len() < offset + 34 {
-                return None;
+            // Skill struct size is 32 bytes
+            // Format: type(4), ranks(2), status(2), sac(4), xp(4), init(4), resist(4), last_used(8)
+            if data.len() < offset + 32 {
+                log::warn!("Truncated skill vector at offset {}", offset);
+                break;
             }
             let sk_type = LittleEndian::read_u32(&data[offset..offset + 4]);
-            let ranks = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
-            // offset + 8 is ushort 1
-            let training = LittleEndian::read_u32(&data[offset + 10..offset + 14]);
-            let xp = LittleEndian::read_u32(&data[offset + 14..offset + 18]);
-            let init = LittleEndian::read_u32(&data[offset + 18..offset + 22]);
-            // rest is skip: 4 bytes task difficulty + 8 bytes time used = 12 bytes
-            skills.push((sk_type, ranks, training, xp, init));
-            offset += 34;
+            let ranks = LittleEndian::read_u16(&data[offset + 4..offset + 6]) as u32;
+            let status = LittleEndian::read_u16(&data[offset + 6..offset + 8]) as u32;
+            let _sac = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
+            let xp = LittleEndian::read_u32(&data[offset + 12..offset + 16]);
+            let init = LittleEndian::read_u32(&data[offset + 16..offset + 20]);
+            // Bytes 20..24: Resistance (4)
+            // Bytes 24..32: LastUsed (8)
+            skills.push((sk_type, ranks, status, xp, init));
+            offset += 32;
+        }
+    }
+
+    // 0x0100: Spell
+    if vector_flags & 0x0100 != 0 && data.len() >= offset + 4 {
+        let count = LittleEndian::read_u16(&data[offset..offset + 2]) as usize;
+        offset += 4 + (count * 8); // key:u32 + float:f32
+    }
+
+    let mut enchantments = Vec::new();
+    // 0x0200: Enchantment
+    if vector_flags & 0x0200 != 0 && data.len() >= offset + 4 {
+        let mask = LittleEndian::read_u32(&data[offset..offset + 4]);
+        offset += 4;
+
+        // Multiplicative = 0x1
+        if mask & 0x01 != 0 && data.len() >= offset + 4 {
+            let count = LittleEndian::read_u32(&data[offset..offset + 4]) as usize;
+            offset += 4;
+            for _ in 0..count {
+                if let Some(e) = Enchantment::read(data, &mut offset) {
+                    enchantments.push(e);
+                } else {
+                    break;
+                }
+            }
+        }
+        // Additive = 0x2
+        if mask & 0x02 != 0 && data.len() >= offset + 4 {
+            let count = LittleEndian::read_u32(&data[offset..offset + 4]) as usize;
+            offset += 4;
+            for _ in 0..count {
+                if let Some(e) = Enchantment::read(data, &mut offset) {
+                    enchantments.push(e);
+                } else {
+                    break;
+                }
+            }
+        }
+        // Cooldown = 0x08
+        if mask & 0x08 != 0 && data.len() >= offset + 4 {
+            let count = LittleEndian::read_u32(&data[offset..offset + 4]) as usize;
+            offset += 4;
+            for _ in 0..count {
+                if let Some(e) = Enchantment::read(data, &mut offset) {
+                    enchantments.push(e);
+                } else {
+                    break;
+                }
+            }
+        }
+        // Vitae = 0x04
+        if mask & 0x04 != 0
+            && let Some(e) = Enchantment::read(data, &mut offset)
+        {
+            enchantments.push(e);
         }
     }
 
@@ -1335,6 +1659,7 @@ fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
         pos,
         attributes,
         skills,
+        enchantments,
     })
 }
 
@@ -1488,7 +1813,12 @@ fn unpack_object_create(data: &[u8]) -> Option<GameMessage> {
 
     // 3. WeenieHeader
     if data.len() < offset + 4 {
-        log::warn!("guid={:08X} failed to read weenie_flags, offset={}, len={}", guid, offset, data.len());
+        log::warn!(
+            "guid={:08X} failed to read weenie_flags, offset={}, len={}",
+            guid,
+            offset,
+            data.len()
+        );
         return None;
     }
     let weenie_flags = LittleEndian::read_u32(&data[offset..offset + 4]);
@@ -1938,6 +2268,194 @@ mod tests {
             assert_eq!(current, 75);
         } else {
             panic!("Expected UpdateVital, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_magic_update_enchantment() {
+        let hex = "B0F70000010000502A000000C2020000010001000100000064000000000000C0298C6741000000000020AC40010000500000803F000000000000000000000000010000020100000000002041";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+
+        if let GameMessage::MagicUpdateEnchantment {
+            target,
+            enchantment,
+        } = msg
+        {
+            assert_eq!(target, 0x50000001);
+            assert_eq!(enchantment.spell_id, 1);
+            assert_eq!(enchantment.layer, 1);
+            assert_eq!(enchantment.power_level, 100);
+            assert_eq!(enchantment.stat_mod_key, 1);
+            assert_eq!(enchantment.stat_mod_value, 10.0);
+            assert_eq!(enchantment.stat_mod_type, 0x02000001);
+        } else {
+            panic!("Expected MagicUpdateEnchantment, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_magic_remove_enchantment() {
+        let hex = "B0F70000010000502B000000C302000001000100";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+
+        if let GameMessage::MagicRemoveEnchantment {
+            target,
+            spell_id,
+            layer,
+        } = msg
+        {
+            assert_eq!(target, 0x50000001);
+            assert_eq!(spell_id, 1);
+            assert_eq!(layer, 1);
+        } else {
+            panic!("Expected MagicRemoveEnchantment, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_magic_dispel_multiple_enchantments() {
+        // GameEventHeader: Target(4)=0x50000001, Seq(4)=0x0000002B, EventType(4)=0x02C8
+        // Payload: Count(4)=2, Spell1(2)=1, Layer1(2)=1, Spell2(2)=2, Layer2(2)=1
+        let hex = "B0F70000010000502B000000C8020000020000000100010002000100";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+
+        if let GameMessage::MagicDispelMultipleEnchantments { target, spells } = msg {
+            assert_eq!(target, 0x50000001);
+            assert_eq!(spells.len(), 2);
+            assert_eq!(spells[0].spell_id, 1);
+            assert_eq!(spells[0].layer, 1);
+            assert_eq!(spells[1].spell_id, 2);
+            assert_eq!(spells[1].layer, 1);
+        } else {
+            panic!("Expected MagicDispelMultipleEnchantments, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_player_description_with_enchantments() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&opcodes::GAME_EVENT.to_le_bytes());
+        data.extend_from_slice(&0x50000001u32.to_le_bytes()); // guid
+        data.extend_from_slice(&0u32.to_le_bytes()); // sequence
+        data.extend_from_slice(&game_event_opcodes::PLAYER_DESCRIPTION.to_le_bytes()); // PlayerDescription event type
+
+        // Event Body (unpack_player_description starts after event_type)
+        data.extend_from_slice(&0x0001u32.to_le_bytes()); // propertyFlags: PropertyInt32
+        data.extend_from_slice(&0x0001u32.to_le_bytes()); // wee_type: Player
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // int count
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // int buckets
+        data.extend_from_slice(&0x0001u32.to_le_bytes()); // int key
+        data.extend_from_slice(&100u32.to_le_bytes()); // int val
+
+        data.extend_from_slice(&0x0203u32.to_le_bytes()); // vector_flags: Attribute(1) | Skill(2) | Enchantment(0x0200)
+        data.extend_from_slice(&0u32.to_le_bytes()); // has_health_stats
+
+        // Attributes (vector_flags 0x01)
+        data.extend_from_slice(&0x01u32.to_le_bytes()); // attr_cache: Strength(1)
+        data.extend_from_slice(&10u32.to_le_bytes()); // ranks
+        data.extend_from_slice(&90u32.to_le_bytes()); // start
+        data.extend_from_slice(&0u32.to_le_bytes()); // xp
+
+        // Skills (vector_flags 0x02)
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // skill count
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // skill buckets
+
+        // Enchantments (vector_flags 0x0200)
+        data.extend_from_slice(&0x0000_0001u32.to_le_bytes()); // mask: Multiplicative(1)
+        data.extend_from_slice(&1u32.to_le_bytes()); // list count
+
+        // One Multiplicative Enchantment (60 bytes + None spell_set_id)
+        data.extend_from_slice(&400u16.to_le_bytes()); // spell_id: 400
+        data.extend_from_slice(&1u16.to_le_bytes()); // layer
+        data.extend_from_slice(&0u16.to_le_bytes()); // spell_category
+        data.extend_from_slice(&0u16.to_le_bytes()); // has_spell_set_id
+        data.extend_from_slice(&100u32.to_le_bytes()); // power_level
+        data.extend_from_slice(&(-10.0f64).to_le_bytes()); // start_time
+        data.extend_from_slice(&3600.0f64.to_le_bytes()); // duration
+        data.extend_from_slice(&0xCAFEBEEFu32.to_le_bytes()); // caster_guid
+        data.extend_from_slice(&1.0f32.to_le_bytes()); // degrade_modifier
+        data.extend_from_slice(&0.0f32.to_le_bytes()); // degrade_limit
+        data.extend_from_slice(&0.0f64.to_le_bytes()); // last_time_degraded
+        data.extend_from_slice(&0x0001u32.to_le_bytes()); // stat_mod_type
+        data.extend_from_slice(&1u32.to_le_bytes()); // stat_mod_key
+        data.extend_from_slice(&5.0f32.to_le_bytes()); // stat_mod_value
+
+        let msg = GameMessage::unpack(&data);
+        if let GameMessage::PlayerDescription {
+            guid, enchantments, ..
+        } = msg
+        {
+            assert_eq!(guid, 0x50000001);
+            assert_eq!(enchantments.len(), 1);
+            assert_eq!(enchantments[0].spell_id, 400);
+            assert_eq!(enchantments[0].start_time, -10.0);
+        } else {
+            panic!("Expected PlayerDescription, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_player_description_unpadded_strings() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0010u32.to_le_bytes()); // propertyFlags: PropertyString only
+        data.extend_from_slice(&0u32.to_le_bytes()); // wee_type
+
+        // PropertyString Table
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // count: 1
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // buckets: 1
+        data.extend_from_slice(&0x0001u32.to_le_bytes()); // key: name
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // len: 3
+        data.extend_from_slice(b"Foo"); // "Foo" (no padding!)
+
+        // Next field: VectorFlags
+        data.extend_from_slice(&0x0001u32.to_le_bytes()); // vector_flags: Attribute
+        data.extend_from_slice(&0u32.to_le_bytes()); // has_health
+        data.extend_from_slice(&0x0000_0000u32.to_le_bytes()); // attr_cache: empty
+
+        let msg = unpack_player_description(0, &data);
+        assert!(msg.is_some());
+        if let Some(GameMessage::PlayerDescription { name, .. }) = msg {
+            assert_eq!(name, "Foo");
+        } else {
+            panic!("Expected PlayerDescription");
+        }
+    }
+
+    #[test]
+    fn test_unpack_player_description_skills_fixed_width() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000_0000u32.to_le_bytes()); // no property flags
+        data.extend_from_slice(&0u32.to_le_bytes()); // wee_type
+
+        data.extend_from_slice(&0x0002u32.to_le_bytes()); // vector_flags: Skill
+        data.extend_from_slice(&0u32.to_le_bytes()); // has_health
+
+        // Skill table
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // count: 1
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // buckets: 1
+
+        // Skill entry (32 bytes - Ground Truth from ACE)
+        data.extend_from_slice(&32u32.to_le_bytes()); // type: 32
+        data.extend_from_slice(&100u16.to_le_bytes()); // ranks
+        data.extend_from_slice(&1u16.to_le_bytes()); // status
+        data.extend_from_slice(&2u32.to_le_bytes()); // sac (trained=2)
+        data.extend_from_slice(&1000u32.to_le_bytes()); // xp
+        data.extend_from_slice(&10u32.to_le_bytes()); // init
+        data.extend_from_slice(&0u32.to_le_bytes()); // resistance
+        data.extend_from_slice(&0.0f64.to_le_bytes()); // last used
+
+        let msg = unpack_player_description(0, &data);
+        assert!(msg.is_some());
+        if let Some(GameMessage::PlayerDescription { skills, .. }) = msg {
+            assert_eq!(skills.len(), 1);
+            assert_eq!(skills[0].0, 32); // id
+            assert_eq!(skills[0].1, 100); // ranks
+            assert_eq!(skills[0].2, 1); // status
+        } else {
+            panic!("Expected PlayerDescription");
         }
     }
 }

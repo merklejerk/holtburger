@@ -49,6 +49,7 @@ pub enum SessionEvent {
     Message(Vec<u8>),
     HandshakeRequest(ConnectRequestData),
     HandshakeResponse { cookie: u64, client_id: u16 },
+    TimeSync(f64),
 }
 
 pub struct Session {
@@ -304,7 +305,13 @@ impl Session {
     }
 
     pub fn process_fragment(&mut self, header: &FragmentHeader, data: &[u8]) -> Option<Vec<u8>> {
-        log::debug!("Processing fragment Seq={} {}/{} size={}", header.sequence, header.index + 1, header.count, data.len());
+        log::debug!(
+            "Processing fragment Seq={} {}/{} size={}",
+            header.sequence,
+            header.index + 1,
+            header.count,
+            data.len()
+        );
         if header.count == 1 {
             return Some(data.to_vec());
         }
@@ -320,7 +327,12 @@ impl Session {
 
         // SAFETY: Handle server restart or ID reuse with different fragment count
         if header.count != entry.count {
-            log::warn!("Fragment count mismatch for Seq {}: expected {}, got {}. Resetting reassembler.", header.sequence, entry.count, header.count);
+            log::warn!(
+                "Fragment count mismatch for Seq {}: expected {}, got {}. Resetting reassembler.",
+                header.sequence,
+                entry.count,
+                header.count
+            );
             entry.count = header.count;
             entry.fragments = vec![None; header.count as usize];
             entry.received_count = 0;
@@ -417,8 +429,9 @@ impl Session {
             self.last_server_seq = header.sequence;
         }
 
-        if (header.flags & flags::ENCRYPTED_CHECKSUM != 0) && self.isaac_s2c.is_some() {
-            let isaac = self.isaac_s2c.as_mut().unwrap();
+        if header.flags & flags::ENCRYPTED_CHECKSUM != 0
+            && let Some(isaac) = self.isaac_s2c.as_mut()
+        {
             isaac.consume_key();
         }
 
@@ -501,7 +514,39 @@ impl Session {
             }
         }
 
-        // 3. Check for Blobs
+        // 3. Check for TimeSync
+        if header.flags & flags::TIME_SYNC != 0 {
+            let mut offset = 0;
+            // TimeSync is an optional header. We need to find its specific offset.
+            // PacketHeaderOptional sequence:
+            // SERVER_SWITCH (8), REQUEST_RETRANSMIT (4+4*n), REJECT_RETRANSMIT (4+4*n), ACK_SEQUENCE (4), CONNECT_RESPONSE (8), CICMD (8), TIME_SYNC (8)
+            if header.flags & flags::SERVER_SWITCH != 0 {
+                offset += 8;
+            }
+            if header.flags & flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
+                let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                offset += 4 + (count as usize * 4);
+            }
+            if header.flags & flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
+                let count = LittleEndian::read_u32(&data[offset..offset + 4]);
+                offset += 4 + (count as usize * 4);
+            }
+            if header.flags & flags::ACK_SEQUENCE != 0 {
+                offset += 4;
+            }
+            if header.flags & flags::CONNECT_RESPONSE != 0 {
+                offset += 8;
+            }
+            if header.flags & flags::CICMD != 0 {
+                offset += 8;
+            }
+            if header.flags & flags::TIME_SYNC != 0 && offset + 8 <= data.len() {
+                let server_time = LittleEndian::read_f64(&data[offset..offset + 8]);
+                events.push(SessionEvent::TimeSync(server_time));
+            }
+        }
+
+        // 4. Check for Blobs
         if header.flags & flags::BLOB_FRAGMENTS != 0 {
             let mut offset = self.get_payload_offset(header.flags, &data);
             while offset + FRAGMENT_HEADER_SIZE <= data.len() {

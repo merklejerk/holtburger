@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - dev
+  workflow_dispatch:
 
 jobs:
   sync-to-main:
@@ -29,7 +30,12 @@ jobs:
           
           # Merge dev into main but don't commit yet
           # We use -X theirs to favor new changes from dev
-          git merge dev --no-commit --no-ff -X theirs
+          # We use || true because modify/delete conflicts (structural) will 
+          # cause a non-zero exit code even if content is resolved.
+          git merge dev --no-commit --no-ff -X theirs || echo "Structural conflicts detected, resolving... 🛠️"
+          
+          # Force add to resolve the conflict state before purging
+          git add .
           
           # THE PURGE 🧹
           echo "Purging the clutter... 🤫"

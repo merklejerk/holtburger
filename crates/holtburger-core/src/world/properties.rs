@@ -85,6 +85,32 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct EnchantmentTypeFlags: u32 {
+        const UNDEF                  = 0x0000000;
+        const ATTRIBUTE              = 0x0000001;
+        const SECOND_ATT              = 0x0000002;
+        const INT                    = 0x0000004;
+        const FLOAT                  = 0x0000008;
+        const SKILL                  = 0x0000010;
+        const BODY_DAMAGE_VALUE        = 0x0000020;
+        const BODY_ARMOR_VALUE         = 0x0000080;
+        const SINGLE_STAT             = 0x0001000;
+        const MULTIPLE_STAT           = 0x0002000;
+        const MULTIPLICATIVE         = 0x0004000;
+        const ADDITIVE               = 0x0008000;
+        const ATTACK_SKILLS           = 0x0010000;
+        const DEFENSE_SKILLS          = 0x0020000;
+        const MULTIPLICATIVE_DEGRADE = 0x0100000;
+        const ADDITIVE_DEGRADE       = 0x0200000;
+        const VITAE                  = 0x0800000;
+        const COOLDOWN               = 0x1000000;
+        const BENEFICIAL             = 0x2000000;
+        const STAT_TYPES              = 0x00000FF;
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct WeenieHeaderFlag: u32 {
         const PLURAL_NAME = 0x00000001;
         const ITEMS_CAPACITY = 0x00000002;

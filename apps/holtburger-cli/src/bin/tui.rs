@@ -344,10 +344,12 @@ async fn main() -> Result<()> {
                                         }
 
                                         if app_state.nearby_tab == ui::NearbyTab::Effects {
-                                            if let Some(enchant) = app_state
-                                                .player_enchantments
-                                                .get(app_state.selected_nearby_index)
+                                            let enchants =
+                                                app_state.get_effects_list_enchantments();
+                                            if let Some((enchant_ref, _)) =
+                                                enchants.get(app_state.selected_nearby_index)
                                             {
+                                                let enchant = (*enchant_ref).clone();
                                                 match c {
                                                     'd' | 'D' => {
                                                         app_state.context_buffer.clear();

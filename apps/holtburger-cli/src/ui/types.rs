@@ -10,7 +10,7 @@ pub const LAYOUT_WIDE_CONTEXT_PCT: u16 = 25;
 
 pub const LAYOUT_NARROW_TOP_ROW_PCT: u16 = 50;
 pub const LAYOUT_NARROW_BOTTOM_ROW_PCT: u16 = 50;
-pub const LAYOUT_NARROW_NEARBY_PCT: u16 = 50;
+pub const LAYOUT_NARROW_DASHBOARD_PCT: u16 = 50;
 pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
 
 // Chat constants
@@ -27,7 +27,7 @@ pub enum UIState {
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub enum NearbyTab {
+pub enum DashboardTab {
     Entities,
     Inventory,
     Character,
@@ -39,7 +39,7 @@ pub enum FocusedPane {
     Chat,
     Context,
     Input,
-    Nearby,
+    Dashboard,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

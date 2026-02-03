@@ -1,3 +1,4 @@
+use crate::math::Vector3;
 use crate::world::position::WorldPosition;
 use crate::world::properties::{
     ItemType, ObjectDescriptionFlag, WeenieHeaderFlag, WeenieHeaderFlag2,
@@ -196,6 +197,24 @@ pub mod opcodes {
     pub const UPDATE_MOTION: u32 = 0xF74C;
     pub const UPDATE_POSITION: u32 = 0xF748;
     pub const VECTOR_UPDATE: u32 = 0xF74E;
+    pub const AUTONOMOUS_POSITION: u32 = 0xF753;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct RawMotionState {
+    pub flags: u32,
+    pub hold_key: Option<u32>,
+    pub stance: Option<u32>,
+    pub forward_command: Option<u32>,
+    pub forward_hold_key: Option<u32>,
+    pub forward_speed: Option<f32>,
+    pub sidestep_command: Option<u32>,
+    pub sidestep_hold_key: Option<u32>,
+    pub sidestep_speed: Option<f32>,
+    pub turn_command: Option<u32>,
+    pub turn_hold_key: Option<u32>,
+    pub turn_speed: Option<f32>,
+    pub commands: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -305,9 +324,56 @@ impl LayeredSpell {
 }
 
 pub mod actions {
-    pub const PICKUP: u32 = 0x0033;
-    pub const USE_ITEM: u32 = 0x0036;
-    pub const IDENTIFY_OBJECT: u32 = 0x0197;
+    pub const TALK: u32 = 0x0015; // Client -> Server talk
+    pub const PUT_ITEM_IN_CONTAINER: u32 = 0x0019;
+    pub const PICKUP_ITEM: u32 = 0x0019; // Synonym for PutItemInContainer(this)
+    pub const GET_AND_WIELD_ITEM: u32 = 0x001A;
+    pub const DROP_ITEM: u32 = 0x001B;
+    pub const USE: u32 = 0x0036;
+    pub const LOGIN_COMPLETE: u32 = 0x00A1;
+    pub const IDENTIFY_OBJECT: u32 = 0x00C8;
+    pub const NO_LONGER_VIEWING_CONTENTS: u32 = 0x0195;
+    
+    // Top-level opcodes that ACE treats as GameActions
+    pub const JUMP: u32 = 0xF61B;
+    pub const MOVE_TO_STATE: u32 = 0xF61C;
+}
+
+#[derive(Debug, Clone)]
+pub enum Movement {
+    InterpretedCommand {
+        command: u16,
+        hold_key: u16,
+        ranks: u32,
+        status: u32,
+        f32: f32,
+    },
+    StopCompletely {
+        hold_key: u16,
+        status: u32,
+    },
+    MoveToObject {
+        target: u32,
+        stance: u32,
+        run_rate: f32,
+    },
+    MoveToPosition {
+        target_pos: Vector3,
+        stance: u32,
+        run_rate: f32,
+    },
+    TurnToObject {
+        target: u32,
+        run_rate: f32,
+    },
+    TurnToHeading {
+        heading: f32,
+        run_rate: f32,
+    },
+    Other {
+        movement_type: u8,
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -448,13 +514,32 @@ pub enum GameMessage {
         target: u32,
         health: f32,
     },
+    MoveToState {
+        raw_motion: RawMotionState,
+        pos: WorldPosition,
+        instance_seq: u16,
+        server_seq: u16,
+        teleport_seq: u16,
+        pos_seq: u16,
+        contact_lj: u8,
+    },
     UpdateMotion {
         guid: u32,
-        data: Vec<u8>,
+        sequence: u16,
+        server_control_sequence: u16,
+        is_autonomous: bool,
+        motion_flags: u8,
+        stance: u16,
+        movement: Movement,
     },
     UpdatePosition {
         guid: u32,
         pos: WorldPosition,
+    },
+    AutonomousPosition {
+        guid: u32,
+        landblock: u32,
+        pos: Vector3,
     },
     VectorUpdate {
         guid: u32,
@@ -485,6 +570,9 @@ pub enum GameMessage {
     ServerMessage {
         message: String,
     },
+    CommunicationTransientString {
+        message: String,
+    },
     HearSpeech {
         message: String,
         sender: String,
@@ -497,6 +585,10 @@ pub enum GameMessage {
     CharacterError {
         error_code: u32,
     },
+    InventoryServerSaveFailed {
+        item_guid: u32,
+        error_code: u32,
+    },
     ServerName {
         name: String,
         online_count: u32,
@@ -505,6 +597,16 @@ pub enum GameMessage {
     DddInterrogation,
     DddInterrogationResponse {
         language: u32,
+    },
+    WeenieError {
+        error_code: u32,
+    },
+    WeenieErrorWithString {
+        error_code: u32,
+        message: String,
+    },
+    ViewContents {
+        container_guid: u32,
     },
     Unknown {
         opcode: u32,
@@ -1013,11 +1115,8 @@ impl GameMessage {
                 }
             }
             opcodes::UPDATE_MOTION => {
-                if data.len() >= 8 {
-                    GameMessage::UpdateMotion {
-                        guid: LittleEndian::read_u32(&data[4..8]),
-                        data: data[8..].to_vec(),
-                    }
+                if let Some(msg) = unpack_update_motion(data) {
+                    msg
                 } else {
                     GameMessage::Unknown {
                         opcode,
@@ -1038,6 +1137,16 @@ impl GameMessage {
                     }
                 }
             }
+            opcodes::AUTONOMOUS_POSITION => {
+                if let Some(msg) = unpack_autonomous_position(data) {
+                    msg
+                } else {
+                    GameMessage::Unknown {
+                        opcode: opcodes::AUTONOMOUS_POSITION,
+                        data: data.to_vec(),
+                    }
+                }
+            }
             opcodes::VECTOR_UPDATE => {
                 if data.len() >= 8 {
                     GameMessage::VectorUpdate {
@@ -1046,8 +1155,8 @@ impl GameMessage {
                     }
                 } else {
                     GameMessage::Unknown {
-                        opcode,
-                        data: data[4..].to_vec(),
+                        opcode: opcodes::VECTOR_UPDATE,
+                        data: data.to_vec(),
                     }
                 }
             }
@@ -1179,6 +1288,39 @@ impl GameMessage {
                     };
                 }
 
+                if event_type == game_event_opcodes::INVENTORY_SERVER_SAVE_FAILED && data.len() >= 24 {
+                    let item_guid = LittleEndian::read_u32(&data[16..20]);
+                    let error_code = LittleEndian::read_u32(&data[20..24]);
+                    return GameMessage::InventoryServerSaveFailed {
+                        item_guid,
+                        error_code,
+                    };
+                }
+
+                if event_type == game_event_opcodes::WEENIE_ERROR && data.len() >= 20 {
+                    let error_code = LittleEndian::read_u32(&data[16..20]);
+                    return GameMessage::WeenieError { error_code };
+                }
+
+                if event_type == game_event_opcodes::WEENIE_ERROR_WITH_STRING && data.len() >= 20 {
+                    let mut offset = 16;
+                    let error_code = LittleEndian::read_u32(&data[offset..offset + 4]);
+                    offset += 4;
+                    let message = read_string16(data, &mut offset);
+                    return GameMessage::WeenieErrorWithString { error_code, message };
+                }
+
+                if event_type == game_event_opcodes::VIEW_CONTENTS && data.len() >= 20 {
+                    let container_guid = LittleEndian::read_u32(&data[16..20]);
+                    return GameMessage::ViewContents { container_guid };
+                }
+
+                if event_type == game_event_opcodes::COMMUNICATION_TRANSIENT_STRING && data.len() >= 20 {
+                    let mut offset = 16;
+                    let message = read_string16(data, &mut offset);
+                    return GameMessage::CommunicationTransientString { message };
+                }
+
                 GameMessage::GameEvent {
                     guid,
                     sequence,
@@ -1264,16 +1406,87 @@ impl GameMessage {
                 buf.extend_from_slice(&action.to_le_bytes());
                 buf.extend_from_slice(data);
             }
+            GameMessage::MoveToState {
+                raw_motion,
+                pos,
+                instance_seq,
+                server_seq,
+                teleport_seq,
+                pos_seq,
+                contact_lj,
+            } => {
+                buf.extend_from_slice(&opcodes::GAME_ACTION.to_le_bytes());
+                buf.extend_from_slice(&0u32.to_le_bytes()); // iteration
+                buf.extend_from_slice(&actions::MOVE_TO_STATE.to_le_bytes());
+
+                // RawMotionState
+                let packed_flags =
+                    (raw_motion.flags & 0x7FF) | ((raw_motion.commands.len() as u32) << 11);
+                buf.extend_from_slice(&packed_flags.to_le_bytes());
+
+                if let Some(val) = raw_motion.hold_key {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.stance {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.forward_command {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.forward_hold_key {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.forward_speed {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.sidestep_command {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.sidestep_hold_key {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.sidestep_speed {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.turn_command {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.turn_hold_key {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                if let Some(val) = raw_motion.turn_speed {
+                    buf.extend_from_slice(&val.to_le_bytes());
+                }
+                buf.extend_from_slice(&raw_motion.commands);
+
+                // Position (32-byte fixed)
+                buf.extend_from_slice(&pos.landblock_id.to_le_bytes());
+                buf.extend_from_slice(&pos.coords.x.to_le_bytes());
+                buf.extend_from_slice(&pos.coords.y.to_le_bytes());
+                buf.extend_from_slice(&pos.coords.z.to_le_bytes());
+                buf.extend_from_slice(&pos.rotation.w.to_le_bytes());
+                buf.extend_from_slice(&pos.rotation.x.to_le_bytes());
+                buf.extend_from_slice(&pos.rotation.y.to_le_bytes());
+                buf.extend_from_slice(&pos.rotation.z.to_le_bytes());
+
+                // Sequences
+                buf.extend_from_slice(&instance_seq.to_le_bytes());
+                buf.extend_from_slice(&server_seq.to_le_bytes());
+                buf.extend_from_slice(&teleport_seq.to_le_bytes());
+                buf.extend_from_slice(&pos_seq.to_le_bytes());
+
+                // Contact/LJ
+                buf.push(*contact_lj);
+
+                // Align to 4
+                let cur = buf.len();
+                let pad = align_to_4(cur) - cur;
+                buf.extend(std::iter::repeat_n(0, pad));
+            }
             _ => unimplemented!("Packing for {:?} not implemented yet", self),
         }
         buf
     }
-}
-
-#[allow(dead_code)]
-pub mod action_opcodes {
-    pub const TALK: u32 = 0x0015; // Client -> Server talk
-    pub const LOGIN_COMPLETE: u32 = 0x00A1;
 }
 
 pub mod game_event_opcodes {
@@ -1283,9 +1496,12 @@ pub mod game_event_opcodes {
     pub const CHARACTER_TITLE: u32 = 0x0029;
     pub const CHANNEL_BROADCAST: u32 = 0x0147;
     pub const VIEW_CONTENTS: u32 = 0x0196;
+    pub const INVENTORY_SERVER_SAVE_FAILED: u32 = 0x00A0;
     pub const START_GAME: u32 = 0x0282;
     pub const WEENIE_ERROR: u32 = 0x028A;
+    pub const WEENIE_ERROR_WITH_STRING: u32 = 0x028B;
     pub const TELL: u32 = 0x02BD;
+    pub const COMMUNICATION_TRANSIENT_STRING: u32 = 0x02EB;
     pub const FELLOWSHIP_UPDATE_FELLOW: u32 = 0x02C0;
     pub const MAGIC_UPDATE_SPELL: u32 = 0x02C1;
     pub const MAGIC_UPDATE_ENCHANTMENT: u32 = 0x02C2;
@@ -1409,7 +1625,143 @@ pub fn build_login_payload(account: &str, password: &str, sequence: u32) -> Vec<
     payload
 }
 
-pub fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
+pub fn unpack_update_motion(data: &[u8]) -> Option<GameMessage> {
+    if data.len() < 16 {
+        return None;
+    }
+
+    let mut offset = 4; // Skip opcode
+    let guid = LittleEndian::read_u32(&data[offset..offset + 4]);
+    offset += 4;
+    let sequence = LittleEndian::read_u16(&data[offset..offset + 2]);
+    offset += 2;
+    let server_control_sequence = LittleEndian::read_u16(&data[offset..offset + 2]);
+    offset += 2;
+    let is_autonomous = data[offset] != 0;
+    offset += 1;
+
+    // Align to 4 bytes
+    offset = (offset + 3) & !3;
+
+    if offset + 4 > data.len() {
+        return None;
+    }
+
+    let movement_type = data[offset];
+    let motion_flags = data[offset + 1];
+    let stance = LittleEndian::read_u16(&data[offset + 2..offset + 4]);
+    offset += 4;
+
+    let movement = match movement_type {
+        2 => {
+            // InterpretedCommand
+            if offset + 16 > data.len() {
+                Movement::Other {
+                    movement_type,
+                    data: data[offset..].to_vec(),
+                }
+            } else {
+                let command = LittleEndian::read_u16(&data[offset..offset + 2]);
+                let hold_key = LittleEndian::read_u16(&data[offset + 2..offset + 4]);
+                let ranks = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
+                let status = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
+                let f32_val = LittleEndian::read_f32(&data[offset + 12..offset + 16]);
+                Movement::InterpretedCommand {
+                    command,
+                    hold_key,
+                    ranks,
+                    status,
+                    f32: f32_val,
+                }
+            }
+        }
+        5 => {
+            // StopCompletely
+            if offset + 6 > data.len() {
+                Movement::Other {
+                    movement_type,
+                    data: data[offset..].to_vec(),
+                }
+            } else {
+                let hold_key = LittleEndian::read_u16(&data[offset..offset + 2]);
+                let status = LittleEndian::read_u32(&data[offset + 2..offset + 6]);
+                Movement::StopCompletely { hold_key, status }
+            }
+        }
+        6 => {
+            // MoveToObject
+            if offset + 52 > data.len() {
+                Movement::Other {
+                    movement_type,
+                    data: data[offset..].to_vec(),
+                }
+            } else {
+                let target = LittleEndian::read_u32(&data[offset..offset + 4]);
+                // Skip Origin (16) and MoveToParams (28) for now, just get RunRate
+                let run_rate = LittleEndian::read_f32(&data[offset + 48..offset + 52]);
+                Movement::MoveToObject {
+                    target,
+                    stance: stance as u32,
+                    run_rate,
+                }
+            }
+        }
+        7 => {
+            // MoveToPosition
+            // ACE writes Origin + MoveToParameters + RunRate
+            if offset + 48 > data.len() {
+                Movement::Other {
+                    movement_type,
+                    data: data[offset..].to_vec(),
+                }
+            } else {
+                let tx = LittleEndian::read_f32(&data[offset + 4..offset + 8]);
+                let ty = LittleEndian::read_f32(&data[offset + 8..offset + 12]);
+                let tz = LittleEndian::read_f32(&data[offset + 12..offset + 16]);
+                let run_rate = LittleEndian::read_f32(&data[offset + 44..offset + 48]);
+                Movement::MoveToPosition {
+                    target_pos: Vector3::new(tx, ty, tz),
+                    stance: stance as u32,
+                    run_rate,
+                }
+            }
+        }
+        _ => Movement::Other {
+            movement_type,
+            data: data[offset..].to_vec(),
+        },
+    };
+
+    Some(GameMessage::UpdateMotion {
+        guid,
+        sequence,
+        server_control_sequence,
+        is_autonomous,
+        motion_flags,
+        stance,
+        movement,
+    })
+}
+
+    pub fn unpack_autonomous_position(data: &[u8]) -> Option<GameMessage> {
+        if data.len() < 36 {
+            return None;
+        }
+
+        let mut offset = 4; // Skip opcode
+        let guid = LittleEndian::read_u32(&data[offset..offset + 4]);
+        offset += 4;
+        let landblock = LittleEndian::read_u32(&data[offset..offset + 4]);
+        offset += 4;
+        let tx = LittleEndian::read_f32(&data[offset..offset + 4]);
+        let ty = LittleEndian::read_f32(&data[offset + 4..offset + 8]);
+        let tz = LittleEndian::read_f32(&data[offset + 8..offset + 12]);
+        let pos = Vector3::new(tx, ty, tz);
+
+        Some(GameMessage::AutonomousPosition { guid, landblock, pos })
+    }
+
+    pub fn unpack_player_description(guid: u32, data: &[u8]) -> Option<GameMessage> {
     let mut offset = 0;
     let mut name = "Unknown".to_string();
     if data.len() < 8 {
@@ -2063,7 +2415,7 @@ mod tests {
         let mut data = Vec::new();
         data.extend_from_slice(&opcodes::GAME_ACTION.to_le_bytes());
         data.extend_from_slice(&0u32.to_le_bytes()); // sequence
-        data.extend_from_slice(&action_opcodes::LOGIN_COMPLETE.to_le_bytes());
+        data.extend_from_slice(&actions::LOGIN_COMPLETE.to_le_bytes());
         data.extend_from_slice(&[1, 2, 3, 4]); // payload
 
         let msg = GameMessage::unpack(&data);
@@ -2072,7 +2424,7 @@ mod tests {
             data: payload,
         } = msg
         {
-            assert_eq!(action, action_opcodes::LOGIN_COMPLETE);
+            assert_eq!(action, actions::LOGIN_COMPLETE);
             assert_eq!(payload, vec![1, 2, 3, 4]);
         } else {
             panic!("Failed to unpack GameAction");
@@ -2456,6 +2808,85 @@ mod tests {
             assert_eq!(skills[0].2, 1); // status
         } else {
             panic!("Expected PlayerDescription");
+        }
+    }
+
+    #[test]
+    fn test_unpack_update_motion_walk() {
+        // Walk hex from ACE Gold Standard
+        let hex = "4CF7000001000050010000000000000002003D0002003D0006000000050000000000803F";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+
+        if let GameMessage::UpdateMotion {
+            guid,
+            is_autonomous,
+            movement,
+            ..
+        } = msg
+        {
+            assert_eq!(guid, 0x50000001);
+            assert!(!is_autonomous);
+            if let Movement::InterpretedCommand {
+                command,
+                hold_key,
+                ranks,
+                status,
+                f32: fwd_speed,
+            } = movement
+            {
+                assert_eq!(command, 2); // Walk
+                assert_eq!(hold_key, 0x3D);
+                assert_eq!(ranks, 6);
+                assert_eq!(status, 5);
+                assert_eq!(fwd_speed, 1.0);
+            } else {
+                panic!("Expected InterpretedCommand, got {:?}", movement);
+            }
+        } else {
+            panic!("Expected UpdateMotion, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_update_motion_stop() {
+        // Stop hex from ACE Gold Standard
+        let hex = "4CF7000001000050020000000000000005003D003D0005000000";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+
+        if let GameMessage::UpdateMotion { movement, .. } = msg {
+            if let Movement::StopCompletely { hold_key, status } = movement {
+                assert_eq!(hold_key, 0x3D);
+                assert_eq!(status, 5);
+            } else {
+                panic!("Expected StopCompletely, got {:?}", movement);
+            }
+        } else {
+            panic!("Expected UpdateMotion, got {:?}", msg);
+        }
+    }
+
+    #[test]
+    fn test_unpack_autonomous_position() {
+        // Opcode(4) + GUID(4) + Landblock(4) + X(4) + Y(4) + Z(4) + more...
+        let hex = "53F70000010000501F0055DA000020410000A0410000F0410000000000000000000000000000000000000000";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data);
+
+        if let GameMessage::AutonomousPosition {
+            guid,
+            landblock,
+            pos,
+        } = msg
+        {
+            assert_eq!(guid, 0x50000001);
+            assert_eq!(landblock, 0xDA55001F);
+            assert_eq!(pos.x, 10.0);
+            assert_eq!(pos.y, 20.0);
+            assert_eq!(pos.z, 30.0);
+        } else {
+            panic!("Expected AutonomousPosition, got {:?}", msg);
         }
     }
 }

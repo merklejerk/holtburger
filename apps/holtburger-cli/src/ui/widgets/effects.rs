@@ -68,13 +68,13 @@ pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
             let mod_desc = get_enchantment_name(enchant);
 
-            let style = if i == state.selected_nearby_index {
+            let style = if i == state.selected_dashboard_index {
                 Style::default().bg(Color::DarkGray)
             } else {
                 Style::default()
             };
 
-            let duration_color = if i == state.selected_nearby_index {
+            let duration_color = if i == state.selected_dashboard_index {
                 Color::White
             } else {
                 Color::DarkGray

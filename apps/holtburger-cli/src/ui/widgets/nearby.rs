@@ -1,12 +1,12 @@
 use super::super::state::AppState;
-use super::super::types::NearbyTab;
+use super::super::types::DashboardTab;
 use crate::classification;
 use holtburger_core::world::properties::{PropertyInt, RadarColor};
 use ratatui::style::{Color, Style};
 use ratatui::widgets::ListItem;
 
 pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let nearby = state.get_filtered_nearby_entities();
+    let nearby = state.get_filtered_nearby_tab();
     nearby
         .iter()
         .enumerate()
@@ -26,7 +26,7 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 _ => Color::White,
             };
 
-            let style = if i == state.selected_nearby_index {
+            let style = if i == state.selected_dashboard_index {
                 Style::default().bg(Color::DarkGray).fg(color)
             } else {
                 Style::default().fg(color)
@@ -47,7 +47,7 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
             let indent = "  ".repeat(*depth);
 
-            if state.nearby_tab == NearbyTab::Entities {
+            if state.dashboard_tab == DashboardTab::Entities {
                 ListItem::new(format!(
                     "{}[{}] {:<15} [{:.1}m]",
                     indent, type_marker, display_name, dist

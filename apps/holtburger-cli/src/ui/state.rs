@@ -1,4 +1,4 @@
-use super::types::{ContextView, FocusedPane, NearbyTab, UIState, WIDTH_BREAKPOINT};
+use super::types::{ContextView, DashboardTab, FocusedPane, UIState, WIDTH_BREAKPOINT};
 use crate::classification;
 use crate::ui::widgets::effects::get_enchantment_name;
 use holtburger_core::protocol::messages::Enchantment;
@@ -25,11 +25,12 @@ pub struct AppState {
     pub focused_pane: FocusedPane,
     pub previous_focused_pane: FocusedPane,
     pub selected_character_index: usize,
-    pub selected_nearby_index: usize,
-    pub nearby_list_state: ratatui::widgets::ListState,
+    pub selected_dashboard_index: usize,
+    pub dashboard_list_state: ratatui::widgets::ListState,
+    pub last_dashboard_height: usize,
     pub scroll_offset: usize,
     pub chat_total_lines: usize,
-    pub nearby_tab: NearbyTab,
+    pub dashboard_tab: DashboardTab,
     pub context_buffer: Vec<String>,
     pub context_scroll_offset: usize,
     pub context_view: ContextView,
@@ -57,20 +58,20 @@ impl AppState {
         }
     }
 
-    pub fn nearby_item_count(&self) -> usize {
-        match self.nearby_tab {
-            NearbyTab::Entities => self
+    pub fn dashboard_item_count(&self) -> usize {
+        match self.dashboard_tab {
+            DashboardTab::Entities => self
                 .entities
                 .values()
                 .filter(|e| classification::is_targetable(e) && e.position.landblock_id != 0)
                 .count(),
-            NearbyTab::Inventory => self
+            DashboardTab::Inventory => self
                 .entities
                 .values()
                 .filter(|e| e.position.landblock_id == 0 && !e.name.is_empty())
                 .count(),
-            NearbyTab::Effects => self.get_effects_list_enchantments().len(),
-            NearbyTab::Character => {
+            DashboardTab::Effects => self.get_effects_list_enchantments().len(),
+            DashboardTab::Character => {
                 let attr_count = self.attributes.len();
                 let skill_count = self.skills.iter().filter(|s| s.skill_type.is_eor()).count();
                 attr_count + skill_count + 3 // 2 headers + 1 spacer
@@ -78,17 +79,15 @@ impl AppState {
         }
     }
 
-    pub fn get_filtered_nearby_entities(&self) -> Vec<(&Entity, f32, usize)> {
+    fn get_filtered_entities(&self, filter_inventory: bool) -> Vec<(&Entity, f32, usize)> {
         let candidates: Vec<_> = self
             .entities
             .values()
             .filter(|e| {
-                if self.nearby_tab == NearbyTab::Entities {
+                if !filter_inventory {
                     classification::is_targetable(e) && e.position.landblock_id != 0
-                } else if self.nearby_tab == NearbyTab::Inventory {
-                    e.position.landblock_id == 0 && !e.name.is_empty()
                 } else {
-                    false
+                    e.position.landblock_id == 0 && !e.name.is_empty()
                 }
             })
             .collect();
@@ -104,10 +103,10 @@ impl AppState {
         let candidate_guids: HashSet<u32> = candidates.iter().map(|e| e.guid).collect();
 
         for e in &candidates {
-            let parent_id = match self.nearby_tab {
-                NearbyTab::Inventory => e.container_id,
-                NearbyTab::Entities => e.container_id.or(e.wielder_id).or(e.physics_parent_id),
-                _ => None,
+            let parent_id = if filter_inventory {
+                e.container_id
+            } else {
+                e.container_id.or(e.wielder_id).or(e.physics_parent_id)
             };
 
             let is_root = if let Some(pid) = parent_id {
@@ -134,7 +133,7 @@ impl AppState {
         roots.sort_by(|&a, &b| {
             let ea = &self.entities[&a];
             let eb = &self.entities[&b];
-            if self.nearby_tab == NearbyTab::Entities {
+            if !filter_inventory {
                 let da = if let Some(p) = &self.player_pos {
                     ea.position.distance_to(p)
                 } else {
@@ -175,6 +174,14 @@ impl AppState {
         result
     }
 
+    pub fn get_filtered_nearby_tab(&self) -> Vec<(&Entity, f32, usize)> {
+        self.get_filtered_entities(false)
+    }
+
+    pub fn get_filtered_inventory_tab(&self) -> Vec<(&Entity, f32, usize)> {
+        self.get_filtered_entities(true)
+    }
+
     pub fn get_effects_list_enchantments(&self) -> Vec<(&Enchantment, bool)> {
         let mut by_category: HashMap<u16, Vec<&Enchantment>> = HashMap::new();
         for e in &self.player_enchantments {
@@ -207,40 +214,40 @@ impl AppState {
 
 pub fn get_next_pane(current: FocusedPane, width: u16) -> FocusedPane {
     if width < WIDTH_BREAKPOINT {
-        // Narrow: Nearby -> Context -> Chat
+        // Narrow: Dashboard -> Context -> Chat
         match current {
-            FocusedPane::Nearby => FocusedPane::Context,
+            FocusedPane::Dashboard => FocusedPane::Context,
             FocusedPane::Context => FocusedPane::Chat,
-            FocusedPane::Chat => FocusedPane::Nearby,
-            _ => FocusedPane::Nearby,
+            FocusedPane::Chat => FocusedPane::Dashboard,
+            _ => FocusedPane::Dashboard,
         }
     } else {
-        // Wide: Nearby -> Chat -> Context
+        // Wide: Dashboard -> Chat -> Context
         match current {
-            FocusedPane::Nearby => FocusedPane::Chat,
+            FocusedPane::Dashboard => FocusedPane::Chat,
             FocusedPane::Chat => FocusedPane::Context,
-            FocusedPane::Context => FocusedPane::Nearby,
-            _ => FocusedPane::Nearby,
+            FocusedPane::Context => FocusedPane::Dashboard,
+            _ => FocusedPane::Dashboard,
         }
     }
 }
 
 pub fn get_prev_pane(current: FocusedPane, width: u16) -> FocusedPane {
     if width < WIDTH_BREAKPOINT {
-        // Narrow reverse: Nearby -> Chat -> Context
+        // Narrow reverse: Dashboard -> Chat -> Context
         match current {
-            FocusedPane::Nearby => FocusedPane::Chat,
+            FocusedPane::Dashboard => FocusedPane::Chat,
             FocusedPane::Chat => FocusedPane::Context,
-            FocusedPane::Context => FocusedPane::Nearby,
-            _ => FocusedPane::Nearby,
+            FocusedPane::Context => FocusedPane::Dashboard,
+            _ => FocusedPane::Dashboard,
         }
     } else {
-        // Wide reverse: Nearby -> Context -> Chat
+        // Wide reverse: Dashboard -> Context -> Chat
         match current {
-            FocusedPane::Nearby => FocusedPane::Context,
+            FocusedPane::Dashboard => FocusedPane::Context,
             FocusedPane::Context => FocusedPane::Chat,
-            FocusedPane::Chat => FocusedPane::Nearby,
-            _ => FocusedPane::Nearby,
+            FocusedPane::Chat => FocusedPane::Dashboard,
+            _ => FocusedPane::Dashboard,
         }
     }
 }

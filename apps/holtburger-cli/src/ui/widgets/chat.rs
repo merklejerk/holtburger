@@ -1,12 +1,14 @@
+use super::super::state::AppState;
+use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, FocusedPane};
+use super::super::utils::wrap_text;
+use holtburger_core::MessageKind;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
-use holtburger_core::MessageKind;
-use super::super::state::AppState;
-use super::super::types::{FocusedPane, CHAT_HISTORY_WINDOW_SIZE};
-use super::super::utils::wrap_text;
+use ratatui::widgets::{
+    Block, Borders, List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 
 pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let width = area.width.saturating_sub(2) as usize;
@@ -35,7 +37,8 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     let total_lines = all_lines.len();
-    if state.chat_total_lines > 0 && total_lines > state.chat_total_lines && state.scroll_offset > 0 {
+    if state.chat_total_lines > 0 && total_lines > state.chat_total_lines && state.scroll_offset > 0
+    {
         state.scroll_offset += total_lines - state.chat_total_lines;
     }
     state.chat_total_lines = total_lines;

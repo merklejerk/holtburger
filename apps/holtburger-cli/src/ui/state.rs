@@ -6,7 +6,8 @@ use holtburger_core::world::stats::{Attribute, Vital, Skill};
 use holtburger_core::protocol::messages::Enchantment;
 use holtburger_core::world::entity::Entity;
 use crate::classification;
-use super::types::{NearbyTab, UIState, FocusedPane, WIDTH_BREAKPOINT};
+use crate::ui::widgets::effects::get_enchantment_name;
+use super::types::{NearbyTab, UIState, FocusedPane, WIDTH_BREAKPOINT, ContextView};
 
 pub struct AppState {
     pub account_name: String,
@@ -31,6 +32,7 @@ pub struct AppState {
     pub nearby_tab: NearbyTab,
     pub context_buffer: Vec<String>,
     pub context_scroll_offset: usize,
+    pub context_view: ContextView,
     pub logon_retry: Option<(u32, u32, Option<Instant>)>,
     pub enter_retry: Option<(u32, u32, Option<Instant>)>,
     pub core_state: ClientState,
@@ -187,10 +189,11 @@ impl AppState {
             list.sort_by(|a, b| b.compare_priority(a));
         }
 
-        // Sort categories by the winner's mod type/key for some stability
-        categories.sort_by_key(|(_, list)| {
-            let winner = list[0];
-            (winner.stat_mod_type, winner.stat_mod_key)
+        // Sort categories by the winner's mod name
+        categories.sort_by(|(_, a_list), (_, b_list)| {
+            let a_name = get_enchantment_name(a_list[0]);
+            let b_name = get_enchantment_name(b_list[0]);
+            a_name.cmp(&b_name)
         });
 
         let mut flattened = Vec::new();

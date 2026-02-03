@@ -93,6 +93,7 @@ bitflags! {
         const FLOAT                  = 0x0000008;
         const SKILL                  = 0x0000010;
         const BODY_DAMAGE_VALUE        = 0x0000020;
+        const BODY_DAMAGE_VARIANCE     = 0x0000040;
         const BODY_ARMOR_VALUE         = 0x0000080;
         const SINGLE_STAT             = 0x0001000;
         const MULTIPLE_STAT           = 0x0002000;

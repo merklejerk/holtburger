@@ -41,3 +41,9 @@ pub enum FocusedPane {
     Input,
     Nearby,
 }
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum ContextView {
+    Default,
+    Custom,
+}

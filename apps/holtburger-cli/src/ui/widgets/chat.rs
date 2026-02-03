@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem};
+use ratatui::widgets::{Block, Borders, List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use holtburger_core::MessageKind;
 use super::super::state::AppState;
 use super::super::types::{FocusedPane, CHAT_HISTORY_WINDOW_SIZE};
@@ -69,19 +69,28 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         Style::default()
     };
 
-    let chat_title = if state.scroll_offset > 0 {
-        format!(" World Chat ({} lines up) [SCROLLED] ", state.scroll_offset)
-    } else {
-        " World Chat ".to_string()
-    };
-
     let chat_list = List::new(messages).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(chat_title)
+            .title(" World Chat ")
             .border_style(chat_style),
     );
     f.render_widget(chat_list, area);
+
+    // Render Scrollbar
+    if total_lines > height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines)
+            .viewport_content_length(height)
+            .position(start);
+        f.render_stateful_widget(
+            Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .end_symbol(Some("▼")),
+            area,
+            &mut scrollbar_state,
+        );
+    }
 }
 
 pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -120,4 +129,19 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             .border_style(ctx_style),
     );
     f.render_widget(ctx_list, area);
+
+    // Render Scrollbar
+    if total_ctx > height {
+        let mut scrollbar_state = ScrollbarState::new(total_ctx)
+            .viewport_content_length(height)
+            .position(ctx_start);
+        f.render_stateful_widget(
+            Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .end_symbol(Some("▼")),
+            area,
+            &mut scrollbar_state,
+        );
+    }
 }

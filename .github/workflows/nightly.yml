@@ -87,6 +87,7 @@ jobs:
           bundle: holtburger-cli.flatpak
           manifest-path: apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml
           cache: true
+          run-tests: true # This is the "secret sauce" to enable network access during build
       - name: Upload Flatpak to Release
         uses: softprops/action-gh-release@v2
         with:

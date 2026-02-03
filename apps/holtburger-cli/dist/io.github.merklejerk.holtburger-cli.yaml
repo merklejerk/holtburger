@@ -1,6 +1,6 @@
 id: io.github.merklejerk.holtburger-cli
 runtime: org.freedesktop.Platform
-runtime-version: '23.08'
+runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -9,8 +9,6 @@ modules:
   - name: holtburger-cli
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
-      build-args:
-        - --package=holtburger-cli
     buildsystem: simple
     build-commands:
       - cargo build --release --package holtburger-cli

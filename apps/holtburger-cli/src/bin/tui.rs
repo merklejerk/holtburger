@@ -7,9 +7,8 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use holtburger_cli::classification::{self};
+use holtburger_cli::actions::{self, ActionTarget, ActionHandler};
 use holtburger_cli::ui::{self, AppState};
-use holtburger_core::protocol::properties::*;
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
@@ -169,14 +168,15 @@ async fn main() -> Result<()> {
         history_index: None,
         characters: Vec::new(),
         state: ui::UIState::Chat,
-        focused_pane: ui::FocusedPane::Nearby,
-        previous_focused_pane: ui::FocusedPane::Nearby,
+        focused_pane: ui::FocusedPane::Dashboard,
+        previous_focused_pane: ui::FocusedPane::Dashboard,
         selected_character_index: 0,
-        selected_nearby_index: 0,
-        nearby_list_state: ratatui::widgets::ListState::default().with_selected(Some(0)),
+        selected_dashboard_index: 0,
+        dashboard_list_state: ratatui::widgets::ListState::default().with_selected(Some(0)),
+        last_dashboard_height: 0,
         scroll_offset: 0,
         chat_total_lines: 0,
-        nearby_tab: ui::NearbyTab::Entities,
+        dashboard_tab: ui::DashboardTab::Entities,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
         context_view: ui::ContextView::Default,
@@ -209,12 +209,12 @@ async fn main() -> Result<()> {
         let elapsed = last_tick.elapsed().as_secs_f64();
         last_tick = Instant::now();
 
-        // Clamp nearby selection index before drawing
-        let nearby_count = app_state.nearby_item_count();
-        if app_state.selected_nearby_index >= nearby_count && nearby_count > 0 {
-            app_state.selected_nearby_index = nearby_count - 1;
-        } else if nearby_count == 0 {
-            app_state.selected_nearby_index = 0;
+        // Clamp dashboard selection index before drawing
+        let dashboard_count = app_state.dashboard_item_count();
+        if app_state.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
+            app_state.selected_dashboard_index = dashboard_count - 1;
+        } else if dashboard_count == 0 {
+            app_state.selected_dashboard_index = 0;
         }
 
         // Proactive enchantment purge
@@ -314,26 +314,26 @@ async fn main() -> Result<()> {
                                     ui::FocusedPane::Input => {
                                         app_state.input.push(c);
                                     }
-                                    ui::FocusedPane::Nearby => {
+                                    ui::FocusedPane::Dashboard => {
                                         match c {
                                             '1' => {
-                                                app_state.nearby_tab = ui::NearbyTab::Entities;
-                                                app_state.selected_nearby_index = 0;
+                                                app_state.dashboard_tab = ui::DashboardTab::Entities;
+                                                app_state.selected_dashboard_index = 0;
                                                 continue;
                                             }
                                             '2' => {
-                                                app_state.nearby_tab = ui::NearbyTab::Inventory;
-                                                app_state.selected_nearby_index = 0;
+                                                app_state.dashboard_tab = ui::DashboardTab::Inventory;
+                                                app_state.selected_dashboard_index = 0;
                                                 continue;
                                             }
                                             '3' => {
-                                                app_state.nearby_tab = ui::NearbyTab::Character;
-                                                app_state.selected_nearby_index = 0;
+                                                app_state.dashboard_tab = ui::DashboardTab::Character;
+                                                app_state.selected_dashboard_index = 0;
                                                 continue;
                                             }
                                             '4' => {
-                                                app_state.nearby_tab = ui::NearbyTab::Effects;
-                                                app_state.selected_nearby_index = 0;
+                                                app_state.dashboard_tab = ui::DashboardTab::Effects;
+                                                app_state.selected_dashboard_index = 0;
                                                 continue;
                                             }
                                             'x' | 'X' => {
@@ -344,359 +344,52 @@ async fn main() -> Result<()> {
                                             _ => {}
                                         }
 
-                                        if app_state.nearby_tab == ui::NearbyTab::Effects {
-                                            let enchants =
-                                                app_state.get_effects_list_enchantments();
-                                            if let Some((enchant_ref, _)) =
-                                                enchants.get(app_state.selected_nearby_index)
+                                        let mut command_to_send = None;
+                                        let mut debug_to_show = None;
+
+                                        {
+                                            let target = match app_state.dashboard_tab {
+                                                ui::DashboardTab::Entities | ui::DashboardTab::Inventory => {
+                                                    let entities = app_state.get_filtered_nearby_tab();
+                                                    entities.get(app_state.selected_dashboard_index)
+                                                        .map(|(e, _, _)| ActionTarget::Entity(e))
+                                                        .unwrap_or(ActionTarget::None)
+                                                }
+                                                ui::DashboardTab::Effects => {
+                                                    let enchants = app_state.get_effects_list_enchantments();
+                                                    enchants.get(app_state.selected_dashboard_index)
+                                                        .map(|(e, _)| ActionTarget::Enchantment(e))
+                                                        .unwrap_or(ActionTarget::None)
+                                                }
+                                                ui::DashboardTab::Character => ActionTarget::None,
+                                            };
+
+                                            let actions = actions::get_actions_for_target(&target, &app_state.entities, app_state.player_guid);
+                                            if let Some(handler) = actions.iter()
+                                                .find(|a| a.shortcut_char() == c.to_ascii_lowercase())
+                                                .and_then(|action| action.handler(&target, app_state.player_guid))
                                             {
-                                                let enchant = (*enchant_ref).clone();
-                                                match c {
-                                                    'd' | 'D' => {
-                                                        app_state.context_view =
-                                                            ui::ContextView::Custom;
-                                                        app_state.context_buffer.clear();
-                                                        app_state.context_buffer.push(format!(
-                                                            "DEBUG ENCHANTMENT: Spell #{}",
-                                                            enchant.spell_id
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Layer:          {}",
-                                                            enchant.layer
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Category:       {}",
-                                                            enchant.spell_category
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Power Level:    {}",
-                                                            enchant.power_level
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Duration:       {:.1}s",
-                                                            enchant.duration
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Stat Mod Type:  0x{:08X}",
-                                                            enchant.stat_mod_type
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Stat Mod Key:   {}",
-                                                            enchant.stat_mod_key
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Stat Mod Value: {:.2}",
-                                                            enchant.stat_mod_value
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Caster GUID:    {:08X}",
-                                                            enchant.caster_guid
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Degrade Limit:  {:.2}",
-                                                            enchant.degrade_limit
-                                                        ));
-                                                        app_state.context_buffer.push(format!(
-                                                            "Last Degraded:  {:.1}",
-                                                            enchant.last_time_degraded
-                                                        ));
-                                                        app_state.context_scroll_offset = 0;
+                                                match handler {
+                                                    ActionHandler::Command(cmd) => {
+                                                        command_to_send = Some(cmd);
                                                     }
-                                                    _ => {}
+                                                    ActionHandler::ToggleDebug => {
+                                                        debug_to_show = Some(actions::get_debug_info(&target, |id| {
+                                                            app_state.entities.get(&id).map(|e| e.name.clone())
+                                                                .or_else(|| if Some(id) == app_state.player_guid { Some("You".to_string()) } else { None })
+                                                        }));
+                                                    }
                                                 }
                                             }
-                                            continue;
                                         }
 
-                                        let guid = {
-                                            let nearby = app_state.get_filtered_nearby_entities();
-                                            nearby
-                                                .get(app_state.selected_nearby_index)
-                                                .map(|(e, _, _)| e.guid)
-                                        };
-
-                                        if let Some(guid) = guid {
-                                            match c {
-                                                'a' | 'A' => {
-                                                    let _ = command_tx
-                                                        .send(ClientCommand::Identify(guid));
-                                                }
-                                                'i' | 'I' => {
-                                                    let _ =
-                                                        command_tx.send(ClientCommand::Use(guid));
-                                                }
-                                                'k' | 'K' => {
-                                                    let _ = command_tx
-                                                        .send(ClientCommand::Attack(guid));
-                                                }
-                                                'd' | 'D' => {
-                                                    let mut lines = Vec::new();
-                                                    if let Some(e) = app_state.entities.get(&guid) {
-                                                        lines.push(format!(
-                                                            "DEBUG INFO: {}",
-                                                            e.name
-                                                        ));
-                                                        lines.push(format!(
-                                                            "GUID:   {:08X}",
-                                                            e.guid
-                                                        ));
-                                                        let class =
-                                                            classification::classify_entity(e);
-                                                        lines.push(format!(
-                                                            "Class:  {} ({:?})",
-                                                            class.label(),
-                                                            class
-                                                        ));
-
-                                                        if let Some(parent_id) = e.physics_parent_id
-                                                        {
-                                                            let parent_name = if let Some(p) =
-                                                                app_state.entities.get(&parent_id)
-                                                            {
-                                                                p.name.clone()
-                                                            } else if Some(parent_id)
-                                                                == app_state.player_guid
-                                                            {
-                                                                "You".to_string()
-                                                            } else {
-                                                                "Unknown".to_string()
-                                                            };
-                                                            lines.push(format!(
-                                                                "Phys Parent: {:08X} ({})",
-                                                                parent_id, parent_name
-                                                            ));
-                                                        }
-
-                                                        if let Some(container_id) = e.container_id {
-                                                            let container_name = if let Some(p) =
-                                                                app_state
-                                                                    .entities
-                                                                    .get(&container_id)
-                                                            {
-                                                                p.name.clone()
-                                                            } else if Some(container_id)
-                                                                == app_state.player_guid
-                                                            {
-                                                                "You".to_string()
-                                                            } else {
-                                                                "Unknown".to_string()
-                                                            };
-                                                            lines.push(format!(
-                                                                "Container:   {:08X} ({})",
-                                                                container_id, container_name
-                                                            ));
-                                                        }
-
-                                                        if let Some(wielder_id) = e.wielder_id {
-                                                            let wielder_name = if let Some(p) =
-                                                                app_state.entities.get(&wielder_id)
-                                                            {
-                                                                p.name.clone()
-                                                            } else if Some(wielder_id)
-                                                                == app_state.player_guid
-                                                            {
-                                                                "You".to_string()
-                                                            } else {
-                                                                "Unknown".to_string()
-                                                            };
-                                                            lines.push(format!(
-                                                                "Wielder:     {:08X} ({})",
-                                                                wielder_id, wielder_name
-                                                            ));
-                                                        }
-
-                                                        lines.push(format!("WCID:   {:?}", e.wcid));
-                                                        lines.push(format!(
-                                                            "Class:  {:?}",
-                                                            classification::classify_entity(e)
-                                                        ));
-                                                        lines.push(format!(
-                                                            "GfxID:  {:?}",
-                                                            e.gfx_id
-                                                        ));
-                                                        lines.push(format!(
-                                                            "Vel:    {:?}",
-                                                            e.velocity
-                                                        ));
-                                                        lines.push(format!(
-                                                            "Flags:  {:08X}",
-                                                            e.flags.bits()
-                                                        ));
-                                                        for (name, _) in e.flags.iter_names() {
-                                                            lines.push(format!("  [X] {}", name));
-                                                        }
-
-                                                        lines.push(format!(
-                                                            "Phys:   {:08X}",
-                                                            e.physics_state.bits()
-                                                        ));
-                                                        for (name, _) in
-                                                            e.physics_state.iter_names()
-                                                        {
-                                                            lines.push(format!("  [X] {}", name));
-                                                        }
-
-                                                        if let Some(it) = e.item_type {
-                                                            lines.push(format!(
-                                                                "IType:  {:08X}",
-                                                                it.bits()
-                                                            ));
-                                                            for (name, _) in it.iter_names() {
-                                                                lines.push(format!(
-                                                                    "  [X] {}",
-                                                                    name
-                                                                ));
-                                                            }
-                                                        }
-                                                        lines.push(format!(
-                                                            "Pos:    {}",
-                                                            e.position.to_world_coords()
-                                                        ));
-                                                        lines.push(format!(
-                                                            "LB:     {:08X}",
-                                                            e.position.landblock_id
-                                                        ));
-                                                        lines.push(format!(
-                                                            "Coords: {:?}",
-                                                            e.position.coords
-                                                        ));
-
-                                                        if !e.int_properties.is_empty() {
-                                                            lines.push(
-                                                                "-- Int Properties --".to_string(),
-                                                            );
-                                                            let mut sorted_keys: Vec<_> =
-                                                                e.int_properties.keys().collect();
-                                                            sorted_keys.sort();
-                                                            for &k in sorted_keys {
-                                                                let name =
-                                                                    PropertyInt::from_repr(k)
-                                                                        .map(|p| p.to_string())
-                                                                        .unwrap_or_else(|| {
-                                                                            k.to_string()
-                                                                        });
-                                                                lines.push(format!(
-                                                                    "  {}: {}",
-                                                                    name, e.int_properties[&k]
-                                                                ));
-                                                            }
-                                                        }
-                                                        if !e.bool_properties.is_empty() {
-                                                            lines.push(
-                                                                "-- Bool Properties --".to_string(),
-                                                            );
-                                                            let mut sorted_keys: Vec<_> =
-                                                                e.bool_properties.keys().collect();
-                                                            sorted_keys.sort();
-                                                            for &k in sorted_keys {
-                                                                let name =
-                                                                    PropertyBool::from_repr(k)
-                                                                        .map(|p| p.to_string())
-                                                                        .unwrap_or_else(|| {
-                                                                            k.to_string()
-                                                                        });
-                                                                lines.push(format!(
-                                                                    "  {}: {}",
-                                                                    name, e.bool_properties[&k]
-                                                                ));
-                                                            }
-                                                        }
-                                                        if !e.float_properties.is_empty() {
-                                                            lines.push(
-                                                                "-- Float Properties --"
-                                                                    .to_string(),
-                                                            );
-                                                            let mut sorted_keys: Vec<_> =
-                                                                e.float_properties.keys().collect();
-                                                            sorted_keys.sort();
-                                                            for &k in sorted_keys {
-                                                                let name =
-                                                                    PropertyFloat::from_repr(k)
-                                                                        .map(|p| p.to_string())
-                                                                        .unwrap_or_else(|| {
-                                                                            k.to_string()
-                                                                        });
-                                                                lines.push(format!(
-                                                                    "  {}: {:.4}",
-                                                                    name, e.float_properties[&k]
-                                                                ));
-                                                            }
-                                                        }
-                                                        if !e.string_properties.is_empty() {
-                                                            lines.push(
-                                                                "-- String Properties --"
-                                                                    .to_string(),
-                                                            );
-                                                            let mut sorted_keys: Vec<_> = e
-                                                                .string_properties
-                                                                .keys()
-                                                                .collect();
-                                                            sorted_keys.sort();
-                                                            for &k in sorted_keys {
-                                                                let name =
-                                                                    PropertyString::from_repr(k)
-                                                                        .map(|p| p.to_string())
-                                                                        .unwrap_or_else(|| {
-                                                                            k.to_string()
-                                                                        });
-                                                                lines.push(format!(
-                                                                    "  {}: {}",
-                                                                    name, e.string_properties[&k]
-                                                                ));
-                                                            }
-                                                        }
-                                                        if !e.did_properties.is_empty() {
-                                                            lines.push(
-                                                                "-- DataID Properties --"
-                                                                    .to_string(),
-                                                            );
-                                                            let mut sorted_keys: Vec<_> =
-                                                                e.did_properties.keys().collect();
-                                                            sorted_keys.sort();
-                                                            for &k in sorted_keys {
-                                                                let name =
-                                                                    PropertyDataId::from_repr(k)
-                                                                        .map(|p| p.to_string())
-                                                                        .unwrap_or_else(|| {
-                                                                            k.to_string()
-                                                                        });
-                                                                lines.push(format!(
-                                                                    "  {}: {:08X}",
-                                                                    name, e.did_properties[&k]
-                                                                ));
-                                                            }
-                                                        }
-                                                        if !e.iid_properties.is_empty() {
-                                                            lines.push(
-                                                                "-- InstanceID Properties --"
-                                                                    .to_string(),
-                                                            );
-                                                            let mut sorted_keys: Vec<_> =
-                                                                e.iid_properties.keys().collect();
-                                                            sorted_keys.sort();
-                                                            for &k in sorted_keys {
-                                                                let name =
-                                                                    PropertyInstanceId::from_repr(
-                                                                        k,
-                                                                    )
-                                                                    .map(|p| p.to_string())
-                                                                    .unwrap_or_else(|| {
-                                                                        k.to_string()
-                                                                    });
-                                                                lines.push(format!(
-                                                                    "  {}: {:08X}",
-                                                                    name, e.iid_properties[&k]
-                                                                ));
-                                                            }
-                                                        }
-                                                    }
-                                                    app_state.context_view =
-                                                        ui::ContextView::Custom;
-                                                    app_state.context_buffer = lines;
-                                                    app_state.context_scroll_offset = 0;
-                                                }
-                                                _ => {}
-                                            }
+                                        if let Some(cmd) = command_to_send {
+                                            let _ = command_tx.send(cmd);
+                                        }
+                                        if let Some(lines) = debug_to_show {
+                                            app_state.context_view = ui::ContextView::Custom;
+                                            app_state.context_buffer = lines;
+                                            app_state.context_scroll_offset = 0;
                                         }
                                     }
                                     _ => {}
@@ -730,9 +423,9 @@ async fn main() -> Result<()> {
                                     app_state.context_scroll_offset =
                                         app_state.context_scroll_offset.saturating_add(1);
                                 }
-                                ui::FocusedPane::Nearby => {
-                                    if app_state.selected_nearby_index > 0 {
-                                        app_state.selected_nearby_index -= 1;
+                                ui::FocusedPane::Dashboard => {
+                                    if app_state.selected_dashboard_index > 0 {
+                                        app_state.selected_dashboard_index -= 1;
                                     }
                                 }
                             },
@@ -764,12 +457,12 @@ async fn main() -> Result<()> {
                                     app_state.context_scroll_offset =
                                         app_state.context_scroll_offset.saturating_sub(1);
                                 }
-                                ui::FocusedPane::Nearby => {
-                                    let nearby_count = app_state.nearby_item_count();
-                                    if nearby_count > 0
-                                        && app_state.selected_nearby_index + 1 < nearby_count
+                                ui::FocusedPane::Dashboard => {
+                                    let dashboard_count = app_state.dashboard_item_count();
+                                    if dashboard_count > 0
+                                        && app_state.selected_dashboard_index + 1 < dashboard_count
                                     {
-                                        app_state.selected_nearby_index += 1;
+                                        app_state.selected_dashboard_index += 1;
                                     }
                                 }
                             },
@@ -795,9 +488,9 @@ async fn main() -> Result<()> {
                                             .context_scroll_offset
                                             .saturating_add(ui::PAGE_SCROLL_STEP);
                                     }
-                                    ui::FocusedPane::Nearby => {
-                                        app_state.selected_nearby_index = app_state
-                                            .selected_nearby_index
+                                    ui::FocusedPane::Dashboard => {
+                                        app_state.selected_dashboard_index = app_state
+                                            .selected_dashboard_index
                                             .saturating_sub(ui::PAGE_SCROLL_STEP);
                                     }
                                     _ => {}
@@ -817,12 +510,12 @@ async fn main() -> Result<()> {
                                             .context_scroll_offset
                                             .saturating_sub(ui::PAGE_SCROLL_STEP);
                                     }
-                                    ui::FocusedPane::Nearby => {
-                                        let nearby_count = app_state.nearby_item_count();
-                                        app_state.selected_nearby_index = (app_state
-                                            .selected_nearby_index
+                                    ui::FocusedPane::Dashboard => {
+                                        let dashboard_count = app_state.dashboard_item_count();
+                                        app_state.selected_dashboard_index = (app_state
+                                            .selected_dashboard_index
                                             + ui::PAGE_SCROLL_STEP)
-                                            .min(nearby_count.saturating_sub(1));
+                                            .min(dashboard_count.saturating_sub(1));
                                     }
                                     _ => {}
                                 }
@@ -841,8 +534,8 @@ async fn main() -> Result<()> {
                                             app_state.context_buffer.len().saturating_sub(1);
                                         app_state.context_scroll_offset = max_scroll;
                                     }
-                                    ui::FocusedPane::Nearby => {
-                                        app_state.selected_nearby_index = 0;
+                                    ui::FocusedPane::Dashboard => {
+                                        app_state.selected_dashboard_index = 0;
                                     }
                                     _ => {}
                                 }
@@ -853,10 +546,10 @@ async fn main() -> Result<()> {
                                 match app_state.focused_pane {
                                     ui::FocusedPane::Chat => app_state.scroll_offset = 0,
                                     ui::FocusedPane::Context => app_state.context_scroll_offset = 0,
-                                    ui::FocusedPane::Nearby => {
-                                        let nearby_count = app_state.nearby_item_count();
-                                        app_state.selected_nearby_index =
-                                            nearby_count.saturating_sub(1);
+                                    ui::FocusedPane::Dashboard => {
+                                        let dashboard_count = app_state.dashboard_item_count();
+                                        app_state.selected_dashboard_index =
+                                            dashboard_count.saturating_sub(1);
                                     }
                                     _ => {}
                                 }
@@ -882,7 +575,7 @@ async fn main() -> Result<()> {
                                 && mouse.column >= main_chunks[0].x
                                 && mouse.column < main_chunks[0].x + main_chunks[0].width
                             {
-                                app_state.focused_pane = ui::FocusedPane::Nearby;
+                                app_state.focused_pane = ui::FocusedPane::Dashboard;
                             } else if mouse.row >= main_chunks[1].y
                                 && mouse.row < main_chunks[1].y + main_chunks[1].height
                                 && mouse.column >= main_chunks[1].x
@@ -918,8 +611,8 @@ async fn main() -> Result<()> {
                                 && mouse.column >= main_chunks[0].x
                                 && mouse.column < main_chunks[0].x + main_chunks[0].width
                             {
-                                app_state.selected_nearby_index =
-                                    app_state.selected_nearby_index.saturating_sub(1);
+                                app_state.selected_dashboard_index =
+                                    app_state.selected_dashboard_index.saturating_sub(1);
                             }
                         }
                         MouseEventKind::ScrollDown => {
@@ -943,8 +636,8 @@ async fn main() -> Result<()> {
                                 && mouse.column >= main_chunks[0].x
                                 && mouse.column < main_chunks[0].x + main_chunks[0].width
                             {
-                                app_state.selected_nearby_index =
-                                    app_state.selected_nearby_index.saturating_add(1);
+                                app_state.selected_dashboard_index =
+                                    app_state.selected_dashboard_index.saturating_add(1);
                             }
                         }
                         _ => {}

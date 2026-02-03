@@ -11,6 +11,7 @@ use anyhow::{Result, anyhow};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use crate::protocol::messages::actions;
 
 #[derive(Debug, Clone)]
 pub enum MessageKind {
@@ -61,6 +62,13 @@ pub enum ClientCommand {
     Identify(u32),
     Use(u32),
     Attack(u32),
+    Drop(u32),
+    Get(u32),
+    MoveItem {
+        item: u32,
+        container: u32,
+        placement: u32,
+    },
     Quit,
 }
 
@@ -270,7 +278,7 @@ impl Client {
             ClientCommand::Use(guid) => {
                 self.session
                     .send_message(&crate::protocol::messages::GameMessage::GameAction {
-                        action: crate::protocol::messages::actions::USE_ITEM,
+                        action: crate::protocol::messages::actions::USE,
                         data: guid.to_le_bytes().to_vec(),
                     })
                     .await
@@ -280,6 +288,41 @@ impl Client {
                     .send_message(&crate::protocol::messages::GameMessage::GameAction {
                         action: 0x0002,
                         data: guid.to_le_bytes().to_vec(),
+                    })
+                    .await
+            }
+            ClientCommand::Drop(guid) => {
+                self.session
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction {
+                        action: crate::protocol::messages::actions::DROP_ITEM,
+                        data: guid.to_le_bytes().to_vec(),
+                    })
+                    .await
+            }
+            ClientCommand::Get(guid) => {
+                let mut data = guid.to_le_bytes().to_vec();
+                let pguid = self.world.player.guid;
+                data.extend_from_slice(&pguid.to_le_bytes());
+                data.extend_from_slice(&0u32.to_le_bytes()); // placement
+                self.session
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction {
+                        action: crate::protocol::messages::actions::PUT_ITEM_IN_CONTAINER,
+                        data,
+                    })
+                    .await
+            }
+            ClientCommand::MoveItem {
+                item,
+                container,
+                placement,
+            } => {
+                let mut data = item.to_le_bytes().to_vec();
+                data.extend_from_slice(&container.to_le_bytes());
+                data.extend_from_slice(&placement.to_le_bytes());
+                self.session
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction {
+                        action: crate::protocol::messages::actions::PUT_ITEM_IN_CONTAINER,
+                        data,
                     })
                     .await
             }
@@ -570,7 +613,7 @@ impl Client {
     }
 
     async fn handle_game_action(&mut self, action: u32, _data: Vec<u8>) -> Result<()> {
-        if action == action_opcodes::LOGIN_COMPLETE {
+        if action == actions::LOGIN_COMPLETE {
             self.state = ClientState::InWorld;
             self.send_status_event();
         }
@@ -612,7 +655,7 @@ impl Client {
 
     async fn send_login_complete(&mut self) -> Result<()> {
         let msg = GameMessage::GameAction {
-            action: action_opcodes::LOGIN_COMPLETE,
+            action: actions::LOGIN_COMPLETE,
             data: Vec::new(),
         };
         self.session.send_message(&msg).await?;
@@ -623,7 +666,7 @@ impl Client {
         let mut data = Vec::new();
         write_string16(&mut data, text);
         let msg = GameMessage::GameAction {
-            action: action_opcodes::TALK,
+            action: actions::TALK,
             data,
         };
         self.session.send_message(&msg).await?;

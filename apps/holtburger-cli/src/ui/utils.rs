@@ -1,6 +1,6 @@
 use super::state::AppState;
-use super::types::NearbyTab;
-use holtburger_core::world::properties::ObjectDescriptionFlag;
+use super::types::DashboardTab;
+use crate::actions::{ActionTarget};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -54,41 +54,34 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
-    let mut tools = Vec::new();
-
-    match state.nearby_tab {
-        NearbyTab::Entities | NearbyTab::Inventory => {
-            let nearby = state.get_filtered_nearby_entities();
-            if let Some((selected_e, _, _)) = nearby.get(state.selected_nearby_index) {
-                tools.push(Span::raw("[A]ssess "));
-                let flags = selected_e.flags;
-
-                if state.nearby_tab == NearbyTab::Inventory {
-                    tools.push(Span::raw("[I]nteract "));
-                } else {
-                    let is_pickable = !flags.intersects(ObjectDescriptionFlag::STUCK);
-                    if is_pickable {
-                        tools.push(Span::raw("[I]tem "));
-                    }
-                }
-
-                if flags.intersects(ObjectDescriptionFlag::ATTACKABLE) {
-                    tools.push(Span::raw("[K]ill "));
-                }
-                tools.push(Span::raw("[D]ebug"));
-            }
+    let target = match state.dashboard_tab {
+        DashboardTab::Entities | DashboardTab::Inventory => {
+            let entities = state.get_filtered_nearby_tab();
+            entities.get(state.selected_dashboard_index)
+                .map(|(e, _, _)| ActionTarget::Entity(e))
+                .unwrap_or(ActionTarget::None)
         }
-        NearbyTab::Effects => {
-            if !state.player_enchantments.is_empty() {
-                tools.push(Span::raw("[D]ebug"));
-            }
+        DashboardTab::Effects => {
+            let enchants = state.get_effects_list_enchantments();
+            enchants.get(state.selected_dashboard_index)
+                .map(|(e, _)| ActionTarget::Enchantment(e))
+                .unwrap_or(ActionTarget::None)
         }
-        NearbyTab::Character => {}
+        _ => ActionTarget::None,
+    };
+
+    let actions = crate::actions::get_actions_for_target(&target, &state.entities, state.player_guid);
+    if actions.is_empty() {
+        return None;
     }
 
-    if tools.is_empty() {
-        None
-    } else {
-        Some(Paragraph::new(Line::from(tools)).block(Block::default().borders(Borders::TOP)))
+    let mut spans = Vec::new();
+    for (i, action) in actions.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" "));
+        }
+        spans.push(Span::raw(action.display_label()));
     }
+
+    Some(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::TOP)))
 }

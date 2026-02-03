@@ -9,7 +9,6 @@ modules:
   - name: holtburger-cli
     build-options:
       append-path: /usr/lib/sdk/rust-stable/bin
-      share-network: true
     buildsystem: simple
     build-commands:
       - cargo build --release --package holtburger-cli

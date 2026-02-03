@@ -10,7 +10,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["holtburger contributors"]
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/cluracan/holtburger"
+repository = "https://github.com/merklejerk/holtburger"
 
 [workspace.dependencies]
 holtburger-core = { path = "crates/holtburger-core" }

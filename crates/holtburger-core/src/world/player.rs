@@ -1,5 +1,5 @@
-use super::stats;
 use super::WorldEvent;
+use super::stats;
 use crate::protocol::messages::{Enchantment, GameMessage};
 use crate::world::properties::EnchantmentTypeFlags;
 use std::collections::HashMap;
@@ -107,7 +107,8 @@ impl PlayerState {
 
         for e in active {
             let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags.contains(EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::MULTIPLICATIVE)
+            if flags
+                .contains(EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::MULTIPLICATIVE)
                 && e.stat_mod_key == attr as u32
             {
                 mult *= e.stat_mod_value;
@@ -153,7 +154,9 @@ impl PlayerState {
         };
 
         match vital_type {
-            stats::VitalType::Health => (get_val(stats::AttributeType::EnduranceAttr) as f32 / 2.0).round() as u32,
+            stats::VitalType::Health => {
+                (get_val(stats::AttributeType::EnduranceAttr) as f32 / 2.0).round() as u32
+            }
             stats::VitalType::Stamina => get_val(stats::AttributeType::EnduranceAttr),
             stats::VitalType::Mana => get_val(stats::AttributeType::SelfAttr),
         }
@@ -170,7 +173,8 @@ impl PlayerState {
 
         for e in active {
             let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags.contains(EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::MULTIPLICATIVE)
+            if flags
+                .contains(EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::MULTIPLICATIVE)
                 && e.stat_mod_key == world_id
             {
                 mult *= e.stat_mod_value;
@@ -200,14 +204,22 @@ impl PlayerState {
     }
 
     pub fn calculate_vital_base(&self, vital_type: stats::VitalType) -> u32 {
-        let base_data = self.vital_bases.get(&vital_type).cloned().unwrap_or_default();
+        let base_data = self
+            .vital_bases
+            .get(&vital_type)
+            .cloned()
+            .unwrap_or_default();
         let base_no_bonus = base_data.ranks + base_data.start;
         let bonus = self.calculate_vital_attribute_contribution(vital_type, false);
         base_no_bonus + bonus
     }
 
     pub fn calculate_vital_current(&self, vital_type: stats::VitalType) -> u32 {
-        let base_data = self.vital_bases.get(&vital_type).cloned().unwrap_or_default();
+        let base_data = self
+            .vital_bases
+            .get(&vital_type)
+            .cloned()
+            .unwrap_or_default();
         let base_no_bonus = base_data.ranks + base_data.start;
         let attr_bonus = self.calculate_vital_attribute_contribution(vital_type, true);
 
@@ -387,8 +399,13 @@ impl PlayerState {
                         _ => stats::TrainingLevel::Unusable,
                     };
 
-                    self.skill_bases
-                        .insert(skill_type, SkillBase { ranks: *ranks, init: *init });
+                    self.skill_bases.insert(
+                        skill_type,
+                        SkillBase {
+                            ranks: *ranks,
+                            init: *init,
+                        },
+                    );
 
                     let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
                     let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
@@ -415,8 +432,13 @@ impl PlayerState {
                 current,
             } => {
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
-                    self.vital_bases
-                        .insert(vital_type, VitalBase { ranks: *ranks, start: *start });
+                    self.vital_bases.insert(
+                        vital_type,
+                        VitalBase {
+                            ranks: *ranks,
+                            start: *start,
+                        },
+                    );
 
                     let base = self.calculate_vital_base(vital_type);
                     let buffed_max = self.calculate_vital_current(vital_type);
@@ -588,12 +610,24 @@ mod tests {
         let mut player = PlayerState::new();
 
         // Setup attributes
-        player.attributes.insert(stats::AttributeType::StrengthAttr, 100);
-        player.attributes.insert(stats::AttributeType::EnduranceAttr, 100);
-        player.attributes.insert(stats::AttributeType::QuicknessAttr, 100);
-        player.attributes.insert(stats::AttributeType::CoordinationAttr, 100);
-        player.attributes.insert(stats::AttributeType::FocusAttr, 100);
-        player.attributes.insert(stats::AttributeType::SelfAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::StrengthAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::EnduranceAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::QuicknessAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::CoordinationAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::FocusAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::SelfAttr, 100);
 
         // Test Vital Bonuses
         assert_eq!(
@@ -610,7 +644,13 @@ mod tests {
         );
 
         // Test Vital Base Calculation
-        player.vital_bases.insert(stats::VitalType::Health, VitalBase { ranks: 50, start: 0 });
+        player.vital_bases.insert(
+            stats::VitalType::Health,
+            VitalBase {
+                ranks: 50,
+                start: 0,
+            },
+        );
         assert_eq!(player.calculate_vital_base(stats::VitalType::Health), 100);
 
         // Test Skill Math
@@ -618,20 +658,28 @@ mod tests {
             player.derive_skill_value(stats::SkillType::MeleeDefense, 10, 4, false),
             81
         );
-        assert_eq!(player.derive_skill_value(stats::SkillType::Run, 5, 0, false), 105);
+        assert_eq!(
+            player.derive_skill_value(stats::SkillType::Run, 5, 0, false),
+            105
+        );
     }
 
     #[test]
     fn test_buff_calculations() {
         let mut player = PlayerState::new();
-        player.attributes.insert(stats::AttributeType::StrengthAttr, 100);
-        player.attributes.insert(stats::AttributeType::CoordinationAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::StrengthAttr, 100);
+        player
+            .attributes
+            .insert(stats::AttributeType::CoordinationAttr, 100);
 
         // Add a Strength Buff (+20 additive)
         player.enchantments.push(Enchantment {
             spell_category: 1, // strength group
             power_level: 100,
-            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
             stat_mod_key: stats::AttributeType::StrengthAttr as u32,
             stat_mod_value: 20.0,
             ..Default::default()
@@ -641,64 +689,91 @@ mod tests {
         player.enchantments.push(Enchantment {
             spell_category: 2, // axe group
             power_level: 100,
-            stat_mod_type: (EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::MULTIPLICATIVE).bits(),
+            stat_mod_type: (EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::MULTIPLICATIVE)
+                .bits(),
             stat_mod_key: stats::SkillType::Axe as u32,
             stat_mod_value: 1.10,
             ..Default::default()
         });
 
         // Strength should be 120
-        assert_eq!(player.get_attribute_current(stats::AttributeType::StrengthAttr), 120);
+        assert_eq!(
+            player.get_attribute_current(stats::AttributeType::StrengthAttr),
+            120
+        );
 
         // Heavy Weapons skill: (Str + Coord) / 3 + Ranks + Init
         // (120 + 100) / 3 = 73.33 -> 73
         // Base was (100 + 100) / 3 = 66.66 -> 67
-        player.skill_bases.insert(stats::SkillType::HeavyWeapons, SkillBase { ranks: 10, init: 0 });
-        
+        player.skill_bases.insert(
+            stats::SkillType::HeavyWeapons,
+            SkillBase { ranks: 10, init: 0 },
+        );
+
         let val = player.derive_skill_value(stats::SkillType::HeavyWeapons, 10, 0, true);
         assert_eq!(val, 73 + 10); // 83
 
         // Test Stacking: Add a weaker Strength buff
         player.enchantments.push(Enchantment {
             spell_category: 1, // same strength group
-            power_level: 50, // Lower power
-            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+            power_level: 50,   // Lower power
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
             stat_mod_key: stats::AttributeType::StrengthAttr as u32,
             stat_mod_value: 10.0,
             ..Default::default()
         });
-        
+
         // Should still be 120
-        assert_eq!(player.get_attribute_current(stats::AttributeType::StrengthAttr), 120);
-        
+        assert_eq!(
+            player.get_attribute_current(stats::AttributeType::StrengthAttr),
+            120
+        );
+
         // Add a STRONGER Strength buff
         player.enchantments.push(Enchantment {
             spell_category: 1, // same group
-            power_level: 200, // Higher power
-            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+            power_level: 200,  // Higher power
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
             stat_mod_key: stats::AttributeType::StrengthAttr as u32,
             stat_mod_value: 30.0,
             ..Default::default()
         });
-        
+
         // Should now be 130
-        assert_eq!(player.get_attribute_current(stats::AttributeType::StrengthAttr), 130);
+        assert_eq!(
+            player.get_attribute_current(stats::AttributeType::StrengthAttr),
+            130
+        );
     }
 
     #[test]
     fn test_health_rounding() {
         let mut player = PlayerState::new();
         // Endurance 101 / 2 = 50.5 -> should be 51
-        player.attributes.insert(stats::AttributeType::EnduranceAttr, 101);
-        player.vital_bases.insert(stats::VitalType::Health, VitalBase { ranks: 0, start: 100 });
+        player
+            .attributes
+            .insert(stats::AttributeType::EnduranceAttr, 101);
+        player.vital_bases.insert(
+            stats::VitalType::Health,
+            VitalBase {
+                ranks: 0,
+                start: 100,
+            },
+        );
 
         let health_base = player.calculate_vital_base(stats::VitalType::Health);
-        assert_eq!(health_base, 151, "Base Health contribution from 101 Endurance should be 51 (rounded)");
+        assert_eq!(
+            health_base, 151,
+            "Base Health contribution from 101 Endurance should be 51 (rounded)"
+        );
 
         // Add an Endurance buff of +10 (Total 111)
         player.enchantments.push(Enchantment {
             spell_category: 3, // endurance group
-            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
             stat_mod_key: stats::AttributeType::EnduranceAttr as u32,
             stat_mod_value: 10.0,
             power_level: 100,
@@ -708,6 +783,9 @@ mod tests {
         // Current Endurance should be 111. 111 / 2 = 55.5 -> 56.
         // Total health should be 100 (start) + 56 (bonus) = 156.
         let health_current = player.calculate_vital_current(stats::VitalType::Health);
-        assert_eq!(health_current, 156, "Current Health with 111 Endurance should be 156 (111/2=55.5 rounded to 56)");
+        assert_eq!(
+            health_current, 156,
+            "Current Health with 111 Endurance should be 156 (111/2=55.5 rounded to 56)"
+        );
     }
 }

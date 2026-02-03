@@ -1,10 +1,10 @@
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::ListItem;
+use super::super::state::AppState;
 use holtburger_core::protocol::properties::{PropertyFloat, PropertyInt as ProtoPropertyInt};
 use holtburger_core::world::properties::EnchantmentTypeFlags;
 use holtburger_core::world::stats::{AttributeType, SkillType};
-use super::super::state::AppState;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::ListItem;
 
 pub fn get_enchantment_name(enchant: &holtburger_core::protocol::messages::Enchantment) -> String {
     if (enchant.stat_mod_type & EnchantmentTypeFlags::ATTRIBUTE.bits()) != 0 {
@@ -50,9 +50,7 @@ pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .into_iter()
         .enumerate()
         .map(|(i, (enchant, is_child))| {
-            let beneficial = (enchant.stat_mod_type
-                & EnchantmentTypeFlags::BENEFICIAL.bits())
-                != 0;
+            let beneficial = (enchant.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0;
             let color = if beneficial { Color::Green } else { Color::Red };
 
             let time_str = if enchant.duration < 0.0 {

@@ -8,9 +8,9 @@ pub mod state;
 pub mod stats;
 
 use crate::protocol::messages::Enchantment;
+use crate::world::entity::Entity;
 use crate::world::position::WorldPosition;
 use crate::world::properties::PropertyValue;
-use crate::world::entity::Entity;
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {

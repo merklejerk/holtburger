@@ -1,7 +1,7 @@
-use ratatui::style::{Color, Style, Modifier};
+use super::super::state::AppState;
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
-use super::super::state::AppState;
 
 pub fn get_character_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     let mut items = Vec::new();

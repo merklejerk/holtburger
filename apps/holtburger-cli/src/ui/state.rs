@@ -1,13 +1,13 @@
-use std::time::Instant;
-use std::collections::{HashMap, HashSet};
-use holtburger_core::{ChatMessage, ClientState};
-use holtburger_core::world::position::WorldPosition;
-use holtburger_core::world::stats::{Attribute, Vital, Skill};
-use holtburger_core::protocol::messages::Enchantment;
-use holtburger_core::world::entity::Entity;
+use super::types::{ContextView, FocusedPane, NearbyTab, UIState, WIDTH_BREAKPOINT};
 use crate::classification;
 use crate::ui::widgets::effects::get_enchantment_name;
-use super::types::{NearbyTab, UIState, FocusedPane, WIDTH_BREAKPOINT, ContextView};
+use holtburger_core::protocol::messages::Enchantment;
+use holtburger_core::world::entity::Entity;
+use holtburger_core::world::position::WorldPosition;
+use holtburger_core::world::stats::{Attribute, Skill, Vital};
+use holtburger_core::{ChatMessage, ClientState};
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 pub struct AppState {
     pub account_name: String,
@@ -40,6 +40,7 @@ pub struct AppState {
     pub player_enchantments: Vec<Enchantment>,
     pub entities: HashMap<u32, Entity>,
     pub server_time: Option<(f64, Instant)>,
+    pub use_emojis: bool,
 }
 
 impl AppState {
@@ -77,9 +78,7 @@ impl AppState {
         }
     }
 
-    pub fn get_filtered_nearby_entities(
-        &self,
-    ) -> Vec<(&Entity, f32, usize)> {
+    pub fn get_filtered_nearby_entities(&self) -> Vec<(&Entity, f32, usize)> {
         let candidates: Vec<_> = self
             .entities
             .values()

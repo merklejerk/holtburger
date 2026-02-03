@@ -1,10 +1,10 @@
+use super::WorldEvent;
 use super::entity::{Entity, EntityManager};
+use super::player::PlayerState;
 use super::position::WorldPosition;
 use super::properties::{ObjectDescriptionFlag, PropertyValue};
 use super::spatial::SpatialScene;
-use super::player::PlayerState;
 use super::stats;
-use super::WorldEvent;
 use crate::dat::DatDatabase;
 use crate::math::{Quaternion, Vector3};
 use crate::protocol::properties::PropertyInstanceId;
@@ -224,10 +224,12 @@ impl WorldState {
                             .skill_bases
                             .insert(skill_type, super::player::SkillBase { ranks, init });
 
-                        let base_val =
-                            self.player.derive_skill_value(skill_type, ranks, init, false);
-                        let current_val =
-                            self.player.derive_skill_value(skill_type, ranks, init, true);
+                        let base_val = self
+                            .player
+                            .derive_skill_value(skill_type, ranks, init, false);
+                        let current_val = self
+                            .player
+                            .derive_skill_value(skill_type, ranks, init, true);
 
                         let skill = stats::Skill {
                             skill_type,

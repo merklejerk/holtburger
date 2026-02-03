@@ -84,6 +84,8 @@ struct Args {
     log: Option<String>,
     #[arg(short, long)]
     verbose: bool,
+    #[arg(long)]
+    no_emojis: bool,
 }
 
 fn refresh_context_buffer(state: &mut AppState) {
@@ -185,6 +187,7 @@ async fn main() -> Result<()> {
         player_enchantments: Vec::new(),
         entities: std::collections::HashMap::new(),
         server_time: None,
+        use_emojis: !args.no_emojis,
     };
 
     refresh_context_buffer(&mut app_state);
@@ -350,7 +353,8 @@ async fn main() -> Result<()> {
                                                 let enchant = (*enchant_ref).clone();
                                                 match c {
                                                     'd' | 'D' => {
-                                                        app_state.context_view = ui::ContextView::Custom;
+                                                        app_state.context_view =
+                                                            ui::ContextView::Custom;
                                                         app_state.context_buffer.clear();
                                                         app_state.context_buffer.push(format!(
                                                             "DEBUG ENCHANTMENT: Spell #{}",
@@ -435,6 +439,13 @@ async fn main() -> Result<()> {
                                                         lines.push(format!(
                                                             "GUID:   {:08X}",
                                                             e.guid
+                                                        ));
+                                                        let class =
+                                                            classification::classify_entity(e);
+                                                        lines.push(format!(
+                                                            "Class:  {} ({:?})",
+                                                            class.label(),
+                                                            class
                                                         ));
 
                                                         if let Some(parent_id) = e.physics_parent_id
@@ -679,7 +690,8 @@ async fn main() -> Result<()> {
                                                             }
                                                         }
                                                     }
-                                                    app_state.context_view = ui::ContextView::Custom;
+                                                    app_state.context_view =
+                                                        ui::ContextView::Custom;
                                                     app_state.context_buffer = lines;
                                                     app_state.context_scroll_offset = 0;
                                                 }
@@ -820,11 +832,13 @@ async fn main() -> Result<()> {
                             if let ui::UIState::Chat = app_state.state {
                                 match app_state.focused_pane {
                                     ui::FocusedPane::Chat => {
-                                        let max_scroll = app_state.chat_total_lines.saturating_sub(1);
+                                        let max_scroll =
+                                            app_state.chat_total_lines.saturating_sub(1);
                                         app_state.scroll_offset = max_scroll;
                                     }
                                     ui::FocusedPane::Context => {
-                                        let max_scroll = app_state.context_buffer.len().saturating_sub(1);
+                                        let max_scroll =
+                                            app_state.context_buffer.len().saturating_sub(1);
                                         app_state.context_scroll_offset = max_scroll;
                                     }
                                     ui::FocusedPane::Nearby => {

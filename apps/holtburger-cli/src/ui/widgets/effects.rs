@@ -1,6 +1,7 @@
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
+use holtburger_core::protocol::properties::{PropertyFloat, PropertyInt as ProtoPropertyInt};
 use holtburger_core::world::properties::EnchantmentTypeFlags;
 use holtburger_core::world::stats::{AttributeType, SkillType};
 use super::super::state::AppState;
@@ -30,29 +31,29 @@ pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 }
             };
 
-            let mod_desc = if (enchant.stat_mod_type
-                & EnchantmentTypeFlags::ATTRIBUTE.bits())
-                != 0
-            {
+            let mod_desc = if (enchant.stat_mod_type & EnchantmentTypeFlags::ATTRIBUTE.bits()) != 0 {
                 AttributeType::from_repr(enchant.stat_mod_key)
                     .map(|a| a.to_string())
                     .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
-            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits())
-                != 0
-            {
+            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits()) != 0 {
                 SkillType::from_repr(enchant.stat_mod_key)
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
-            } else if (enchant.stat_mod_type
-                & EnchantmentTypeFlags::SECOND_ATT.bits())
-                != 0
-            {
+            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SECOND_ATT.bits()) != 0 {
                 match enchant.stat_mod_key {
-                    1 => "Health".to_string(),
-                    3 => "Stamina".to_string(),
-                    5 => "Mana".to_string(),
+                    1 => "Max Health".to_string(),
+                    3 => "Max Stamina".to_string(),
+                    5 => "Max Mana".to_string(),
                     _ => format!("Vital #{}", enchant.stat_mod_key),
                 }
+            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::INT.bits()) != 0 {
+                ProtoPropertyInt::from_repr(enchant.stat_mod_key)
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| format!("Int #{}", enchant.stat_mod_key))
+            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::FLOAT.bits()) != 0 {
+                PropertyFloat::from_repr(enchant.stat_mod_key)
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| format!("Float #{}", enchant.stat_mod_key))
             } else {
                 format!("Mod #{}", enchant.stat_mod_key)
             };

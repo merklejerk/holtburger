@@ -1,11 +1,11 @@
+use super::super::state::AppState;
+use holtburger_core::ClientState;
+use holtburger_core::world::stats::VitalType;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use holtburger_core::world::stats::VitalType;
-use holtburger_core::ClientState;
-use super::super::state::AppState;
 
 pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let chunks = Layout::default()
@@ -14,13 +14,34 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         .split(area);
 
     // 1. Render Vitals (Left Half)
-    let health = state.vitals.iter().find(|v| v.vital_type == VitalType::Health);
-    let stamina = state.vitals.iter().find(|v| v.vital_type == VitalType::Stamina);
-    let mana = state.vitals.iter().find(|v| v.vital_type == VitalType::Mana);
+    let health = state
+        .vitals
+        .iter()
+        .find(|v| v.vital_type == VitalType::Health);
+    let stamina = state
+        .vitals
+        .iter()
+        .find(|v| v.vital_type == VitalType::Stamina);
+    let mana = state
+        .vitals
+        .iter()
+        .find(|v| v.vital_type == VitalType::Mana);
 
-    let health_str = if let Some(h) = health { format!("H {}/{}", h.current, h.buffed_max) } else { "H --/--".to_string() };
-    let stamina_str = if let Some(s) = stamina { format!("S {}/{}", s.current, s.buffed_max) } else { "S --/--".to_string() };
-    let mana_str = if let Some(m) = mana { format!("M {}/{}", m.current, m.buffed_max) } else { "M --/--".to_string() };
+    let health_str = if let Some(h) = health {
+        format!("H {}/{}", h.current, h.buffed_max)
+    } else {
+        "H --/--".to_string()
+    };
+    let stamina_str = if let Some(s) = stamina {
+        format!("S {}/{}", s.current, s.buffed_max)
+    } else {
+        "S --/--".to_string()
+    };
+    let mana_str = if let Some(m) = mana {
+        format!("M {}/{}", m.current, m.buffed_max)
+    } else {
+        "M --/--".to_string()
+    };
 
     let vitals_para = Paragraph::new(Line::from(vec![
         Span::styled(health_str, Style::default().fg(Color::Red)),
@@ -42,11 +63,15 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let mut retry_info = String::new();
     let now = std::time::Instant::now();
     if let Some((current, max, next_time)) = state.logon_retry {
-        let secs = next_time.map(|t| t.saturating_duration_since(now).as_secs()).unwrap_or(0);
+        let secs = next_time
+            .map(|t| t.saturating_duration_since(now).as_secs())
+            .unwrap_or(0);
         retry_info.push_str(&format!("[Logon:{}/{} {}s] ", current, max, secs));
     }
     if let Some((current, max, next_time)) = state.enter_retry {
-        let secs = next_time.map(|t| t.saturating_duration_since(now).as_secs()).unwrap_or(0);
+        let secs = next_time
+            .map(|t| t.saturating_duration_since(now).as_secs())
+            .unwrap_or(0);
         retry_info.push_str(&format!("[Enter:{}/{} {}s] ", current, max, secs));
     }
 

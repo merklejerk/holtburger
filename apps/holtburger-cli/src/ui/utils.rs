@@ -1,8 +1,8 @@
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Borders, Block, Paragraph};
-use holtburger_core::world::properties::ObjectDescriptionFlag;
 use super::state::AppState;
 use super::types::NearbyTab;
+use holtburger_core::world::properties::ObjectDescriptionFlag;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {

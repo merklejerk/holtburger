@@ -1,8 +1,8 @@
+use super::super::state::AppState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, List, ListItem};
-use super::super::state::AppState;
 
 pub fn render_character_selection(f: &mut Frame, state: &AppState, area: Rect) {
     let items: Vec<ListItem> = state

@@ -1,9 +1,9 @@
-use ratatui::style::{Color, Style};
-use ratatui::widgets::ListItem;
-use holtburger_core::world::properties::{PropertyInt, RadarColor};
-use crate::classification::{self, EntityClass};
 use super::super::state::AppState;
 use super::super::types::NearbyTab;
+use crate::classification;
+use holtburger_core::world::properties::{PropertyInt, RadarColor};
+use ratatui::style::{Color, Style};
+use ratatui::widgets::ListItem;
 
 pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     let nearby = state.get_filtered_nearby_entities();
@@ -32,22 +32,11 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 Style::default().fg(color)
             };
 
-            let type_marker = match classification::classify_entity(e) {
-                EntityClass::Player => "Player",
-                EntityClass::Npc => "NPC",
-                EntityClass::Monster => "Mob",
-                EntityClass::Weapon => "Weapon",
-                EntityClass::Armor => "Armor",
-                EntityClass::Jewelry => "Jewelry",
-                EntityClass::Apparel => "Apparel",
-                EntityClass::Door => "Door",
-                EntityClass::Portal => "Portal",
-                EntityClass::LifeStone => "LifeStone",
-                EntityClass::Chest => "Chest",
-                EntityClass::Tool => "Tool",
-                EntityClass::StaticObject => "Static",
-                EntityClass::Dynamic => "Dynamic",
-                EntityClass::Unknown => "?",
+            let class = classification::classify_entity(e);
+            let type_marker = if state.use_emojis {
+                class.emoji()
+            } else {
+                class.label()
             };
 
             let display_name = if e.name.trim().is_empty() {
@@ -65,11 +54,8 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 ))
                 .style(style)
             } else {
-                ListItem::new(format!(
-                    "{}[{}] {:<15}",
-                    indent, type_marker, display_name
-                ))
-                .style(style)
+                ListItem::new(format!("{}[{}] {:<15}", indent, type_marker, display_name))
+                    .style(style)
             }
         })
         .collect()

@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style, Modifier};
-use ratatui::widgets::{Block, Borders, List};
+use ratatui::widgets::{Block, Borders, List, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 pub mod types;
 pub mod state;
@@ -90,17 +90,64 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                 Style::default()
             };
 
-            let title = match state.nearby_tab {
-                NearbyTab::Entities => " [1] Nearby |  2  Packs |  3  Stats |  4  Effects ",
-                NearbyTab::Inventory => "  1  Nearby | [2] Packs |  3  Stats |  4  Effects ",
-                NearbyTab::Character => "  1  Nearby |  2  Packs | [3] Stats |  4  Effects ",
-                NearbyTab::Effects => "  1  Nearby |  2  Packs |  3  Stats | [4] Effects ",
+            let (title, title_style) = match state.nearby_tab {
+                NearbyTab::Entities => (
+                    ratatui::text::Line::from(vec![
+                        ratatui::text::Span::styled(" [1] Nearby ", Style::default().add_modifier(Modifier::BOLD)),
+                        ratatui::text::Span::raw("| "),
+                        ratatui::text::Span::raw(" (2) "),
+                        ratatui::text::Span::raw("Packs | "),
+                        ratatui::text::Span::raw(" (3) "),
+                        ratatui::text::Span::raw("Stats | "),
+                        ratatui::text::Span::raw(" (4) "),
+                        ratatui::text::Span::raw("Effects "),
+                    ]),
+                    nearby_style,
+                ),
+                NearbyTab::Inventory => (
+                    ratatui::text::Line::from(vec![
+                        ratatui::text::Span::raw(" (1) "),
+                        ratatui::text::Span::raw("Nearby | "),
+                        ratatui::text::Span::styled(" [2] Packs ", Style::default().add_modifier(Modifier::BOLD)),
+                        ratatui::text::Span::raw("| "),
+                        ratatui::text::Span::raw(" (3) "),
+                        ratatui::text::Span::raw("Stats | "),
+                        ratatui::text::Span::raw(" (4) "),
+                        ratatui::text::Span::raw("Effects "),
+                    ]),
+                    nearby_style,
+                ),
+                NearbyTab::Character => (
+                    ratatui::text::Line::from(vec![
+                        ratatui::text::Span::raw(" (1) "),
+                        ratatui::text::Span::raw("Nearby | "),
+                        ratatui::text::Span::raw(" (2) "),
+                        ratatui::text::Span::raw("Packs | "),
+                        ratatui::text::Span::styled(" [3] Stats ", Style::default().add_modifier(Modifier::BOLD)),
+                        ratatui::text::Span::raw("| "),
+                        ratatui::text::Span::raw(" (4) "),
+                        ratatui::text::Span::raw("Effects "),
+                    ]),
+                    nearby_style,
+                ),
+                NearbyTab::Effects => (
+                    ratatui::text::Line::from(vec![
+                        ratatui::text::Span::raw(" (1) "),
+                        ratatui::text::Span::raw("Nearby | "),
+                        ratatui::text::Span::raw(" (2) "),
+                        ratatui::text::Span::raw("Packs | "),
+                        ratatui::text::Span::raw(" (3) "),
+                        ratatui::text::Span::raw("Stats | "),
+                        ratatui::text::Span::styled(" [4] Effects ", Style::default().add_modifier(Modifier::BOLD)),
+                    ]),
+                    nearby_style,
+                ),
             };
 
             let nearby_block = Block::default()
                 .borders(Borders::ALL)
                 .title(title)
-                .border_style(nearby_style);
+                .border_style(title_style);
 
             let nearby_inner_chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -122,6 +169,23 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             );
 
             f.render_widget(nearby_block, main_chunks[0]);
+
+            // Render Scrollbar for Nearby List
+            let nearby_total = state.nearby_item_count();
+            let nearby_height = nearby_inner_chunks[0].height as usize;
+            if nearby_total > nearby_height {
+                let mut scrollbar_state = ScrollbarState::new(nearby_total)
+                    .viewport_content_length(nearby_height)
+                    .position(state.selected_nearby_index); // Selected index is our best guess for position
+                f.render_stateful_widget(
+                    Scrollbar::default()
+                        .orientation(ScrollbarOrientation::VerticalRight)
+                        .begin_symbol(Some("▲"))
+                        .end_symbol(Some("▼")),
+                    main_chunks[0],
+                    &mut scrollbar_state,
+                );
+            }
 
             if let Some(action_bar) = render_action_bar(state) {
                 f.render_widget(action_bar, nearby_inner_chunks[1]);

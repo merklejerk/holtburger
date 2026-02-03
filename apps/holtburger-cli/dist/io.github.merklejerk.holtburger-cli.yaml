@@ -1,0 +1,28 @@
+id: io.github.merklejerk.holtburger-cli
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: holtburger-cli
+modules:
+  - name: holtburger-cli
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      build-args:
+        - --package=holtburger-cli
+    buildsystem: simple
+    build-commands:
+      - cargo build --release --package holtburger-cli
+      - install -D target/release/holtburger-cli /app/bin/holtburger-cli
+      - install -D apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
+      - install -D apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
+    sources:
+      - type: dir
+        path: .
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=x11 # In case we ever use a GUI, but needed for some terminal features sometimes
+  - --socket=wayland
+  - --device=all

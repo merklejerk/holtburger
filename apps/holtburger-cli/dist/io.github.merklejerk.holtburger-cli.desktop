@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Holtburger CLI
+Comment=TUI client for Asheron's Call
+Exec=holtburger-cli
+Icon=io.github.merklejerk.holtburger-cli
+Terminal=true
+Categories=Game;RolePlaying;
+Keywords=asheron;ac;client;tui;

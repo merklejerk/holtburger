@@ -19,7 +19,7 @@ modules:
       - install -D apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
     sources:
       - type: dir
-        path: .
+        path: ../../..
 finish-args:
   - --share=network
   - --share=ipc

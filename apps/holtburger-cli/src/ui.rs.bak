@@ -203,7 +203,11 @@ impl AppState {
                 .filter(|e| e.position.landblock_id == 0 && !e.name.is_empty())
                 .count(),
             NearbyTab::Effects => self.player_enchantments.len(),
-            NearbyTab::Character => 0,
+            NearbyTab::Character => {
+                let attr_count = self.attributes.len();
+                let skill_count = self.skills.iter().filter(|s| s.skill_type.is_eor()).count();
+                attr_count + skill_count + 3 // 2 headers + 1 spacer
+            }
         }
     }
 
@@ -365,17 +369,17 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         .find(|v| v.vital_type == VitalType::Mana);
 
     let health_str = if let Some(h) = health {
-        format!("H {}/{}", h.current, h.base)
+        format!("H {}/{}", h.current, h.buffed_max)
     } else {
         "H --/--".to_string()
     };
     let stamina_str = if let Some(s) = stamina {
-        format!("S {}/{}", s.current, s.base)
+        format!("S {}/{}", s.current, s.buffed_max)
     } else {
         "S --/--".to_string()
     };
     let mana_str = if let Some(m) = mana {
-        format!("M {}/{}", m.current, m.base)
+        format!("M {}/{}", m.current, m.buffed_max)
     } else {
         "M --/--".to_string()
     };
@@ -402,150 +406,235 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             let main_chunks = &main_chunks_vec;
 
             // --- Nearby Entities / Inventory / Effects Pane ---
-            let nearby_items: Vec<ListItem> = if state.nearby_tab == NearbyTab::Effects {
-                state
-                    .player_enchantments
-                    .iter()
-                    .enumerate()
-                    .map(|(i, enchant)| {
-                        let name = format!("Spell #{}", enchant.spell_id);
-                        let beneficial =
-                            (enchant.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0;
-                        let color = if beneficial { Color::Green } else { Color::Red };
+            let nearby_items: Vec<ListItem> = match state.nearby_tab {
+                NearbyTab::Effects => {
+                    let mut by_category: HashMap<u16, Vec<&holtburger_core::protocol::messages::Enchantment>> =
+                        HashMap::new();
+                    for e in &state.player_enchantments {
+                        by_category.entry(e.spell_category).or_default().push(e);
+                    }
 
-                        let time_str = if enchant.duration < 0.0 {
-                            "Inf".to_string()
-                        } else {
-                            let remain = enchant.start_time + enchant.duration;
-                            if remain <= 0.0 {
-                                "0s".to_string()
-                            } else if remain > 60.0 {
-                                format!("{}m", (remain / 60.0) as u32)
-                            } else {
-                                format!("{}s", remain as u32)
-                            }
-                        };
+                    let mut categories: Vec<_> = by_category.into_iter().collect();
 
-                        let mod_desc = if (enchant.stat_mod_type
-                            & EnchantmentTypeFlags::ATTRIBUTE.bits())
-                            != 0
-                        {
-                            AttributeType::from_repr(enchant.stat_mod_key)
-                                .map(|a| a.to_string())
-                                .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
-                        } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits()) != 0
-                        {
-                            SkillType::from_repr(enchant.stat_mod_key)
-                                .map(|s| s.to_string())
-                                .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
-                        } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SECOND_ATT.bits())
-                            != 0
-                        {
-                            match enchant.stat_mod_key {
-                                1 => "Health".to_string(),
-                                3 => "Stamina".to_string(),
-                                5 => "Mana".to_string(),
-                                _ => format!("Vital #{}", enchant.stat_mod_key),
-                            }
-                        } else {
-                            format!("Mod #{}", enchant.stat_mod_key)
-                        };
+                    // Sort enchantments within each category (winner first: Power -> StartTime)
+                    for (_, list) in categories.iter_mut() {
+                        list.sort_by(|a, b| b.compare_priority(a));
+                    }
 
-                        let style = if i == state.selected_nearby_index {
-                            Style::default().bg(Color::DarkGray)
-                        } else {
-                            Style::default()
-                        };
+                    // Sort categories by the winner's mod type/key for some stability
+                    categories.sort_by_key(|(_, list)| {
+                        let winner = list[0];
+                        (winner.stat_mod_type, winner.stat_mod_key)
+                    });
 
-                        let duration_color = if i == state.selected_nearby_index {
-                            Color::White
-                        } else {
-                            Color::DarkGray
-                        };
-
-                        ListItem::new(Line::from(vec![
-                            Span::styled(format!("{:<15} ", name), Style::default().fg(color)),
-                            Span::raw(format!("(L{}) -> {} ", enchant.layer, mod_desc)),
-                            Span::styled(
-                                format!("{:+}", enchant.stat_mod_value),
-                                Style::default().fg(Color::Cyan),
-                            ),
-                            Span::styled(
-                                format!(" [{}]", time_str),
-                                Style::default().fg(duration_color),
-                            ),
-                        ]))
-                        .style(style)
-                    })
-                    .collect()
-            } else {
-                let nearby = state.get_filtered_nearby_entities();
-                nearby
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (e, dist, depth))| {
-                        let color_val = e
-                            .int_properties
-                            .get(&(PropertyInt::RadarBlipColor as u32))
-                            .cloned()
-                            .unwrap_or(0);
-                        let color = match color_val as u8 {
-                            c if c == RadarColor::Blue as u8 => Color::Blue,
-                            c if c == RadarColor::Gold as u8 => Color::Yellow,
-                            c if c == RadarColor::Purple as u8 => Color::Magenta,
-                            c if c == RadarColor::Red as u8 => Color::Red,
-                            c if c == RadarColor::Green as u8 => Color::Green,
-                            c if c == RadarColor::Yellow as u8 => Color::Yellow,
-                            _ => Color::White,
-                        };
-
-                        let style = if i == state.selected_nearby_index {
-                            Style::default().bg(Color::DarkGray).fg(color)
-                        } else {
-                            Style::default().fg(color)
-                        };
-
-                        let type_marker = match classification::classify_entity(e) {
-                            EntityClass::Player => "Player",
-                            EntityClass::Npc => "NPC",
-                            EntityClass::Monster => "Mob",
-                            EntityClass::Weapon => "Weapon",
-                            EntityClass::Armor => "Armor",
-                            EntityClass::Jewelry => "Jewelry",
-                            EntityClass::Apparel => "Apparel",
-                            EntityClass::Door => "Door",
-                            EntityClass::Portal => "Portal",
-                            EntityClass::LifeStone => "LifeStone",
-                            EntityClass::Chest => "Chest",
-                            EntityClass::Tool => "Tool",
-                            EntityClass::StaticObject => "Static",
-                            EntityClass::Dynamic => "Dynamic",
-                            EntityClass::Unknown => "?",
-                        };
-
-                        let display_name = if e.name.trim().is_empty() {
-                            format!("<{:08X}>", e.guid)
-                        } else {
-                            e.name.clone()
-                        };
-
-                        let indent = "  ".repeat(*depth);
-
-                        if state.nearby_tab == NearbyTab::Entities {
-                            ListItem::new(format!(
-                                "{}[{}] {:<15} [{:.1}m]",
-                                indent, type_marker, display_name, dist
-                            ))
-                            .style(style)
-                        } else {
-                            ListItem::new(format!(
-                                "{}[{}] {:<15}",
-                                indent, type_marker, display_name
-                            ))
-                            .style(style)
+                    let mut flattened = Vec::new();
+                    for (_, list) in categories {
+                        for (idx, enchant) in list.into_iter().enumerate() {
+                            flattened.push((enchant, idx > 0)); // (enchant, is_child)
                         }
-                    })
-                    .collect()
+                    }
+
+                    flattened
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, (enchant, is_child))| {
+                            let beneficial = (enchant.stat_mod_type
+                                & EnchantmentTypeFlags::BENEFICIAL.bits())
+                                != 0;
+                            let color = if beneficial { Color::Green } else { Color::Red };
+
+                            let time_str = if enchant.duration < 0.0 {
+                                "Inf".to_string()
+                            } else {
+                                let remain = enchant.start_time + enchant.duration;
+                                if remain <= 0.0 {
+                                    "0s".to_string()
+                                } else if remain > 60.0 {
+                                    format!("{}m", (remain / 60.0) as u32)
+                                } else {
+                                    format!("{}s", remain as u32)
+                                }
+                            };
+
+                            let mod_desc = if (enchant.stat_mod_type
+                                & EnchantmentTypeFlags::ATTRIBUTE.bits())
+                                != 0
+                            {
+                                AttributeType::from_repr(enchant.stat_mod_key)
+                                    .map(|a| a.to_string())
+                                    .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
+                            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits())
+                                != 0
+                            {
+                                SkillType::from_repr(enchant.stat_mod_key)
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
+                            } else if (enchant.stat_mod_type
+                                & EnchantmentTypeFlags::SECOND_ATT.bits())
+                                != 0
+                            {
+                                match enchant.stat_mod_key {
+                                    1 => "Health".to_string(),
+                                    3 => "Stamina".to_string(),
+                                    5 => "Mana".to_string(),
+                                    _ => format!("Vital #{}", enchant.stat_mod_key),
+                                }
+                            } else {
+                                format!("Mod #{}", enchant.stat_mod_key)
+                            };
+
+                            let style = if i == state.selected_nearby_index {
+                                Style::default().bg(Color::DarkGray)
+                            } else {
+                                Style::default()
+                            };
+
+                            let duration_color = if i == state.selected_nearby_index {
+                                Color::White
+                            } else {
+                                Color::DarkGray
+                            };
+
+                            let indent = if is_child { "  " } else { "" };
+                            let label = if is_child { "(surpassed)" } else { "Spell" };
+
+                            ListItem::new(Line::from(vec![
+                                Span::raw(indent),
+                                Span::styled(format!("{:<15} ", label), Style::default().fg(color)),
+                                Span::raw(format!("-> {} ", mod_desc)),
+                                Span::styled(
+                                    format!("{:+}", enchant.stat_mod_value),
+                                    Style::default().fg(Color::Cyan),
+                                ),
+                                Span::styled(
+                                    format!(" [{}]", time_str),
+                                    Style::default().fg(duration_color),
+                                ),
+                            ]))
+                            .style(style)
+                        })
+                        .collect()
+                }
+                NearbyTab::Character => {
+                    let mut items = Vec::new();
+                    let header_style = Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD);
+
+                    // Attributes
+                    items.push(ListItem::new(Line::from(vec![Span::styled(
+                        " ATTRIBUTES ",
+                        header_style,
+                    )])));
+                    let mut sorted_attrs = state.attributes.clone();
+                    sorted_attrs.sort_by_key(|a| a.attr_type as u32);
+                    for attr in sorted_attrs {
+                        let val_str = if attr.current != attr.base {
+                            format!("{} ({})", attr.base, attr.current)
+                        } else {
+                            attr.base.to_string()
+                        };
+                        items.push(ListItem::new(Line::from(format!(
+                            "  {:<15} {:>10}",
+                            attr.attr_type, val_str
+                        ))));
+                    }
+
+                    items.push(ListItem::new(Line::from("")));
+
+                    // Skills
+                    items.push(ListItem::new(Line::from(vec![Span::styled(
+                        " SKILLS ",
+                        header_style,
+                    )])));
+                    let mut sorted_skills = state.skills.clone();
+                    sorted_skills.sort_by_key(|s| s.skill_type as u32);
+                    for skill in sorted_skills {
+                        if skill.skill_type.is_eor() {
+                            let val_str = if skill.current != skill.base {
+                                format!("{} ({})", skill.base, skill.current)
+                            } else {
+                                skill.current.to_string()
+                            };
+                            items.push(ListItem::new(Line::from(format!(
+                                "  {:<20} {:>10}",
+                                skill.skill_type.to_string(),
+                                val_str
+                            ))));
+                        }
+                    }
+                    items
+                }
+                _ => {
+                    let nearby = state.get_filtered_nearby_entities();
+                    nearby
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (e, dist, depth))| {
+                            let color_val = e
+                                .int_properties
+                                .get(&(PropertyInt::RadarBlipColor as u32))
+                                .cloned()
+                                .unwrap_or(0);
+                            let color = match color_val as u8 {
+                                c if c == RadarColor::Blue as u8 => Color::Blue,
+                                c if c == RadarColor::Gold as u8 => Color::Yellow,
+                                c if c == RadarColor::Purple as u8 => Color::Magenta,
+                                c if c == RadarColor::Red as u8 => Color::Red,
+                                c if c == RadarColor::Green as u8 => Color::Green,
+                                c if c == RadarColor::Yellow as u8 => Color::Yellow,
+                                _ => Color::White,
+                            };
+
+                            let style = if i == state.selected_nearby_index {
+                                Style::default().bg(Color::DarkGray).fg(color)
+                            } else {
+                                Style::default().fg(color)
+                            };
+
+                            let type_marker = match classification::classify_entity(e) {
+                                EntityClass::Player => "Player",
+                                EntityClass::Npc => "NPC",
+                                EntityClass::Monster => "Mob",
+                                EntityClass::Weapon => "Weapon",
+                                EntityClass::Armor => "Armor",
+                                EntityClass::Jewelry => "Jewelry",
+                                EntityClass::Apparel => "Apparel",
+                                EntityClass::Door => "Door",
+                                EntityClass::Portal => "Portal",
+                                EntityClass::LifeStone => "LifeStone",
+                                EntityClass::Chest => "Chest",
+                                EntityClass::Tool => "Tool",
+                                EntityClass::StaticObject => "Static",
+                                EntityClass::Dynamic => "Dynamic",
+                                EntityClass::Unknown => "?",
+                            };
+
+                            let display_name = if e.name.trim().is_empty() {
+                                format!("<{:08X}>", e.guid)
+                            } else {
+                                e.name.clone()
+                            };
+
+                            let indent = "  ".repeat(*depth);
+
+                            if state.nearby_tab == NearbyTab::Entities {
+                                ListItem::new(format!(
+                                    "{}[{}] {:<15} [{:.1}m]",
+                                    indent, type_marker, display_name, dist
+                                ))
+                                .style(style)
+                            } else {
+                                ListItem::new(format!(
+                                    "{}[{}] {:<15}",
+                                    indent, type_marker, display_name
+                                ))
+                                .style(style)
+                            }
+                        })
+                        .collect()
+                }
             };
 
             let nearby_style = if state.focused_pane == FocusedPane::Nearby {
@@ -575,67 +664,18 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
                 ])
                 .split(nearby_block.inner(main_chunks[0]));
 
-            if state.nearby_tab == NearbyTab::Character {
-                let mut lines = Vec::new();
+            let nearby_list = List::new(nearby_items)
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                .highlight_symbol("> ");
 
-                lines.push(Line::from(vec![Span::styled(
-                    "--- Vitals ---",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )]));
-                for vital in &state.vitals {
-                    lines.push(Line::from(format!(
-                        "  {:<10} {:>3} / {:>3}",
-                        vital.vital_type, vital.current, vital.base
-                    )));
-                }
-
-                lines.push(Line::from(""));
-                lines.push(Line::from(vec![Span::styled(
-                    "--- Attributes ---",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )]));
-                let mut sorted_attrs = state.attributes.clone();
-                sorted_attrs.sort_by_key(|a| a.attr_type as u32);
-                for attr in sorted_attrs {
-                    lines.push(Line::from(format!(
-                        "  {:<10} {:>3}",
-                        attr.attr_type, attr.base
-                    )));
-                }
-
-                lines.push(Line::from(""));
-                lines.push(Line::from(vec![Span::styled(
-                    "--- Skills ---",
-                    Style::default().add_modifier(Modifier::BOLD),
-                )]));
-                let mut sorted_skills = state.skills.clone();
-                sorted_skills.sort_by_key(|s| s.skill_type as u32);
-                for skill in sorted_skills {
-                    if skill.skill_type.is_eor() {
-                        lines.push(Line::from(format!(
-                            "  {:<15} {:>3}",
-                            skill.skill_type.to_string(),
-                            skill.current
-                        )));
-                    }
-                }
-
-                let para = Paragraph::new(lines).block(Block::default());
-                f.render_widget(para, nearby_inner_chunks[0]);
-            } else {
-                let nearby_list = List::new(nearby_items)
-                    .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-                    .highlight_symbol("> ");
-
-                state
-                    .nearby_list_state
-                    .select(Some(state.selected_nearby_index));
-                f.render_stateful_widget(
-                    nearby_list,
-                    nearby_inner_chunks[0],
-                    &mut state.nearby_list_state,
+            state
+                .nearby_list_state
+                .select(Some(state.selected_nearby_index));
+            f.render_stateful_widget(
+                nearby_list,
+                nearby_inner_chunks[0],
+                &mut state.nearby_list_state,
                 );
-            }
 
             f.render_widget(nearby_block, main_chunks[0]);
 

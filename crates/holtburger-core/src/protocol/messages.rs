@@ -218,6 +218,23 @@ pub struct Enchantment {
 }
 
 impl Enchantment {
+    /// Compares two enchantments to see which one is "better" (higher priority)
+    /// based on PowerLevel and StartTime.
+    pub fn is_better_than(&self, other: &Self) -> bool {
+        matches!(self.compare_priority(other), std::cmp::Ordering::Greater)
+    }
+
+    /// Returns the priority ordering of two enchantments.
+    /// Greater means higher priority (better).
+    pub fn compare_priority(&self, other: &Self) -> std::cmp::Ordering {
+        if self.power_level != other.power_level {
+            return self.power_level.cmp(&other.power_level);
+        }
+        self.start_time
+            .partial_cmp(&other.start_time)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }
+
     pub fn read(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 60 > data.len() {
             return None;

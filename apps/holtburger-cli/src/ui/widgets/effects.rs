@@ -6,6 +6,43 @@ use holtburger_core::world::properties::EnchantmentTypeFlags;
 use holtburger_core::world::stats::{AttributeType, SkillType};
 use super::super::state::AppState;
 
+pub fn get_enchantment_name(enchant: &holtburger_core::protocol::messages::Enchantment) -> String {
+    if (enchant.stat_mod_type & EnchantmentTypeFlags::ATTRIBUTE.bits()) != 0 {
+        AttributeType::from_repr(enchant.stat_mod_key)
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits()) != 0 {
+        SkillType::from_repr(enchant.stat_mod_key)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SECOND_ATT.bits()) != 0 {
+        match enchant.stat_mod_key {
+            1 => "Max Health".to_string(),
+            3 => "Max Stamina".to_string(),
+            5 => "Max Mana".to_string(),
+            _ => format!("Vital #{}", enchant.stat_mod_key),
+        }
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::INT.bits()) != 0 {
+        ProtoPropertyInt::from_repr(enchant.stat_mod_key)
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| format!("Int #{}", enchant.stat_mod_key))
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::FLOAT.bits()) != 0 {
+        PropertyFloat::from_repr(enchant.stat_mod_key)
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| format!("Float #{}", enchant.stat_mod_key))
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_ARMOR_VALUE.bits()) != 0 {
+        "Armor".to_string()
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_DAMAGE_VALUE.bits()) != 0 {
+        "Damage".to_string()
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_DAMAGE_VARIANCE.bits()) != 0 {
+        "Variance".to_string()
+    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::VITAE.bits()) != 0 {
+        "Vitae".to_string()
+    } else {
+        format!("Mod #{}", enchant.stat_mod_key)
+    }
+}
+
 pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     let flattened = state.get_effects_list_enchantments();
 
@@ -31,32 +68,7 @@ pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 }
             };
 
-            let mod_desc = if (enchant.stat_mod_type & EnchantmentTypeFlags::ATTRIBUTE.bits()) != 0 {
-                AttributeType::from_repr(enchant.stat_mod_key)
-                    .map(|a| a.to_string())
-                    .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
-            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits()) != 0 {
-                SkillType::from_repr(enchant.stat_mod_key)
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
-            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SECOND_ATT.bits()) != 0 {
-                match enchant.stat_mod_key {
-                    1 => "Max Health".to_string(),
-                    3 => "Max Stamina".to_string(),
-                    5 => "Max Mana".to_string(),
-                    _ => format!("Vital #{}", enchant.stat_mod_key),
-                }
-            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::INT.bits()) != 0 {
-                ProtoPropertyInt::from_repr(enchant.stat_mod_key)
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| format!("Int #{}", enchant.stat_mod_key))
-            } else if (enchant.stat_mod_type & EnchantmentTypeFlags::FLOAT.bits()) != 0 {
-                PropertyFloat::from_repr(enchant.stat_mod_key)
-                    .map(|p| p.to_string())
-                    .unwrap_or_else(|| format!("Float #{}", enchant.stat_mod_key))
-            } else {
-                format!("Mod #{}", enchant.stat_mod_key)
-            };
+            let mod_desc = get_enchantment_name(enchant);
 
             let style = if i == state.selected_nearby_index {
                 Style::default().bg(Color::DarkGray)

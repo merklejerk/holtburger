@@ -333,7 +333,10 @@ impl Client {
                                         self.handle_handshake_response(cookie, client_id).await?;
                                     }
                                     SessionEvent::TimeSync(server_time) => {
-                                        self.world.server_time = Some((server_time, Instant::now()));
+                                        self.world.server_time = Some(crate::world::state::ServerTimeSync {
+                                            server_time,
+                                            local_time: Instant::now(),
+                                        });
                                         if let Some(tx) = &self.event_tx {
                                             let _ = tx.send(ClientEvent::World(Box::new(crate::world::WorldEvent::ServerTimeUpdate(server_time))));
                                         }
@@ -412,7 +415,7 @@ impl Client {
                 }
             }
             GameMessage::PlayerCreate { player_id } => {
-                self.world.player_guid = player_id;
+                self.world.player.guid = player_id;
 
                 let name = self
                     .characters

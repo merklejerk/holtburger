@@ -81,23 +81,45 @@ The `Status` field in skill updates defines the character's training state:
 - `2`: Trained
 - `3`: Specialized
 
+## Stat Update Mechanics
+
+### The "Stingy Server" Behavior
+The server (notably ACE/Retail) is efficient with bandwidth. When a character receives an enchantment (buff/debuff), the server sends a `MagicUpdateEnchantment` or `MagicUpdateMultipleEnchantments` message, but it **does not** send updated `PrivateUpdateAttribute` or `PrivateUpdateSkill` messages for the affected stats. 
+
+The client is responsible for tracking all active enchantments and recalculating the "Buffed" values locally.
+
+### Vital Update Exceptions
+Vitals (Health, Stamina, Mana) have a unique behavior:
+- After applying a spell that affects a Max Vital (e.g. "Major Health VI"), ACE sends a `PrivateUpdateAttribute2ndLevel` (Max Vital) update, but it is **delayed by 1.0 seconds**.
+- This delay ensures the client has received and processed the enchantment before the "computed" total arrives.
+- If the client does not implement local recalculation, the UI will lag by 1s before showing the new Max Vital.
+
 ## Effective Stat Calculation
 
 The client performs local recalculation of effective stats to ensure the UI remains responsive and accurate even between server updates. 
 
+### Stacking Rules
+- **Spell Categories**: Enchantments in the same `SpellCategory` do not stack. 
+- **Priority (The Winner)**: In modern AC protocol (ACE/Retail), the "winning" enchantment in a category is determined by:
+  1. **PowerLevel**: Highest power wins.
+  2. **StartTime**: If PowerLevels are equal, the most recently cast spell wins.
+- **The LayerId Trap**: While the protocol includes a `LayerId` field, it often acts as a sequence number for spells in a category (preserving the "stack"). Do **not** assume `LayerId == 1` is always the active spell.
+- **Multipliers vs Additives**:
+  - All Multiplicative mods are multiplied together.
+  - All Additive mods are summed.
+  - `Final = (Base * ProductOfMultipliers) + SumOfAdditives`
+
 ### Formulas
 
+- **Primary Attributes**:
+  - `EffectiveAttr = (BaseAttr * ProductOfMultipliers) + SumOfAdditives`
+
 - **Derived Vitals (Max)**:
-  - `Health = BaseHealth + (EffectiveEndurance - BaseEndurance) / 2`
-  - `Stamina = BaseStamina + (EffectiveEndurance - BaseEndurance)`
-  - `Mana = BaseMana + (EffectiveSelf - BaseSelf)`
+  - `EffectiveMaxVital = (BaseMaxVital + VitalBonusFromAttributes) * Multipliers + Additives`
+  - `VitalBonusFromAttributes` uses the *Buffed* values of the contributing attributes.
 
 - **Derived Skills**:
-  - `EffectiveSkill = (InvestedRanks + (EffectiveAttr1 + EffectiveAttr2) / Divisor) * Multipliers + Additives`
-
-Common skill contributing attributes:
-- Magic (War/Life/Creature/Item/Void): `(Focus + Self) / 4`
-- Melee Defense: `(Quickness + Coordination) / 3`
+  - `EffectiveSkill = (InvestedRanks + InitBonus + (BuffedAttr1 + BuffedAttr2) / Divisor) * Multipliers + Additives`
 - Missile Defense: `(Quickness + Coordination) / 5`
 - Magic Defense: `(Focus + Self) / 7`
 - Arcane Lore/Mana Conversion: `(Focus + Self) / 6 or 3`

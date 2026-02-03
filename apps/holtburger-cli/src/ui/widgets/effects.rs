@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
@@ -7,31 +6,7 @@ use holtburger_core::world::stats::{AttributeType, SkillType};
 use super::super::state::AppState;
 
 pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let mut by_category: HashMap<u16, Vec<&holtburger_core::protocol::messages::Enchantment>> =
-        HashMap::new();
-    for e in &state.player_enchantments {
-        by_category.entry(e.spell_category).or_default().push(e);
-    }
-
-    let mut categories: Vec<_> = by_category.into_iter().collect();
-
-    // Sort enchantments within each category (winner first: Power -> StartTime)
-    for (_, list) in categories.iter_mut() {
-        list.sort_by(|a, b| b.compare_priority(a));
-    }
-
-    // Sort categories by the winner's mod type/key for some stability
-    categories.sort_by_key(|(_, list)| {
-        let winner = list[0];
-        (winner.stat_mod_type, winner.stat_mod_key)
-    });
-
-    let mut flattened = Vec::new();
-    for (_, list) in categories {
-        for (idx, enchant) in list.into_iter().enumerate() {
-            flattened.push((enchant, idx > 0)); // (enchant, is_child)
-        }
-    }
+    let flattened = state.get_effects_list_enchantments();
 
     flattened
         .into_iter()
@@ -95,14 +70,12 @@ pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             };
 
             let indent = if is_child { "  " } else { "" };
-            let label = if is_child { "(surpassed)" } else { "Spell" };
 
             ListItem::new(Line::from(vec![
                 Span::raw(indent),
-                Span::styled(format!("{:<15} ", label), Style::default().fg(color)),
-                Span::raw(format!("-> {} ", mod_desc)),
+                Span::styled(format!("{:<15} ", mod_desc), Style::default().fg(color)),
                 Span::styled(
-                    format!("{:+}", enchant.stat_mod_value),
+                    format!("{:<+6}", enchant.stat_mod_value),
                     Style::default().fg(Color::Cyan),
                 ),
                 Span::styled(

@@ -66,7 +66,7 @@ impl AppState {
                 .values()
                 .filter(|e| e.position.landblock_id == 0 && !e.name.is_empty())
                 .count(),
-            NearbyTab::Effects => self.player_enchantments.len(),
+            NearbyTab::Effects => self.get_effects_list_enchantments().len(),
             NearbyTab::Character => {
                 let attr_count = self.attributes.len();
                 let skill_count = self.skills.iter().filter(|s| s.skill_type.is_eor()).count();
@@ -172,6 +172,34 @@ impl AppState {
         }
 
         result
+    }
+
+    pub fn get_effects_list_enchantments(&self) -> Vec<(&Enchantment, bool)> {
+        let mut by_category: HashMap<u16, Vec<&Enchantment>> = HashMap::new();
+        for e in &self.player_enchantments {
+            by_category.entry(e.spell_category).or_default().push(e);
+        }
+
+        let mut categories: Vec<_> = by_category.into_iter().collect();
+
+        // Sort enchantments within each category (winner first: Power -> StartTime)
+        for (_, list) in categories.iter_mut() {
+            list.sort_by(|a, b| b.compare_priority(a));
+        }
+
+        // Sort categories by the winner's mod type/key for some stability
+        categories.sort_by_key(|(_, list)| {
+            let winner = list[0];
+            (winner.stat_mod_type, winner.stat_mod_key)
+        });
+
+        let mut flattened = Vec::new();
+        for (_, list) in categories {
+            for (i, &enchant) in list.iter().enumerate() {
+                flattened.push((enchant, i > 0));
+            }
+        }
+        flattened
     }
 }
 

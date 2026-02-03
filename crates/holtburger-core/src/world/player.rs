@@ -153,7 +153,7 @@ impl PlayerState {
         };
 
         match vital_type {
-            stats::VitalType::Health => get_val(stats::AttributeType::EnduranceAttr) / 2,
+            stats::VitalType::Health => (get_val(stats::AttributeType::EnduranceAttr) as f32 / 2.0).round() as u32,
             stats::VitalType::Stamina => get_val(stats::AttributeType::EnduranceAttr),
             stats::VitalType::Mana => get_val(stats::AttributeType::SelfAttr),
         }
@@ -683,5 +683,31 @@ mod tests {
         
         // Should now be 130
         assert_eq!(player.get_attribute_current(stats::AttributeType::StrengthAttr), 130);
+    }
+
+    #[test]
+    fn test_health_rounding() {
+        let mut player = PlayerState::new();
+        // Endurance 101 / 2 = 50.5 -> should be 51
+        player.attributes.insert(stats::AttributeType::EnduranceAttr, 101);
+        player.vital_bases.insert(stats::VitalType::Health, VitalBase { ranks: 0, start: 100 });
+
+        let health_base = player.calculate_vital_base(stats::VitalType::Health);
+        assert_eq!(health_base, 151, "Base Health contribution from 101 Endurance should be 51 (rounded)");
+
+        // Add an Endurance buff of +10 (Total 111)
+        player.enchantments.push(Enchantment {
+            spell_category: 3, // endurance group
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE).bits(),
+            stat_mod_key: stats::AttributeType::EnduranceAttr as u32,
+            stat_mod_value: 10.0,
+            power_level: 100,
+            ..Default::default()
+        });
+
+        // Current Endurance should be 111. 111 / 2 = 55.5 -> 56.
+        // Total health should be 100 (start) + 56 (bonus) = 156.
+        let health_current = player.calculate_vital_current(stats::VitalType::Health);
+        assert_eq!(health_current, 156, "Current Health with 111 Endurance should be 156 (111/2=55.5 rounded to 56)");
     }
 }

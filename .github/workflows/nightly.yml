@@ -52,9 +52,9 @@ jobs:
         shell: bash
         run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.30.3/cargo-dist-installer.sh | sh
 
-      - name: Run cargo-dist build
+      - name: Run dist build
         shell: bash
-        run: cargo dist build --target=${{ matrix.target }}
+        run: dist build --target=${{ matrix.target }}
 
       - name: Upload Artifacts to Release
         uses: softprops/action-gh-release@v2

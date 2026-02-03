@@ -87,18 +87,10 @@ struct Args {
 }
 
 fn refresh_context_buffer(state: &mut AppState) {
-    // Only clear if we aren't displaying an entity's debug info
-    // For now, let's just make it empty by default until an entity is selected
+    if state.context_view == ui::ContextView::Custom {
+        return;
+    }
     state.context_buffer.clear();
-    state
-        .context_buffer
-        .push("--- Context Information ---".to_string());
-    state
-        .context_buffer
-        .push("Select an entity to see its details.".to_string());
-    state
-        .context_buffer
-        .push("---------------------------".to_string());
 }
 
 #[tokio::main]
@@ -185,6 +177,7 @@ async fn main() -> Result<()> {
         nearby_tab: ui::NearbyTab::Entities,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
+        context_view: ui::ContextView::Default,
         logon_retry: None,
         enter_retry: None,
         core_state: ClientState::Connected,
@@ -340,6 +333,11 @@ async fn main() -> Result<()> {
                                                 app_state.selected_nearby_index = 0;
                                                 continue;
                                             }
+                                            'x' | 'X' => {
+                                                app_state.context_view = ui::ContextView::Default;
+                                                refresh_context_buffer(&mut app_state);
+                                                continue;
+                                            }
                                             _ => {}
                                         }
 
@@ -352,6 +350,7 @@ async fn main() -> Result<()> {
                                                 let enchant = (*enchant_ref).clone();
                                                 match c {
                                                     'd' | 'D' => {
+                                                        app_state.context_view = ui::ContextView::Custom;
                                                         app_state.context_buffer.clear();
                                                         app_state.context_buffer.push(format!(
                                                             "DEBUG ENCHANTMENT: Spell #{}",
@@ -680,6 +679,7 @@ async fn main() -> Result<()> {
                                                             }
                                                         }
                                                     }
+                                                    app_state.context_view = ui::ContextView::Custom;
                                                     app_state.context_buffer = lines;
                                                     app_state.context_scroll_offset = 0;
                                                 }
@@ -819,8 +819,31 @@ async fn main() -> Result<()> {
                         KeyCode::Home => {
                             if let ui::UIState::Chat = app_state.state {
                                 match app_state.focused_pane {
+                                    ui::FocusedPane::Chat => {
+                                        let max_scroll = app_state.chat_total_lines.saturating_sub(1);
+                                        app_state.scroll_offset = max_scroll;
+                                    }
+                                    ui::FocusedPane::Context => {
+                                        let max_scroll = app_state.context_buffer.len().saturating_sub(1);
+                                        app_state.context_scroll_offset = max_scroll;
+                                    }
+                                    ui::FocusedPane::Nearby => {
+                                        app_state.selected_nearby_index = 0;
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                        KeyCode::End => {
+                            if let ui::UIState::Chat = app_state.state {
+                                match app_state.focused_pane {
                                     ui::FocusedPane::Chat => app_state.scroll_offset = 0,
                                     ui::FocusedPane::Context => app_state.context_scroll_offset = 0,
+                                    ui::FocusedPane::Nearby => {
+                                        let nearby_count = app_state.nearby_item_count();
+                                        app_state.selected_nearby_index =
+                                            nearby_count.saturating_sub(1);
+                                    }
                                     _ => {}
                                 }
                             }

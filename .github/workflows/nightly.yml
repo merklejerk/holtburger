@@ -54,7 +54,7 @@ jobs:
 
       - name: Run cargo-dist build
         shell: bash
-        run: cargo dist build --tag=nightly --target=${{ matrix.target }}
+        run: cargo dist build --target=${{ matrix.target }}
 
       - name: Upload Artifacts to Release
         uses: softprops/action-gh-release@v2

@@ -9,15 +9,19 @@ pub const CHECKSUM_SEED: u32 = 0xBADD70DD;
 pub const ACE_HANDSHAKE_RACE_DELAY_MS: u64 = 200;
 
 // Handshake Offsets (ConnectRequest) - Relative to payload
-pub const OFF_CONNECT_TIME: usize = 0;
-pub const OFF_CONNECT_COOKIE: usize = 8;
-pub const OFF_CONNECT_CLIENT_ID: usize = 16;
-pub const OFF_CONNECT_SERVER_SEED: usize = 20;
-pub const OFF_CONNECT_CLIENT_SEED: usize = 24;
+pub const CONNECT_REQUEST_SIZE: usize = 32;
+pub const CONNECT_RESPONSE_SIZE: usize = 8;
+pub const TIME_SYNC_SIZE: usize = 8;
+pub const ECHO_REQUEST_SIZE: usize = 4;
+pub const ECHO_RESPONSE_SIZE: usize = 8;
+pub const FLOW_SIZE: usize = 6;
+pub const CICMD_SIZE: usize = 8;
+pub const SERVER_SWITCH_SIZE: usize = 8;
+pub const ACK_SEQUENCE_SIZE: usize = 4;
 
 #[derive(Debug, Clone)]
 pub struct ConnectRequestData {
-    pub time: u64,
+    pub time: f64,
     pub cookie: u64,
     pub client_id: u16,
     pub server_seed: u32,
@@ -25,14 +29,29 @@ pub struct ConnectRequestData {
 }
 
 impl ConnectRequestData {
-    pub fn unpack(data: &[u8]) -> Self {
-        ConnectRequestData {
-            time: LittleEndian::read_u64(&data[0..8]),
-            cookie: LittleEndian::read_u64(&data[8..16]),
-            client_id: LittleEndian::read_u32(&data[16..20]) as u16,
-            server_seed: LittleEndian::read_u32(&data[20..24]), // Note: ACE skip 2 bytes? or is it 16+4?
-            client_seed: LittleEndian::read_u32(&data[24..28]),
+    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if data.len() < *offset + CONNECT_REQUEST_SIZE {
+            return None;
         }
+        let time = LittleEndian::read_f64(&data[*offset..*offset + 8]);
+        *offset += 8;
+        let cookie = LittleEndian::read_u64(&data[*offset..*offset + 8]);
+        *offset += 8;
+        let client_id = LittleEndian::read_u32(&data[*offset..*offset + 4]) as u16;
+        *offset += 4;
+        let server_seed = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let client_seed = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        *offset += 4; // padding
+
+        Some(ConnectRequestData {
+            time,
+            cookie,
+            client_id,
+            server_seed,
+            client_seed,
+        })
     }
 }
 
@@ -48,33 +67,60 @@ pub struct PacketHeader {
 }
 
 impl PacketHeader {
-    pub fn unpack(data: &[u8]) -> Self {
-        PacketHeader {
-            sequence: LittleEndian::read_u32(&data[0..4]),
-            flags: LittleEndian::read_u32(&data[4..8]),
-            checksum: LittleEndian::read_u32(&data[8..12]),
-            id: LittleEndian::read_u16(&data[12..14]),
-            time: LittleEndian::read_u16(&data[14..16]),
-            size: LittleEndian::read_u16(&data[16..18]),
-            iteration: LittleEndian::read_u16(&data[18..20]),
+    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if data.len() < *offset + HEADER_SIZE {
+            return None;
         }
+
+        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let flags = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let checksum = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let time = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let size = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let iteration = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+
+        Some(PacketHeader {
+            sequence,
+            flags,
+            checksum,
+            id,
+            time,
+            size,
+            iteration,
+        })
     }
 
-    pub fn pack(&self, data: &mut [u8]) {
-        LittleEndian::write_u32(&mut data[0..4], self.sequence);
-        LittleEndian::write_u32(&mut data[4..8], self.flags);
-        LittleEndian::write_u32(&mut data[8..12], self.checksum);
-        LittleEndian::write_u16(&mut data[12..14], self.id);
-        LittleEndian::write_u16(&mut data[14..16], self.time);
-        LittleEndian::write_u16(&mut data[16..18], self.size);
-        LittleEndian::write_u16(&mut data[18..20], self.iteration);
+    pub fn pack(&self, data: &mut [u8], offset: &mut usize) {
+        LittleEndian::write_u32(&mut data[*offset..*offset + 4], self.sequence);
+        *offset += 4;
+        LittleEndian::write_u32(&mut data[*offset..*offset + 4], self.flags);
+        *offset += 4;
+        LittleEndian::write_u32(&mut data[*offset..*offset + 4], self.checksum);
+        *offset += 4;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.id);
+        *offset += 2;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.time);
+        *offset += 2;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.size);
+        *offset += 2;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.iteration);
+        *offset += 2;
     }
 
     pub fn calculate_checksum(&self) -> u32 {
         let mut header_data = [0u8; HEADER_SIZE];
         let mut header_copy = self.clone();
         header_copy.checksum = CHECKSUM_SEED;
-        header_copy.pack(&mut header_data);
+        let mut offset = 0;
+        header_copy.pack(&mut header_data, &mut offset);
 
         crate::protocol::crypto::Hash32::compute(&header_data)
     }
@@ -91,24 +137,47 @@ pub struct FragmentHeader {
 }
 
 impl FragmentHeader {
-    pub fn unpack(data: &[u8]) -> Self {
-        FragmentHeader {
-            sequence: LittleEndian::read_u32(&data[0..4]),
-            id: LittleEndian::read_u32(&data[4..8]),
-            count: LittleEndian::read_u16(&data[8..10]),
-            size: LittleEndian::read_u16(&data[10..12]),
-            index: LittleEndian::read_u16(&data[12..14]),
-            queue: LittleEndian::read_u16(&data[14..16]),
+    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if data.len() < *offset + FRAGMENT_HEADER_SIZE {
+            return None;
         }
+
+        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let count = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let size = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let index = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let queue = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+
+        Some(FragmentHeader {
+            sequence,
+            id,
+            count,
+            size,
+            index,
+            queue,
+        })
     }
 
-    pub fn pack(&self, data: &mut [u8]) {
-        LittleEndian::write_u32(&mut data[0..4], self.sequence);
-        LittleEndian::write_u32(&mut data[4..8], self.id);
-        LittleEndian::write_u16(&mut data[8..10], self.count);
-        LittleEndian::write_u16(&mut data[10..12], self.size);
-        LittleEndian::write_u16(&mut data[12..14], self.index);
-        LittleEndian::write_u16(&mut data[14..16], self.queue);
+    pub fn pack(&self, data: &mut [u8], offset: &mut usize) {
+        LittleEndian::write_u32(&mut data[*offset..*offset + 4], self.sequence);
+        *offset += 4;
+        LittleEndian::write_u32(&mut data[*offset..*offset + 4], self.id);
+        *offset += 4;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.count);
+        *offset += 2;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.size);
+        *offset += 2;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.index);
+        *offset += 2;
+        LittleEndian::write_u16(&mut data[*offset..*offset + 2], self.queue);
+        *offset += 2;
     }
 }
 
@@ -123,10 +192,12 @@ mod tests {
         LittleEndian::write_u32(&mut buf[4..8], 0xABCD);
         LittleEndian::write_u16(&mut buf[16..18], 100);
 
-        let unpacked = PacketHeader::unpack(&buf);
+        let mut offset = 0;
+        let unpacked = PacketHeader::unpack(&buf, &mut offset).unwrap();
         assert_eq!(unpacked.sequence, 1234);
         assert_eq!(unpacked.flags, 0xABCD);
         assert_eq!(unpacked.size, 100);
+        assert_eq!(offset, HEADER_SIZE);
     }
 
     #[test]
@@ -139,9 +210,12 @@ mod tests {
         };
 
         let mut buf = [0u8; HEADER_SIZE];
-        header.pack(&mut buf);
+        let mut pack_offset = 0;
+        header.pack(&mut buf, &mut pack_offset);
+        assert_eq!(pack_offset, HEADER_SIZE);
 
-        let unpacked = PacketHeader::unpack(&buf);
+        let mut unpack_offset = 0;
+        let unpacked = PacketHeader::unpack(&buf, &mut unpack_offset).unwrap();
         assert_eq!(header.sequence, unpacked.sequence);
         assert_eq!(header.flags, unpacked.flags);
         assert_eq!(header.size, unpacked.size);
@@ -156,11 +230,13 @@ mod tests {
         LittleEndian::write_u16(&mut buf[10..12], 500); // size
         LittleEndian::write_u16(&mut buf[12..14], 1); // index
 
-        let unpacked = FragmentHeader::unpack(&buf);
+        let mut offset = 0;
+        let unpacked = FragmentHeader::unpack(&buf, &mut offset).unwrap();
         assert_eq!(unpacked.id, 0x11223344);
         assert_eq!(unpacked.size, 500);
         assert_eq!(unpacked.index, 1);
         assert_eq!(unpacked.count, 2);
+        assert_eq!(offset, FRAGMENT_HEADER_SIZE);
     }
 
     #[test]
@@ -174,9 +250,12 @@ mod tests {
         };
 
         let mut buf = [0u8; FRAGMENT_HEADER_SIZE];
-        header.pack(&mut buf);
+        let mut pack_offset = 0;
+        header.pack(&mut buf, &mut pack_offset);
+        assert_eq!(pack_offset, FRAGMENT_HEADER_SIZE);
 
-        let unpacked = FragmentHeader::unpack(&buf);
+        let mut unpack_offset = 0;
+        let unpacked = FragmentHeader::unpack(&buf, &mut unpack_offset).unwrap();
         assert_eq!(header.id, unpacked.id);
         assert_eq!(header.size, unpacked.size);
         assert_eq!(header.index, unpacked.index);
@@ -195,7 +274,8 @@ mod tests {
         };
 
         let mut frag_packed = vec![0u8; 16];
-        frag_header.pack(&mut frag_packed);
+        let mut offset = 0;
+        frag_header.pack(&mut frag_packed, &mut offset);
 
         // Seq: 64 00 00 00
         // Id:  C8 00 00 00

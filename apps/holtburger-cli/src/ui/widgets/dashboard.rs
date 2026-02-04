@@ -58,7 +58,10 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Tab-specific rendering
     match state.dashboard_tab {
-        DashboardTab::Entities | DashboardTab::Inventory | DashboardTab::Character | DashboardTab::Effects => {
+        DashboardTab::Entities
+        | DashboardTab::Inventory
+        | DashboardTab::Character
+        | DashboardTab::Effects => {
             // These tabs currently all use a List view
             let items = match state.dashboard_tab {
                 DashboardTab::Entities => get_nearby_list_items(state),
@@ -88,7 +91,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             if total > height {
                 let mut scrollbar_state = ScrollbarState::new(total)
                     .viewport_content_length(height)
-                    .position(state.selected_dashboard_index); 
+                    .position(state.selected_dashboard_index);
                 f.render_stateful_widget(
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)
@@ -98,9 +101,8 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                     &mut scrollbar_state,
                 );
             }
-        }
-        // Future non-list tabs go here
-        // DashboardTab::Party => { render_party_grid(f, state, dashboard_inner_chunks[0]); }
+        } // Future non-list tabs go here
+          // DashboardTab::Party => { render_party_grid(f, state, dashboard_inner_chunks[0]); }
     }
 
     f.render_widget(dashboard_block, area);
@@ -175,8 +177,7 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
             let indent = "  ".repeat(*depth);
 
-            ListItem::new(format!("{}[{}] {:<15}", indent, type_marker, display_name))
-                .style(style)
+            ListItem::new(format!("{}[{}] {:<15}", indent, type_marker, display_name)).style(style)
         })
         .collect()
 }

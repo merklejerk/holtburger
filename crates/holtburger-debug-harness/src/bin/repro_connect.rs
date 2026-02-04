@@ -1,7 +1,7 @@
 use anyhow::Result;
-use holtburger_core::{Client, ClientCommand, ClientEvent};
-use tokio::sync::mpsc;
+use holtburger_core::{Client, ClientEvent};
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -10,21 +10,16 @@ async fn main() -> Result<()> {
         .init();
 
     println!("Starting connection test...");
-    
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-    let (command_tx, _command_rx) = mpsc::unbounded_channel();
 
-    let mut client = Client::new(
-        "127.0.0.1",
-        9000,
-        "test",
-        None,
-    ).await?;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let (_command_tx, _command_rx) = mpsc::unbounded_channel();
+
+    let mut client = Client::new("127.0.0.1", 9000, "test", None).await?;
 
     client.set_event_tx(event_tx);
     client.set_command_rx(_command_rx);
 
-    let client_handle = tokio::spawn(async move {
+    let _client_handle = tokio::spawn(async move {
         if let Err(e) = client.run("test").await {
             log::error!("Client error: {}", e);
         }

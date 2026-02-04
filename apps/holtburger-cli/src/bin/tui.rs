@@ -7,7 +7,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use holtburger_cli::actions::{self, ActionTarget, ActionHandler};
+use holtburger_cli::actions::{self, ActionHandler, ActionTarget};
 use holtburger_cli::ui::{self, AppState};
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -317,17 +317,20 @@ async fn main() -> Result<()> {
                                     ui::FocusedPane::Dashboard => {
                                         match c {
                                             '1' => {
-                                                app_state.dashboard_tab = ui::DashboardTab::Entities;
+                                                app_state.dashboard_tab =
+                                                    ui::DashboardTab::Entities;
                                                 app_state.selected_dashboard_index = 0;
                                                 continue;
                                             }
                                             '2' => {
-                                                app_state.dashboard_tab = ui::DashboardTab::Inventory;
+                                                app_state.dashboard_tab =
+                                                    ui::DashboardTab::Inventory;
                                                 app_state.selected_dashboard_index = 0;
                                                 continue;
                                             }
                                             '3' => {
-                                                app_state.dashboard_tab = ui::DashboardTab::Character;
+                                                app_state.dashboard_tab =
+                                                    ui::DashboardTab::Character;
                                                 app_state.selected_dashboard_index = 0;
                                                 continue;
                                             }
@@ -349,35 +352,69 @@ async fn main() -> Result<()> {
 
                                         {
                                             let target = match app_state.dashboard_tab {
-                                                ui::DashboardTab::Entities | ui::DashboardTab::Inventory => {
-                                                    let entities = app_state.get_filtered_nearby_tab();
-                                                    entities.get(app_state.selected_dashboard_index)
+                                                ui::DashboardTab::Entities
+                                                | ui::DashboardTab::Inventory => {
+                                                    let entities =
+                                                        app_state.get_filtered_nearby_tab();
+                                                    entities
+                                                        .get(app_state.selected_dashboard_index)
                                                         .map(|(e, _, _)| ActionTarget::Entity(e))
                                                         .unwrap_or(ActionTarget::None)
                                                 }
                                                 ui::DashboardTab::Effects => {
-                                                    let enchants = app_state.get_effects_list_enchantments();
-                                                    enchants.get(app_state.selected_dashboard_index)
+                                                    let enchants =
+                                                        app_state.get_effects_list_enchantments();
+                                                    enchants
+                                                        .get(app_state.selected_dashboard_index)
                                                         .map(|(e, _)| ActionTarget::Enchantment(e))
                                                         .unwrap_or(ActionTarget::None)
                                                 }
                                                 ui::DashboardTab::Character => ActionTarget::None,
                                             };
 
-                                            let actions = actions::get_actions_for_target(&target, &app_state.entities, app_state.player_guid);
-                                            if let Some(handler) = actions.iter()
-                                                .find(|a| a.shortcut_char() == c.to_ascii_lowercase())
-                                                .and_then(|action| action.handler(&target, app_state.player_guid))
+                                            let actions = actions::get_actions_for_target(
+                                                &target,
+                                                &app_state.entities,
+                                                app_state.player_guid,
+                                            );
+                                            if let Some(handler) = actions
+                                                .iter()
+                                                .find(|a| {
+                                                    a.shortcut_char() == c.to_ascii_lowercase()
+                                                })
+                                                .and_then(|action| {
+                                                    action.handler(&target, app_state.player_guid)
+                                                })
                                             {
                                                 match handler {
                                                     ActionHandler::Command(cmd) => {
                                                         command_to_send = Some(cmd);
                                                     }
                                                     ActionHandler::ToggleDebug => {
-                                                        debug_to_show = Some(actions::get_debug_info(&target, |id| {
-                                                            app_state.entities.get(&id).map(|e| e.name.clone())
-                                                                .or_else(|| if Some(id) == app_state.player_guid { Some("You".to_string()) } else { None })
-                                                        }));
+                                                        debug_to_show =
+                                                            Some(actions::get_debug_info(
+                                                                &target,
+                                                                |id| {
+                                                                    app_state
+                                                                        .entities
+                                                                        .get(&id)
+                                                                        .map(|e| e.name.clone())
+                                                                        .or_else(|| {
+                                                                            if Some(id)
+                                                                                == app_state
+                                                                                    .player_guid
+                                                                            {
+                                                                                Some(
+                                                                                    "You"
+                                                                                        .to_string(
+                                                                                        ),
+                                                                                )
+                                                                            } else {
+                                                                                None
+                                                                            }
+                                                                        })
+                                                                },
+                                                            ));
                                                     }
                                                 }
                                             }

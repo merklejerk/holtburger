@@ -265,7 +265,8 @@ impl MessageUnpack for ObjectCreateData {
         if weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) && *offset + 4 <= data.len() {
             *offset += 4;
         }
-        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) && *offset + 4 <= data.len() {
+        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) && *offset + 4 <= data.len()
+        {
             *offset += 4;
         }
         if weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) && *offset + 2 <= data.len() {

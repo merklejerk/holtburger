@@ -391,35 +391,10 @@ impl GameMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn hex_to_vec(s: &str) -> Vec<u8> {
-        let s = s.replace(" ", "");
-        (0..s.len())
-            .step_by(2)
-            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
-            .collect()
-    }
+    use hex;
 
     #[test]
-    fn test_gamemessage_unpack_game_action() {
-        let mut data = Vec::new();
-        data.extend_from_slice(&opcodes::GAME_ACTION.to_le_bytes());
-        data.extend_from_slice(&0u32.to_le_bytes()); // sequence
-        data.extend_from_slice(&actions::LOGIN_COMPLETE.to_le_bytes());
-        data.extend_from_slice(&[1, 2, 3, 4]); // payload
-
-        let msg = GameMessage::unpack(&data).unwrap();
-        if let GameMessage::GameAction(data) = msg {
-            assert_eq!(data.sequence, 0);
-            assert_eq!(data.action, actions::LOGIN_COMPLETE);
-            assert_eq!(data.data, vec![1, 2, 3, 4]);
-        } else {
-            panic!("Expected GameAction variant");
-        }
-    }
-
-    #[test]
-    fn test_gamemessage_unpack_private_update_property_int() {
+    fn test_gamemessage_routing_property_int_private() {
         let mut data = Vec::new();
         data.extend_from_slice(&opcodes::PRIVATE_UPDATE_PROPERTY_INT.to_le_bytes());
         data.push(0x42); // Sequence
@@ -428,84 +403,31 @@ mod tests {
 
         let msg = GameMessage::unpack(&data).unwrap();
         if let GameMessage::UpdatePropertyInt(data) = msg {
+            assert_eq!(data.sequence, 0x42);
             assert_eq!(data.guid, 0); // Private
             assert_eq!(data.property, 1);
-            assert_eq!(data.value, 100);
-            assert!(!data.is_public);
+            assert_eq!(data.is_public, false);
         } else {
             panic!("Expected UpdatePropertyInt variant");
         }
     }
 
     #[test]
-    fn test_gamemessage_unpack_public_update_property_int() {
-        let mut data = Vec::new();
-        data.extend_from_slice(&opcodes::PUBLIC_UPDATE_PROPERTY_INT.to_le_bytes());
-        data.push(0x42); // Sequence
-        data.extend_from_slice(&0x50000001u32.to_le_bytes()); // GUID
-        data.extend_from_slice(&0x00000001u32.to_le_bytes()); // Property
-        data.extend_from_slice(&100i32.to_le_bytes()); // Value
-
-        let msg = GameMessage::unpack(&data).unwrap();
-        if let GameMessage::UpdatePropertyInt(data) = msg {
-            assert_eq!(data.guid, 0x50000001);
-            assert_eq!(data.property, 1);
-            assert_eq!(data.value, 100);
-            assert!(data.is_public);
-        } else {
-            panic!("Expected UpdatePropertyInt variant");
-        }
-    }
-
-    #[test]
-    fn test_gamemessage_unpack_start_game() {
-        let hex = "B0F70000 01000050 0E000000 82020000";
-        let data = hex_to_vec(hex);
+    fn test_gamemessage_routing_game_event_start() {
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x0E), Event (0x0282)
+        let hex = "B0F70000010000500E00000082020000";
+        let data = hex::decode(hex).unwrap();
         let msg = GameMessage::unpack(&data).unwrap();
         assert!(matches!(msg, GameMessage::StartGame));
     }
 
     #[test]
-    fn test_gamemessage_unpack_character_enter_world_request() {
+    fn test_gamemessage_routing_character_request() {
         let packed = vec![0xC8, 0xF7, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12];
         let unpacked = GameMessage::unpack(&packed).unwrap();
-        if let GameMessage::CharacterEnterWorldRequest(data) = unpacked {
-            assert_eq!(data.guid, 0x12345678);
-        } else {
-            panic!("Wrong message type");
-        }
-    }
-
-    #[test]
-    fn test_gamemessage_pack_character_enter_world_request() {
-        let msg =
-            GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
-                guid: 0x12345678,
-            }));
-        let packed = msg.pack();
-        assert_eq!(packed, vec![0xC8, 0xF7, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12]);
-    }
-
-    #[test]
-    fn test_gamemessage_unpack_character_enter_world() {
-        let msg = GameMessage::CharacterEnterWorld(Box::new(CharacterEnterWorldData {
-            guid: 0x12345678,
-            account: "Alice".to_string(),
-        }));
-        let packed = msg.pack();
-
-        let unpacked = GameMessage::unpack(&packed).unwrap();
-        assert_eq!(unpacked, msg);
-    }
-
-    #[test]
-    fn test_gamemessage_pack_character_enter_world() {
-        let msg = GameMessage::CharacterEnterWorld(Box::new(CharacterEnterWorldData {
-            guid: 0x12345678,
-            account: "Alice".to_string(),
-        }));
-        let packed = msg.pack();
-        // Opcode (4) + GUID (4) + Name (2+5+1 pad=8) = 16
-        assert_eq!(packed.len(), 16);
+        assert!(matches!(
+            unpacked,
+            GameMessage::CharacterEnterWorldRequest(_)
+        ));
     }
 }

@@ -10,6 +10,20 @@ pub struct WorldPosition {
     pub rotation: Quaternion,
 }
 
+impl WorldPosition {
+    pub fn write_raw(&self, writer: &mut Vec<u8>) {
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.landblock_id).unwrap();
+        writer.write_f32::<LittleEndian>(self.coords.x).unwrap();
+        writer.write_f32::<LittleEndian>(self.coords.y).unwrap();
+        writer.write_f32::<LittleEndian>(self.coords.z).unwrap();
+        writer.write_f32::<LittleEndian>(self.rotation.w).unwrap();
+        writer.write_f32::<LittleEndian>(self.rotation.x).unwrap();
+        writer.write_f32::<LittleEndian>(self.rotation.y).unwrap();
+        writer.write_f32::<LittleEndian>(self.rotation.z).unwrap();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum WorldCoordinates {
     Indoor {

@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
                 Some(event) = event_rx.recv() => {
                     if let ClientEvent::CharacterList(chars) = event {
                         println!("Characters for account {}:", args.account);
-                        for (id, name) in chars { println!("  - {} (ID: {:08X})", name, id); }
+                        for character in chars { println!("  - {} (ID: {:08X})", character.name, character.id); }
                         let _ = command_tx.send(ClientCommand::Quit);
                         let _ = client_handle.await;
                         return Ok(());
@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
                         match event {
                             ClientEvent::Message(msg) => { println!("{}", msg.text); }
                             ClientEvent::CharacterList(chars) => {
-                                println!("Available characters: {:?}", chars.iter().map(|c| &c.1).collect::<Vec<_>>());
+                                println!("Available characters: {:?}", chars.iter().map(|c| &c.name).collect::<Vec<_>>());
                                 if character_pref.is_none() {
                                     println!("Selecting first character...");
                                     let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(1));

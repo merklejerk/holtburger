@@ -1,11 +1,11 @@
 use crate::classification::{self, EntityClass};
+use holtburger_core::ClientCommand;
 use holtburger_core::protocol::messages::Enchantment;
 use holtburger_core::protocol::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString,
 };
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::properties::ObjectDescriptionFlag;
-use holtburger_core::ClientCommand;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +70,11 @@ impl Action {
         }
     }
 
-    pub fn handler(&self, target: &ActionTarget, player_guid: Option<u32>) -> Option<ActionHandler> {
+    pub fn handler(
+        &self,
+        target: &ActionTarget,
+        player_guid: Option<u32>,
+    ) -> Option<ActionHandler> {
         match (self, target) {
             (Action::Assess, ActionTarget::Entity(e)) => {
                 Some(ActionHandler::Command(ClientCommand::Identify(e.guid)))
@@ -82,7 +86,9 @@ impl Action {
                 Some(ActionHandler::Command(ClientCommand::Drop(e.guid)))
             }
             (Action::PickUp, ActionTarget::Entity(e)) => {
-                if let (Some(pguid), EntityClass::Container) = (player_guid, classification::classify_entity(e)) {
+                if let (Some(pguid), EntityClass::Container) =
+                    (player_guid, classification::classify_entity(e))
+                {
                     // Force the "MoveItem" variant for containers explicitly
                     Some(ActionHandler::Command(ClientCommand::MoveItem {
                         item: e.guid,
@@ -106,7 +112,11 @@ impl Action {
     }
 }
 
-pub fn is_owned_by_player(entity: &Entity, entities: &HashMap<u32, Entity>, player_guid: u32) -> bool {
+pub fn is_owned_by_player(
+    entity: &Entity,
+    entities: &HashMap<u32, Entity>,
+    player_guid: u32,
+) -> bool {
     let mut current_guid = entity.guid;
     let mut visited = HashSet::new();
 
@@ -185,9 +195,7 @@ pub fn get_actions_for_target(
             }
             ent_actions
         }
-        ActionTarget::Enchantment(_) => {
-            Vec::new()
-        }
+        ActionTarget::Enchantment(_) => Vec::new(),
         ActionTarget::None => Vec::new(),
     };
 
@@ -231,12 +239,18 @@ pub fn get_debug_info(
             if let Some(container_id) = e.container_id {
                 let container_name =
                     name_lookup(container_id).unwrap_or_else(|| "Unknown".to_string());
-                lines.push(format!("Container:   {:08X} ({})", container_id, container_name));
+                lines.push(format!(
+                    "Container:   {:08X} ({})",
+                    container_id, container_name
+                ));
             }
 
             if let Some(wielder_id) = e.wielder_id {
                 let wielder_name = name_lookup(wielder_id).unwrap_or_else(|| "Unknown".to_string());
-                lines.push(format!("Wielder:     {:08X} ({})", wielder_id, wielder_name));
+                lines.push(format!(
+                    "Wielder:     {:08X} ({})",
+                    wielder_id, wielder_name
+                ));
             }
 
             lines.push(format!("WCID:   {:?}", e.wcid));

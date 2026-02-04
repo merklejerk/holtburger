@@ -196,17 +196,15 @@ impl Session {
                 if offset + FRAGMENT_HEADER_SIZE > payload.len() {
                     break;
                 }
-                // Fragment Header
-                let hh = crate::protocol::crypto::Hash32::compute(
-                    &payload[offset..offset + FRAGMENT_HEADER_SIZE],
-                );
+                let h_start = offset;
+                let frag_header = FragmentHeader::unpack(payload, &mut offset)
+                    .expect("Failed to unpack fragment header");
+                // Fragment Header Hash
+                let hh = crate::protocol::crypto::Hash32::compute(&payload[h_start..offset]);
                 total_payload_checksum = total_payload_checksum.wrapping_add(hh);
 
-                let frag_header =
-                    FragmentHeader::unpack(&payload[offset..offset + FRAGMENT_HEADER_SIZE]);
                 let frag_data_size =
                     (frag_header.size as usize).saturating_sub(FRAGMENT_HEADER_SIZE);
-                offset += FRAGMENT_HEADER_SIZE;
 
                 // Fragment Data
                 if frag_data_size > 0 {
@@ -297,7 +295,8 @@ impl Session {
         }
 
         let mut packet = vec![0u8; HEADER_SIZE];
-        header.pack(&mut packet);
+        let mut pack_offset = 0;
+        header.pack(&mut packet, &mut pack_offset);
         packet.extend_from_slice(&full_payload);
 
         log::debug!("RAW OUTBOUND: {:02X?}", packet);
@@ -381,7 +380,8 @@ impl Session {
         self.fragment_id += 1;
 
         let mut body = vec![0u8; FRAGMENT_HEADER_SIZE];
-        frag_header.pack(&mut body);
+        let mut pack_offset = 0;
+        frag_header.pack(&mut body, &mut pack_offset);
         body.extend_from_slice(&payload);
 
         let header = PacketHeader {
@@ -419,7 +419,9 @@ impl Session {
             let _ = capture.write_entry(Direction::Inbound, addr, &buf[..len]);
         }
 
-        let header = PacketHeader::unpack(&buf[..HEADER_SIZE]);
+        let mut offset = 0;
+        let header = PacketHeader::unpack(&buf[..HEADER_SIZE], &mut offset)
+            .ok_or_else(|| anyhow::anyhow!("Failed to unpack packet header"))?;
         let data = buf[HEADER_SIZE..len].to_vec();
 
         log::debug!("RAW INBOUND: {:02X?}", &buf[..len]);
@@ -462,7 +464,7 @@ impl Session {
     pub fn get_payload_offset(&self, flags: u32, data: &[u8]) -> usize {
         let mut offset = 0;
         if flags & packet_flags::SERVER_SWITCH != 0 {
-            offset += 8;
+            offset += transport::SERVER_SWITCH_SIZE;
         }
         if flags & packet_flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
             let count = LittleEndian::read_u32(&data[offset..offset + 4]);
@@ -473,25 +475,25 @@ impl Session {
             offset += 4 + (count as usize * 4);
         }
         if flags & packet_flags::ACK_SEQUENCE != 0 {
-            offset += 4;
+            offset += transport::ACK_SEQUENCE_SIZE;
         }
         if flags & packet_flags::CONNECT_RESPONSE != 0 {
-            offset += 8;
+            offset += transport::CONNECT_RESPONSE_SIZE;
         }
         if flags & packet_flags::CICMD != 0 {
-            offset += 8;
+            offset += transport::CICMD_SIZE;
         }
         if flags & packet_flags::TIME_SYNC != 0 {
-            offset += 8;
+            offset += transport::TIME_SYNC_SIZE;
         }
         if flags & packet_flags::ECHO_REQUEST != 0 {
-            offset += 4;
+            offset += transport::ECHO_REQUEST_SIZE;
         }
         if flags & packet_flags::ECHO_RESPONSE != 0 {
-            offset += 8;
+            offset += transport::ECHO_RESPONSE_SIZE;
         }
         if flags & packet_flags::FLOW != 0 {
-            offset += 6;
+            offset += transport::FLOW_SIZE;
         }
         offset
     }
@@ -504,9 +506,10 @@ impl Session {
 
         // 1. Check for Handshake Request (Seeds/NetID from Server)
         if header.flags & packet_flags::CONNECT_REQUEST != 0 {
-            let offset = self.get_payload_offset(header.flags, &data);
-            if offset + 32 <= data.len() {
-                let mut crd = ConnectRequestData::unpack(&data[offset..offset + 32]);
+            let mut offset = self.get_payload_offset(header.flags, &data);
+            if offset + transport::CONNECT_REQUEST_SIZE <= data.len() {
+                let mut crd = ConnectRequestData::unpack(&data, &mut offset)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to unpack connect request"))?;
                 // If the body CID is 0, use the one from the packet header
                 if crd.client_id == 0 && header.id != 0 {
                     crd.client_id = header.id;
@@ -518,8 +521,10 @@ impl Session {
         // 2. Check for Handshake Response (Cookie from Server)
         if header.flags & packet_flags::CONNECT_RESPONSE != 0 {
             let offset = self.get_payload_offset(header.flags, &data);
-            if offset + 8 <= data.len() {
-                let cookie = LittleEndian::read_u64(&data[offset..offset + 8]);
+            if offset + transport::CONNECT_RESPONSE_SIZE <= data.len() {
+                let cookie = LittleEndian::read_u64(
+                    &data[offset..offset + transport::CONNECT_RESPONSE_SIZE],
+                );
                 events.push(SessionEvent::HandshakeResponse {
                     cookie,
                     client_id: header.id,
@@ -563,11 +568,10 @@ impl Session {
         if header.flags & packet_flags::BLOB_FRAGMENTS != 0 {
             let mut offset = self.get_payload_offset(header.flags, &data);
             while offset + FRAGMENT_HEADER_SIZE <= data.len() {
-                let frag_header =
-                    FragmentHeader::unpack(&data[offset..offset + FRAGMENT_HEADER_SIZE]);
+                let frag_header = FragmentHeader::unpack(&data, &mut offset)
+                    .ok_or_else(|| anyhow::anyhow!("Failed to unpack fragment header"))?;
                 let frag_data_size =
                     (frag_header.size as usize).saturating_sub(FRAGMENT_HEADER_SIZE);
-                offset += FRAGMENT_HEADER_SIZE;
 
                 if offset + frag_data_size > data.len() {
                     break;

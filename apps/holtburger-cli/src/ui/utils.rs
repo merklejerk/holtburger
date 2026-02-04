@@ -1,6 +1,6 @@
 use super::state::AppState;
 use super::types::DashboardTab;
-use crate::actions::{ActionTarget};
+use crate::actions::ActionTarget;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
@@ -57,20 +57,23 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
     let target = match state.dashboard_tab {
         DashboardTab::Entities | DashboardTab::Inventory => {
             let entities = state.get_filtered_nearby_tab();
-            entities.get(state.selected_dashboard_index)
+            entities
+                .get(state.selected_dashboard_index)
                 .map(|(e, _, _)| ActionTarget::Entity(e))
                 .unwrap_or(ActionTarget::None)
         }
         DashboardTab::Effects => {
             let enchants = state.get_effects_list_enchantments();
-            enchants.get(state.selected_dashboard_index)
+            enchants
+                .get(state.selected_dashboard_index)
                 .map(|(e, _)| ActionTarget::Enchantment(e))
                 .unwrap_or(ActionTarget::None)
         }
         _ => ActionTarget::None,
     };
 
-    let actions = crate::actions::get_actions_for_target(&target, &state.entities, state.player_guid);
+    let actions =
+        crate::actions::get_actions_for_target(&target, &state.entities, state.player_guid);
     if actions.is_empty() {
         return None;
     }

@@ -406,7 +406,7 @@ mod tests {
             assert_eq!(data.sequence, 0x42);
             assert_eq!(data.guid, 0); // Private
             assert_eq!(data.property, 1);
-            assert_eq!(data.is_public, false);
+            assert!(!data.is_public);
         } else {
             panic!("Expected UpdatePropertyInt variant");
         }

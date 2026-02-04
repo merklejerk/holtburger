@@ -1,7 +1,7 @@
 use anyhow::Result;
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
-use tokio::sync::mpsc;
 use std::time::Duration;
+use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -10,16 +10,11 @@ async fn main() -> Result<()> {
         .init();
 
     println!("Starting full login validation test...");
-    
+
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-    let mut client = Client::new(
-        "127.0.0.1",
-        9000,
-        "test",
-        None,
-    ).await?;
+    let mut client = Client::new("127.0.0.1", 9000, "test", None).await?;
     client.session.set_capture("caps/repro.cap")?;
 
     client.set_event_tx(event_tx);

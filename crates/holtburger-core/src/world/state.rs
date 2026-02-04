@@ -108,113 +108,116 @@ impl WorldState {
                     });
                 }
             }
-            GameMessage::PlayerDescription(data) => {
-                let guid = data.guid;
-                let name = &data.name;
-                let pos = &data.pos;
+            GameMessage::GameEvent(ev) => match &ev.event {
+                GameEventData::PlayerDescription(data) => {
+                    let guid = data.guid;
+                    let name = &data.name;
+                    let pos = &data.pos;
 
-                self.player.guid = guid;
-                self.player.name = name.clone();
-                self.player.enchantments = data.enchantments.clone();
+                    self.player.guid = guid;
+                    self.player.name = name.clone();
+                    self.player.enchantments = data.enchantments.clone();
 
-                let mut attr_objs = Vec::new();
-                let mut vital_objs = Vec::new();
+                    let mut attr_objs = Vec::new();
+                    let mut vital_objs = Vec::new();
 
-                self.player.attributes.clear();
-                for (at_type, attr) in &data.attributes {
-                    let at_type = *at_type;
-                    let ranks = attr.ranks;
-                    let start = attr.start;
-                    let current = attr.current.unwrap_or(0);
+                    self.player.attributes.clear();
+                    for (at_type, attr) in &data.attributes {
+                        let at_type = *at_type;
+                        let ranks = attr.ranks;
+                        let start = attr.start;
+                        let current = attr.current.unwrap_or(0);
 
-                    if at_type <= 6 {
-                        if let Some(attr_type) = stats::AttributeType::from_repr(at_type) {
-                            let base = ranks + start;
-                            self.player.attributes.insert(attr_type, base);
-                            attr_objs.push(stats::Attribute {
-                                attr_type,
-                                base,
-                                current: base,
-                            });
+                        if at_type <= 6 {
+                            if let Some(attr_type) = stats::AttributeType::from_repr(at_type) {
+                                let base = ranks + start;
+                                self.player.attributes.insert(attr_type, base);
+                                attr_objs.push(stats::Attribute {
+                                    attr_type,
+                                    base,
+                                    current: base,
+                                });
+                            }
+                        } else if (7..=9).contains(&at_type) {
+                            let vital_type = match at_type {
+                                7 => stats::VitalType::Health,
+                                8 => stats::VitalType::Stamina,
+                                9 => stats::VitalType::Mana,
+                                _ => continue,
+                            };
+
+                            self.player
+                                .vital_bases
+                                .insert(vital_type, super::player::VitalBase { ranks, start });
+
+                            let base = self.player.calculate_vital_base(vital_type);
+                            let final_base = if base == 0 { current } else { base };
+
+                            let vital = stats::Vital {
+                                vital_type,
+                                base: final_base,
+                                buffed_max: final_base,
+                                current,
+                            };
+                            self.player.vitals.insert(vital_type, vital.clone());
+                            vital_objs.push(vital);
                         }
-                    } else if (7..=9).contains(&at_type) {
-                        let vital_type = match at_type {
-                            7 => stats::VitalType::Health,
-                            8 => stats::VitalType::Stamina,
-                            9 => stats::VitalType::Mana,
-                            _ => continue,
-                        };
-
-                        self.player
-                            .vital_bases
-                            .insert(vital_type, super::player::VitalBase { ranks, start });
-
-                        let base = self.player.calculate_vital_base(vital_type);
-                        let final_base = if base == 0 { current } else { base };
-
-                        let vital = stats::Vital {
-                            vital_type,
-                            base: final_base,
-                            buffed_max: final_base,
-                            current,
-                        };
-                        self.player.vitals.insert(vital_type, vital.clone());
-                        vital_objs.push(vital);
                     }
-                }
 
-                self.player.skills.clear();
-                self.player.skill_bases.clear();
-                let mut skill_objs = Vec::new();
+                    self.player.skills.clear();
+                    self.player.skill_bases.clear();
+                    let mut skill_objs = Vec::new();
 
-                for (sk_type, s) in &data.skills {
-                    if let Some(skill_type) = stats::SkillType::from_repr(*sk_type) {
-                        let training = stats::TrainingLevel::from_repr(s.status)
-                            .unwrap_or(stats::TrainingLevel::Untrained);
+                    for (sk_type, s) in &data.skills {
+                        if let Some(skill_type) = stats::SkillType::from_repr(*sk_type) {
+                            let training = stats::TrainingLevel::from_repr(s.status)
+                                .unwrap_or(stats::TrainingLevel::Untrained);
 
-                        self.player.skill_bases.insert(
-                            skill_type,
-                            crate::world::player::SkillBase {
-                                ranks: s.ranks,
-                                init: s.init,
-                            },
-                        );
+                            self.player.skill_bases.insert(
+                                skill_type,
+                                crate::world::player::SkillBase {
+                                    ranks: s.ranks,
+                                    init: s.init,
+                                },
+                            );
 
-                        let base_val = self
-                            .player
-                            .derive_skill_value(skill_type, s.ranks, s.init, false);
-                        let skill = stats::Skill {
-                            skill_type,
-                            base: base_val,
-                            current: base_val,
-                            training,
-                        };
-                        self.player.skills.insert(skill_type, skill.clone());
-                        skill_objs.push(skill);
+                            let base_val = self
+                                .player
+                                .derive_skill_value(skill_type, s.ranks, s.init, false);
+                            let skill = stats::Skill {
+                                skill_type,
+                                base: base_val,
+                                current: base_val,
+                                training,
+                            };
+                            self.player.skills.insert(skill_type, skill.clone());
+                            skill_objs.push(skill);
+                        }
                     }
+
+                    self.player.spells = data.spells.clone();
+                    self.player.spell_lists = data.spell_lists.clone();
+
+                    if let Some(p) = pos
+                        && let Some(entity) = self.entities.get_mut(guid)
+                    {
+                        entity.position = *p;
+                    }
+
+                    events.push(WorldEvent::PlayerInfo {
+                        guid,
+                        name: name.clone(),
+                        pos: *pos,
+                        attributes: attr_objs,
+                        vitals: vital_objs,
+                        skills: skill_objs,
+                        enchantments: self.player.enchantments.clone(),
+                    });
+
+                    self.player.emit_derived_stats(&mut events);
                 }
-
-                self.player.spells = data.spells.clone();
-                self.player.spell_lists = data.spell_lists.clone();
-
-                if let Some(p) = pos
-                    && let Some(entity) = self.entities.get_mut(guid)
-                {
-                    entity.position = *p;
-                }
-
-                events.push(WorldEvent::PlayerInfo {
-                    guid,
-                    name: name.clone(),
-                    pos: *pos,
-                    attributes: attr_objs,
-                    vitals: vital_objs,
-                    skills: skill_objs,
-                    enchantments: self.player.enchantments.clone(),
-                });
-
-                self.player.emit_derived_stats(&mut events);
-            }
+                _ => {}
+            },
             GameMessage::SetState(data) => {
                 if let Some(entity) = self.entities.get_mut(data.guid) {
                     entity.physics_state =

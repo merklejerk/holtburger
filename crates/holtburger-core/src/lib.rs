@@ -477,14 +477,17 @@ impl Client {
                     Ok(())
                 }
             }
-            GameMessage::PlayerDescription(_) | GameMessage::StartGame => {
-                if self.state == ClientState::EnteringWorld {
-                    self.state = ClientState::InWorld;
-                    self.enter_retry.reset();
-                    self.send_status_event();
+            GameMessage::GameEvent(ev) => match &ev.event {
+                GameEventData::PlayerDescription(_) | GameEventData::StartGame => {
+                    if self.state == ClientState::EnteringWorld {
+                        self.state = ClientState::InWorld;
+                        self.enter_retry.reset();
+                        self.send_status_event();
+                    }
+                    Ok(())
                 }
-                Ok(())
-            }
+                _ => Ok(()),
+            },
             GameMessage::PlayerCreate(data) => {
                 let player_id = data.guid;
                 self.world.player.guid = player_id;
@@ -540,7 +543,7 @@ impl Client {
                 let resp =
                     GameMessage::DddInterrogationResponse(Box::new(DddInterrogationResponseData {
                         language: 1,
-                        iteration_list_count: 0,
+                        lists: Vec::new(),
                     }));
                 self.session.send_message(&resp).await
             }

@@ -1,4 +1,4 @@
-use holtburger_core::protocol::messages::GameMessage;
+use holtburger_core::protocol::messages::{GameMessage, GameEventData};
 use std::fs;
 
 fn main() {
@@ -10,13 +10,17 @@ fn main() {
     let msg = GameMessage::unpack(&bytes);
 
     match msg {
-        Some(GameMessage::PlayerDescription(ref data)) => {
+        Some(GameMessage::GameEvent(ref ev)) if matches!(ev.event, GameEventData::PlayerDescription(_)) => {
+            let data = match &ev.event {
+                GameEventData::PlayerDescription(d) => d,
+                _ => unreachable!(),
+            };
             println!(
                 "Successfully unpacked PlayerDescription for {} ({:08X})",
                 data.name, data.guid
             );
 
-            let message = GameMessage::PlayerDescription(data.clone());
+            let message = GameMessage::GameEvent(ev.clone());
             let packed = message.pack();
 
             println!("Original size: {}", bytes.len());

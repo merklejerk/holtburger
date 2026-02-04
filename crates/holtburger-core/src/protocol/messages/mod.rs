@@ -2,6 +2,7 @@ pub mod character;
 pub mod chat;
 pub mod common;
 pub mod constants;
+pub mod game_event;
 pub mod magic;
 pub mod misc;
 pub mod movement;
@@ -15,6 +16,7 @@ pub use character::*;
 pub use chat::*;
 pub use common::*;
 pub use constants::*;
+pub use game_event::*;
 pub use magic::*;
 pub use misc::*;
 pub use movement::*;
@@ -38,20 +40,13 @@ pub enum GameMessage {
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),
     GameAction(Box<GameActionData>),
+    GameEvent(Box<GameEvent>),
 
-    // GameEvents (0xF7B0)
-    PlayerDescription(Box<PlayerDescriptionData>),
-    StartGame, // 0xF7B0 + 0x0001
     UpdateAttribute(Box<UpdateAttributeData>),
     UpdateSkill(Box<UpdateSkillData>),
     UpdateVital(Box<UpdateVitalData>),
     UpdateVitalCurrent(Box<UpdateVitalCurrentData>),
-    MagicUpdateEnchantment(Box<MagicUpdateEnchantmentData>),
-    MagicUpdateMultipleEnchantments(Box<MagicUpdateMultipleEnchantmentsData>),
-    MagicRemoveEnchantment(Box<MagicRemoveEnchantmentData>),
-    MagicRemoveMultipleEnchantments(Box<MagicRemoveMultipleEnchantmentsData>),
-    MagicPurgeEnchantments(Box<MagicPurgeEnchantmentsData>),
-    MagicPurgeBadEnchantments(Box<MagicPurgeBadEnchantmentsData>),
+
     HearSpeech(Box<HearSpeechData>),
     SoulEmote(Box<SoulEmoteData>),
 
@@ -119,66 +114,9 @@ impl GameMessage {
             ))),
 
             // GameEvent wrapper (0xF7B0)
-            opcodes::GAME_EVENT => {
-                if data.len() < offset + 12 {
-                    return None;
-                }
-                let target_guid = LittleEndian::read_u32(&data[offset..offset + 4]);
-                let sequence = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
-                let event_type = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
-                offset += 12;
-
-                match event_type {
-                    game_event_opcodes::PLAYER_DESCRIPTION => Some(GameMessage::PlayerDescription(
-                        Box::new(PlayerDescriptionData::unpack(
-                            target_guid,
-                            sequence,
-                            data,
-                            &mut offset,
-                        )?),
-                    )),
-                    game_event_opcodes::START_GAME => Some(GameMessage::StartGame),
-                    game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT => {
-                        let mut data = MagicUpdateEnchantmentData::unpack(data, &mut offset)?;
-                        data.target = target_guid;
-                        data.sequence = sequence;
-                        Some(GameMessage::MagicUpdateEnchantment(Box::new(data)))
-                    }
-                    game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS => {
-                        let mut data =
-                            MagicUpdateMultipleEnchantmentsData::unpack(data, &mut offset)?;
-                        data.target = target_guid;
-                        data.sequence = sequence;
-                        Some(GameMessage::MagicUpdateMultipleEnchantments(Box::new(data)))
-                    }
-                    game_event_opcodes::MAGIC_REMOVE_ENCHANTMENT => {
-                        let mut data = MagicRemoveEnchantmentData::unpack(data, &mut offset)?;
-                        data.target = target_guid;
-                        data.sequence = sequence;
-                        Some(GameMessage::MagicRemoveEnchantment(Box::new(data)))
-                    }
-                    game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS => {
-                        let mut data =
-                            MagicRemoveMultipleEnchantmentsData::unpack(data, &mut offset)?;
-                        data.target = target_guid;
-                        data.sequence = sequence;
-                        Some(GameMessage::MagicRemoveMultipleEnchantments(Box::new(data)))
-                    }
-                    game_event_opcodes::MAGIC_PURGE_ENCHANTMENTS => {
-                        let mut data = MagicPurgeEnchantmentsData::unpack(data, &mut offset)?;
-                        data.target = target_guid;
-                        data.sequence = sequence;
-                        Some(GameMessage::MagicPurgeEnchantments(Box::new(data)))
-                    }
-                    game_event_opcodes::MAGIC_PURGE_BAD_ENCHANTMENTS => {
-                        let mut data = MagicPurgeBadEnchantmentsData::unpack(data, &mut offset)?;
-                        data.target = target_guid;
-                        data.sequence = sequence;
-                        Some(GameMessage::MagicPurgeBadEnchantments(Box::new(data)))
-                    }
-                    _ => Some(GameMessage::Unknown(event_type, data[offset..].to_vec())),
-                }
-            }
+            opcodes::GAME_EVENT => Some(GameMessage::GameEvent(Box::new(
+                GameEvent::unpack(data, &mut offset)?,
+            ))),
 
             opcodes::HEAR_SPEECH => Some(GameMessage::HearSpeech(Box::new(
                 HearSpeechData::unpack(data, &mut offset)?,
@@ -323,55 +261,10 @@ impl GameMessage {
                 buf.extend_from_slice(&0xF7B1u32.to_le_bytes());
                 data.pack(&mut buf);
             }
-            GameMessage::MagicUpdateEnchantment(data) => {
-                buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
-                buf.extend_from_slice(&data.target.to_le_bytes());
-                buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(&game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT.to_le_bytes());
+            GameMessage::GameEvent(data) => {
+                buf.extend_from_slice(&opcodes::GAME_EVENT.to_le_bytes());
                 data.pack(&mut buf);
             }
-            GameMessage::MagicUpdateMultipleEnchantments(data) => {
-                buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
-                buf.extend_from_slice(&data.target.to_le_bytes());
-                buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(
-                    &game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS.to_le_bytes(),
-                );
-                data.pack(&mut buf);
-            }
-            GameMessage::MagicRemoveEnchantment(data) => {
-                buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
-                buf.extend_from_slice(&data.target.to_le_bytes());
-                buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(&game_event_opcodes::MAGIC_REMOVE_ENCHANTMENT.to_le_bytes());
-                data.pack(&mut buf);
-            }
-            GameMessage::MagicRemoveMultipleEnchantments(data) => {
-                buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
-                buf.extend_from_slice(&data.target.to_le_bytes());
-                buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(
-                    &game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS.to_le_bytes(),
-                );
-                data.pack(&mut buf);
-            }
-            GameMessage::MagicPurgeEnchantments(data) => {
-                buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
-                buf.extend_from_slice(&data.target.to_le_bytes());
-                buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(&game_event_opcodes::MAGIC_PURGE_ENCHANTMENTS.to_le_bytes());
-                data.pack(&mut buf);
-            }
-            GameMessage::MagicPurgeBadEnchantments(data) => {
-                buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
-                buf.extend_from_slice(&data.target.to_le_bytes());
-                buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(
-                    &game_event_opcodes::MAGIC_PURGE_BAD_ENCHANTMENTS.to_le_bytes(),
-                );
-                data.pack(&mut buf);
-            }
-
             GameMessage::HearSpeech(data) => {
                 buf.extend_from_slice(&opcodes::HEAR_SPEECH.to_le_bytes());
                 data.pack(&mut buf);
@@ -418,7 +311,11 @@ mod tests {
         let hex = "B0F70000010000500E00000082020000";
         let data = hex::decode(hex).unwrap();
         let msg = GameMessage::unpack(&data).unwrap();
-        assert!(matches!(msg, GameMessage::StartGame));
+        if let GameMessage::GameEvent(ev) = msg {
+            assert!(matches!(ev.event, GameEventData::StartGame));
+        } else {
+            panic!("Expected GameEvent");
+        }
     }
 
     #[test]

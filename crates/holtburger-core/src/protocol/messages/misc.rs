@@ -30,14 +30,6 @@ impl MessageUnpack for OrderingResetData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GameEventData {
-    pub target: u32,
-    pub sequence: u32,
-    pub event_type: u32,
-    pub data: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct GameActionData {
     pub sequence: u32,
     pub action: u32,
@@ -135,9 +127,83 @@ pub fn build_login_payload(account: &str, password: &str, sequence: u32, version
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct MostlyConsecutiveIntSet {
+    pub iterations: i32,
+    pub values: Vec<i32>,
+}
+
+impl MostlyConsecutiveIntSet {
+    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let iterations_count = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+        *offset += 4;
+
+        let mut values = Vec::new();
+        let mut current_iters = 0;
+        while current_iters < iterations_count {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let x = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+            *offset += 4;
+
+            if x < 0 {
+                current_iters += x.abs() - 1;
+            } else {
+                current_iters += 1;
+            }
+            values.push(x);
+        }
+        Some(MostlyConsecutiveIntSet {
+            iterations: iterations_count,
+            values,
+        })
+    }
+
+    pub fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_i32::<LittleEndian>(self.iterations).unwrap();
+        for &val in &self.values {
+            buf.write_i32::<LittleEndian>(val).unwrap();
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TaggedIterationList {
+    pub dat_file_type: i32,
+    pub dat_file_id: i32,
+    pub list: MostlyConsecutiveIntSet,
+}
+
+impl TaggedIterationList {
+    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let dat_file_type = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+        let dat_file_id = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
+        let list = MostlyConsecutiveIntSet::unpack(data, offset)?;
+        Some(TaggedIterationList {
+            dat_file_type,
+            dat_file_id,
+            list,
+        })
+    }
+
+    pub fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_i32::<LittleEndian>(self.dat_file_type).unwrap();
+        buf.write_i32::<LittleEndian>(self.dat_file_id).unwrap();
+        self.list.pack(buf);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct DddInterrogationResponseData {
     pub language: u32,
-    pub iteration_list_count: u32,
+    pub lists: Vec<TaggedIterationList>,
 }
 
 impl MessageUnpack for DddInterrogationResponseData {
@@ -147,19 +213,24 @@ impl MessageUnpack for DddInterrogationResponseData {
         }
         let language = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let iteration_list_count = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let count = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(DddInterrogationResponseData {
-            language,
-            iteration_list_count,
-        })
+
+        let mut lists = Vec::new();
+        for _ in 0..count {
+            lists.push(TaggedIterationList::unpack(data, offset)?);
+        }
+        Some(DddInterrogationResponseData { language, lists })
     }
 }
 
 impl MessagePack for DddInterrogationResponseData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.language.to_le_bytes());
-        buf.extend_from_slice(&self.iteration_list_count.to_le_bytes());
+        buf.write_u32::<LittleEndian>(self.language).unwrap();
+        buf.write_u32::<LittleEndian>(self.lists.len() as u32).unwrap();
+        for list in &self.lists {
+            list.pack(buf);
+        }
     }
 }
 
@@ -240,5 +311,71 @@ mod tests {
         msg.pack(&mut buf);
         // seq(4) + action(4) + payload(3) = 11
         assert_eq!(buf.len(), 11);
+    }
+
+    #[test]
+    fn test_ddd_interrogation_response_unpack() {
+        use crate::protocol::fixtures;
+        let data = fixtures::DDD_INTERROGATION_RESPONSE;
+        let mut offset = 4; // Skip opcode
+        let unpacked = DddInterrogationResponseData::unpack(data, &mut offset).unwrap();
+
+        assert_eq!(unpacked.language, 1);
+        assert_eq!(unpacked.lists.len(), 1);
+        let list = &unpacked.lists[0];
+        assert_eq!(list.dat_file_type, 1);
+        assert_eq!(list.dat_file_id, 1);
+        assert_eq!(list.list.iterations, 2);
+        assert_eq!(list.list.values, vec![100, 101]);
+    }
+
+    #[test]
+    fn test_ddd_interrogation_response_pack() {
+        use crate::protocol::fixtures;
+        let msg = DddInterrogationResponseData {
+            language: 1,
+            lists: vec![TaggedIterationList {
+                dat_file_type: 1,
+                dat_file_id: 1,
+                list: MostlyConsecutiveIntSet {
+                    iterations: 2,
+                    values: vec![100, 101],
+                },
+            }],
+        };
+        let mut buf = Vec::new();
+        msg.pack(&mut buf);
+        assert_eq!(buf, fixtures::DDD_INTERROGATION_RESPONSE[4..]);
+    }
+
+    #[test]
+    fn test_mostly_consecutive_int_set_unpack() {
+        // iterations=5, [1000, -5]
+        let data = vec![
+            0x05, 0x00, 0x00, 0x00, // count
+            0xE8, 0x03, 0x00, 0x00, // 1000
+            0xFB, 0xFF, 0xFF, 0xFF, // -5
+        ];
+        let mut offset = 0;
+        let unpacked = MostlyConsecutiveIntSet::unpack(&data, &mut offset).unwrap();
+        assert_eq!(unpacked.iterations, 5);
+        assert_eq!(unpacked.values, vec![1000, -5]);
+        assert_eq!(offset, 12);
+    }
+
+    #[test]
+    fn test_mostly_consecutive_int_set_pack() {
+        let set = MostlyConsecutiveIntSet {
+            iterations: 5,
+            values: vec![1000, -5],
+        };
+        let mut buf = Vec::new();
+        set.pack(&mut buf);
+        let expected = vec![
+            0x05, 0x00, 0x00, 0x00, // count
+            0xE8, 0x03, 0x00, 0x00, // 1000
+            0xFB, 0xFF, 0xFF, 0xFF, // -5
+        ];
+        assert_eq!(buf, expected);
     }
 }

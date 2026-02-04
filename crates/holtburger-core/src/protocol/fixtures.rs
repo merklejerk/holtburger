@@ -19,3 +19,5 @@ pub const OBJECT_CREATE_COMPLEX: &[u8] =
 pub const CREATURE_SKILL_MELEE_DEF: &[u8] =
     include_bytes!("../../tests/fixtures/creature_skill_melee_def.bin");
 pub const ENCHANTMENT_SIMPLE: &[u8] = include_bytes!("../../tests/fixtures/enchantment_simple.bin");
+pub const DDD_INTERROGATION_RESPONSE: &[u8] =
+    include_bytes!("../../tests/fixtures/ddd_interrogation_response.bin");

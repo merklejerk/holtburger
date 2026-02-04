@@ -1,6 +1,6 @@
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{read_string16, write_string16, write_string32};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerMessageData {
@@ -46,14 +46,20 @@ pub struct GameActionData {
 
 impl MessageUnpack for GameActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let action = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let payload = data[*offset..].to_vec();
         *offset = data.len();
-        Some(GameActionData { sequence, action, data: payload })
+        Some(GameActionData {
+            sequence,
+            action,
+            data: payload,
+        })
     }
 }
 
@@ -72,7 +78,9 @@ pub struct CharacterErrorData {
 
 impl MessageUnpack for CharacterErrorData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let error_code = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         Some(CharacterErrorData { error_code })
@@ -93,9 +101,11 @@ pub struct AddEffectData {
 
 impl MessageUnpack for AddEffectData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let effect = LittleEndian::read_u32(&data[*offset+4..*offset + 8]);
+        let effect = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
         Some(AddEffectData { target, effect })
     }
@@ -132,12 +142,17 @@ pub struct DddInterrogationResponseData {
 
 impl MessageUnpack for DddInterrogationResponseData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let language = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let iteration_list_count = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(DddInterrogationResponseData { language, iteration_list_count })
+        Some(DddInterrogationResponseData {
+            language,
+            iteration_list_count,
+        })
     }
 }
 

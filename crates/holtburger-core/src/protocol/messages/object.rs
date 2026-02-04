@@ -1,8 +1,11 @@
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
-use crate::protocol::messages::utils::{read_string16, align_to_4, read_packed_u32, write_string16, read_packed_u32_with_known_type, write_packed_u32_with_known_type};
-use crate::world::properties::{PhysicsDescriptionFlag, WeenieHeaderFlag, ObjectDescriptionFlag};
+use crate::protocol::messages::utils::{
+    align_to_4, read_packed_u32, read_packed_u32_with_known_type, read_string16,
+    write_packed_u32_with_known_type, write_string16,
+};
 use crate::world::position::WorldPosition;
+use crate::world::properties::{ObjectDescriptionFlag, PhysicsDescriptionFlag, WeenieHeaderFlag};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectCreateData {
@@ -27,16 +30,22 @@ pub struct ObjectCreateData {
 
 impl MessageUnpack for ObjectCreateData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         // ModelData
         let model_header = data[*offset];
         if model_header == 0x11 {
             *offset += 1;
-            if *offset + 3 > data.len() { return None; }
+            if *offset + 3 > data.len() {
+                return None;
+            }
             let num_p = data[*offset];
             let num_t = data[*offset + 1];
             let num_m = data[*offset + 2];
@@ -46,18 +55,24 @@ impl MessageUnpack for ObjectCreateData {
                 read_packed_u32(data, offset); // PaletteID
                 for _ in 0..num_p {
                     read_packed_u32(data, offset); // SubPaletteId
-                    if *offset + 2 > data.len() { return None; }
+                    if *offset + 2 > data.len() {
+                        return None;
+                    }
                     *offset += 2; // Offset and Length
                 }
             }
             for _ in 0..num_t {
-                if *offset + 1 > data.len() { return None; }
+                if *offset + 1 > data.len() {
+                    return None;
+                }
                 *offset += 1; // PartIndex
                 read_packed_u32(data, offset); // OldTexture
                 read_packed_u32(data, offset); // NewTexture
             }
             for _ in 0..num_m {
-                if *offset + 1 > data.len() { return None; }
+                if *offset + 1 > data.len() {
+                    return None;
+                }
                 *offset += 1; // Index
                 read_packed_u32(data, offset); // AnimationId
             }
@@ -71,7 +86,9 @@ impl MessageUnpack for ObjectCreateData {
             }
         }
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         // PhysicsData
         let phys_flags_bits = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let physics_flags = PhysicsDescriptionFlag::from_bits_retain(phys_flags_bits);
@@ -81,15 +98,21 @@ impl MessageUnpack for ObjectCreateData {
         *offset += 4;
 
         if physics_flags.contains(PhysicsDescriptionFlag::MOVEMENT) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let len = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
             *offset += 4 + len;
             if len > 0 {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 *offset += 4; // is_autonomous
             }
         } else if physics_flags.contains(PhysicsDescriptionFlag::ANIMATION_FRAME) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
 
@@ -99,86 +122,120 @@ impl MessageUnpack for ObjectCreateData {
         }
 
         if physics_flags.contains(PhysicsDescriptionFlag::MTABLE) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::STABLE) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::PETABLE) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::CSETUP) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
 
         let mut parent_id = None;
         let mut parent_loc = None;
         if physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            if *offset + 8 > data.len() { return None; }
+            if *offset + 8 > data.len() {
+                return None;
+            }
             parent_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
             parent_loc = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::CHILDREN) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
             *offset += 4 + (count * 8);
         }
         let mut obj_scale = None;
         if physics_flags.contains(PhysicsDescriptionFlag::OBJSCALE) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             obj_scale = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::FRICTION) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::ELASTICITY) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::TRANSLUCENCY) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::VELOCITY) {
-            if *offset + 12 > data.len() { return None; }
+            if *offset + 12 > data.len() {
+                return None;
+            }
             *offset += 12;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::ACCELERATION) {
-            if *offset + 12 > data.len() { return None; }
+            if *offset + 12 > data.len() {
+                return None;
+            }
             *offset += 12;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::OMEGA) {
-            if *offset + 12 > data.len() { return None; }
+            if *offset + 12 > data.len() {
+                return None;
+            }
             *offset += 12;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
         if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT_INTENSITY) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4;
         }
 
-        if *offset + 18 > data.len() { return None; }
+        if *offset + 18 > data.len() {
+            return None;
+        }
         // Sequences
         let mut sequences = [0u16; 9];
-        for i in 0..9 {
-            sequences[i] = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        for seq in &mut sequences {
+            *seq = LittleEndian::read_u16(&data[*offset..*offset + 2]);
             *offset += 2;
         }
         *offset = align_to_4(*offset);
 
         // WeenieHeader
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let weenie_flags_bits = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let weenie_flags = WeenieHeaderFlag::from_bits_retain(weenie_flags_bits);
         *offset += 4;
@@ -186,7 +243,9 @@ impl MessageUnpack for ObjectCreateData {
         let name = read_string16(data, offset);
         let wcid = read_packed_u32_with_known_type(data, offset, 0);
         let icon_id = read_packed_u32_with_known_type(data, offset, 0x06000000);
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let item_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let obj_desc_flags_bits = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         let obj_desc_flags = ObjectDescriptionFlag::from_bits_retain(obj_desc_flags_bits);
@@ -194,40 +253,64 @@ impl MessageUnpack for ObjectCreateData {
         *offset = align_to_4(*offset);
 
         if obj_desc_flags.contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             *offset += 4; // weenie_flags2
         }
 
         if weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME) {
             read_string16(data, offset);
         }
-        if weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) { if *offset + 4 <= data.len() { *offset += 4; } }
-        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) { if *offset + 4 <= data.len() { *offset += 4; } }
-        if weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) { if *offset + 2 <= data.len() { *offset += 2; } }
-        if weenie_flags.contains(WeenieHeaderFlag::VALUE) { if *offset + 4 <= data.len() { *offset += 4; } }
-        if weenie_flags.contains(WeenieHeaderFlag::USABLE) { if *offset + 4 <= data.len() { *offset += 4; } }
-        if weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) { if *offset + 4 <= data.len() { *offset += 4; } }
-        if weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) { if *offset + 4 <= data.len() { *offset += 4; } }
-        if weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) { if *offset + 4 <= data.len() { *offset += 4; } }
-        if weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) { if *offset + 1 <= data.len() { *offset += 1; } }
-        if weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) { if *offset + 2 <= data.len() { *offset += 2; } }
-        if weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) { if *offset + 2 <= data.len() { *offset += 2; } }
-        if weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) { if *offset + 2 <= data.len() { *offset += 2; } }
-        if weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) { if *offset + 2 <= data.len() { *offset += 2; } }
+        if weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) && *offset + 4 <= data.len() {
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) && *offset + 4 <= data.len() {
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) && *offset + 2 <= data.len() {
+            *offset += 2;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::VALUE) && *offset + 4 <= data.len() {
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::USABLE) && *offset + 4 <= data.len() {
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) && *offset + 4 <= data.len() {
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) && *offset + 4 <= data.len() {
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) && *offset + 4 <= data.len() {
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) && *offset < data.len() {
+            *offset += 1;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) && *offset + 2 <= data.len() {
+            *offset += 2;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) && *offset + 2 <= data.len() {
+            *offset += 2;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) && *offset + 2 <= data.len() {
+            *offset += 2;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) && *offset + 2 <= data.len() {
+            *offset += 2;
+        }
 
         let mut container_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
-            if *offset + 4 <= data.len() {
-                container_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-                *offset += 4;
-            }
+        if weenie_flags.contains(WeenieHeaderFlag::CONTAINER) && *offset + 4 <= data.len() {
+            container_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
         }
         let mut wielder_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
-            if *offset + 4 <= data.len() {
-                wielder_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-                *offset += 4;
-            }
+        if weenie_flags.contains(WeenieHeaderFlag::WIELDER) && *offset + 4 <= data.len() {
+            wielder_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
         }
 
         Some(ObjectCreateData {
@@ -261,51 +344,76 @@ impl MessagePack for ObjectCreateData {
         buf.push(0); // num_p
         buf.push(0); // num_t
         buf.push(0); // num_m
-        while buf.len() % 4 != 0 { buf.push(0); }
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
 
         // PhysicsData
-        buf.write_u32::<LittleEndian>(self.physics_flags.bits()).unwrap();
+        buf.write_u32::<LittleEndian>(self.physics_flags.bits())
+            .unwrap();
         buf.write_u32::<LittleEndian>(self.physics_state).unwrap();
 
-        if self.physics_flags.contains(PhysicsDescriptionFlag::POSITION) {
+        if self
+            .physics_flags
+            .contains(PhysicsDescriptionFlag::POSITION)
+        {
             self.pos.as_ref().unwrap().pack(buf);
         }
 
         if self.physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            buf.write_u32::<LittleEndian>(self.parent_id.unwrap()).unwrap();
-            buf.write_u32::<LittleEndian>(self.parent_loc.unwrap_or(0)).unwrap();
+            buf.write_u32::<LittleEndian>(self.parent_id.unwrap())
+                .unwrap();
+            buf.write_u32::<LittleEndian>(self.parent_loc.unwrap_or(0))
+                .unwrap();
         }
 
-        if self.physics_flags.contains(PhysicsDescriptionFlag::OBJSCALE) {
-            buf.write_f32::<LittleEndian>(self.obj_scale.unwrap_or(1.0)).unwrap();
+        if self
+            .physics_flags
+            .contains(PhysicsDescriptionFlag::OBJSCALE)
+        {
+            buf.write_f32::<LittleEndian>(self.obj_scale.unwrap_or(1.0))
+                .unwrap();
         }
 
         // Sequences (18 bytes)
         for val in self.sequences {
             buf.write_u16::<LittleEndian>(val).unwrap();
         }
-        while buf.len() % 4 != 0 { buf.push(0); }
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
 
         // WeenieHeader
-        buf.write_u32::<LittleEndian>(self.weenie_flags.bits()).unwrap();
+        buf.write_u32::<LittleEndian>(self.weenie_flags.bits())
+            .unwrap();
         write_string16(buf, self.name.as_deref().unwrap_or(""));
         write_packed_u32_with_known_type(buf, self.wcid, 0);
         write_packed_u32_with_known_type(buf, self.icon_id, 0x06000000);
         buf.write_u32::<LittleEndian>(self.item_type).unwrap();
-        buf.write_u32::<LittleEndian>(self.obj_desc_flags.bits()).unwrap();
-        while buf.len() % 4 != 0 { buf.push(0); }
+        buf.write_u32::<LittleEndian>(self.obj_desc_flags.bits())
+            .unwrap();
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
 
-        if self.obj_desc_flags.contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER) {
+        if self
+            .obj_desc_flags
+            .contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER)
+        {
             buf.write_u32::<LittleEndian>(0).unwrap(); // weenie_flags2
         }
 
         if self.weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
-            buf.write_u32::<LittleEndian>(self.container_id.unwrap()).unwrap();
+            buf.write_u32::<LittleEndian>(self.container_id.unwrap())
+                .unwrap();
         }
         if self.weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
-            buf.write_u32::<LittleEndian>(self.wielder_id.unwrap()).unwrap();
+            buf.write_u32::<LittleEndian>(self.wielder_id.unwrap())
+                .unwrap();
         }
-        while buf.len() % 4 != 0 { buf.push(0); }
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
     }
 }
 
@@ -316,7 +424,9 @@ pub struct ObjectDeleteData {
 
 impl MessageUnpack for ObjectDeleteData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         Some(ObjectDeleteData { guid })
@@ -394,12 +504,16 @@ pub struct UpdatePropertyInstanceIdData {
 
 impl UpdatePropertyIntData {
     pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let sequence = data[*offset];
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
             g
@@ -407,12 +521,20 @@ impl UpdatePropertyIntData {
             0
         };
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let value = LittleEndian::read_i32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(UpdatePropertyIntData { sequence, guid, property, value, is_public })
+        Some(UpdatePropertyIntData {
+            sequence,
+            guid,
+            property,
+            value,
+            is_public,
+        })
     }
 }
 
@@ -429,12 +551,16 @@ impl MessagePack for UpdatePropertyIntData {
 
 impl UpdatePropertyInt64Data {
     pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let sequence = data[*offset];
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
             g
@@ -442,12 +568,20 @@ impl UpdatePropertyInt64Data {
             0
         };
 
-        if *offset + 12 > data.len() { return None; }
+        if *offset + 12 > data.len() {
+            return None;
+        }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let value = LittleEndian::read_i64(&data[*offset..*offset + 8]);
         *offset += 8;
-        Some(UpdatePropertyInt64Data { sequence, guid, property, value, is_public })
+        Some(UpdatePropertyInt64Data {
+            sequence,
+            guid,
+            property,
+            value,
+            is_public,
+        })
     }
 }
 
@@ -464,12 +598,16 @@ impl MessagePack for UpdatePropertyInt64Data {
 
 impl UpdatePropertyBoolData {
     pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let sequence = data[*offset];
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
             g
@@ -477,12 +615,20 @@ impl UpdatePropertyBoolData {
             0
         };
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let value = LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0;
         *offset += 4;
-        Some(UpdatePropertyBoolData { sequence, guid, property, value, is_public })
+        Some(UpdatePropertyBoolData {
+            sequence,
+            guid,
+            property,
+            value,
+            is_public,
+        })
     }
 }
 
@@ -493,18 +639,23 @@ impl MessagePack for UpdatePropertyBoolData {
             buf.write_u32::<LittleEndian>(self.guid).unwrap();
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
-        buf.write_u32::<LittleEndian>(if self.value { 1 } else { 0 }).unwrap();
+        buf.write_u32::<LittleEndian>(if self.value { 1 } else { 0 })
+            .unwrap();
     }
 }
 
 impl UpdatePropertyFloatData {
     pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let sequence = data[*offset];
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
             g
@@ -512,12 +663,20 @@ impl UpdatePropertyFloatData {
             0
         };
 
-        if *offset + 12 > data.len() { return None; }
+        if *offset + 12 > data.len() {
+            return None;
+        }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let value = LittleEndian::read_f64(&data[*offset..*offset + 8]);
         *offset += 8;
-        Some(UpdatePropertyFloatData { sequence, guid, property, value, is_public })
+        Some(UpdatePropertyFloatData {
+            sequence,
+            guid,
+            property,
+            value,
+            is_public,
+        })
     }
 }
 
@@ -534,16 +693,22 @@ impl MessagePack for UpdatePropertyFloatData {
 
 impl UpdatePropertyStringData {
     pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let sequence = data[*offset];
         *offset += 1;
 
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
             g
@@ -552,12 +717,18 @@ impl UpdatePropertyStringData {
         };
 
         // Align before reading string
-        if *offset % 4 != 0 {
+        if !(*offset).is_multiple_of(4) {
             *offset = (*offset + 4) & !3;
         }
 
         let value = read_string16(data, offset)?;
-        Some(UpdatePropertyStringData { sequence, guid, property, value, is_public })
+        Some(UpdatePropertyStringData {
+            sequence,
+            guid,
+            property,
+            value,
+            is_public,
+        })
     }
 }
 
@@ -568,24 +739,28 @@ impl MessagePack for UpdatePropertyStringData {
         if self.is_public {
             buf.write_u32::<LittleEndian>(self.guid).unwrap();
         }
-        
+
         // Align before string
-        while buf.len() % 4 != 0 {
+        while !buf.len().is_multiple_of(4) {
             buf.push(0);
         }
-        
+
         write_string16(buf, &self.value);
     }
 }
 
 impl UpdatePropertyDataIdData {
     pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let sequence = data[*offset];
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
             g
@@ -593,12 +768,20 @@ impl UpdatePropertyDataIdData {
             0
         };
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let value = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(UpdatePropertyDataIdData { sequence, guid, property, value, is_public })
+        Some(UpdatePropertyDataIdData {
+            sequence,
+            guid,
+            property,
+            value,
+            is_public,
+        })
     }
 }
 
@@ -615,12 +798,16 @@ impl MessagePack for UpdatePropertyDataIdData {
 
 impl UpdatePropertyInstanceIdData {
     pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let sequence = data[*offset];
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
             g
@@ -628,12 +815,20 @@ impl UpdatePropertyInstanceIdData {
             0
         };
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let value = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(UpdatePropertyInstanceIdData { sequence, guid, property, value, is_public })
+        Some(UpdatePropertyInstanceIdData {
+            sequence,
+            guid,
+            property,
+            value,
+            is_public,
+        })
     }
 }
 
@@ -656,7 +851,9 @@ pub struct UpdateHealthData {
 
 impl MessageUnpack for UpdateHealthData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let health = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
@@ -680,14 +877,20 @@ pub struct ParentEventData {
 
 impl MessageUnpack for ParentEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() { return None; }
+        if *offset + 12 > data.len() {
+            return None;
+        }
         let child_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let parent_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let location = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(ParentEventData { child_guid, parent_guid, location })
+        Some(ParentEventData {
+            child_guid,
+            parent_guid,
+            location,
+        })
     }
 }
 
@@ -699,7 +902,9 @@ pub struct PickupEventData {
 
 impl MessageUnpack for PickupEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let success = LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0;
@@ -716,7 +921,9 @@ pub struct SetStateData {
 
 impl MessageUnpack for SetStateData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let state = LittleEndian::read_u32(&data[*offset..*offset + 4]);
@@ -725,7 +932,6 @@ impl MessageUnpack for SetStateData {
     }
 }
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,7 +942,7 @@ mod tests {
         let data = fixtures::OBJECT_CREATE_MINIMAL;
         let mut offset = 0;
         let msg = ObjectCreateData::unpack(data, &mut offset).unwrap();
-        
+
         assert_eq!(msg.guid, 0x50000001);
         assert_eq!(msg.model_header, 1);
         assert_eq!(msg.name, Some("Buddy".to_string()));
@@ -750,7 +956,9 @@ mod tests {
     #[test]
     fn test_object_create_pack_minimal() {
         let mut sequences = [0u16; 9];
-        for i in 0..9 { sequences[i] = i as u16; }
+        for (i, seq) in sequences.iter_mut().enumerate() {
+            *seq = i as u16;
+        }
 
         let msg = ObjectCreateData {
             guid: 0x50000001,
@@ -760,7 +968,12 @@ mod tests {
             pos: Some(WorldPosition {
                 landblock_id: 0x12340001,
                 coords: crate::math::Vector3::new(100.0, 200.0, 300.0),
-                rotation: crate::math::Quaternion { w: 1.0, x: 0.0, y: 0.0, z: 0.0 },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
             }),
             parent_id: None,
             parent_loc: None,
@@ -786,7 +999,7 @@ mod tests {
         let data = fixtures::OBJECT_CREATE_COMPLEX;
         let mut offset = 0;
         let msg = ObjectCreateData::unpack(data, &mut offset).unwrap();
-        
+
         assert_eq!(msg.guid, 0x50000002);
         assert_eq!(msg.name, Some("Fancy Buddy".to_string()));
         assert_eq!(msg.wcid, 456);
@@ -801,20 +1014,27 @@ mod tests {
     #[test]
     fn test_object_create_pack_complex() {
         let mut sequences = [0u16; 9];
-        for i in 0..9 { sequences[i] = (100 + i) as u16; }
+        for (i, seq) in sequences.iter_mut().enumerate() {
+            *seq = (100 + i) as u16;
+        }
 
         let msg = ObjectCreateData {
             guid: 0x50000002,
             model_header: 0x11,
-            physics_flags: PhysicsDescriptionFlag::POSITION | 
-                           PhysicsDescriptionFlag::PARENT | 
-                           PhysicsDescriptionFlag::OBJSCALE | 
-                           PhysicsDescriptionFlag::TIMESTAMPS,
+            physics_flags: PhysicsDescriptionFlag::POSITION
+                | PhysicsDescriptionFlag::PARENT
+                | PhysicsDescriptionFlag::OBJSCALE
+                | PhysicsDescriptionFlag::TIMESTAMPS,
             physics_state: 0,
             pos: Some(WorldPosition {
                 landblock_id: 0x12340001,
                 coords: crate::math::Vector3::new(10.0, 20.0, 30.0),
-                rotation: crate::math::Quaternion { w: 1.0, x: 0.0, y: 0.0, z: 0.0 },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
             }),
             parent_id: Some(0x50000001),
             parent_loc: Some(1),
@@ -843,7 +1063,7 @@ mod tests {
         assert_eq!(msg.sequence, 0x0C);
         assert_eq!(msg.property, 25);
         assert_eq!(msg.value, 50);
-        assert_eq!(msg.is_public, false);
+        assert!(!msg.is_public);
     }
 
     #[test]
@@ -871,7 +1091,7 @@ mod tests {
         assert_eq!(msg.guid, 0x12345678);
         assert_eq!(msg.property, 25);
         assert_eq!(msg.value, 50);
-        assert_eq!(msg.is_public, true);
+        assert!(msg.is_public);
     }
 
     #[test]

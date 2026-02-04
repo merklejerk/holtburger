@@ -259,7 +259,9 @@ impl Session {
         header.size = full_payload.len() as u16;
 
         let is_handshake = (header.flags
-            & (packet_flags::LOGIN_REQUEST | packet_flags::CONNECT_REQUEST | packet_flags::CONNECT_RESPONSE))
+            & (packet_flags::LOGIN_REQUEST
+                | packet_flags::CONNECT_REQUEST
+                | packet_flags::CONNECT_RESPONSE))
             != 0;
 
         if let (Some(_), false) = (&mut self.isaac_c2s, is_handshake) {
@@ -602,7 +604,10 @@ mod tests {
 
         // AckSequence + ConnectResponse
         assert_eq!(
-            session.get_payload_offset(packet_flags::ACK_SEQUENCE | packet_flags::CONNECT_RESPONSE, &[0u8; 100]),
+            session.get_payload_offset(
+                packet_flags::ACK_SEQUENCE | packet_flags::CONNECT_RESPONSE,
+                &[0u8; 100]
+            ),
             12
         );
 

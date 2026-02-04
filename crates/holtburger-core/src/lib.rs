@@ -269,46 +269,46 @@ impl Client {
             }
             ClientCommand::Identify(guid) => {
                 self.session
-                    .send_message(&crate::protocol::messages::GameMessage::GameAction(Box::new(
-                        GameActionData {
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction(
+                        Box::new(GameActionData {
                             sequence: 0,
                             action: actions::IDENTIFY_OBJECT,
                             data: guid.to_le_bytes().to_vec(),
-                        },
-                    )))
+                        }),
+                    ))
                     .await
             }
             ClientCommand::Use(guid) => {
                 self.session
-                    .send_message(&crate::protocol::messages::GameMessage::GameAction(Box::new(
-                        GameActionData {
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction(
+                        Box::new(GameActionData {
                             sequence: 0,
                             action: actions::USE,
                             data: guid.to_le_bytes().to_vec(),
-                        },
-                    )))
+                        }),
+                    ))
                     .await
             }
             ClientCommand::Attack(guid) => {
                 self.session
-                    .send_message(&crate::protocol::messages::GameMessage::GameAction(Box::new(
-                        GameActionData {
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction(
+                        Box::new(GameActionData {
                             sequence: 0,
                             action: 0x0002,
                             data: guid.to_le_bytes().to_vec(),
-                        },
-                    )))
+                        }),
+                    ))
                     .await
             }
             ClientCommand::Drop(guid) => {
                 self.session
-                    .send_message(&crate::protocol::messages::GameMessage::GameAction(Box::new(
-                        GameActionData {
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction(
+                        Box::new(GameActionData {
                             sequence: 0,
                             action: actions::DROP_ITEM,
                             data: guid.to_le_bytes().to_vec(),
-                        },
-                    )))
+                        }),
+                    ))
                     .await
             }
             ClientCommand::Get(guid) => {
@@ -317,13 +317,13 @@ impl Client {
                 data.extend_from_slice(&pguid.to_le_bytes());
                 data.extend_from_slice(&0u32.to_le_bytes()); // placement
                 self.session
-                    .send_message(&crate::protocol::messages::GameMessage::GameAction(Box::new(
-                        GameActionData {
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction(
+                        Box::new(GameActionData {
                             sequence: 0,
                             action: actions::PUT_ITEM_IN_CONTAINER,
                             data,
-                        },
-                    )))
+                        }),
+                    ))
                     .await
             }
             ClientCommand::MoveItem {
@@ -335,13 +335,13 @@ impl Client {
                 data.extend_from_slice(&container.to_le_bytes());
                 data.extend_from_slice(&placement.to_le_bytes());
                 self.session
-                    .send_message(&crate::protocol::messages::GameMessage::GameAction(Box::new(
-                        GameActionData {
+                    .send_message(&crate::protocol::messages::GameMessage::GameAction(
+                        Box::new(GameActionData {
                             sequence: 0,
                             action: actions::PUT_ITEM_IN_CONTAINER,
                             data,
-                        },
-                    )))
+                        }),
+                    ))
                     .await
             }
             ClientCommand::Quit => {
@@ -469,9 +469,7 @@ impl Client {
         }
 
         match message {
-            GameMessage::CharacterList(data) => {
-                self.handle_character_list(data.characters).await
-            }
+            GameMessage::CharacterList(data) => self.handle_character_list(data.characters).await,
             GameMessage::CharacterEnterWorldServerReady => {
                 if let Some(char_id) = self.character_id {
                     self.send_character_enter_world(char_id).await
@@ -529,17 +527,21 @@ impl Client {
                 Ok(())
             }
             GameMessage::UpdatePropertyInt(_) => Ok(()),
-            GameMessage::GameAction(data) => self.handle_game_action(data.action, data.data.clone()).await,
+            GameMessage::GameAction(data) => {
+                self.handle_game_action(data.action, data.data.clone())
+                    .await
+            }
             GameMessage::ServerMessage(data) => {
                 self.send_message_event(MessageKind::System, &data.message);
                 Ok(())
             }
             GameMessage::CharacterError(data) => self.handle_character_error(data.error_code),
             GameMessage::DddInterrogation => {
-                let resp = GameMessage::DddInterrogationResponse(Box::new(DddInterrogationResponseData { 
-                    language: 1,
-                    iteration_list_count: 0,
-                }));
+                let resp =
+                    GameMessage::DddInterrogationResponse(Box::new(DddInterrogationResponseData {
+                        language: 1,
+                        iteration_list_count: 0,
+                    }));
                 self.session.send_message(&resp).await
             }
             GameMessage::ServerName(data) => {
@@ -550,12 +552,22 @@ impl Client {
                 Ok(())
             }
             GameMessage::HearSpeech(data) => {
-                let sender = if data.sender_name.is_empty() { "You" } else { &data.sender_name };
-                self.send_message_event(MessageKind::Chat, &format!("{}: {}", sender, data.message));
+                let sender = if data.sender_name.is_empty() {
+                    "You"
+                } else {
+                    &data.sender_name
+                };
+                self.send_message_event(
+                    MessageKind::Chat,
+                    &format!("{}: {}", sender, data.message),
+                );
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
-                self.send_message_event(MessageKind::Emote, &format!("{} {}", data.sender_name, data.text));
+                self.send_message_event(
+                    MessageKind::Emote,
+                    &format!("{} {}", data.sender_name, data.text),
+                );
                 Ok(())
             }
             _ => Ok(()),
@@ -628,9 +640,10 @@ impl Client {
             waited += 50;
         }
 
-        let msg = GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
-            guid: char_id,
-        }));
+        let msg =
+            GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
+                guid: char_id,
+            }));
         self.session.send_message(&msg).await?;
         Ok(())
     }
@@ -676,8 +689,12 @@ impl Client {
             sequence: self.session.packet_sequence,
             ..Default::default()
         };
-        let payload =
-            build_login_payload(&self.account_name, password, self.session.packet_sequence, "1802");
+        let payload = build_login_payload(
+            &self.account_name,
+            password,
+            self.session.packet_sequence,
+            "1802",
+        );
         self.session.packet_sequence += 1;
         self.session.send_packet(header, &payload).await?;
         Ok(())

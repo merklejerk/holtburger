@@ -1,28 +1,28 @@
-pub mod traits;
-pub mod utils;
-pub mod constants;
-pub mod player;
-pub mod object;
-pub mod magic;
-pub mod movement;
 pub mod character;
 pub mod chat;
 pub mod common;
+pub mod constants;
+pub mod magic;
 pub mod misc;
+pub mod movement;
+pub mod object;
+pub mod player;
+pub mod traits;
 pub mod transport;
+pub mod utils;
 
-pub use traits::*;
-pub use constants::*;
-pub use utils::*;
-pub use player::*;
-pub use object::*;
-pub use magic::*;
-pub use movement::*;
 pub use character::*;
 pub use chat::*;
 pub use common::*;
+pub use constants::*;
+pub use magic::*;
 pub use misc::*;
+pub use movement::*;
+pub use object::*;
+pub use player::*;
+pub use traits::*;
 pub use transport::*;
+pub use utils::*;
 
 use byteorder::{ByteOrder, LittleEndian};
 
@@ -38,7 +38,7 @@ pub enum GameMessage {
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),
     GameAction(Box<GameActionData>),
-    
+
     // GameEvents (0xF7B0)
     PlayerDescription(Box<PlayerDescriptionData>),
     StartGame, // 0xF7B0 + 0x0001
@@ -68,7 +68,7 @@ pub enum GameMessage {
     UpdatePropertyString(Box<UpdatePropertyStringData>),
     UpdatePropertyDataId(Box<UpdatePropertyDataIdData>),
     UpdatePropertyInstanceId(Box<UpdatePropertyInstanceIdData>),
-    
+
     UpdateHealth(Box<UpdateHealthData>),
     ParentEvent(Box<ParentEventData>),
     PickupEvent(Box<PickupEventData>),
@@ -80,32 +80,63 @@ pub enum GameMessage {
 impl GameMessage {
     pub fn unpack(data: &[u8]) -> Option<Self> {
         let mut offset = 0;
-        if data.len() < 4 { return None; }
+        if data.len() < 4 {
+            return None;
+        }
         let opcode = LittleEndian::read_u32(&data[offset..offset + 4]);
         offset += 4;
 
         match opcode {
-            opcodes::CHARACTER_LIST => Some(GameMessage::CharacterList(Box::new(CharacterListData::unpack(data, &mut offset)?))),
-            opcodes::CHARACTER_ENTER_WORLD_REQUEST => Some(GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData::unpack(data, &mut offset)?))),
-            opcodes::CHARACTER_ENTER_WORLD => Some(GameMessage::CharacterEnterWorld(Box::new(CharacterEnterWorldData::unpack(data, &mut offset)?))),
-            opcodes::SERVER_NAME => Some(GameMessage::ServerName(Box::new(ServerNameData::unpack(data, &mut offset)?))),
-            opcodes::CHARACTER_ENTER_WORLD_SERVER_READY => Some(GameMessage::CharacterEnterWorldServerReady),
+            opcodes::CHARACTER_LIST => Some(GameMessage::CharacterList(Box::new(
+                CharacterListData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::CHARACTER_ENTER_WORLD_REQUEST => {
+                Some(GameMessage::CharacterEnterWorldRequest(Box::new(
+                    CharacterEnterWorldRequestData::unpack(data, &mut offset)?,
+                )))
+            }
+            opcodes::CHARACTER_ENTER_WORLD => Some(GameMessage::CharacterEnterWorld(Box::new(
+                CharacterEnterWorldData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::SERVER_NAME => Some(GameMessage::ServerName(Box::new(
+                ServerNameData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::CHARACTER_ENTER_WORLD_SERVER_READY => {
+                Some(GameMessage::CharacterEnterWorldServerReady)
+            }
             opcodes::DDD_INTERROGATION => Some(GameMessage::DddInterrogation),
-            opcodes::DDD_INTERROGATION_RESPONSE => Some(GameMessage::DddInterrogationResponse(Box::new(DddInterrogationResponseData::unpack(data, &mut offset)?))),
-            opcodes::CHARACTER_ERROR => Some(GameMessage::CharacterError(Box::new(CharacterErrorData::unpack(data, &mut offset)?))),
-            opcodes::SERVER_MESSAGE => Some(GameMessage::ServerMessage(Box::new(ServerMessageData::unpack(data, &mut offset)?))),
-            opcodes::GAME_ACTION => Some(GameMessage::GameAction(Box::new(GameActionData::unpack(data, &mut offset)?))),
-            
+            opcodes::DDD_INTERROGATION_RESPONSE => Some(GameMessage::DddInterrogationResponse(
+                Box::new(DddInterrogationResponseData::unpack(data, &mut offset)?),
+            )),
+            opcodes::CHARACTER_ERROR => Some(GameMessage::CharacterError(Box::new(
+                CharacterErrorData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::SERVER_MESSAGE => Some(GameMessage::ServerMessage(Box::new(
+                ServerMessageData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::GAME_ACTION => Some(GameMessage::GameAction(Box::new(
+                GameActionData::unpack(data, &mut offset)?,
+            ))),
+
             // GameEvent wrapper (0xF7B0)
             opcodes::GAME_EVENT => {
-                if data.len() < offset + 12 { return None; }
+                if data.len() < offset + 12 {
+                    return None;
+                }
                 let target_guid = LittleEndian::read_u32(&data[offset..offset + 4]);
                 let sequence = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
                 let event_type = LittleEndian::read_u32(&data[offset + 8..offset + 12]);
                 offset += 12;
-                
+
                 match event_type {
-                    game_event_opcodes::PLAYER_DESCRIPTION => Some(GameMessage::PlayerDescription(Box::new(PlayerDescriptionData::unpack(target_guid, sequence, data, &mut offset)?))),
+                    game_event_opcodes::PLAYER_DESCRIPTION => Some(GameMessage::PlayerDescription(
+                        Box::new(PlayerDescriptionData::unpack(
+                            target_guid,
+                            sequence,
+                            data,
+                            &mut offset,
+                        )?),
+                    )),
                     game_event_opcodes::START_GAME => Some(GameMessage::StartGame),
                     game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT => {
                         let mut data = MagicUpdateEnchantmentData::unpack(data, &mut offset)?;
@@ -114,7 +145,8 @@ impl GameMessage {
                         Some(GameMessage::MagicUpdateEnchantment(Box::new(data)))
                     }
                     game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS => {
-                        let mut data = MagicUpdateMultipleEnchantmentsData::unpack(data, &mut offset)?;
+                        let mut data =
+                            MagicUpdateMultipleEnchantmentsData::unpack(data, &mut offset)?;
                         data.target = target_guid;
                         data.sequence = sequence;
                         Some(GameMessage::MagicUpdateMultipleEnchantments(Box::new(data)))
@@ -126,7 +158,8 @@ impl GameMessage {
                         Some(GameMessage::MagicRemoveEnchantment(Box::new(data)))
                     }
                     game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS => {
-                        let mut data = MagicRemoveMultipleEnchantmentsData::unpack(data, &mut offset)?;
+                        let mut data =
+                            MagicRemoveMultipleEnchantmentsData::unpack(data, &mut offset)?;
                         data.target = target_guid;
                         data.sequence = sequence;
                         Some(GameMessage::MagicRemoveMultipleEnchantments(Box::new(data)))
@@ -147,38 +180,103 @@ impl GameMessage {
                 }
             }
 
-            opcodes::HEAR_SPEECH => Some(GameMessage::HearSpeech(Box::new(HearSpeechData::unpack(data, &mut offset)?))),
-            opcodes::SOUL_EMOTE => Some(GameMessage::SoulEmote(Box::new(SoulEmoteData::unpack(data, &mut offset)?))),
-            opcodes::PRIVATE_UPDATE_ATTRIBUTE => Some(GameMessage::UpdateAttribute(Box::new(UpdateAttributeData::unpack(data, &mut offset)?))),
-            opcodes::PRIVATE_UPDATE_SKILL => Some(GameMessage::UpdateSkill(Box::new(UpdateSkillData::unpack(data, &mut offset)?))),
-            opcodes::PRIVATE_UPDATE_VITAL => Some(GameMessage::UpdateVital(Box::new(UpdateVitalData::unpack(data, &mut offset)?))),
-            opcodes::PRIVATE_UPDATE_VITAL_CURRENT => Some(GameMessage::UpdateVitalCurrent(Box::new(UpdateVitalCurrentData::unpack(data, &mut offset)?))),
+            opcodes::HEAR_SPEECH => Some(GameMessage::HearSpeech(Box::new(
+                HearSpeechData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::SOUL_EMOTE => Some(GameMessage::SoulEmote(Box::new(SoulEmoteData::unpack(
+                data,
+                &mut offset,
+            )?))),
+            opcodes::PRIVATE_UPDATE_ATTRIBUTE => Some(GameMessage::UpdateAttribute(Box::new(
+                UpdateAttributeData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::PRIVATE_UPDATE_SKILL => Some(GameMessage::UpdateSkill(Box::new(
+                UpdateSkillData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::PRIVATE_UPDATE_VITAL => Some(GameMessage::UpdateVital(Box::new(
+                UpdateVitalData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::PRIVATE_UPDATE_VITAL_CURRENT => Some(GameMessage::UpdateVitalCurrent(
+                Box::new(UpdateVitalCurrentData::unpack(data, &mut offset)?),
+            )),
 
-            opcodes::OBJECT_CREATE => Some(GameMessage::ObjectCreate(Box::new(ObjectCreateData::unpack(data, &mut offset)?))),
-            opcodes::PLAYER_CREATE => Some(GameMessage::PlayerCreate(Box::new(PlayerCreateData::unpack(data, &mut offset)?))),
-            opcodes::OBJECT_DELETE => Some(GameMessage::ObjectDelete(Box::new(ObjectDeleteData::unpack(data, &mut offset)?))),
-            opcodes::UPDATE_POSITION | opcodes::UPDATE_OBJECT | 0x02DC => Some(GameMessage::UpdatePosition(Box::new(UpdatePositionData::unpack(data, &mut offset)?))),
-            opcodes::UPDATE_MOTION => Some(GameMessage::UpdateMotion(Box::new(MovementEventData::unpack(data, &mut offset)?))),
-            opcodes::PARENT_EVENT => Some(GameMessage::ParentEvent(Box::new(ParentEventData::unpack(data, &mut offset)?))),
-            opcodes::PICKUP_EVENT => Some(GameMessage::PickupEvent(Box::new(PickupEventData::unpack(data, &mut offset)?))),
+            opcodes::OBJECT_CREATE => Some(GameMessage::ObjectCreate(Box::new(
+                ObjectCreateData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::PLAYER_CREATE => Some(GameMessage::PlayerCreate(Box::new(
+                PlayerCreateData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::OBJECT_DELETE => Some(GameMessage::ObjectDelete(Box::new(
+                ObjectDeleteData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::UPDATE_POSITION | opcodes::UPDATE_OBJECT | 0x02DC => {
+                Some(GameMessage::UpdatePosition(Box::new(
+                    UpdatePositionData::unpack(data, &mut offset)?,
+                )))
+            }
+            opcodes::UPDATE_MOTION => Some(GameMessage::UpdateMotion(Box::new(
+                MovementEventData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::PARENT_EVENT => Some(GameMessage::ParentEvent(Box::new(
+                ParentEventData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::PICKUP_EVENT => Some(GameMessage::PickupEvent(Box::new(
+                PickupEventData::unpack(data, &mut offset)?,
+            ))),
 
-            opcodes::PRIVATE_UPDATE_PROPERTY_INT => Some(GameMessage::UpdatePropertyInt(Box::new(UpdatePropertyIntData::unpack(data, &mut offset, false)?))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_INT => Some(GameMessage::UpdatePropertyInt(Box::new(UpdatePropertyIntData::unpack(data, &mut offset, true)?))),
-            opcodes::PRIVATE_UPDATE_PROPERTY_INT64 => Some(GameMessage::UpdatePropertyInt64(Box::new(UpdatePropertyInt64Data::unpack(data, &mut offset, false)?))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_INT64 => Some(GameMessage::UpdatePropertyInt64(Box::new(UpdatePropertyInt64Data::unpack(data, &mut offset, true)?))),
-            opcodes::PRIVATE_UPDATE_PROPERTY_BOOL => Some(GameMessage::UpdatePropertyBool(Box::new(UpdatePropertyBoolData::unpack(data, &mut offset, false)?))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_BOOL => Some(GameMessage::UpdatePropertyBool(Box::new(UpdatePropertyBoolData::unpack(data, &mut offset, true)?))),
-            opcodes::PRIVATE_UPDATE_PROPERTY_FLOAT => Some(GameMessage::UpdatePropertyFloat(Box::new(UpdatePropertyFloatData::unpack(data, &mut offset, false)?))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_FLOAT => Some(GameMessage::UpdatePropertyFloat(Box::new(UpdatePropertyFloatData::unpack(data, &mut offset, true)?))),
-            opcodes::PRIVATE_UPDATE_PROPERTY_STRING => Some(GameMessage::UpdatePropertyString(Box::new(UpdatePropertyStringData::unpack(data, &mut offset, false)?))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_STRING => Some(GameMessage::UpdatePropertyString(Box::new(UpdatePropertyStringData::unpack(data, &mut offset, true)?))),
-            opcodes::PRIVATE_UPDATE_PROPERTY_DID => Some(GameMessage::UpdatePropertyDataId(Box::new(UpdatePropertyDataIdData::unpack(data, &mut offset, false)?))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_DID => Some(GameMessage::UpdatePropertyDataId(Box::new(UpdatePropertyDataIdData::unpack(data, &mut offset, true)?))),
-            opcodes::PRIVATE_UPDATE_PROPERTY_IID => Some(GameMessage::UpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceIdData::unpack(data, &mut offset, false)?))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_IID => Some(GameMessage::UpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceIdData::unpack(data, &mut offset, true)?))),
+            opcodes::PRIVATE_UPDATE_PROPERTY_INT => Some(GameMessage::UpdatePropertyInt(Box::new(
+                UpdatePropertyIntData::unpack(data, &mut offset, false)?,
+            ))),
+            opcodes::PUBLIC_UPDATE_PROPERTY_INT => Some(GameMessage::UpdatePropertyInt(Box::new(
+                UpdatePropertyIntData::unpack(data, &mut offset, true)?,
+            ))),
+            opcodes::PRIVATE_UPDATE_PROPERTY_INT64 => Some(GameMessage::UpdatePropertyInt64(
+                Box::new(UpdatePropertyInt64Data::unpack(data, &mut offset, false)?),
+            )),
+            opcodes::PUBLIC_UPDATE_PROPERTY_INT64 => Some(GameMessage::UpdatePropertyInt64(
+                Box::new(UpdatePropertyInt64Data::unpack(data, &mut offset, true)?),
+            )),
+            opcodes::PRIVATE_UPDATE_PROPERTY_BOOL => Some(GameMessage::UpdatePropertyBool(
+                Box::new(UpdatePropertyBoolData::unpack(data, &mut offset, false)?),
+            )),
+            opcodes::PUBLIC_UPDATE_PROPERTY_BOOL => Some(GameMessage::UpdatePropertyBool(
+                Box::new(UpdatePropertyBoolData::unpack(data, &mut offset, true)?),
+            )),
+            opcodes::PRIVATE_UPDATE_PROPERTY_FLOAT => Some(GameMessage::UpdatePropertyFloat(
+                Box::new(UpdatePropertyFloatData::unpack(data, &mut offset, false)?),
+            )),
+            opcodes::PUBLIC_UPDATE_PROPERTY_FLOAT => Some(GameMessage::UpdatePropertyFloat(
+                Box::new(UpdatePropertyFloatData::unpack(data, &mut offset, true)?),
+            )),
+            opcodes::PRIVATE_UPDATE_PROPERTY_STRING => Some(GameMessage::UpdatePropertyString(
+                Box::new(UpdatePropertyStringData::unpack(data, &mut offset, false)?),
+            )),
+            opcodes::PUBLIC_UPDATE_PROPERTY_STRING => Some(GameMessage::UpdatePropertyString(
+                Box::new(UpdatePropertyStringData::unpack(data, &mut offset, true)?),
+            )),
+            opcodes::PRIVATE_UPDATE_PROPERTY_DID => Some(GameMessage::UpdatePropertyDataId(
+                Box::new(UpdatePropertyDataIdData::unpack(data, &mut offset, false)?),
+            )),
+            opcodes::PUBLIC_UPDATE_PROPERTY_DID => Some(GameMessage::UpdatePropertyDataId(
+                Box::new(UpdatePropertyDataIdData::unpack(data, &mut offset, true)?),
+            )),
+            opcodes::PRIVATE_UPDATE_PROPERTY_IID => {
+                Some(GameMessage::UpdatePropertyInstanceId(Box::new(
+                    UpdatePropertyInstanceIdData::unpack(data, &mut offset, false)?,
+                )))
+            }
+            opcodes::PUBLIC_UPDATE_PROPERTY_IID => {
+                Some(GameMessage::UpdatePropertyInstanceId(Box::new(
+                    UpdatePropertyInstanceIdData::unpack(data, &mut offset, true)?,
+                )))
+            }
 
             _ => {
-                log::debug!("<<< Unknown Opcode: {:08X} Data Len: {}", opcode, data.len() - 4);
+                log::debug!(
+                    "<<< Unknown Opcode: {:08X} Data Len: {}",
+                    opcode,
+                    data.len() - 4
+                );
                 Some(GameMessage::Unknown(opcode, data[offset..].to_vec()))
             }
         }
@@ -236,7 +334,9 @@ impl GameMessage {
                 buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
                 buf.extend_from_slice(&data.target.to_le_bytes());
                 buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(&game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS.to_le_bytes());
+                buf.extend_from_slice(
+                    &game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS.to_le_bytes(),
+                );
                 data.pack(&mut buf);
             }
             GameMessage::MagicRemoveEnchantment(data) => {
@@ -250,7 +350,9 @@ impl GameMessage {
                 buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
                 buf.extend_from_slice(&data.target.to_le_bytes());
                 buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(&game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS.to_le_bytes());
+                buf.extend_from_slice(
+                    &game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS.to_le_bytes(),
+                );
                 data.pack(&mut buf);
             }
             GameMessage::MagicPurgeEnchantments(data) => {
@@ -264,10 +366,12 @@ impl GameMessage {
                 buf.extend_from_slice(&0xF7B0u32.to_le_bytes());
                 buf.extend_from_slice(&data.target.to_le_bytes());
                 buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(&game_event_opcodes::MAGIC_PURGE_BAD_ENCHANTMENTS.to_le_bytes());
+                buf.extend_from_slice(
+                    &game_event_opcodes::MAGIC_PURGE_BAD_ENCHANTMENTS.to_le_bytes(),
+                );
                 data.pack(&mut buf);
             }
-            
+
             GameMessage::HearSpeech(data) => {
                 buf.extend_from_slice(&opcodes::HEAR_SPEECH.to_le_bytes());
                 data.pack(&mut buf);
@@ -276,7 +380,7 @@ impl GameMessage {
                 buf.extend_from_slice(&opcodes::SOUL_EMOTE.to_le_bytes());
                 data.pack(&mut buf);
             }
-            
+
             // Add more as needed...
             _ => {}
         }
@@ -374,9 +478,10 @@ mod tests {
 
     #[test]
     fn test_gamemessage_pack_character_enter_world_request() {
-        let msg = GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
-            guid: 0x12345678,
-        }));
+        let msg =
+            GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
+                guid: 0x12345678,
+            }));
         let packed = msg.pack();
         assert_eq!(packed, vec![0xC8, 0xF7, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12]);
     }

@@ -45,18 +45,24 @@ Never guess. Guessing is cringe. Use the ACE Server submodule as the source of t
   - Useful for checking the fixed-width size of structs.
   - **WARNING:** ACE Entity structs often map to Database storage, which may differ from the Wire format! Always cross-reference `GameEvent` code to see if fields like `Status` or timestamps are actually skipped during serialization.
 
-### The "Active Verification" Strategy
-Don't just read the C# code—run it. Static analysis (reading) assumes you understand the inheritance and extension methods perfectly. You probably don't.
-1. **Create a Test:** Add a temporary test in `ACE/Source/ACE.Server.Tests/`.
-2. **Serialize to Hex:** Instantiate the struct or message, populate it with known values, serialize it using ACE's own writers, and print the hex.
-3. **Compare & Conquer:** This gives you the "Gold Standard" bytes. If your Rust parser reads these bytes and produces a different result, your parser is wrong. If the "Gold Standard" bytes don't match `repro.hex`, then ACE handles that scenario differently than you think.
+### The "Synthetic Truth" Generation (GOLD Standard)
+Don't wait for a real pcap to happen to you. If a message is too complex (like `PlayerDescription`), generate your own "Perfect" bytes.
+1. **Create a Test:** Add a class like `PlayerDescriptionDumping.cs` in `ACE/Source/ACE.Server.Tests/`.
+2. **Control the Variables:** Manually populate a `Character` or `Biota` object with exactly ONE property, ONE skill, and ONE attribute. 
+3. **Serialize to Hex:** Use ACE's native `Writer` to dump this minimal payload. 
+4. **Compare & Conquer:** This gives you a "Gold Standard" hex string. Using this as a fixture in Rust is 100x easier than desegregating a 6KB live packet.
 
-**Pro-Tip: The "Writer Scan":** When reading C# `Pack` methods, pay close attention to the `Writer.Write` argument type. 
+**Pro-Tip: The "Writer Scan":** When reading C# `Pack` methods, pay microscopic attention to the `Writer.Write` argument type. 
 - `Writer.Write(intVal)` is 4 bytes.
 - `Writer.Write((ushort)intVal)` is 2 bytes. 
-- A common mistake is seeing a field name like `Ranks` and assuming it's a `uint32` just because most numbers in AC are. If you see a cast to `ushort` or `byte`, that's your smoking gun for a potential "Drift Bug."
+- **The Drift Killer:** A common mistake is assuming every "Count" or "ID" is a `uint32`. If you see a cast to `ushort` (common in Skill ranks or Property headers), that is your smoking gun for a potential "Drift Bug."
 
 ## 3. Advanced Diagnostic Techniques
+
+### The "Two-Phase Integrity Check"
+Repack tests (Unpack -> Pack -> Assert Parity) are powerful but dangerous. If your parser AND your packer share the same wrong assumption about a field's size, the test will pass, but your data will be garbage.
+1. **Phase 1: Field Assertions.** After calling `unpack`, verify the *internal* values of the struct. (e.g., `assert_eq!(skills[0].ranks, 10)`).
+2. **Phase 2: Bit Parity.** Only after the logic is verified should you `assert_eq!(original_hex, packed_hex)`.
 
 ### The "Drift Calculation"
 If your parser reads garbage data after a list/vector, you have a size mismatch in the list items.
@@ -77,6 +83,8 @@ Before blaming the parser logic, rule out reassembly failures. Scan your `repro.
 - **Padding Nuance:** Top-level `String16L` in AC is almost always padded to a 4-byte boundary (including the 2-byte length). However, strings inside **Property Hash Tables** are **NOT** padded. 
 - **Wait for Fragments:** If a message is too large for one packet, it will be fragmented. Ensure the `extractor` bin is used to reassemble fragments before parsing.
 - **Fail-Soft Parsing:** When writing parsers for large vectors (Enchants, Skills), always use `break` on truncation instead of `panic!`. It makes the client much more stable in a live environment.
+- **Mandatory Fields & Silent Zeros:** Some messages (like `PlayerDescription`) have mandatory blocks that MUST be written even if empty (e.g., the 8 spell lists). Others have "Silent Zeros" where ACE writes `0` even if a flag is missing. Check `ACE/Source/ACE.Server/Network/GameEvent/Events/PlayerDescription.cs` for these edge cases.
+- **Hash Table Sorting:** AC uses a specific bucket-based sorting for Property Hash Tables (`ID % NumBuckets`). Use the `ac_hash_sort` helper in Rust to ensure the order matches exactly.
 
 ## 5. Best Practices
 

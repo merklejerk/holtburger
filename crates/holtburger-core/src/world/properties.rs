@@ -84,7 +84,7 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct EnchantmentTypeFlags: u32 {
         const UNDEF                  = 0x0000000;
         const ATTRIBUTE              = 0x0000001;

@@ -1,7 +1,7 @@
 use super::types::{ContextView, DashboardTab, FocusedPane, UIState, WIDTH_BREAKPOINT};
 use crate::classification;
 use crate::ui::widgets::effects::get_enchantment_name;
-use holtburger_core::protocol::messages::Enchantment;
+use holtburger_core::protocol::messages::{CharacterEntry, Enchantment};
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, Skill, Vital};
@@ -20,7 +20,7 @@ pub struct AppState {
     pub input: String,
     pub input_history: Vec<String>,
     pub history_index: Option<usize>,
-    pub characters: Vec<(u32, String)>,
+    pub characters: Vec<CharacterEntry>,
     pub state: UIState,
     pub focused_pane: FocusedPane,
     pub previous_focused_pane: FocusedPane,

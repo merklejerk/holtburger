@@ -9,13 +9,13 @@ pub fn render_character_selection(f: &mut Frame, state: &AppState, area: Rect) {
         .characters
         .iter()
         .enumerate()
-        .map(|(i, (_id, name))| {
+        .map(|(i, character)| {
             let style = if i == state.selected_character_index {
                 Style::default().fg(Color::Yellow)
             } else {
                 Style::default().fg(Color::White)
             };
-            ListItem::new(format!("{}. {}", i + 1, name)).style(style)
+            ListItem::new(format!("{}. {}", i + 1, character.name)).style(style)
         })
         .collect();
 

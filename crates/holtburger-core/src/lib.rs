@@ -5,13 +5,13 @@ pub mod session;
 pub mod world;
 
 use crate::protocol::crypto::Isaac;
+use crate::protocol::messages::actions;
 use crate::protocol::messages::*;
 use crate::session::Session;
 use anyhow::{Result, anyhow};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use crate::protocol::messages::actions;
 
 #[derive(Debug, Clone)]
 pub enum MessageKind {
@@ -33,7 +33,7 @@ pub struct ChatMessage {
 #[derive(Debug, PartialEq, Clone)]
 pub enum ClientState {
     Connected,
-    CharacterSelection(Vec<(u32, String)>),
+    CharacterSelection(Vec<crate::protocol::messages::CharacterEntry>),
     EnteringWorld,
     InWorld,
 }
@@ -41,7 +41,7 @@ pub enum ClientState {
 #[derive(Debug, Clone)]
 pub enum ClientEvent {
     Message(ChatMessage),
-    CharacterList(Vec<(u32, String)>),
+    CharacterList(Vec<crate::protocol::messages::CharacterEntry>),
     PlayerEntered {
         guid: u32,
         name: String,
@@ -130,7 +130,7 @@ pub struct Client {
     pub session: Session,
     pub world: crate::world::WorldState,
     account_name: String,
-    characters: Vec<(u32, String)>,
+    characters: Vec<crate::protocol::messages::CharacterEntry>,
     character_id: Option<u32>,
     character_preference: Option<String>,
     state: ClientState,
@@ -256,7 +256,7 @@ impl Client {
             ClientCommand::SelectCharacter(id) => self.select_character(id).await,
             ClientCommand::SelectCharacterByIndex(idx) => match &self.state {
                 ClientState::CharacterSelection(chars) if (1..=chars.len()).contains(&idx) => {
-                    let char_id = chars[idx - 1].0;
+                    let char_id = chars[idx - 1].id;
                     self.select_character(char_id).await
                 }
                 _ => Ok(()),
@@ -447,7 +447,7 @@ impl Client {
         }
 
         match message {
-            GameMessage::CharacterList { characters } => {
+            GameMessage::CharacterList { characters, .. } => {
                 self.handle_character_list(characters).await
             }
             GameMessage::CharacterEnterWorldServerReady => {
@@ -463,15 +463,15 @@ impl Client {
                 let name = self
                     .characters
                     .iter()
-                    .find(|(id, _)| *id == player_id)
-                    .map(|(_, name)| name.clone())
+                    .find(|c| c.id == player_id)
+                    .map(|c| c.name.clone())
                     .unwrap_or_else(|| {
                         // try search by character_id if we have it
                         if let Some(char_id) = self.character_id {
                             self.characters
                                 .iter()
-                                .find(|(id, _)| *id == char_id)
-                                .map(|(_, name)| name.clone())
+                                .find(|c| c.id == char_id)
+                                .map(|c| c.name.clone())
                                 .unwrap_or_else(|| "Unknown".to_string())
                         } else {
                             "Unknown".to_string()
@@ -501,6 +501,7 @@ impl Client {
                 guid: _,
                 property: _,
                 value: _,
+                ..
             } => Ok(()),
             GameMessage::GameEvent {
                 event_type,
@@ -508,7 +509,7 @@ impl Client {
                 sequence,
                 data,
             } => {
-                self.handle_game_event(event_type, guid, sequence, data)
+                self.handle_game_event(event_type, guid.into(), sequence, data)
                     .await
             }
             GameMessage::GameAction { action, data } => self.handle_game_action(action, data).await,
@@ -544,7 +545,10 @@ impl Client {
         }
     }
 
-    async fn handle_character_list(&mut self, characters: Vec<(u32, String)>) -> Result<()> {
+    async fn handle_character_list(
+        &mut self,
+        characters: Vec<crate::protocol::messages::CharacterEntry>,
+    ) -> Result<()> {
         self.logon_retry.reset();
         self.enter_retry.reset();
         self.characters = characters.clone();
@@ -553,13 +557,15 @@ impl Client {
                 && idx > 0
                 && idx <= characters.len()
             {
-                return self.select_character(characters[idx - 1].0).await;
+                let id = characters[idx - 1].id;
+                return self.select_character(id).await;
             }
             if let Some(c) = characters
                 .iter()
-                .find(|(_, name)| name.to_lowercase() == pref.to_lowercase())
+                .find(|c| c.name.to_lowercase() == pref.to_lowercase())
             {
-                return self.select_character(c.0).await;
+                let id = c.id;
+                return self.select_character(id).await;
             }
         }
         self.state = ClientState::CharacterSelection(characters.clone());

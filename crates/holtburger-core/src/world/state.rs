@@ -129,11 +129,11 @@ impl WorldState {
             GameMessage::PlayerDescription {
                 guid,
                 name,
-                wee_type: _,
                 pos,
                 attributes,
                 skills,
                 enchantments,
+                ..
             } => {
                 self.player.guid = guid;
                 self.player.name = name.clone();
@@ -211,25 +211,35 @@ impl WorldState {
                 }
 
                 let mut skill_objs = Vec::new();
-                for (sk_id, ranks, status, _xp, init) in skills {
-                    if let Some(skill_type) = stats::SkillType::from_repr(sk_id) {
-                        let training = match status {
+                for skill in skills {
+                    if let Some(skill_type) = stats::SkillType::from_repr(skill.sk_type) {
+                        let training = match skill.status {
                             1 => stats::TrainingLevel::Untrained,
                             2 => stats::TrainingLevel::Trained,
                             3 => stats::TrainingLevel::Specialized,
                             _ => stats::TrainingLevel::Unusable,
                         };
 
-                        self.player
-                            .skill_bases
-                            .insert(skill_type, super::player::SkillBase { ranks, init });
+                        self.player.skill_bases.insert(
+                            skill_type,
+                            super::player::SkillBase {
+                                ranks: skill.ranks as u32,
+                                init: skill.init,
+                            },
+                        );
 
-                        let base_val = self
-                            .player
-                            .derive_skill_value(skill_type, ranks, init, false);
-                        let current_val = self
-                            .player
-                            .derive_skill_value(skill_type, ranks, init, true);
+                        let base_val = self.player.derive_skill_value(
+                            skill_type,
+                            skill.ranks as u32,
+                            skill.init,
+                            false,
+                        );
+                        let current_val = self.player.derive_skill_value(
+                            skill_type,
+                            skill.ranks as u32,
+                            skill.init,
+                            true,
+                        );
 
                         let skill = stats::Skill {
                             skill_type,
@@ -264,6 +274,7 @@ impl WorldState {
                 guid,
                 property,
                 value,
+                ..
             } => {
                 let target_guid = if guid == 0 { self.player.guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
@@ -279,6 +290,7 @@ impl WorldState {
                 guid,
                 property,
                 value,
+                ..
             } => {
                 let target_guid = if guid == 0 { self.player.guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
@@ -294,6 +306,7 @@ impl WorldState {
                 guid,
                 property,
                 value,
+                ..
             } => {
                 let target_guid = if guid == 0 { self.player.guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
@@ -309,6 +322,7 @@ impl WorldState {
                 guid,
                 property,
                 value,
+                ..
             } => {
                 let target_guid = if guid == 0 { self.player.guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
@@ -324,6 +338,7 @@ impl WorldState {
                 guid,
                 property,
                 value,
+                ..
             } => {
                 let target_guid = if guid == 0 { self.player.guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
@@ -339,6 +354,7 @@ impl WorldState {
                 guid,
                 property,
                 value,
+                ..
             } => {
                 let target_guid = if guid == 0 { self.player.guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
@@ -354,6 +370,7 @@ impl WorldState {
                 guid,
                 property,
                 value,
+                ..
             } => {
                 let target_guid = if guid == 0 { self.player.guid } else { guid };
                 if let Some(entity) = self.entities.get_mut(target_guid) {

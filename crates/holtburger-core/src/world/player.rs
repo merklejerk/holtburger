@@ -368,7 +368,7 @@ impl PlayerState {
                 attribute,
                 ranks,
                 start,
-                xp: _,
+                ..
             } => {
                 if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
                     let base = start + ranks;
@@ -388,8 +388,8 @@ impl PlayerState {
                 skill,
                 ranks,
                 status,
-                xp: _,
                 init,
+                ..
             } => {
                 if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
                     let training = match status {
@@ -402,13 +402,14 @@ impl PlayerState {
                     self.skill_bases.insert(
                         skill_type,
                         SkillBase {
-                            ranks: *ranks,
+                            ranks: *ranks as u32,
                             init: *init,
                         },
                     );
 
-                    let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
-                    let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
+                    let base_val = self.derive_skill_value(skill_type, *ranks as u32, *init, false);
+                    let current_val =
+                        self.derive_skill_value(skill_type, *ranks as u32, *init, true);
 
                     let skill_obj = stats::Skill {
                         skill_type,
@@ -428,8 +429,8 @@ impl PlayerState {
                 vital,
                 ranks,
                 start,
-                xp: _,
                 current,
+                ..
             } => {
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
                     self.vital_bases.insert(
@@ -458,7 +459,7 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateVitalCurrent { vital, current } => {
+            GameMessage::UpdateVitalCurrent { vital, current, .. } => {
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital)
                     && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
                 {
@@ -471,7 +472,7 @@ impl PlayerState {
                 target,
                 enchantment,
             } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     if let Some(existing) = self.enchantments.iter_mut().find(|e| {
                         e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
                     }) {
@@ -488,7 +489,7 @@ impl PlayerState {
                 target,
                 enchantments,
             } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     for enchantment in enchantments {
                         if let Some(existing) = self.enchantments.iter_mut().find(|e| {
                             e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
@@ -508,7 +509,7 @@ impl PlayerState {
                 spell_id,
                 layer,
             } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     self.enchantments
                         .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                     events.push(WorldEvent::EnchantmentRemoved {
@@ -520,7 +521,7 @@ impl PlayerState {
                 }
             }
             GameMessage::MagicRemoveMultipleEnchantments { target, spells } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     for spell in spells {
                         self.enchantments
                             .retain(|e| e.spell_id != spell.spell_id || e.layer != spell.layer);
@@ -534,7 +535,7 @@ impl PlayerState {
                 }
             }
             GameMessage::MagicPurgeEnchantments { target } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     self.enchantments.clear();
                     events.push(WorldEvent::EnchantmentsPurged);
                     self.emit_derived_stats(events);
@@ -542,7 +543,7 @@ impl PlayerState {
                 }
             }
             GameMessage::MagicPurgeBadEnchantments { target } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     self.enchantments.retain(|e| {
                         (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
                     });
@@ -556,7 +557,7 @@ impl PlayerState {
                 spell_id,
                 layer,
             } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     self.enchantments
                         .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                     events.push(WorldEvent::EnchantmentRemoved {
@@ -568,7 +569,7 @@ impl PlayerState {
                 }
             }
             GameMessage::MagicDispelMultipleEnchantments { target, spells } => {
-                if *target == self.guid as u64 {
+                if *target == self.guid {
                     for spell in spells {
                         self.enchantments
                             .retain(|e| e.spell_id != spell.spell_id || e.layer != spell.layer);

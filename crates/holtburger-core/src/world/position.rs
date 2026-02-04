@@ -2,12 +2,26 @@ use crate::math::{Quaternion, Vector3};
 use crate::world::properties::UpdatePositionFlag;
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
+use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct WorldPosition {
     pub landblock_id: u32,
     pub coords: Vector3,
     pub rotation: Quaternion,
+}
+
+impl MessagePack for WorldPosition {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.write_raw(writer);
+    }
+}
+
+impl MessageUnpack for WorldPosition {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 32 > data.len() { return None; }
+        Some(Self::read_raw(data, offset))
+    }
 }
 
 impl WorldPosition {

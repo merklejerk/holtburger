@@ -85,17 +85,17 @@ async fn main() -> Result<()> {
             Some(event) = event_rx.recv() => {
                 if let ClientEvent::CharacterList(chars) = event {
                     println!("Characters received:");
-                    for entry in &chars { println!("  - {} ({:08X})", entry.name, entry.id); }
+                    for entry in &chars { println!("  - {} ({:08X})", entry.name, entry.guid); }
 
                     let target_name = args.character.as_deref().unwrap_or("");
                     if !chars.is_empty() {
                         let mut selected_id = None;
                         if target_name.is_empty() {
-                            selected_id = Some(chars[0].id);
+                            selected_id = Some(chars[0].guid);
                         } else {
                             for entry in &chars {
                                 if entry.name.to_lowercase().contains(&target_name.to_lowercase()) {
-                                    selected_id = Some(entry.id);
+                                    selected_id = Some(entry.guid);
                                     break;
                                 }
                             }

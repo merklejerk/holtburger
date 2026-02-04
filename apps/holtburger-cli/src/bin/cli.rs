@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
                 Some(event) = event_rx.recv() => {
                     if let ClientEvent::CharacterList(chars) = event {
                         println!("Characters for account {}:", args.account);
-                        for character in chars { println!("  - {} (ID: {:08X})", character.name, character.id); }
+                        for character in chars { println!("  - {} (ID: {:08X})", character.name, character.guid); }
                         let _ = command_tx.send(ClientCommand::Quit);
                         let _ = client_handle.await;
                         return Ok(());

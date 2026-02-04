@@ -218,7 +218,7 @@ mod tests {
     fn test_game_action_unpack() {
         let msg = GameActionData {
             sequence: 123,
-            action: 456,
+            action: crate::protocol::messages::actions::LOGIN_COMPLETE,
             data: vec![0x11, 0x22, 0x33],
         };
         let mut buf = Vec::new();
@@ -233,7 +233,7 @@ mod tests {
     fn test_game_action_pack() {
         let msg = GameActionData {
             sequence: 123,
-            action: 456,
+            action: crate::protocol::messages::actions::LOGIN_COMPLETE,
             data: vec![0x11, 0x22, 0x33],
         };
         let mut buf = Vec::new();

@@ -1,8 +1,8 @@
 use super::WorldEvent;
 use super::stats;
-use crate::protocol::messages::{Enchantment, GameMessage};
+use crate::protocol::messages::*;
 use crate::world::properties::EnchantmentTypeFlags;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SkillBase {
@@ -28,6 +28,8 @@ pub struct PlayerState {
     /// Stores the raw ranks and init for skills so they can be recalculated
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
     pub enchantments: Vec<Enchantment>,
+    pub spells: BTreeMap<u32, f32>,
+    pub spell_lists: Vec<Vec<u32>>,
 }
 
 impl Default for PlayerState {
@@ -47,6 +49,8 @@ impl PlayerState {
             skills: HashMap::new(),
             skill_bases: HashMap::new(),
             enchantments: Vec::new(),
+            spells: BTreeMap::new(),
+            spell_lists: vec![Vec::new(); 8],
         }
     }
 
@@ -364,12 +368,13 @@ impl PlayerState {
 
     pub fn handle_message(&mut self, msg: &GameMessage, events: &mut Vec<WorldEvent>) -> bool {
         match msg {
-            GameMessage::UpdateAttribute {
-                attribute,
-                ranks,
-                start,
-                ..
-            } => {
+            GameMessage::UpdateAttribute(data) => {
+                let UpdateAttributeData {
+                    attribute,
+                    ranks,
+                    start,
+                    ..
+                } = &**data;
                 if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
                     let base = start + ranks;
                     self.attributes.insert(attr_type, base);
@@ -384,13 +389,14 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateSkill {
-                skill,
-                ranks,
-                status,
-                init,
-                ..
-            } => {
+            GameMessage::UpdateSkill(data) => {
+                let UpdateSkillData {
+                    skill,
+                    ranks,
+                    status,
+                    init,
+                    ..
+                } = &**data;
                 if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
                     let training = match status {
                         1 => stats::TrainingLevel::Untrained,
@@ -402,14 +408,14 @@ impl PlayerState {
                     self.skill_bases.insert(
                         skill_type,
                         SkillBase {
-                            ranks: *ranks as u32,
+                            ranks: *ranks,
                             init: *init,
                         },
                     );
 
-                    let base_val = self.derive_skill_value(skill_type, *ranks as u32, *init, false);
+                    let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
                     let current_val =
-                        self.derive_skill_value(skill_type, *ranks as u32, *init, true);
+                        self.derive_skill_value(skill_type, *ranks, *init, true);
 
                     let skill_obj = stats::Skill {
                         skill_type,
@@ -425,13 +431,14 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateVital {
-                vital,
-                ranks,
-                start,
-                current,
-                ..
-            } => {
+            GameMessage::UpdateVital(data) => {
+                let UpdateVitalData {
+                    vital,
+                    ranks,
+                    start,
+                    current,
+                    ..
+                } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
                     self.vital_bases.insert(
                         vital_type,
@@ -459,7 +466,8 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateVitalCurrent { vital, current, .. } => {
+            GameMessage::UpdateVitalCurrent(data) => {
+                let UpdateVitalCurrentData { vital, current, .. } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital)
                     && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
                 {
@@ -468,10 +476,12 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::MagicUpdateEnchantment {
-                target,
-                enchantment,
-            } => {
+            GameMessage::MagicUpdateEnchantment(data) => {
+                let MagicUpdateEnchantmentData {
+                    target,
+                    enchantment,
+                    ..
+                } = &**data;
                 if *target == self.guid {
                     if let Some(existing) = self.enchantments.iter_mut().find(|e| {
                         e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
@@ -485,10 +495,12 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::MagicUpdateMultipleEnchantments {
-                target,
-                enchantments,
-            } => {
+            GameMessage::MagicUpdateMultipleEnchantments(data) => {
+                let MagicUpdateMultipleEnchantmentsData {
+                    target,
+                    enchantments,
+                    ..
+                } = &**data;
                 if *target == self.guid {
                     for enchantment in enchantments {
                         if let Some(existing) = self.enchantments.iter_mut().find(|e| {
@@ -504,37 +516,45 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::MagicRemoveEnchantment {
-                target,
-                spell_id,
-                layer,
-            } => {
+            GameMessage::MagicRemoveEnchantment(data) => {
+                let MagicRemoveEnchantmentData {
+                    target,
+                    spell_id,
+                    layer,
+                    ..
+                } = &**data;
                 if *target == self.guid {
                     self.enchantments
-                        .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
+                        .retain(|e| e.spell_id != (*spell_id as u16) || e.layer != *layer);
                     events.push(WorldEvent::EnchantmentRemoved {
-                        spell_id: *spell_id,
+                        spell_id: *spell_id as u16,
                         layer: *layer,
                     });
                     self.emit_derived_stats(events);
                     return true;
                 }
             }
-            GameMessage::MagicRemoveMultipleEnchantments { target, spells } => {
+            GameMessage::MagicRemoveMultipleEnchantments(data) => {
+                let MagicRemoveMultipleEnchantmentsData {
+                    target,
+                    spells,
+                    ..
+                } = &**data;
                 if *target == self.guid {
-                    for spell in spells {
+                    for (spell_id, layer) in spells {
                         self.enchantments
-                            .retain(|e| e.spell_id != spell.spell_id || e.layer != spell.layer);
+                            .retain(|e| e.spell_id != (*spell_id as u16) || e.layer != *layer);
                         events.push(WorldEvent::EnchantmentRemoved {
-                            spell_id: spell.spell_id,
-                            layer: spell.layer,
+                            spell_id: *spell_id as u16,
+                            layer: *layer,
                         });
                     }
                     self.emit_derived_stats(events);
                     return true;
                 }
             }
-            GameMessage::MagicPurgeEnchantments { target } => {
+            GameMessage::MagicPurgeEnchantments(data) => {
+                let MagicPurgeEnchantmentsData { target, .. } = &**data;
                 if *target == self.guid {
                     self.enchantments.clear();
                     events.push(WorldEvent::EnchantmentsPurged);
@@ -542,7 +562,8 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::MagicPurgeBadEnchantments { target } => {
+            GameMessage::MagicPurgeBadEnchantments(data) => {
+                let MagicPurgeBadEnchantmentsData { target, .. } = &**data;
                 if *target == self.guid {
                     self.enchantments.retain(|e| {
                         (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
@@ -552,48 +573,18 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::MagicDispelEnchantment {
-                target,
-                spell_id,
-                layer,
-            } => {
-                if *target == self.guid {
-                    self.enchantments
-                        .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                    events.push(WorldEvent::EnchantmentRemoved {
-                        spell_id: *spell_id,
-                        layer: *layer,
-                    });
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicDispelMultipleEnchantments { target, spells } => {
-                if *target == self.guid {
-                    for spell in spells {
-                        self.enchantments
-                            .retain(|e| e.spell_id != spell.spell_id || e.layer != spell.layer);
-                        events.push(WorldEvent::EnchantmentRemoved {
-                            spell_id: spell.spell_id,
-                            layer: spell.layer,
-                        });
-                    }
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::UpdateHealth { target, health } => {
-                let target_guid = if *target == 0 { self.guid } else { *target };
+            GameMessage::UpdateHealth(data) => {
+                let target = data.target;
+                let health = data.health;
+                let target_guid = if target == 0 { self.guid } else { target };
 
-                if target_guid == self.guid
-                    && target_guid != 0
-                    && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health)
-                {
-                    // UpdateHealth is a percentage float (0.0 to 1.0)
-                    let new_current = (*health * vital_obj.buffed_max as f32) as u32;
-                    vital_obj.current = new_current;
-                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
-                    return true;
+                if target_guid == self.guid && target_guid != 0
+                    && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health) {
+                        // UpdateHealth is a percentage float (0.0 to 1.0)
+                        let new_current = (health * vital_obj.buffed_max as f32) as u32;
+                        vital_obj.current = new_current;
+                        events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                        return true;
                 }
             }
             _ => {}

@@ -9,10 +9,11 @@ fn main() {
     let msg = GameMessage::unpack(&bytes);
     
     match msg {
-        GameMessage::PlayerDescription { ref name, guid, .. } => {
-            println!("Successfully unpacked PlayerDescription for {} ({:08X})", name, guid);
+        Some(GameMessage::PlayerDescription(ref data)) => {
+            println!("Successfully unpacked PlayerDescription for {} ({:08X})", data.name, data.guid);
             
-            let packed = msg.pack();
+            let message = GameMessage::PlayerDescription(data.clone());
+            let packed = message.pack();
             
             println!("Original size: {}", bytes.len());
             println!("Packed size:   {}", packed.len());

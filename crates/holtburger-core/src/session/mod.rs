@@ -134,53 +134,53 @@ impl Session {
         // 1. Optional Headers Section (Follows ACE PacketHeaderOptional sequence)
         let mut header_optional_bytes = Vec::new();
 
-        if flags & flags::SERVER_SWITCH != 0 {
+        if flags & packet_flags::SERVER_SWITCH != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
             offset += 8;
         }
-        if flags & flags::REQUEST_RETRANSMIT != 0 {
+        if flags & packet_flags::REQUEST_RETRANSMIT != 0 {
             let count = LittleEndian::read_u32(&payload[offset..offset + 4]) as usize;
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 4 + (count * 4)]);
             offset += 4 + (count * 4);
         }
-        if flags & flags::REJECT_RETRANSMIT != 0 {
+        if flags & packet_flags::REJECT_RETRANSMIT != 0 {
             let count = LittleEndian::read_u32(&payload[offset..offset + 4]) as usize;
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 4 + (count * 4)]);
             offset += 4 + (count * 4);
         }
-        if flags & flags::ACK_SEQUENCE != 0 {
+        if flags & packet_flags::ACK_SEQUENCE != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 4]);
             offset += 4;
         }
-        if flags & flags::CONNECT_REQUEST != 0 {
+        if flags & packet_flags::CONNECT_REQUEST != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 32]);
             offset += 32;
         }
-        if flags & flags::LOGIN_REQUEST != 0 {
+        if flags & packet_flags::LOGIN_REQUEST != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..]);
             offset = payload.len();
         }
-        if flags & flags::CONNECT_RESPONSE != 0 {
+        if flags & packet_flags::CONNECT_RESPONSE != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
             offset += 8;
         }
-        if flags & flags::CICMD != 0 {
+        if flags & packet_flags::CICMD != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
             offset += 8;
         }
-        if flags & flags::TIME_SYNC != 0 {
+        if flags & packet_flags::TIME_SYNC != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
             offset += 8;
         }
-        if flags & flags::ECHO_REQUEST != 0 {
+        if flags & packet_flags::ECHO_REQUEST != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 4]);
             offset += 4;
         }
-        if flags & flags::ECHO_RESPONSE != 0 {
+        if flags & packet_flags::ECHO_RESPONSE != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
             offset += 8;
         }
-        if flags & flags::FLOW != 0 {
+        if flags & packet_flags::FLOW != 0 {
             header_optional_bytes.extend_from_slice(&payload[offset..offset + 6]);
             offset += 6;
         }
@@ -191,7 +191,7 @@ impl Session {
         }
 
         // 2. Fragments Section
-        if flags & flags::BLOB_FRAGMENTS != 0 {
+        if flags & packet_flags::BLOB_FRAGMENTS != 0 {
             while offset < payload.len() {
                 if offset + FRAGMENT_HEADER_SIZE > payload.len() {
                     break;
@@ -240,16 +240,18 @@ impl Session {
         addr: SocketAddr,
     ) -> Result<()> {
         let mut full_payload = Vec::new();
+        let caller_provided_ack = (header.flags & packet_flags::ACK_SEQUENCE) != 0;
 
-        if self.last_server_seq > 0
-            && (header.flags & flags::CONNECT_REQUEST == 0)
-            && (header.flags & flags::CONNECT_RESPONSE == 0)
-            && (header.flags & flags::LOGIN_REQUEST == 0)
+        if !caller_provided_ack
+            && self.last_server_seq > 0
+            && (header.flags & packet_flags::CONNECT_REQUEST == 0)
+            && (header.flags & packet_flags::CONNECT_RESPONSE == 0)
+            && (header.flags & packet_flags::LOGIN_REQUEST == 0)
         {
-            header.flags |= flags::ACK_SEQUENCE;
+            header.flags |= packet_flags::ACK_SEQUENCE;
         }
 
-        if (header.flags & flags::ACK_SEQUENCE) != 0 {
+        if (header.flags & packet_flags::ACK_SEQUENCE) != 0 {
             full_payload.extend_from_slice(&self.last_server_seq.to_le_bytes());
         }
 
@@ -257,11 +259,11 @@ impl Session {
         header.size = full_payload.len() as u16;
 
         let is_handshake = (header.flags
-            & (flags::LOGIN_REQUEST | flags::CONNECT_REQUEST | flags::CONNECT_RESPONSE))
+            & (packet_flags::LOGIN_REQUEST | packet_flags::CONNECT_REQUEST | packet_flags::CONNECT_RESPONSE))
             != 0;
 
         if let (Some(_), false) = (&mut self.isaac_c2s, is_handshake) {
-            header.flags |= flags::ENCRYPTED_CHECKSUM;
+            header.flags |= packet_flags::ENCRYPTED_CHECKSUM;
         }
 
         let header_hash = header.calculate_checksum();
@@ -295,6 +297,8 @@ impl Session {
         let mut packet = vec![0u8; HEADER_SIZE];
         header.pack(&mut packet);
         packet.extend_from_slice(&full_payload);
+
+        log::debug!("RAW OUTBOUND: {:02X?}", packet);
 
         if let Some(ref mut capture) = self.capture {
             let _ = capture.write_entry(Direction::Outbound, addr, &packet);
@@ -379,7 +383,7 @@ impl Session {
         body.extend_from_slice(&payload);
 
         let header = PacketHeader {
-            flags: flags::BLOB_FRAGMENTS,
+            flags: packet_flags::BLOB_FRAGMENTS,
             sequence: self.packet_sequence,
             id: self.client_id,
             ..Default::default()
@@ -391,7 +395,7 @@ impl Session {
 
     pub async fn send_ack(&mut self, sequence: u32) -> Result<()> {
         let header = PacketHeader {
-            flags: flags::ACK_SEQUENCE,
+            flags: packet_flags::ACK_SEQUENCE,
             sequence: 0,
             id: self.client_id,
             ..Default::default()
@@ -416,34 +420,37 @@ impl Session {
         let header = PacketHeader::unpack(&buf[..HEADER_SIZE]);
         let data = buf[HEADER_SIZE..len].to_vec();
 
+        log::debug!("RAW INBOUND: {:02X?}", &buf[..len]);
+
         log::debug!(
-            "<<< Inbound Packet from {}: Seq={} ID={} Flags={:08X} Size={}",
+            "<<< Inbound from {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
             addr,
             header.sequence,
             header.id,
             header.flags,
-            len
+            len,
+            &buf[..len]
         );
 
         if header.sequence > self.last_server_seq {
             self.last_server_seq = header.sequence;
         }
 
-        if header.flags & flags::ENCRYPTED_CHECKSUM != 0
+        if header.flags & packet_flags::ENCRYPTED_CHECKSUM != 0
             && let Some(isaac) = self.isaac_s2c.as_mut()
         {
             isaac.consume_key();
         }
 
         // Handle Transport-layer housekeeping (ACKs)
-        if header.sequence > 0 && (header.flags & flags::ACK_SEQUENCE == 0) {
+        if header.sequence > 0 && (header.flags & packet_flags::ACK_SEQUENCE == 0) {
             let _ = self.send_ack(header.sequence).await;
         }
 
         // ECHO_REQUEST Handling
-        if header.flags & flags::ECHO_REQUEST != 0 {
+        if header.flags & packet_flags::ECHO_REQUEST != 0 {
             let mut resp = header.clone();
-            resp.flags = flags::ECHO_RESPONSE;
+            resp.flags = packet_flags::ECHO_RESPONSE;
             let _ = self.send_packet_to_addr(resp, &[], addr).await;
         }
 
@@ -452,36 +459,36 @@ impl Session {
 
     pub fn get_payload_offset(&self, flags: u32, data: &[u8]) -> usize {
         let mut offset = 0;
-        if flags & flags::SERVER_SWITCH != 0 {
+        if flags & packet_flags::SERVER_SWITCH != 0 {
             offset += 8;
         }
-        if flags & flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
+        if flags & packet_flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
             let count = LittleEndian::read_u32(&data[offset..offset + 4]);
             offset += 4 + (count as usize * 4);
         }
-        if flags & flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
+        if flags & packet_flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
             let count = LittleEndian::read_u32(&data[offset..offset + 4]);
             offset += 4 + (count as usize * 4);
         }
-        if flags & flags::ACK_SEQUENCE != 0 {
+        if flags & packet_flags::ACK_SEQUENCE != 0 {
             offset += 4;
         }
-        if flags & flags::CONNECT_RESPONSE != 0 {
+        if flags & packet_flags::CONNECT_RESPONSE != 0 {
             offset += 8;
         }
-        if flags & flags::CICMD != 0 {
+        if flags & packet_flags::CICMD != 0 {
             offset += 8;
         }
-        if flags & flags::TIME_SYNC != 0 {
+        if flags & packet_flags::TIME_SYNC != 0 {
             offset += 8;
         }
-        if flags & flags::ECHO_REQUEST != 0 {
+        if flags & packet_flags::ECHO_REQUEST != 0 {
             offset += 4;
         }
-        if flags & flags::ECHO_RESPONSE != 0 {
+        if flags & packet_flags::ECHO_RESPONSE != 0 {
             offset += 8;
         }
-        if flags & flags::FLOW != 0 {
+        if flags & packet_flags::FLOW != 0 {
             offset += 6;
         }
         offset
@@ -494,16 +501,20 @@ impl Session {
         let mut events = Vec::new();
 
         // 1. Check for Handshake Request (Seeds/NetID from Server)
-        if header.flags & flags::CONNECT_REQUEST != 0 {
+        if header.flags & packet_flags::CONNECT_REQUEST != 0 {
             let offset = self.get_payload_offset(header.flags, &data);
             if offset + 32 <= data.len() {
-                let crd = ConnectRequestData::unpack(&data[offset..offset + 32]);
+                let mut crd = ConnectRequestData::unpack(&data[offset..offset + 32]);
+                // If the body CID is 0, use the one from the packet header
+                if crd.client_id == 0 && header.id != 0 {
+                    crd.client_id = header.id;
+                }
                 events.push(SessionEvent::HandshakeRequest(crd));
             }
         }
 
         // 2. Check for Handshake Response (Cookie from Server)
-        if header.flags & flags::CONNECT_RESPONSE != 0 {
+        if header.flags & packet_flags::CONNECT_RESPONSE != 0 {
             let offset = self.get_payload_offset(header.flags, &data);
             if offset + 8 <= data.len() {
                 let cookie = LittleEndian::read_u64(&data[offset..offset + 8]);
@@ -515,39 +526,39 @@ impl Session {
         }
 
         // 3. Check for TimeSync
-        if header.flags & flags::TIME_SYNC != 0 {
+        if header.flags & packet_flags::TIME_SYNC != 0 {
             let mut offset = 0;
             // TimeSync is an optional header. We need to find its specific offset.
             // PacketHeaderOptional sequence:
             // SERVER_SWITCH (8), REQUEST_RETRANSMIT (4+4*n), REJECT_RETRANSMIT (4+4*n), ACK_SEQUENCE (4), CONNECT_RESPONSE (8), CICMD (8), TIME_SYNC (8)
-            if header.flags & flags::SERVER_SWITCH != 0 {
+            if header.flags & packet_flags::SERVER_SWITCH != 0 {
                 offset += 8;
             }
-            if header.flags & flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
+            if header.flags & packet_flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
                 let count = LittleEndian::read_u32(&data[offset..offset + 4]);
                 offset += 4 + (count as usize * 4);
             }
-            if header.flags & flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
+            if header.flags & packet_flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
                 let count = LittleEndian::read_u32(&data[offset..offset + 4]);
                 offset += 4 + (count as usize * 4);
             }
-            if header.flags & flags::ACK_SEQUENCE != 0 {
+            if header.flags & packet_flags::ACK_SEQUENCE != 0 {
                 offset += 4;
             }
-            if header.flags & flags::CONNECT_RESPONSE != 0 {
+            if header.flags & packet_flags::CONNECT_RESPONSE != 0 {
                 offset += 8;
             }
-            if header.flags & flags::CICMD != 0 {
+            if header.flags & packet_flags::CICMD != 0 {
                 offset += 8;
             }
-            if header.flags & flags::TIME_SYNC != 0 && offset + 8 <= data.len() {
+            if header.flags & packet_flags::TIME_SYNC != 0 && offset + 8 <= data.len() {
                 let server_time = LittleEndian::read_f64(&data[offset..offset + 8]);
                 events.push(SessionEvent::TimeSync(server_time));
             }
         }
 
         // 4. Check for Blobs
-        if header.flags & flags::BLOB_FRAGMENTS != 0 {
+        if header.flags & packet_flags::BLOB_FRAGMENTS != 0 {
             let mut offset = self.get_payload_offset(header.flags, &data);
             while offset + FRAGMENT_HEADER_SIZE <= data.len() {
                 let frag_header =
@@ -575,7 +586,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::messages::flags;
+    use crate::protocol::messages::packet_flags;
 
     #[tokio::test]
     async fn test_payload_offset_handshake() {
@@ -585,19 +596,19 @@ mod tests {
 
         // ConnectResponse should have 8 bytes offset
         assert_eq!(
-            session.get_payload_offset(flags::CONNECT_RESPONSE, &[0u8; 100]),
+            session.get_payload_offset(packet_flags::CONNECT_RESPONSE, &[0u8; 100]),
             8
         );
 
         // AckSequence + ConnectResponse
         assert_eq!(
-            session.get_payload_offset(flags::ACK_SEQUENCE | flags::CONNECT_RESPONSE, &[0u8; 100]),
+            session.get_payload_offset(packet_flags::ACK_SEQUENCE | packet_flags::CONNECT_RESPONSE, &[0u8; 100]),
             12
         );
 
         // EchoResponse (8 bytes)
         assert_eq!(
-            session.get_payload_offset(flags::ECHO_RESPONSE, &[0u8; 100]),
+            session.get_payload_offset(packet_flags::ECHO_RESPONSE, &[0u8; 100]),
             8
         );
     }
@@ -610,7 +621,7 @@ mod tests {
 
         // ConnectRequest hashing (32 bytes body)
         let payload = vec![1u8; 32];
-        let hash = session.calculate_payload_hash(flags::CONNECT_REQUEST, &payload);
+        let hash = session.calculate_payload_hash(packet_flags::CONNECT_REQUEST, &payload);
         assert!(hash > 0);
 
         // Should match a direct Hash32 of the 32 bytes
@@ -631,7 +642,7 @@ mod tests {
         payload.extend_from_slice(&[1, 2, 3, 4]); // data
 
         // Checksum = hash(header) + hash(data)
-        let hash = session.calculate_payload_hash(flags::BLOB_FRAGMENTS, &payload);
+        let hash = session.calculate_payload_hash(packet_flags::BLOB_FRAGMENTS, &payload);
 
         let h1 = crate::protocol::crypto::Hash32::compute(&payload[0..16]);
         let h2 = crate::protocol::crypto::Hash32::compute(&payload[16..20]);
@@ -646,7 +657,7 @@ mod tests {
         payload[0] = 0xAA;
         payload[7] = 0xBB;
 
-        let hash = session.calculate_payload_hash(flags::ECHO_RESPONSE, &payload);
+        let hash = session.calculate_payload_hash(packet_flags::ECHO_RESPONSE, &payload);
         let expected = crate::protocol::crypto::Hash32::compute(&payload);
         assert_eq!(hash, expected);
     }
@@ -662,7 +673,7 @@ mod tests {
 
         let header = PacketHeader {
             sequence: 10,
-            flags: flags::ENCRYPTED_CHECKSUM,
+            flags: packet_flags::ENCRYPTED_CHECKSUM,
             checksum: 0,
             id: 123,
             time: 1000,

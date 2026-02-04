@@ -1,6 +1,6 @@
+use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Shortcut {
@@ -113,18 +113,32 @@ impl MessagePack for Enchantment {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u16::<LittleEndian>(self.spell_id).unwrap();
         writer.write_u16::<LittleEndian>(self.layer).unwrap();
-        writer.write_u16::<LittleEndian>(self.spell_category).unwrap();
-        writer.write_u16::<LittleEndian>(self.has_spell_set_id).unwrap();
+        writer
+            .write_u16::<LittleEndian>(self.spell_category)
+            .unwrap();
+        writer
+            .write_u16::<LittleEndian>(self.has_spell_set_id)
+            .unwrap();
         writer.write_u32::<LittleEndian>(self.power_level).unwrap();
         writer.write_f64::<LittleEndian>(self.start_time).unwrap();
         writer.write_f64::<LittleEndian>(self.duration).unwrap();
         writer.write_u32::<LittleEndian>(self.caster_guid).unwrap();
-        writer.write_f32::<LittleEndian>(self.degrade_modifier).unwrap();
-        writer.write_f32::<LittleEndian>(self.degrade_limit).unwrap();
-        writer.write_f64::<LittleEndian>(self.last_time_degraded).unwrap();
-        writer.write_u32::<LittleEndian>(self.stat_mod_type).unwrap();
+        writer
+            .write_f32::<LittleEndian>(self.degrade_modifier)
+            .unwrap();
+        writer
+            .write_f32::<LittleEndian>(self.degrade_limit)
+            .unwrap();
+        writer
+            .write_f64::<LittleEndian>(self.last_time_degraded)
+            .unwrap();
+        writer
+            .write_u32::<LittleEndian>(self.stat_mod_type)
+            .unwrap();
         writer.write_u32::<LittleEndian>(self.stat_mod_key).unwrap();
-        writer.write_f32::<LittleEndian>(self.stat_mod_value).unwrap();
+        writer
+            .write_f32::<LittleEndian>(self.stat_mod_value)
+            .unwrap();
         if let Some(spell_set_id) = self.spell_set_id {
             writer.write_u32::<LittleEndian>(spell_set_id).unwrap();
         }
@@ -140,7 +154,9 @@ impl Enchantment {
         if self.power_level != other.power_level {
             return self.power_level.cmp(&other.power_level);
         }
-        self.start_time.partial_cmp(&other.start_time).unwrap_or(std::cmp::Ordering::Equal)
+        self.start_time
+            .partial_cmp(&other.start_time)
+            .unwrap_or(std::cmp::Ordering::Equal)
     }
 }
 
@@ -273,7 +289,7 @@ mod tests {
         let mut offset = 4; // sk_type is read by table
         let mut skill = CreatureSkill::unpack(data, &mut offset).unwrap();
         skill.sk_type = 28;
-        
+
         assert_eq!(skill.sk_type, 28);
         assert_eq!(skill.ranks, 10);
         assert_eq!(skill.status, 3);
@@ -312,7 +328,7 @@ mod tests {
         let data = fixtures::ENCHANTMENT_SIMPLE;
         let mut offset = 0;
         let enc = Enchantment::unpack(data, &mut offset).unwrap();
-        
+
         assert_eq!(enc.spell_id, 1);
         assert_eq!(enc.power_level, 100);
         assert_eq!(enc.duration, 3600.0);
@@ -323,7 +339,7 @@ mod tests {
     fn test_hash_table_sorting() {
         let mut items = vec![
             (1u32, "one"),
-            (65u32, "sixty-five"), // Bucket 1 (65 % 64)
+            (65u32, "sixty-five"),  // Bucket 1 (65 % 64)
             (25u32, "twenty-five"), // Bucket 25
         ];
 
@@ -349,7 +365,7 @@ mod tests {
         };
         let mut buf = Vec::new();
         sc.pack(&mut buf);
-        
+
         let mut offset = 0;
         let unpacked = Shortcut::unpack(&buf, &mut offset).unwrap();
         assert_eq!(sc, unpacked);

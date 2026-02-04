@@ -39,10 +39,14 @@ pub fn write_string32(buf: &mut Vec<u8>, s: &str) {
 }
 
 pub fn read_string16(data: &[u8], offset: &mut usize) -> Option<String> {
-    if *offset + 2 > data.len() { return None; }
+    if *offset + 2 > data.len() {
+        return None;
+    }
     let len = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
     *offset += 2;
-    if *offset + len > data.len() { return None; }
+    if *offset + len > data.len() {
+        return None;
+    }
     let s = String::from_utf8_lossy(&data[*offset..*offset + len]).to_string();
     *offset += len;
     let structure_len = 2 + len;
@@ -52,20 +56,28 @@ pub fn read_string16(data: &[u8], offset: &mut usize) -> Option<String> {
 }
 
 pub fn read_string16_unpadded(data: &[u8], offset: &mut usize) -> Option<String> {
-    if *offset + 2 > data.len() { return None; }
+    if *offset + 2 > data.len() {
+        return None;
+    }
     let len = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
     *offset += 2;
-    if *offset + len > data.len() { return None; }
+    if *offset + len > data.len() {
+        return None;
+    }
     let s = String::from_utf8_lossy(&data[*offset..*offset + len]).to_string();
     *offset += len;
     Some(s)
 }
 
 pub fn read_data(data: &[u8], offset: &mut usize) -> Option<Vec<u8>> {
-    if *offset + 4 > data.len() { return None; }
+    if *offset + 4 > data.len() {
+        return None;
+    }
     let len = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
     *offset += 4;
-    if *offset + len > data.len() { return None; }
+    if *offset + len > data.len() {
+        return None;
+    }
     let buf = data[*offset..*offset + len].to_vec();
     *offset += len;
     Some(buf)
@@ -87,7 +99,7 @@ pub fn read_packed_u32(data: &[u8], offset: &mut usize) -> u32 {
         }
         let full = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let lower = (full >> 16) as u32;
+        let lower = full >> 16;
         let higher = (full & 0x7FFF) << 16;
         higher | lower
     } else {
@@ -112,6 +124,14 @@ pub fn read_packed_u32_with_known_type(data: &[u8], offset: &mut usize, known_ty
         raw | known_type
     } else {
         raw
+    }
+}
+
+pub fn write_packed_u32_with_known_type(buf: &mut Vec<u8>, value: u32, known_type: u32) {
+    if known_type != 0 && (value & known_type) == known_type {
+        write_packed_u32(buf, value - known_type);
+    } else {
+        write_packed_u32(buf, value);
     }
 }
 
@@ -200,13 +220,5 @@ mod tests {
         write_string32(&mut buf, "a");
         assert_eq!(buf.len(), 8);
         assert_eq!(LittleEndian::read_u32(&buf[0..4]), 2); // 1 byte prefix + 1 byte string = 2
-    }
-}
-
-pub fn write_packed_u32_with_known_type(buf: &mut Vec<u8>, value: u32, known_type: u32) {
-    if known_type != 0 && (value & known_type) == known_type {
-        write_packed_u32(buf, value - known_type);
-    } else {
-        write_packed_u32(buf, value);
     }
 }

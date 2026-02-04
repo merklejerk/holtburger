@@ -1,6 +1,6 @@
-use byteorder::{ByteOrder, LittleEndian};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 pub use crate::world::position::WorldPosition;
+use byteorder::{ByteOrder, LittleEndian};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePositionData {
@@ -10,7 +10,9 @@ pub struct UpdatePositionData {
 
 impl MessageUnpack for UpdatePositionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let pos = WorldPosition::unpack(data, offset)?;
@@ -34,12 +36,18 @@ pub struct MovementEventData {
 
 impl MessageUnpack for MovementEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let event_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
         let pos = WorldPosition::unpack(data, offset)?;
-        Some(MovementEventData { guid, event_type, pos })
+        Some(MovementEventData {
+            guid,
+            event_type,
+            pos,
+        })
     }
 }
 

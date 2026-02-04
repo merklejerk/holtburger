@@ -1,8 +1,8 @@
 use crate::math::{Quaternion, Vector3};
+use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::world::properties::UpdatePositionFlag;
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct WorldPosition {
@@ -19,7 +19,9 @@ impl MessagePack for WorldPosition {
 
 impl MessageUnpack for WorldPosition {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 32 > data.len() { return None; }
+        if *offset + 32 > data.len() {
+            return None;
+        }
         Some(Self::read_raw(data, offset))
     }
 }

@@ -1,6 +1,6 @@
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{read_string16, write_string16};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEntry {
@@ -11,16 +11,24 @@ pub struct CharacterEntry {
 
 impl MessageUnpack for CharacterEntry {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let name = read_string16(data, offset)?;
-        
-        if *offset + 4 > data.len() { return None; }
+
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let delete_time = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
-        Some(CharacterEntry { guid, name, delete_time })
+        Some(CharacterEntry {
+            guid,
+            name,
+            delete_time,
+        })
     }
 }
 
@@ -44,10 +52,14 @@ pub struct CharacterListData {
 impl MessageUnpack for CharacterListData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         // Skip leading padding (always 0)
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         *offset += 4;
 
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
         *offset += 4;
         let mut characters = Vec::new();
@@ -58,26 +70,32 @@ impl MessageUnpack for CharacterListData {
         }
 
         // Post-character list padding
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         *offset += 4;
 
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let max_slots = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
         let account_name = read_string16(data, offset)?;
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let use_turbine_chat = LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0;
         let has_tod_expansion = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) != 0;
         *offset += 8;
 
-        Some(CharacterListData { 
-            characters, 
-            max_slots, 
-            account_name, 
-            use_turbine_chat, 
-            has_tod_expansion 
+        Some(CharacterListData {
+            characters,
+            max_slots,
+            account_name,
+            use_turbine_chat,
+            has_tod_expansion,
         })
     }
 }
@@ -92,8 +110,10 @@ impl MessagePack for CharacterListData {
         buf.write_u32::<LittleEndian>(0).unwrap(); // Middle padding
         buf.write_u32::<LittleEndian>(self.max_slots).unwrap();
         write_string16(buf, &self.account_name);
-        buf.write_u32::<LittleEndian>(self.use_turbine_chat as u32).unwrap();
-        buf.write_u32::<LittleEndian>(self.has_tod_expansion as u32).unwrap();
+        buf.write_u32::<LittleEndian>(self.use_turbine_chat as u32)
+            .unwrap();
+        buf.write_u32::<LittleEndian>(self.has_tod_expansion as u32)
+            .unwrap();
     }
 }
 
@@ -104,7 +124,9 @@ pub struct CharacterEnterWorldRequestData {
 
 impl MessageUnpack for CharacterEnterWorldRequestData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         Some(CharacterEnterWorldRequestData { guid })
@@ -125,7 +147,9 @@ pub struct CharacterEnterWorldData {
 
 impl MessageUnpack for CharacterEnterWorldData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let account = read_string16(data, offset)?;
@@ -149,12 +173,18 @@ pub struct ServerNameData {
 
 impl MessageUnpack for ServerNameData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let online_count = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let online_cap = LittleEndian::read_u32(&data[*offset + 4 ..*offset + 8]);
+        let online_cap = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
         let name = read_string16(data, offset)?;
-        Some(ServerNameData { name, online_count, online_cap })
+        Some(ServerNameData {
+            name,
+            online_count,
+            online_cap,
+        })
     }
 }
 
@@ -177,7 +207,7 @@ mod tests {
         // Skip opcode (4 bytes)
         let mut offset = 4;
         let unpacked = CharacterEnterWorldRequestData::unpack(data, &mut offset).unwrap();
-        
+
         assert_eq!(unpacked.guid, 0x12345678);
         assert_eq!(offset, data.len());
     }
@@ -199,7 +229,7 @@ mod tests {
         // Skip opcode (4 bytes)
         let mut offset = 4;
         let unpacked = CharacterEnterWorldData::unpack(data, &mut offset).unwrap();
-        
+
         assert_eq!(unpacked.guid, 0x12345678);
         assert_eq!(unpacked.account, "Alice");
         assert_eq!(offset, data.len());
@@ -222,7 +252,7 @@ mod tests {
         // Skip opcode (4 bytes)
         let mut offset = 4;
         let unpacked = CharacterListData::unpack(data, &mut offset).unwrap();
-        
+
         assert_eq!(unpacked.characters.len(), 1);
         assert_eq!(unpacked.characters[0].guid, 0x12345678);
         assert_eq!(unpacked.characters[0].name, "Alice");

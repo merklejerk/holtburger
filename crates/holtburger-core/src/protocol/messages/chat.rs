@@ -14,11 +14,18 @@ impl MessageUnpack for HearSpeechData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
         let sender_name = read_string16(data, offset)?;
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let sender = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let chat_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
-        Some(HearSpeechData { message, sender, sender_name, chat_type })
+        Some(HearSpeechData {
+            message,
+            sender,
+            sender_name,
+            chat_type,
+        })
     }
 }
 
@@ -40,12 +47,18 @@ pub struct SoulEmoteData {
 
 impl MessageUnpack for SoulEmoteData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let sender = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let sender_name = read_string16(data, offset)?;
         let text = read_string16(data, offset)?;
-        Some(SoulEmoteData { sender, sender_name, text })
+        Some(SoulEmoteData {
+            sender,
+            sender_name,
+            text,
+        })
     }
 }
 

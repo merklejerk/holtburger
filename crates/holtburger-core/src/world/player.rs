@@ -2,7 +2,7 @@ use super::WorldEvent;
 use super::stats;
 use crate::protocol::messages::*;
 use crate::world::properties::EnchantmentTypeFlags;
-use std::collections::{HashMap, BTreeMap};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SkillBase {
@@ -414,8 +414,7 @@ impl PlayerState {
                     );
 
                     let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
-                    let current_val =
-                        self.derive_skill_value(skill_type, *ranks, *init, true);
+                    let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
 
                     let skill_obj = stats::Skill {
                         skill_type,
@@ -525,9 +524,9 @@ impl PlayerState {
                 } = &**data;
                 if *target == self.guid {
                     self.enchantments
-                        .retain(|e| e.spell_id != (*spell_id as u16) || e.layer != *layer);
+                        .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                     events.push(WorldEvent::EnchantmentRemoved {
-                        spell_id: *spell_id as u16,
+                        spell_id: *spell_id,
                         layer: *layer,
                     });
                     self.emit_derived_stats(events);
@@ -535,17 +534,13 @@ impl PlayerState {
                 }
             }
             GameMessage::MagicRemoveMultipleEnchantments(data) => {
-                let MagicRemoveMultipleEnchantmentsData {
-                    target,
-                    spells,
-                    ..
-                } = &**data;
+                let MagicRemoveMultipleEnchantmentsData { target, spells, .. } = &**data;
                 if *target == self.guid {
                     for (spell_id, layer) in spells {
                         self.enchantments
-                            .retain(|e| e.spell_id != (*spell_id as u16) || e.layer != *layer);
+                            .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                         events.push(WorldEvent::EnchantmentRemoved {
-                            spell_id: *spell_id as u16,
+                            spell_id: *spell_id,
                             layer: *layer,
                         });
                     }
@@ -578,13 +573,15 @@ impl PlayerState {
                 let health = data.health;
                 let target_guid = if target == 0 { self.guid } else { target };
 
-                if target_guid == self.guid && target_guid != 0
-                    && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health) {
-                        // UpdateHealth is a percentage float (0.0 to 1.0)
-                        let new_current = (health * vital_obj.buffed_max as f32) as u32;
-                        vital_obj.current = new_current;
-                        events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
-                        return true;
+                if target_guid == self.guid
+                    && target_guid != 0
+                    && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health)
+                {
+                    // UpdateHealth is a percentage float (0.0 to 1.0)
+                    let new_current = (health * vital_obj.buffed_max as f32) as u32;
+                    vital_obj.current = new_current;
+                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                    return true;
                 }
             }
             _ => {}

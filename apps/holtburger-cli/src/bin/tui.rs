@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 struct TuiLogger {
     tx: mpsc::UnboundedSender<ClientEvent>,
     file: Option<Mutex<File>>,
-    verbose_tui: bool,
+    verbosity: u8,
 }
 
 impl log::Log for TuiLogger {
@@ -39,18 +39,15 @@ impl log::Log for TuiLogger {
                 let _ = file.flush();
             }
 
-            // Only send to TUI if verbose is enabled or it's a high level message
-            if self.verbose_tui || record.level() <= log::Level::Info {
-                let _ = self
-                    .tx
-                    .send(ClientEvent::Message(holtburger_core::ChatMessage {
-                        kind: match record.level() {
-                            log::Level::Error => holtburger_core::MessageKind::Error,
-                            log::Level::Warn => holtburger_core::MessageKind::Warning,
-                            _ => holtburger_core::MessageKind::System,
-                        },
-                        text: log_msg,
-                    }));
+            // Only send to TUI if verbose is high enough or it's a high level message
+            let should_send = match record.level() {
+                log::Level::Error | log::Level::Warn | log::Level::Info => true,
+                log::Level::Debug => self.verbosity >= 4,
+                log::Level::Trace => self.verbosity >= 5,
+            };
+
+            if should_send {
+                let _ = self.tx.send(ClientEvent::LogMessage(log_msg));
             }
         }
     }
@@ -81,8 +78,10 @@ struct Args {
     capture: Option<String>,
     #[arg(short, long)]
     log: Option<String>,
-    #[arg(short, long)]
-    verbose: bool,
+    #[arg(long)]
+    debug_file: Option<String>,
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
     #[arg(long)]
     no_emojis: bool,
 }
@@ -101,8 +100,20 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-    if args.verbose || args.log.is_some() {
-        let file = if let Some(path) = &args.log {
+    let debug_file = if let Some(path) = &args.debug_file {
+        match File::create(path) {
+            Ok(f) => Some(Mutex::new(f)),
+            Err(e) => {
+                eprintln!("Failed to create debug file: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    if args.verbose > 0 || args.log.is_some() {
+        let log_file = if let Some(path) = &args.log {
             match File::create(path) {
                 Ok(f) => Some(Mutex::new(f)),
                 Err(e) => {
@@ -116,8 +127,8 @@ async fn main() -> Result<()> {
 
         let logger = TuiLogger {
             tx: event_tx.clone(),
-            file,
-            verbose_tui: args.verbose,
+            file: log_file,
+            verbosity: args.verbose,
         };
         log::set_boxed_logger(Box::new(logger)).ok();
         log::set_max_level(log::LevelFilter::Debug);
@@ -192,10 +203,10 @@ async fn main() -> Result<()> {
 
     refresh_context_buffer(&mut app_state);
 
-    if args.verbose {
+    if args.verbose > 0 {
         app_state.messages.push(holtburger_core::ChatMessage {
             kind: holtburger_core::MessageKind::System,
-            text: "Verbose mode enabled. Logs will appear in chat.".to_string(),
+            text: format!("Verbosity level {} enabled.", args.verbose),
         });
     }
 
@@ -514,21 +525,26 @@ async fn main() -> Result<()> {
                         },
                         KeyCode::PageUp => {
                             if let ui::UIState::Chat = app_state.state {
+                                let (_, main_chunks) = ui::get_layout(terminal.size()?);
                                 match app_state.focused_pane {
                                     ui::FocusedPane::Chat => {
-                                        app_state.scroll_offset = app_state
-                                            .scroll_offset
-                                            .saturating_add(ui::PAGE_SCROLL_STEP);
+                                        let h = main_chunks[1].height.saturating_sub(2) as usize;
+                                        let step = (h / 2) + 1;
+                                        app_state.scroll_offset =
+                                            app_state.scroll_offset.saturating_add(step);
                                     }
                                     ui::FocusedPane::Context => {
-                                        app_state.context_scroll_offset = app_state
-                                            .context_scroll_offset
-                                            .saturating_add(ui::PAGE_SCROLL_STEP);
+                                        let h = main_chunks[2].height.saturating_sub(2) as usize;
+                                        let step = (h / 2) + 1;
+                                        app_state.context_scroll_offset =
+                                            app_state.context_scroll_offset.saturating_add(step);
                                     }
                                     ui::FocusedPane::Dashboard => {
+                                        let h = app_state.last_dashboard_height;
+                                        let step = (h / 2) + 1;
                                         app_state.selected_dashboard_index = app_state
                                             .selected_dashboard_index
-                                            .saturating_sub(ui::PAGE_SCROLL_STEP);
+                                            .saturating_sub(step);
                                     }
                                     _ => {}
                                 }
@@ -536,22 +552,27 @@ async fn main() -> Result<()> {
                         }
                         KeyCode::PageDown => {
                             if let ui::UIState::Chat = app_state.state {
+                                let (_, main_chunks) = ui::get_layout(terminal.size()?);
                                 match app_state.focused_pane {
                                     ui::FocusedPane::Chat => {
-                                        app_state.scroll_offset = app_state
-                                            .scroll_offset
-                                            .saturating_sub(ui::PAGE_SCROLL_STEP);
+                                        let h = main_chunks[1].height.saturating_sub(2) as usize;
+                                        let step = (h / 2) + 1;
+                                        app_state.scroll_offset =
+                                            app_state.scroll_offset.saturating_sub(step);
                                     }
                                     ui::FocusedPane::Context => {
-                                        app_state.context_scroll_offset = app_state
-                                            .context_scroll_offset
-                                            .saturating_sub(ui::PAGE_SCROLL_STEP);
+                                        let h = main_chunks[2].height.saturating_sub(2) as usize;
+                                        let step = (h / 2) + 1;
+                                        app_state.context_scroll_offset =
+                                            app_state.context_scroll_offset.saturating_sub(step);
                                     }
                                     ui::FocusedPane::Dashboard => {
                                         let dashboard_count = app_state.dashboard_item_count();
+                                        let h = app_state.last_dashboard_height;
+                                        let step = (h / 2) + 1;
                                         app_state.selected_dashboard_index = (app_state
                                             .selected_dashboard_index
-                                            + ui::PAGE_SCROLL_STEP)
+                                            + step)
                                             .min(dashboard_count.saturating_sub(1));
                                     }
                                     _ => {}
@@ -685,12 +706,54 @@ async fn main() -> Result<()> {
         }
 
         while let Ok(event) = event_rx.try_recv() {
+            let mut log_text = None;
+            match &event {
+                ClientEvent::LogMessage(msg) => {
+                    log_text = Some(msg.clone());
+                }
+                ClientEvent::CharacterList(_)
+                | ClientEvent::PlayerEntered { .. }
+                | ClientEvent::StatusUpdate { .. } => {
+                    if args.verbose >= 1 {
+                        log_text = Some(format!("ClientEvent: {:?}", event));
+                    }
+                }
+                ClientEvent::World(world_event) => {
+                    if args.verbose >= 2 {
+                        log_text = Some(format!("WorldEvent: {:?}", world_event));
+                    }
+                }
+                ClientEvent::GameMessage(msg) => {
+                    if args.verbose >= 3 {
+                        log_text = Some(format!("GameMessage: {:?}", msg));
+                    }
+                }
+                ClientEvent::RawMessage(data) => {
+                    if args.verbose >= 4 {
+                        log_text = Some(format!("RawPacket ({} bytes): {:02X?}", data.len(), data));
+                    }
+                }
+                _ => {}
+            }
+
+            if let Some(text) = log_text {
+                if let Some(file_mutex) = &debug_file {
+                    if let Ok(mut file) = file_mutex.lock() {
+                        let _ = writeln!(file, "{}", text);
+                        let _ = file.flush();
+                    }
+                } else {
+                    app_state.messages.push(holtburger_core::ChatMessage {
+                        kind: holtburger_core::MessageKind::System,
+                        text: text.clone(),
+                    });
+                }
+            }
+
             match event {
+                ClientEvent::LogMessage(_) => {}
                 ClientEvent::Message(msg) => {
                     app_state.messages.push(msg);
-                    // Only auto-scroll to bottom if we are already at the bottom.
-                    // If we are scrolled up, we stay at the current scroll_offset.
-                    // Note: This still causes text to slide up because scroll_offset is from the bottom.
                 }
                 ClientEvent::CharacterList(chars) => {
                     app_state.characters = chars;
@@ -837,6 +900,7 @@ async fn main() -> Result<()> {
                     app_state.logon_retry = logon_retry;
                     app_state.enter_retry = enter_retry;
                 }
+                ClientEvent::GameMessage(_) | ClientEvent::RawMessage(_) => {}
             }
         }
     }

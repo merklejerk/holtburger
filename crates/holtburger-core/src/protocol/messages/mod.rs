@@ -211,7 +211,7 @@ impl GameMessage {
             }
 
             _ => {
-                log::debug!(
+                log::warn!(
                     "<<< Unknown Opcode: {:08X} Data Len: {}",
                     opcode,
                     data.len() - 4

@@ -66,9 +66,9 @@ async fn main() -> Result<()> {
     client.set_event_tx(event_tx);
     client.set_command_rx(command_rx);
 
-    let password = args.password.clone();
+    let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
     let mut client_handle = tokio::spawn(async move {
-        match client.run(&password).await {
+        match client.run().await {
             Err(e) if !e.to_string().contains("Graceful disconnect") => {
                 log::error!("Client error: {}", e);
             }

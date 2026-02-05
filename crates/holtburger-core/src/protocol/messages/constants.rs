@@ -72,5 +72,6 @@ pub mod game_event_opcodes {
 
 pub mod character_error_codes {
     pub const ACCOUNT_ALREADY_LOGGED_ON: u32 = 0x00000001;
-    pub const ENTER_GAME_CHARACTER_IN_WORLD: u32 = 0x00000002;
+    pub const ENTER_GAME_CHARACTER_IN_WORLD: u32 = 0x0000000D;
+    pub const ENTER_GAME_CHARACTER_IN_WORLD_SERVER: u32 = 0x00000010;
 }

@@ -81,9 +81,9 @@ async fn main() -> Result<()> {
     client.set_event_tx(event_tx);
     client.set_command_rx(command_rx);
 
-    let password = args.password.clone();
+    let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
     let client_handle = tokio::spawn(async move {
-        match client.run(&password).await {
+        match client.run().await {
             Err(e) if !e.to_string().contains("Graceful disconnect") => {
                 log::error!("Client error: {}", e);
             }
@@ -120,7 +120,10 @@ async fn main() -> Result<()> {
                 tokio::select! {
                     Some(event) = event_rx.recv() => {
                         match event {
-                            ClientEvent::Message(msg) => { println!("{}", msg.text); }
+                            ClientEvent::LogMessage(msg) => { println!("{}", msg); }
+                            ClientEvent::ServerMessage(msg) => { println!("{}", msg); }
+                            ClientEvent::Chat { sender, message } => { println!("{}: {}", sender, message); }
+                            ClientEvent::Emote { sender, text } => { println!("{} {}", sender, text); }
                             ClientEvent::CharacterList(chars) => {
                                 println!("Available characters: {:?}", chars.iter().map(|c| &c.name).collect::<Vec<_>>());
                                 if character_pref.is_none() {

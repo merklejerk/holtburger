@@ -1,6 +1,6 @@
-use crate::ui::AppState;
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::classification;
+use crate::ui::AppState;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::properties::{PropertyInt, RadarColor};
 use ratatui::Frame;
@@ -92,7 +92,11 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
             if total > height {
                 let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
-                    .position(state.selected_dashboard_index.min(total.saturating_sub(height)));
+                    .position(
+                        state
+                            .selected_dashboard_index
+                            .min(total.saturating_sub(height)),
+                    );
                 f.render_stateful_widget(
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)
@@ -120,7 +124,13 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, dist, depth))| {
-            render_entity_list_item(e, Some(*dist), *depth, i == state.selected_dashboard_index, state.use_emojis)
+            render_entity_list_item(
+                e,
+                Some(*dist),
+                *depth,
+                i == state.selected_dashboard_index,
+                state.use_emojis,
+            )
         })
         .collect()
 }
@@ -131,7 +141,13 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, _, depth))| {
-            render_entity_list_item(e, None, *depth, i == state.selected_dashboard_index, state.use_emojis)
+            render_entity_list_item(
+                e,
+                None,
+                *depth,
+                i == state.selected_dashboard_index,
+                state.use_emojis,
+            )
         })
         .collect()
 }
@@ -166,7 +182,10 @@ fn render_entity_list_item(
     let indent = "  ".repeat(depth);
 
     let text = if let Some(d) = dist {
-        format!("{}[{}] {:<15} [{:.1}m]", indent, type_marker, display_name, d)
+        format!(
+            "{}[{}] {:<15} [{:.1}m]",
+            indent, type_marker, display_name, d
+        )
     } else {
         format!("{}[{}] {:<15}", indent, type_marker, display_name)
     };

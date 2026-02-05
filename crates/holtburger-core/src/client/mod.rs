@@ -1,12 +1,12 @@
-use anyhow::{Result, anyhow};
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 use crate::protocol::crypto::Isaac;
 use crate::protocol::messages::actions;
 use crate::protocol::messages::*;
 use crate::session::Session;
-use crate::world::{WorldState, WorldEvent, state::ServerTimeSync};
+use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
+use anyhow::{Result, anyhow};
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 pub mod types;
 use types::*;
@@ -22,9 +22,6 @@ pub struct Client {
     event_tx: Option<mpsc::UnboundedSender<ClientEvent>>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     connection_cookie: u64,
-    password: Option<String>,
-    logon_retry: RetryState,
-    enter_retry: RetryState,
     pub message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
 }
@@ -83,9 +80,6 @@ impl Client {
             event_tx: None,
             command_rx: None,
             connection_cookie: 0,
-            password: None,
-            logon_retry: RetryState::new(5),
-            enter_retry: RetryState::new(5),
             message_dump_dir: None,
             message_counter: 0,
         })
@@ -99,116 +93,108 @@ impl Client {
         self.command_rx = Some(rx);
     }
 
-    fn send_message_event(&self, kind: ChatMessageKind, text: &str) {
-        if let Some(tx) = &self.event_tx {
-            let _ = tx.send(ClientEvent::Message(ChatMessage {
-                kind,
-                text: text.to_string(),
-            }));
-        }
-    }
-
     fn send_status_event(&self) {
         if let Some(tx) = &self.event_tx {
-            let logon_retry = if self.logon_retry.active {
-                Some((
-                    self.logon_retry.attempts,
-                    self.logon_retry.max_attempts,
-                    self.logon_retry.next_time,
-                ))
-            } else {
-                None
-            };
-            let enter_retry = if self.enter_retry.active {
-                Some((
-                    self.enter_retry.attempts,
-                    self.enter_retry.max_attempts,
-                    self.enter_retry.next_time,
-                ))
-            } else {
-                None
-            };
             let _ = tx.send(ClientEvent::StatusUpdate {
                 state: self.state.clone(),
-                logon_retry,
-                enter_retry,
             });
         }
     }
 
     async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::SelectCharacter(id) => self.select_character(id).await,
+            ClientCommand::Login(password) => {
+                log::info!("Attempting login...");
+                self.send_login_request(&password).await
+            }
+            ClientCommand::SelectCharacter(id) => {
+                log::info!("Selecting character: 0x{:08X}", id);
+                self.select_character(id).await
+            }
             ClientCommand::SelectCharacterByIndex(idx) => match &self.state {
                 ClientState::CharacterSelection(chars) if (1..=chars.len()).contains(&idx) => {
-                    let char_id = chars[idx - 1].guid;
-                    self.select_character(char_id).await
+                    let char_guid = chars[idx - 1].guid;
+                    let char_name = &chars[idx - 1].name;
+                    log::info!(
+                        "Selecting character by index {}: {} (0x{:08X})",
+                        idx,
+                        char_name,
+                        char_guid
+                    );
+                    self.select_character(char_guid).await
                 }
                 _ => Ok(()),
             },
+            ClientCommand::EnterWorld => {
+                if let Some(char_id) = self.character_id {
+                    log::info!(
+                        "Attempting to enter world with character: 0x{:08X}",
+                        char_id
+                    );
+                    self.select_character(char_id).await
+                } else {
+                    Ok(())
+                }
+            }
             ClientCommand::Talk(text) => {
                 if matches!(self.state, ClientState::InWorld) {
+                    log::info!(">>> You say: \"{}\"", text);
                     return self.send_talk(&text).await;
                 }
                 Ok(())
             }
             ClientCommand::Ping => {
+                log::info!(">>> Sending Ping");
                 self.session
-                    .send_message(&GameMessage::GameAction(
-                        Box::new(GameActionData {
-                            sequence: 0,
-                            action: actions::PING_REQUEST,
-                            data: Vec::new(),
-                        }),
-                    ))
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                        sequence: 0,
+                        action: actions::PING_REQUEST,
+                        data: Vec::new(),
+                    })))
                     .await
             }
             ClientCommand::Identify(guid) => {
+                log::info!(">>> Identifying: 0x{:08X}", guid);
                 self.session
-                    .send_message(&GameMessage::GameAction(
-                        Box::new(GameActionData {
-                            sequence: 0,
-                            action: actions::IDENTIFY_OBJECT,
-                            data: guid.to_le_bytes().to_vec(),
-                        }),
-                    ))
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                        sequence: 0,
+                        action: actions::IDENTIFY_OBJECT,
+                        data: guid.to_le_bytes().to_vec(),
+                    })))
                     .await
             }
             ClientCommand::Use(guid) => {
+                log::info!(">>> Using: 0x{:08X}", guid);
                 self.session
-                    .send_message(&GameMessage::GameAction(
-                        Box::new(GameActionData {
-                            sequence: 0,
-                            action: actions::USE,
-                            data: guid.to_le_bytes().to_vec(),
-                        }),
-                    ))
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                        sequence: 0,
+                        action: actions::USE,
+                        data: guid.to_le_bytes().to_vec(),
+                    })))
                     .await
             }
             ClientCommand::Drop(guid) => {
+                log::info!(">>> Dropping: 0x{:08X}", guid);
                 self.session
-                    .send_message(&GameMessage::GameAction(
-                        Box::new(GameActionData {
-                            sequence: 0,
-                            action: actions::DROP_ITEM,
-                            data: guid.to_le_bytes().to_vec(),
-                        }),
-                    ))
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                        sequence: 0,
+                        action: actions::DROP_ITEM,
+                        data: guid.to_le_bytes().to_vec(),
+                    })))
                     .await
             }
             ClientCommand::Get(guid) => {
+                log::info!(">>> Getting: 0x{:08X}", guid);
                 let mut data = guid.to_le_bytes().to_vec();
                 let pguid = self.world.player.guid;
                 data.extend_from_slice(&pguid.to_le_bytes());
                 data.extend_from_slice(&0u32.to_le_bytes()); // placement
                 self.session
-                    .send_message(&GameMessage::GameAction(
-                        Box::new(GameActionData {
-                            sequence: 0,
-                            action: actions::PUT_ITEM_IN_CONTAINER,
-                            data,
-                        }),
-                    ))
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                        sequence: 0,
+                        action: actions::PUT_ITEM_IN_CONTAINER,
+                        data,
+                    })))
                     .await
             }
             ClientCommand::MoveItem {
@@ -216,20 +202,25 @@ impl Client {
                 container,
                 placement,
             } => {
+                log::info!(
+                    ">>> Moving item 0x{:08X} to container 0x{:08X} (slot {})",
+                    item,
+                    container,
+                    placement
+                );
                 let mut data = item.to_le_bytes().to_vec();
                 data.extend_from_slice(&container.to_le_bytes());
                 data.extend_from_slice(&placement.to_le_bytes());
                 self.session
-                    .send_message(&GameMessage::GameAction(
-                        Box::new(GameActionData {
-                            sequence: 0,
-                            action: actions::PUT_ITEM_IN_CONTAINER,
-                            data,
-                        }),
-                    ))
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                        sequence: 0,
+                        action: actions::PUT_ITEM_IN_CONTAINER,
+                        data,
+                    })))
                     .await
             }
             ClientCommand::Quit => {
+                log::info!("Disconnecting...");
                 self.disconnect().await?;
                 Err(anyhow!("Graceful disconnect"))
             }
@@ -250,14 +241,10 @@ impl Client {
         Ok(())
     }
 
-    pub async fn run(&mut self, password: &str) -> Result<()> {
-        self.password = Some(password.to_string());
-
-        // Initial handshake: Start by sending Login Request
-        self.send_login_request(password).await?;
+    pub async fn run(&mut self) -> Result<()> {
+        // Initial handshake: If this is an activation/logon session, the bin should send ClientCommand::Login
         self.send_status_event();
 
-        let mut retry_tick = tokio::time::interval(Duration::from_secs(1));
         let mut physics_tick = tokio::time::interval(Duration::from_millis(30));
         let mut last_physics_time = Instant::now();
 
@@ -313,21 +300,6 @@ impl Client {
                     // TODO: Use actual player radius from DAT/Properties
                     self.world.tick(dt, 0.35);
                 }
-                _ = retry_tick.tick() => {
-                    let now = Instant::now();
-                    if self.logon_retry.tick(now) {
-                        self.send_status_event();
-                        if let Some(pw) = self.password.clone() {
-                            let _ = self.send_login_request(&pw).await;
-                        }
-                    }
-                    if self.enter_retry.tick(now) {
-                        self.send_status_event();
-                        if let Some(char_id) = self.character_id {
-                            let _ = self.send_character_enter_world(char_id).await;
-                        }
-                    }
-                }
             }
         }
     }
@@ -345,7 +317,11 @@ impl Client {
 
         let message = GameMessage::unpack(data);
         if message.is_none() {
-            log::warn!("Failed to unpack GameMessage ({} bytes): {:02X?}", data.len(), data);
+            log::warn!(
+                "Failed to unpack GameMessage ({} bytes): {:02X?}",
+                data.len(),
+                data
+            );
             return Ok(());
         }
         let message = message.unwrap();
@@ -363,7 +339,7 @@ impl Client {
         }
 
         match message {
-            GameMessage::CharacterList(data) => self.handle_character_list(data.characters).await,
+            GameMessage::CharacterList(data) => self.handle_character_list(*data).await,
             GameMessage::CharacterEnterWorldServerReady => {
                 if let Some(char_id) = self.character_id {
                     self.send_character_enter_world(char_id).await
@@ -375,7 +351,6 @@ impl Client {
                 GameEventData::PlayerDescription(_) | GameEventData::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
-                        self.enter_retry.reset();
                         self.send_status_event();
                     }
                     Ok(())
@@ -426,15 +401,8 @@ impl Client {
                     });
                 }
 
-                self.send_message_event(
-                    ChatMessageKind::System,
-                    &format!("Created as GUID: {:08X} ({})", player_id, name),
-                );
-
                 self.send_login_complete().await?;
                 self.state = ClientState::InWorld;
-                self.logon_retry.reset();
-                self.enter_retry.reset();
                 self.send_status_event();
                 Ok(())
             }
@@ -444,7 +412,9 @@ impl Client {
                     .await
             }
             GameMessage::ServerMessage(data) => {
-                self.send_message_event(ChatMessageKind::System, &data.message);
+                if let Some(tx) = &self.event_tx {
+                    let _ = tx.send(ClientEvent::ServerMessage(data.message.clone()));
+                }
                 Ok(())
             }
             GameMessage::CharacterError(data) => self.handle_character_error(data.error_code),
@@ -456,52 +426,52 @@ impl Client {
                     }));
                 self.session.send_message(&resp).await
             }
-            GameMessage::ServerName(data) => {
-                self.send_message_event(
-                    ChatMessageKind::System,
-                    &format!("Server: {} ({} online)", data.name, data.online_count),
-                );
-                Ok(())
-            }
+            GameMessage::ServerName(_data) => Ok(()),
             GameMessage::HearSpeech(data) => {
-                let sender = if data.sender_name.is_empty() {
-                    "You"
-                } else {
-                    &data.sender_name
-                };
-                self.send_message_event(
-                    ChatMessageKind::Chat,
-                    &format!("{}: {}", sender, data.message),
-                );
+                if let Some(tx) = &self.event_tx {
+                    let sender = if data.sender_name.is_empty() {
+                        "You".to_string()
+                    } else {
+                        data.sender_name.clone()
+                    };
+                    let _ = tx.send(ClientEvent::Chat {
+                        sender,
+                        message: data.message.clone(),
+                    });
+                }
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
-                self.send_message_event(
-                    ChatMessageKind::Emote,
-                    &format!("{} {}", data.sender_name, data.text),
-                );
+                if let Some(tx) = &self.event_tx {
+                    let _ = tx.send(ClientEvent::Emote {
+                        sender: data.sender_name.clone(),
+                        text: data.text.clone(),
+                    });
+                }
                 Ok(())
             }
             _ => Ok(()),
         }
     }
 
-    async fn handle_character_list(
-        &mut self,
-        characters: Vec<CharacterEntry>,
-    ) -> Result<()> {
-        self.logon_retry.reset();
-        self.enter_retry.reset();
-        self.characters = characters.clone();
+    async fn handle_character_list(&mut self, data: CharacterListData) -> Result<()> {
+        self.characters = data.characters.clone();
+
+        log::info!("Character List for account: {}", data.account_name);
+        for (i, c) in self.characters.iter().enumerate() {
+            log::info!("  [{}] {} (0x{:08X})", i + 1, c.name, c.guid);
+        }
+
         if let Some(pref) = &self.character_preference {
             if let Ok(idx) = pref.parse::<usize>()
                 && idx > 0
-                && idx <= characters.len()
+                && idx <= self.characters.len()
             {
-                let id = characters[idx - 1].guid;
+                let id = self.characters[idx - 1].guid;
                 return self.select_character(id).await;
             }
-            if let Some(c) = characters
+            if let Some(c) = self
+                .characters
                 .iter()
                 .find(|c| c.name.to_lowercase() == pref.to_lowercase())
             {
@@ -509,10 +479,10 @@ impl Client {
                 return self.select_character(id).await;
             }
         }
-        self.state = ClientState::CharacterSelection(characters.clone());
+        self.state = ClientState::CharacterSelection(self.characters.clone());
         self.send_status_event();
         if let Some(tx) = &self.event_tx {
-            let _ = tx.send(ClientEvent::CharacterList(characters));
+            let _ = tx.send(ClientEvent::CharacterList(self.characters.clone()));
         }
         Ok(())
     }
@@ -526,17 +496,10 @@ impl Client {
     }
 
     fn handle_character_error(&mut self, error_code: u32) -> Result<()> {
-        if error_code == character_error_codes::ACCOUNT_ALREADY_LOGGED_ON {
-            self.logon_retry.schedule();
-            self.send_status_event();
-        } else if error_code == character_error_codes::ENTER_GAME_CHARACTER_IN_WORLD {
-            self.enter_retry.schedule();
-            self.send_status_event();
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientEvent::CharacterError(error_code));
         }
-        self.send_message_event(
-            ChatMessageKind::Error,
-            &format!("Character Error: 0x{:08X}", error_code),
-        );
+        log::warn!("Character Error received: 0x{:08X}", error_code);
         Ok(())
     }
 
@@ -610,10 +573,7 @@ impl Client {
         Ok(())
     }
 
-    async fn handle_handshake_request(
-        &mut self,
-        crd: ConnectRequestData,
-    ) -> Result<()> {
+    async fn handle_handshake_request(&mut self, crd: ConnectRequestData) -> Result<()> {
         log::debug!("<<< Handshake Request (Incoming): {:?}", crd);
         self.connection_cookie = crd.cookie;
         self.session.client_id = crd.client_id;
@@ -636,7 +596,10 @@ impl Client {
         let mut activation_addr = self.session.server_addr;
         activation_addr.set_port(self.session.server_addr.port() + 1);
 
-        tokio::time::sleep(Duration::from_millis(crate::protocol::messages::transport::ACE_HANDSHAKE_RACE_DELAY_MS)).await;
+        tokio::time::sleep(Duration::from_millis(
+            crate::protocol::messages::transport::ACE_HANDSHAKE_RACE_DELAY_MS,
+        ))
+        .await;
         log::debug!(">>> Sending Handshake Response to {}", activation_addr);
         self.session
             .send_packet_to_addr(resp_header, &payload, activation_addr)
@@ -652,11 +615,6 @@ impl Client {
         );
         self.connection_cookie = cookie;
         self.session.client_id = client_id;
-
-        // After handshake, we can finally login
-        if let Some(pw) = self.password.clone() {
-            self.send_login_request(&pw).await?;
-        }
 
         Ok(())
     }

@@ -1,4 +1,3 @@
-
 // Layout constants
 pub const STATUS_BAR_HEIGHT: u16 = 3;
 pub const INPUT_AREA_HEIGHT: u16 = 3;
@@ -20,6 +19,23 @@ pub const CHAT_HISTORY_WINDOW_SIZE: usize = 10000;
 // Interaction constants
 pub const SCROLL_STEP: usize = 3;
 
+#[derive(Debug, Clone)]
+pub enum ChatMessageKind {
+    Info,
+    System,
+    Chat,
+    Tell,
+    Emote,
+    Error,
+    Warning,
+    Debug,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub kind: ChatMessageKind,
+    pub text: String,
+}
 
 #[derive(PartialEq, Debug)]
 pub enum UIState {

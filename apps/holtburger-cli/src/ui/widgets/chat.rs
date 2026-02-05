@@ -1,7 +1,6 @@
-use crate::ui::AppState;
-use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, FocusedPane};
+use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, ChatMessageKind, FocusedPane};
 use super::super::utils::wrap_text;
-use holtburger_core::ChatMessageKind;
+use crate::ui::AppState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -18,9 +17,9 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let m_len = state.messages.len();
     let window_start = m_len.saturating_sub(window_size);
-    // For now, let's just optimize by only wrapping the window. 
+    // For now, let's just optimize by only wrapping the window.
     // Even at 10k messages, if we don't re-wrap, it should be fast.
-    
+
     let mut all_lines = Vec::new();
     for m in &state.messages[window_start..] {
         let color = match m.kind {
@@ -31,6 +30,7 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             ChatMessageKind::System => Color::DarkGray,
             ChatMessageKind::Error => Color::Red,
             ChatMessageKind::Warning => Color::Yellow,
+            ChatMessageKind::Debug => Color::Indexed(242), // Greyish
         };
 
         let wrapped = wrap_text(&m.text, width);
@@ -41,7 +41,7 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let total_lines = all_lines.len();
     state.maintain_scroll(false, total_lines, height);
-    
+
     let effective_scroll = state.scroll_offset;
     let end = total_lines.saturating_sub(effective_scroll);
     let start = end.saturating_sub(height);

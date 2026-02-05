@@ -274,7 +274,7 @@ impl Session {
             isaac.consume_key();
 
             header.checksum = header_hash.wrapping_add(payload_hash ^ key);
-            log::debug!(
+            log::trace!(
                 ">>> Encrypted Send to {}: Seq={} ID={} Flags={:08X} FinalCRC={:08X}",
                 addr,
                 header.sequence,
@@ -284,7 +284,7 @@ impl Session {
             );
         } else {
             header.checksum = header_hash.wrapping_add(payload_hash);
-            log::debug!(
+            log::trace!(
                 ">>> Cleartext Send to {}: Seq={} ID={} Flags={:08X} Checksum={:08X}",
                 addr,
                 header.sequence,
@@ -299,7 +299,7 @@ impl Session {
         header.pack(&mut packet, &mut pack_offset);
         packet.extend_from_slice(&full_payload);
 
-        log::debug!("RAW OUTBOUND: {:02X?}", packet);
+        log::trace!("RAW OUTBOUND: {:02X?}", packet);
 
         if let Some(ref mut capture) = self.capture {
             let _ = capture.write_entry(Direction::Outbound, addr, &packet);
@@ -310,7 +310,7 @@ impl Session {
     }
 
     pub fn process_fragment(&mut self, header: &FragmentHeader, data: &[u8]) -> Option<Vec<u8>> {
-        log::debug!(
+        log::trace!(
             "Processing fragment Seq={} {}/{} size={}",
             header.sequence,
             header.index + 1,
@@ -424,9 +424,9 @@ impl Session {
             .ok_or_else(|| anyhow::anyhow!("Failed to unpack packet header"))?;
         let data = buf[HEADER_SIZE..len].to_vec();
 
-        log::debug!("RAW INBOUND: {:02X?}", &buf[..len]);
+        log::trace!("RAW INBOUND: {:02X?}", &buf[..len]);
 
-        log::debug!(
+        log::trace!(
             "<<< Inbound from {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
             addr,
             header.sequence,

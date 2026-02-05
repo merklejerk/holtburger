@@ -19,10 +19,225 @@ impl MessagePack for WorldPosition {
 
 impl MessageUnpack for WorldPosition {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 32 > data.len() {
+        if data.len() < *offset + 32 {
             return None;
         }
-        Some(Self::read_raw(data, offset))
+        let landblock_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        let z = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
+        *offset += 12;
+        let qw = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        let qx = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        let qy = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
+        let qz = LittleEndian::read_f32(&data[*offset + 12..*offset + 16]);
+        *offset += 16;
+
+        Some(Self {
+            landblock_id,
+            coords: Vector3 { x, y, z },
+            rotation: Quaternion {
+                w: qw,
+                x: qx,
+                y: qy,
+                z: qz,
+            },
+        })
+    }
+}
+
+/// A variable-length position structure used in movement updates (PositionPack in ACE)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PositionPack {
+    pub flags: UpdatePositionFlag,
+    pub pos: WorldPosition,
+    pub velocity: Option<Vector3>,
+    pub placement_id: Option<u32>,
+    pub instance_sequence: u16,
+    pub position_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+}
+
+impl MessageUnpack for PositionPack {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if data.len() < *offset + 8 {
+            return None;
+        }
+        let raw_flags = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let flags = UpdatePositionFlag::from_bits_retain(raw_flags);
+        *offset += 4;
+        let landblock_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+
+        // Origin position (always present)
+        if data.len() < *offset + 12 {
+            return None;
+        }
+        let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        let z = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
+        *offset += 12;
+
+        let mut qw = 0.0;
+        let mut qx = 0.0;
+        let mut qy = 0.0;
+        let mut qz = 0.0;
+
+        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_W) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            qw = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+            *offset += 4;
+        }
+        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_X) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            qx = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+            *offset += 4;
+        }
+        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_Y) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            qy = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+            *offset += 4;
+        }
+        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_Z) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            qz = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+            *offset += 4;
+        }
+
+        let mut velocity = None;
+        if flags.contains(UpdatePositionFlag::HAS_VELOCITY) {
+            if *offset + 12 > data.len() {
+                return None;
+            }
+            let vx = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+            let vy = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+            let vz = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
+            *offset += 12;
+            velocity = Some(Vector3 {
+                x: vx,
+                y: vy,
+                z: vz,
+            });
+        }
+
+        let mut placement_id = None;
+        if flags.contains(UpdatePositionFlag::HAS_PLACEMENT_ID) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            placement_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let position_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        let teleport_sequence = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]);
+        let force_position_sequence = LittleEndian::read_u16(&data[*offset + 6..*offset + 8]);
+        *offset += 8;
+
+        Some(Self {
+            flags,
+            pos: WorldPosition {
+                landblock_id,
+                coords: Vector3 { x, y, z },
+                rotation: Quaternion {
+                    w: qw,
+                    x: qx,
+                    y: qy,
+                    z: qz,
+                },
+            },
+            velocity,
+            placement_id,
+            instance_sequence,
+            position_sequence,
+            teleport_sequence,
+            force_position_sequence,
+        })
+    }
+}
+
+impl MessagePack for PositionPack {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        // For now, we always write a full orientation (no flags set)
+        // or we use the flags we already have.
+        // To be safe and simple: just write them as is.
+        use byteorder::{LittleEndian, WriteBytesExt};
+        writer.write_u32::<LittleEndian>(self.flags.bits()).unwrap();
+        writer
+            .write_u32::<LittleEndian>(self.pos.landblock_id)
+            .unwrap();
+        writer.write_f32::<LittleEndian>(self.pos.coords.x).unwrap();
+        writer.write_f32::<LittleEndian>(self.pos.coords.y).unwrap();
+        writer.write_f32::<LittleEndian>(self.pos.coords.z).unwrap();
+
+        if !self
+            .flags
+            .contains(UpdatePositionFlag::ORIENTATION_HAS_NO_W)
+        {
+            writer
+                .write_f32::<LittleEndian>(self.pos.rotation.w)
+                .unwrap();
+        }
+        if !self
+            .flags
+            .contains(UpdatePositionFlag::ORIENTATION_HAS_NO_X)
+        {
+            writer
+                .write_f32::<LittleEndian>(self.pos.rotation.x)
+                .unwrap();
+        }
+        if !self
+            .flags
+            .contains(UpdatePositionFlag::ORIENTATION_HAS_NO_Y)
+        {
+            writer
+                .write_f32::<LittleEndian>(self.pos.rotation.y)
+                .unwrap();
+        }
+        if !self
+            .flags
+            .contains(UpdatePositionFlag::ORIENTATION_HAS_NO_Z)
+        {
+            writer
+                .write_f32::<LittleEndian>(self.pos.rotation.z)
+                .unwrap();
+        }
+
+        if let Some(v) = self.velocity {
+            writer.write_f32::<LittleEndian>(v.x).unwrap();
+            writer.write_f32::<LittleEndian>(v.y).unwrap();
+            writer.write_f32::<LittleEndian>(v.z).unwrap();
+        }
+        if let Some(pid) = self.placement_id {
+            writer.write_u32::<LittleEndian>(pid).unwrap();
+        }
+
+        writer
+            .write_u16::<LittleEndian>(self.instance_sequence)
+            .unwrap();
+        writer
+            .write_u16::<LittleEndian>(self.position_sequence)
+            .unwrap();
+        writer
+            .write_u16::<LittleEndian>(self.teleport_sequence)
+            .unwrap();
+        writer
+            .write_u16::<LittleEndian>(self.force_position_sequence)
+            .unwrap();
     }
 }
 
@@ -145,95 +360,6 @@ impl WorldPosition {
 
         (dx * dx + dy * dy + dz * dz).sqrt()
     }
-
-    pub fn read_raw(data: &[u8], offset: &mut usize) -> Self {
-        if data.len() < *offset + 32 {
-            return Self::default();
-        }
-        let landblock_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-        let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
-        let z = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
-        let qw = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-        let qx = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
-        let qy = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
-        let qz = LittleEndian::read_f32(&data[*offset + 12..*offset + 16]);
-        *offset += 16;
-
-        Self {
-            landblock_id,
-            coords: Vector3 { x, y, z },
-            rotation: Quaternion {
-                w: qw,
-                x: qx,
-                y: qy,
-                z: qz,
-            },
-        }
-    }
-
-    pub fn read(data: &[u8], offset: &mut usize) -> Self {
-        if data.len() < *offset + 8 {
-            return Self::default();
-        }
-        let raw_flags = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let flags = UpdatePositionFlag::from_bits_retain(raw_flags);
-        *offset += 4;
-        let landblock_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-
-        // Origin position (always present in PositionPack)
-        let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-        let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
-        let z = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
-
-        let mut qw = 0.0;
-        let mut qx = 0.0;
-        let mut qy = 0.0;
-        let mut qz = 0.0;
-
-        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_W) {
-            qw = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-            *offset += 4;
-        }
-        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_X) {
-            qx = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-            *offset += 4;
-        }
-        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_Y) {
-            qy = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-            *offset += 4;
-        }
-        if !flags.contains(UpdatePositionFlag::ORIENTATION_HAS_NO_Z) {
-            qz = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-            *offset += 4;
-        }
-
-        // Handle the rest of the PositionPack (Velocity, Placement, Sequences)
-        if flags.contains(UpdatePositionFlag::HAS_VELOCITY) {
-            *offset += 12; // Skip velocity
-        }
-        if flags.contains(UpdatePositionFlag::HAS_PLACEMENT_ID) {
-            *offset += 4; // Skip placement id
-        }
-
-        // Fixed sequences at the end of every PositionPack
-        *offset += 8;
-
-        Self {
-            landblock_id,
-            coords: Vector3 { x, y, z },
-            rotation: Quaternion {
-                w: qw,
-                x: qx,
-                y: qy,
-                z: qz,
-            },
-        }
-    }
 }
 
 #[cfg(test)]
@@ -334,7 +460,7 @@ mod tests {
         data.extend_from_slice(&0.0f32.to_le_bytes());
 
         let mut offset = 0usize;
-        let p = WorldPosition::read_raw(&data, &mut offset);
+        let p = WorldPosition::unpack(&data, &mut offset).unwrap();
         assert_eq!(offset, 32);
         assert_eq!(p.landblock_id, landblock_id);
         assert!((p.coords.x - 84.0).abs() < 1e-6);
@@ -357,13 +483,13 @@ mod tests {
         data2.extend_from_slice(&[0u8; 8]); // Sequences
 
         let mut offset2 = 0usize;
-        let p2 = WorldPosition::read(&data2, &mut offset2);
-        assert_eq!(p2.landblock_id, landblock_id);
-        assert!((p2.coords.x - 84.0).abs() < 1e-6);
-        assert!((p2.coords.y - 108.0).abs() < 1e-6);
-        assert!((p2.coords.z - 1.5).abs() < 1e-6);
-        assert!((p2.rotation.w - 1.0).abs() < 1e-6);
-        assert!((p2.rotation.x - 0.1).abs() < 1e-6);
+        let p2 = PositionPack::unpack(&data2, &mut offset2).unwrap();
+        assert_eq!(p2.pos.landblock_id, landblock_id);
+        assert!((p2.pos.coords.x - 84.0).abs() < 1e-6);
+        assert!((p2.pos.coords.y - 108.0).abs() < 1e-6);
+        assert!((p2.pos.coords.z - 1.5).abs() < 1e-6);
+        assert!((p2.pos.rotation.w - 1.0).abs() < 1e-6);
+        assert!((p2.pos.rotation.x - 0.1).abs() < 1e-6);
         assert_eq!(offset2, data2.len());
     }
 
@@ -382,19 +508,19 @@ mod tests {
         data.extend_from_slice(&[0u8; 8]); // Sequences
 
         let mut offset = 0usize;
-        let p = WorldPosition::read(&data, &mut offset);
-        assert_eq!(p.rotation.w, 0.0);
-        assert_eq!(p.rotation.x, 0.0);
-        assert_eq!(p.rotation.y, 0.0);
-        assert_eq!(p.rotation.z, 0.9);
+        let p = PositionPack::unpack(&data, &mut offset).unwrap();
+        assert_eq!(p.pos.rotation.w, 0.0);
+        assert_eq!(p.pos.rotation.x, 0.0);
+        assert_eq!(p.pos.rotation.y, 0.0);
+        assert_eq!(p.pos.rotation.z, 0.9);
         assert_eq!(offset, data.len());
     }
 
     #[test]
-    fn test_read_with_insufficient_data_returns_default() {
+    fn test_read_with_insufficient_data() {
         let data: [u8; 4] = [0, 0, 0, 0];
         let mut offset = 0usize;
-        let p = WorldPosition::read_raw(&data, &mut offset);
-        assert_eq!(p, WorldPosition::default());
+        let p = WorldPosition::unpack(&data, &mut offset);
+        assert!(p.is_none());
     }
 }

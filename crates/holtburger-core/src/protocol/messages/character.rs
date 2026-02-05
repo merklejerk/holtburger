@@ -118,8 +118,7 @@ impl MessagePack for CharacterListData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CharacterEnterWorldRequestData {
-}
+pub struct CharacterEnterWorldRequestData {}
 
 impl MessageUnpack for CharacterEnterWorldRequestData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
@@ -128,8 +127,7 @@ impl MessageUnpack for CharacterEnterWorldRequestData {
 }
 
 impl MessagePack for CharacterEnterWorldRequestData {
-    fn pack(&self, _buf: &mut Vec<u8>) {
-    }
+    fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
 #[derive(Debug, Clone, PartialEq)]

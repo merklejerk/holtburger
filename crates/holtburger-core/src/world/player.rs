@@ -475,36 +475,15 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::GameEvent(ev) => return match &ev.event {
-                GameEventData::MagicUpdateEnchantment(data) => {
-                    let MagicUpdateEnchantmentData {
-                        target,
-                        enchantment,
-                        ..
-                    } = &**data;
-                    if *target == self.guid {
-                        if let Some(existing) = self.enchantments.iter_mut().find(|e| {
-                            e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
-                        }) {
-                            *existing = enchantment.clone();
-                        } else {
-                            self.enchantments.push(enchantment.clone());
-                        }
-                        events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
-                        self.emit_derived_stats(events);
-                        true
-                    } else {
-                        false
-                    }
-                }
-                GameEventData::MagicUpdateMultipleEnchantments(data) => {
-                    let MagicUpdateMultipleEnchantmentsData {
-                        target,
-                        enchantments,
-                        ..
-                    } = &**data;
-                    if *target == self.guid {
-                        for enchantment in enchantments {
+            GameMessage::GameEvent(ev) => {
+                return match &ev.event {
+                    GameEventData::MagicUpdateEnchantment(data) => {
+                        let MagicUpdateEnchantmentData {
+                            target,
+                            enchantment,
+                            ..
+                        } = &**data;
+                        if *target == self.guid {
                             if let Some(existing) = self.enchantments.iter_mut().find(|e| {
                                 e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
                             }) {
@@ -513,76 +492,100 @@ impl PlayerState {
                                 self.enchantments.push(enchantment.clone());
                             }
                             events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
                         }
-                        self.emit_derived_stats(events);
-                        true
-                    } else {
-                        false
                     }
-                }
-                GameEventData::MagicRemoveEnchantment(data) => {
-                    let MagicRemoveEnchantmentData {
-                        target,
-                        spell_id,
-                        layer,
-                        ..
-                    } = &**data;
-                    if *target == self.guid {
-                        self.enchantments
-                            .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                        events.push(WorldEvent::EnchantmentRemoved {
-                            spell_id: *spell_id,
-                            layer: *layer,
-                        });
-                        self.emit_derived_stats(events);
-                        true
-                    } else {
-                        false
+                    GameEventData::MagicUpdateMultipleEnchantments(data) => {
+                        let MagicUpdateMultipleEnchantmentsData {
+                            target,
+                            enchantments,
+                            ..
+                        } = &**data;
+                        if *target == self.guid {
+                            for enchantment in enchantments {
+                                if let Some(existing) = self.enchantments.iter_mut().find(|e| {
+                                    e.spell_id == enchantment.spell_id
+                                        && e.layer == enchantment.layer
+                                }) {
+                                    *existing = enchantment.clone();
+                                } else {
+                                    self.enchantments.push(enchantment.clone());
+                                }
+                                events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                            }
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
                     }
-                }
-                GameEventData::MagicRemoveMultipleEnchantments(data) => {
-                    let MagicRemoveMultipleEnchantmentsData { target, spells, .. } = &**data;
-                    if *target == self.guid {
-                        for (spell_id, layer) in spells {
+                    GameEventData::MagicRemoveEnchantment(data) => {
+                        let MagicRemoveEnchantmentData {
+                            target,
+                            spell_id,
+                            layer,
+                            ..
+                        } = &**data;
+                        if *target == self.guid {
                             self.enchantments
                                 .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                             events.push(WorldEvent::EnchantmentRemoved {
                                 spell_id: *spell_id,
                                 layer: *layer,
                             });
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
                         }
-                        self.emit_derived_stats(events);
-                        true
-                    } else {
-                        false
                     }
-                }
-                GameEventData::MagicPurgeEnchantments(data) => {
-                    let MagicPurgeEnchantmentsData { target, .. } = &**data;
-                    if *target == self.guid {
-                        self.enchantments.clear();
-                        events.push(WorldEvent::EnchantmentsPurged);
-                        self.emit_derived_stats(events);
-                        true
-                    } else {
-                        false
+                    GameEventData::MagicRemoveMultipleEnchantments(data) => {
+                        let MagicRemoveMultipleEnchantmentsData { target, spells, .. } = &**data;
+                        if *target == self.guid {
+                            for (spell_id, layer) in spells {
+                                self.enchantments
+                                    .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
+                                events.push(WorldEvent::EnchantmentRemoved {
+                                    spell_id: *spell_id,
+                                    layer: *layer,
+                                });
+                            }
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
                     }
-                }
-                GameEventData::MagicPurgeBadEnchantments(data) => {
-                    let MagicPurgeBadEnchantmentsData { target, .. } = &**data;
-                    if *target == self.guid {
-                        self.enchantments.retain(|e| {
-                            (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
-                        });
-                        events.push(WorldEvent::EnchantmentsPurged);
-                        self.emit_derived_stats(events);
-                        true
-                    } else {
-                        false
+                    GameEventData::MagicPurgeEnchantments(data) => {
+                        let MagicPurgeEnchantmentsData { target, .. } = &**data;
+                        if *target == self.guid {
+                            self.enchantments.clear();
+                            events.push(WorldEvent::EnchantmentsPurged);
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
                     }
-                }
-                _ => false,
-            },
+                    GameEventData::MagicPurgeBadEnchantments(data) => {
+                        let MagicPurgeBadEnchantmentsData { target, .. } = &**data;
+                        if *target == self.guid {
+                            self.enchantments.retain(|e| {
+                                (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
+                            });
+                            events.push(WorldEvent::EnchantmentsPurged);
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
+            }
             GameMessage::UpdateHealth(data) => {
                 let target = data.target;
                 let health = data.health;

@@ -341,10 +341,10 @@ impl PlayerDescriptionData {
                     }
                 }
             }
-            if mask.contains(EnchantmentMask::VITAE) {
-                if let Some(e) = Enchantment::unpack(data, offset) {
-                    enchantments.push(e);
-                }
+            if mask.contains(EnchantmentMask::VITAE)
+                && let Some(e) = Enchantment::unpack(data, offset)
+            {
+                enchantments.push(e);
             }
         }
 

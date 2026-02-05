@@ -185,7 +185,7 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct UpdatePositionFlag: u32 {
         const NONE = 0x00;
         const HAS_VELOCITY = 0x01;

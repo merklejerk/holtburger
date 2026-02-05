@@ -1,4 +1,4 @@
-use super::super::state::AppState;
+use crate::ui::AppState;
 use holtburger_core::protocol::properties::{PropertyFloat, PropertyInt as ProtoPropertyInt};
 use holtburger_core::world::properties::EnchantmentTypeFlags;
 use holtburger_core::world::stats::{AttributeType, SkillType};

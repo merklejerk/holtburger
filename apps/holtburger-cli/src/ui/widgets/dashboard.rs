@@ -1,4 +1,4 @@
-use super::super::state::AppState;
+use crate::ui::AppState;
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::classification;
 use holtburger_core::world::entity::Entity;
@@ -120,33 +120,7 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, dist, depth))| {
-            let color = get_entity_color(e);
-            let style = if i == state.selected_dashboard_index {
-                Style::default().bg(Color::DarkGray).fg(color)
-            } else {
-                Style::default().fg(color)
-            };
-
-            let class = classification::classify_entity(e);
-            let type_marker = if state.use_emojis {
-                class.emoji()
-            } else {
-                class.label()
-            };
-
-            let display_name = if e.name.trim().is_empty() {
-                format!("<{:08X}>", e.guid)
-            } else {
-                e.name.clone()
-            };
-
-            let indent = "  ".repeat(*depth);
-
-            ListItem::new(format!(
-                "{}[{}] {:<15} [{:.1}m]",
-                indent, type_marker, display_name, dist
-            ))
-            .style(style)
+            render_entity_list_item(e, Some(*dist), *depth, i == state.selected_dashboard_index, state.use_emojis)
         })
         .collect()
 }
@@ -157,31 +131,47 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, _, depth))| {
-            let color = get_entity_color(e);
-            let style = if i == state.selected_dashboard_index {
-                Style::default().bg(Color::DarkGray).fg(color)
-            } else {
-                Style::default().fg(color)
-            };
-
-            let class = classification::classify_entity(e);
-            let type_marker = if state.use_emojis {
-                class.emoji()
-            } else {
-                class.label()
-            };
-
-            let display_name = if e.name.trim().is_empty() {
-                format!("<{:08X}>", e.guid)
-            } else {
-                e.name.clone()
-            };
-
-            let indent = "  ".repeat(*depth);
-
-            ListItem::new(format!("{}[{}] {:<15}", indent, type_marker, display_name)).style(style)
+            render_entity_list_item(e, None, *depth, i == state.selected_dashboard_index, state.use_emojis)
         })
         .collect()
+}
+
+fn render_entity_list_item(
+    e: &Entity,
+    dist: Option<f32>,
+    depth: usize,
+    is_selected: bool,
+    use_emojis: bool,
+) -> ListItem<'static> {
+    let color = get_entity_color(e);
+    let style = if is_selected {
+        Style::default().bg(Color::DarkGray).fg(color)
+    } else {
+        Style::default().fg(color)
+    };
+
+    let class = classification::classify_entity(e);
+    let type_marker = if use_emojis {
+        class.emoji()
+    } else {
+        class.label()
+    };
+
+    let display_name = if e.name.trim().is_empty() {
+        format!("<{:08X}>", e.guid)
+    } else {
+        e.name.clone()
+    };
+
+    let indent = "  ".repeat(depth);
+
+    let text = if let Some(d) = dist {
+        format!("{}[{}] {:<15} [{:.1}m]", indent, type_marker, display_name, d)
+    } else {
+        format!("{}[{}] {:<15}", indent, type_marker, display_name)
+    };
+
+    ListItem::new(text).style(style)
 }
 
 fn get_entity_color(e: &Entity) -> Color {

@@ -1,4 +1,4 @@
-use super::super::state::AppState;
+use crate::ui::AppState;
 use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, FocusedPane};
 use super::super::utils::wrap_text;
 use holtburger_core::MessageKind;
@@ -105,7 +105,7 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let ctx_end = total_ctx.saturating_sub(effective_ctx_scroll);
     let ctx_start = ctx_end.saturating_sub(height);
 
-    let mut ctx_items: Vec<ListItem> = state.context_buffer[ctx_start..ctx_end]
+    let mut ctx_items: Vec<ListItem<'static>> = state.context_buffer[ctx_start..ctx_end]
         .iter()
         .map(|s| ListItem::new(s.clone()))
         .collect();

@@ -1,4 +1,4 @@
-use super::state::AppState;
+use crate::ui::AppState;
 use super::types::DashboardTab;
 use crate::actions::ActionTarget;
 use ratatui::text::{Line, Span};
@@ -87,4 +87,44 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
     }
 
     Some(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::TOP)))
+}
+
+pub fn get_next_pane(current: super::types::FocusedPane, width: u16) -> super::types::FocusedPane {
+    if width < super::types::WIDTH_BREAKPOINT {
+        // Narrow: Dashboard -> Context -> Chat
+        match current {
+            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Context,
+            super::types::FocusedPane::Context => super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Chat => super::types::FocusedPane::Dashboard,
+            _ => super::types::FocusedPane::Dashboard,
+        }
+    } else {
+        // Wide: Dashboard -> Chat -> Context
+        match current {
+            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Chat => super::types::FocusedPane::Context,
+            super::types::FocusedPane::Context => super::types::FocusedPane::Dashboard,
+            _ => super::types::FocusedPane::Dashboard,
+        }
+    }
+}
+
+pub fn get_prev_pane(current: super::types::FocusedPane, width: u16) -> super::types::FocusedPane {
+    if width < super::types::WIDTH_BREAKPOINT {
+        // Narrow reverse: Dashboard -> Chat -> Context
+        match current {
+            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Chat => super::types::FocusedPane::Context,
+            super::types::FocusedPane::Context => super::types::FocusedPane::Dashboard,
+            _ => super::types::FocusedPane::Dashboard,
+        }
+    } else {
+        // Wide reverse: Dashboard -> Context -> Chat
+        match current {
+            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Context,
+            super::types::FocusedPane::Context => super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Chat => super::types::FocusedPane::Dashboard,
+            _ => super::types::FocusedPane::Dashboard,
+        }
+    }
 }

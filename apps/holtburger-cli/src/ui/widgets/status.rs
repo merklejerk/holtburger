@@ -1,4 +1,4 @@
-use super::super::state::AppState;
+use crate::ui::AppState;
 use holtburger_core::ClientState;
 use holtburger_core::world::stats::VitalType;
 use ratatui::Frame;
@@ -16,15 +16,15 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     // 1. Render Vitals (Left Half)
     let health = state
         .vitals
-        .iter()
+        .values()
         .find(|v| v.vital_type == VitalType::Health);
     let stamina = state
         .vitals
-        .iter()
+        .values()
         .find(|v| v.vital_type == VitalType::Stamina);
     let mana = state
         .vitals
-        .iter()
+        .values()
         .find(|v| v.vital_type == VitalType::Mana);
 
     let health_str = if let Some(h) = health {

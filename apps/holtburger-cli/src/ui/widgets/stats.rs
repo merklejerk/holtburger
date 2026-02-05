@@ -1,4 +1,4 @@
-use super::super::state::AppState;
+use crate::ui::AppState;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
@@ -15,7 +15,7 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         " ATTRIBUTES ",
         header_style,
     )])));
-    let mut sorted_attrs = state.attributes.clone();
+    let mut sorted_attrs: Vec<_> = state.attributes.values().collect();
     sorted_attrs.sort_by_key(|a| a.attr_type as u32);
     for attr in sorted_attrs {
         let val_str = if attr.current != attr.base {
@@ -36,7 +36,7 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         " SKILLS ",
         header_style,
     )])));
-    let mut sorted_skills = state.skills.clone();
+    let mut sorted_skills: Vec<_> = state.skills.values().collect();
     sorted_skills.sort_by_key(|s| s.skill_type as u32);
     for skill in sorted_skills {
         if skill.skill_type.is_eor() {

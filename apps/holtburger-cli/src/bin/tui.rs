@@ -187,6 +187,7 @@ async fn main() -> Result<()> {
         last_dashboard_height: 0,
         scroll_offset: 0,
         chat_total_lines: 0,
+        context_total_lines: 0,
         dashboard_tab: ui::DashboardTab::Entities,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
@@ -199,6 +200,8 @@ async fn main() -> Result<()> {
         entities: std::collections::HashMap::new(),
         server_time: None,
         use_emojis: !args.no_emojis,
+        chat_cache: Vec::new(),
+        last_rendered_width: 0,
     };
 
     refresh_context_buffer(&mut app_state);
@@ -303,7 +306,6 @@ async fn main() -> Result<()> {
                                     app_state.input_history.push(input.clone());
                                     app_state.history_index = None;
                                     let _ = command_tx.send(ClientCommand::Talk(input));
-                                    app_state.scroll_offset = 0;
                                     app_state.focused_pane = app_state.previous_focused_pane;
                                 } else {
                                     app_state.previous_focused_pane = app_state.focused_pane;

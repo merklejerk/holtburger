@@ -15,9 +15,18 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
 
     let window_size = CHAT_HISTORY_WINDOW_SIZE;
+
+    // Check if we need to invalidate the cache
+    if state.last_rendered_width != width {
+        state.chat_cache.clear();
+        state.last_rendered_width = width;
+    }
+    
     let m_len = state.messages.len();
     let window_start = m_len.saturating_sub(window_size);
-
+    // For now, let's just optimize by only wrapping the window. 
+    // Even at 10k messages, if we don't re-wrap, it should be fast.
+    
     let mut all_lines = Vec::new();
     for m in &state.messages[window_start..] {
         let color = match m.kind {
@@ -37,12 +46,27 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     let total_lines = all_lines.len();
-    if state.chat_total_lines > 0 && total_lines > state.chat_total_lines && state.scroll_offset > 0
-    {
-        state.scroll_offset += total_lines - state.chat_total_lines;
-    }
-    state.chat_total_lines = total_lines;
     let max_scroll = total_lines.saturating_sub(height);
+    let old_total = state.chat_total_lines;
+
+    // If total lines hasn't changed, we don't need to do anything with the scroll offset.
+    // If lines were added, and we are NOT at the bottom, increment offset to stay pinned.
+    if old_total > 0 && total_lines != old_total {
+        let diff = if total_lines > old_total {
+            total_lines - old_total
+        } else {
+            0
+        };
+
+        if state.scroll_offset > 0 {
+            state.scroll_offset += diff;
+        } else if total_lines < old_total {
+            // If the buffer shrank (e.g. window size prune), adjust offset to stay relative to bottom
+            state.scroll_offset = state.scroll_offset.saturating_sub(old_total - total_lines);
+        }
+    }
+    
+    // Clamp to valid range
     state.scroll_offset = state.scroll_offset.min(max_scroll);
     let effective_scroll = state.scroll_offset;
 
@@ -80,6 +104,9 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     );
     f.render_widget(chat_list, area);
 
+    // Update state for next frame
+    state.chat_total_lines = total_lines;
+
     // Render Scrollbar
     if total_lines > height {
         let mut scrollbar_state =
@@ -89,7 +116,10 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("▲"))
                 .end_symbol(Some("▼")),
-            area,
+            area.inner(&ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut scrollbar_state,
         );
     }
@@ -98,6 +128,18 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
     let total_ctx = state.context_buffer.len();
+    let old_ctx_total = state.context_total_lines;
+
+    if old_ctx_total > 0 && total_ctx != old_ctx_total {
+        let diff = if total_ctx > old_ctx_total {
+            total_ctx - old_ctx_total
+        } else {
+            0
+        };
+        if state.context_scroll_offset > 0 {
+            state.context_scroll_offset += diff;
+        }
+    }
 
     let max_ctx_scroll = total_ctx.saturating_sub(height);
     state.context_scroll_offset = state.context_scroll_offset.min(max_ctx_scroll);
@@ -127,10 +169,13 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let ctx_list = List::new(ctx_items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Context Information")
+            .title(" Context Information ")
             .border_style(ctx_style),
     );
     f.render_widget(ctx_list, area);
+
+    // Update state for next frame
+    state.context_total_lines = total_ctx;
 
     // Render Scrollbar
     if total_ctx > height {
@@ -141,7 +186,10 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("▲"))
                 .end_symbol(Some("▼")),
-            area,
+            area.inner(&ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut scrollbar_state,
         );
     }

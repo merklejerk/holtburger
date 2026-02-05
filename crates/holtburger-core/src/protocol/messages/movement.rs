@@ -40,6 +40,24 @@ bitflags::bitflags! {
     }
 }
 
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+    pub struct RawMotionFlags: u32 {
+        const INVALID = 0x0;
+        const CURRENT_HOLD_KEY = 0x1;
+        const CURRENT_STYLE = 0x2;
+        const FORWARD_COMMAND = 0x4;
+        const FORWARD_HOLD_KEY = 0x8;
+        const FORWARD_SPEED = 0x10;
+        const SIDE_STEP_COMMAND = 0x20;
+        const SIDE_STEP_HOLD_KEY = 0x40;
+        const SIDE_STEP_SPEED = 0x80;
+        const TURN_COMMAND = 0x100;
+        const TURN_HOLD_KEY = 0x200;
+        const TURN_SPEED = 0x400;
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePositionData {
     pub guid: u32,
@@ -76,6 +94,36 @@ pub struct MovementEventData {
     pub motion_flags: u8,
     pub current_style: u16,
     pub data: MovementTypeData,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlayerTeleportData {
+    pub teleport_sequence: u16,
+}
+
+impl MessageUnpack for PlayerTeleportData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 2 > data.len() {
+            return None;
+        }
+        let teleport_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+
+        // Alignment (Writer.Align() in ACE)
+        *offset = (*offset + 3) & !3;
+
+        Some(PlayerTeleportData { teleport_sequence })
+    }
+}
+
+impl MessagePack for PlayerTeleportData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.teleport_sequence.to_le_bytes());
+        // Align to 4 bytes
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -699,6 +747,192 @@ impl MessagePack for InterpretedMotionState {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct RawMotionState {
+    pub flags: RawMotionFlags,
+    pub current_hold_key: Option<u32>,
+    pub current_style: Option<u32>,
+    pub forward_command: Option<u32>,
+    pub forward_hold_key: Option<u32>,
+    pub forward_speed: Option<f32>,
+    pub sidestep_command: Option<u32>,
+    pub sidestep_hold_key: Option<u32>,
+    pub sidestep_speed: Option<f32>,
+    pub turn_command: Option<u32>,
+    pub turn_hold_key: Option<u32>,
+    pub turn_speed: Option<f32>,
+    pub commands: Vec<MotionItem>,
+}
+
+impl MessageUnpack for RawMotionState {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let packed_flags = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+
+        let flags = RawMotionFlags::from_bits_truncate(packed_flags & 0x7FF);
+        let command_list_length = (packed_flags >> 11) as u16;
+
+        let mut state = RawMotionState {
+            flags,
+            ..Default::default()
+        };
+
+        if flags.contains(RawMotionFlags::CURRENT_HOLD_KEY) {
+            state.current_hold_key = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::CURRENT_STYLE) {
+            state.current_style = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::FORWARD_COMMAND) {
+            state.forward_command = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::FORWARD_HOLD_KEY) {
+            state.forward_hold_key = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::FORWARD_SPEED) {
+            state.forward_speed = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::SIDE_STEP_COMMAND) {
+            state.sidestep_command = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::SIDE_STEP_HOLD_KEY) {
+            state.sidestep_hold_key = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::SIDE_STEP_SPEED) {
+            state.sidestep_speed = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::TURN_COMMAND) {
+            state.turn_command = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::TURN_HOLD_KEY) {
+            state.turn_hold_key = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if flags.contains(RawMotionFlags::TURN_SPEED) {
+            state.turn_speed = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        for _ in 0..command_list_length {
+            state.commands.push(MotionItem::unpack(data, offset)?);
+        }
+
+        Some(state)
+    }
+}
+
+impl MessagePack for RawMotionState {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        let mut packed_flags = self.flags.bits() & 0x7FF;
+        packed_flags |= (self.commands.len() as u32) << 11;
+        buf.extend_from_slice(&packed_flags.to_le_bytes());
+
+        if let Some(val) = self.current_hold_key {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.current_style {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.forward_command {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.forward_hold_key {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.forward_speed {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.sidestep_command {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.sidestep_hold_key {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.sidestep_speed {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.turn_command {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.turn_hold_key {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+        if let Some(val) = self.turn_speed {
+            buf.extend_from_slice(&val.to_le_bytes());
+        }
+
+        for command in &self.commands {
+            command.pack(buf);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MoveToStateData {
+    pub sequence: u32,
+    pub raw_motion_state: RawMotionState,
+    pub position: WorldPosition,
+    pub instance_sequence: u16,
+    pub server_control_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+    pub contact_long_jump: u8,
+}
+
+impl MoveToStateData {
+    pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
+        let raw_motion_state = RawMotionState::unpack(data, offset)?;
+        let position = WorldPosition::unpack(data, offset)?;
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let server_control_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        let teleport_sequence = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]);
+        let force_position_sequence = LittleEndian::read_u16(&data[*offset + 6..*offset + 8]);
+        *offset += 8;
+        let contact_long_jump = data[*offset];
+        *offset += 1;
+
+        // Align to 4 bytes
+        while !(*offset).is_multiple_of(4) {
+            *offset += 1;
+        }
+
+        Some(MoveToStateData {
+            sequence,
+            raw_motion_state,
+            position,
+            instance_sequence,
+            server_control_sequence,
+            teleport_sequence,
+            force_position_sequence,
+            contact_long_jump,
+        })
+    }
+
+    pub fn pack(&self, buf: &mut Vec<u8>) {
+        self.raw_motion_state.pack(buf);
+        self.position.pack(buf);
+        buf.extend_from_slice(&self.instance_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.server_control_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.teleport_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.force_position_sequence.to_le_bytes());
+        buf.push(self.contact_long_jump);
+
+        // Align to 4 bytes
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -756,6 +990,45 @@ mod tests {
     }
 
     #[test]
+    fn test_player_teleport_parity() {
+        let expected = PlayerTeleportData {
+            teleport_sequence: 0x1234,
+        };
+        // Skip opcode (4 bytes)
+        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(
+            &fixtures::PLAYER_TELEPORT[4..],
+            &expected,
+        );
+
+        // Also verify dispatcher integration
+        use crate::protocol::messages::GameMessage;
+        let msg = GameMessage::unpack(fixtures::PLAYER_TELEPORT).unwrap();
+        assert!(matches!(msg, GameMessage::PlayerTeleport(_)));
+    }
+
+    #[test]
+    fn test_move_to_state_parity() {
+        let fixture = fixtures::MOVE_TO_STATE;
+
+        // We need to unpack this via GameMessage to handle the wrapper
+        use crate::protocol::messages::GameMessage;
+        let msg = GameMessage::unpack(fixture).unwrap();
+
+        if let GameMessage::MoveToState(ref data) = msg {
+            assert_eq!(data.sequence, 0x5678);
+            assert_eq!(data.instance_sequence, 0xFF01);
+            assert_eq!(data.contact_long_jump, 0x03);
+            assert_eq!(data.raw_motion_state.commands.len(), 1);
+            assert_eq!(data.raw_motion_state.commands[0].command, 0x0001);
+
+            let packed = msg.pack();
+            assert_eq!(fixture, packed);
+        } else {
+            panic!("Expected MoveToState message");
+        }
+    }
+
+    #[test]
     fn test_turn_to_parameters_default_size() {
         let params = TurnToParameters {
             movement_parameters: 0,
@@ -765,5 +1038,18 @@ mod tests {
         let mut buf = Vec::new();
         params.pack(&mut buf);
         assert_eq!(buf.len(), 12);
+    }
+
+    #[test]
+    fn test_routing_player_teleport() {
+        use crate::protocol::messages::GameMessage;
+        let hex = "51F7000000000000";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data).unwrap();
+        if let GameMessage::PlayerTeleport(tele) = msg {
+            assert_eq!(tele.teleport_sequence, 0);
+        } else {
+            panic!("Expected PlayerTeleport, got {:?}", msg);
+        }
     }
 }

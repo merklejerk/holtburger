@@ -1197,4 +1197,19 @@ mod tests {
         let expected = ObjectDeleteData { guid: 0x50000001 };
         assert_pack_unpack_parity(&data, &expected);
     }
+
+    #[test]
+    fn test_routing_update_property_int() {
+        use crate::protocol::messages::GameMessage;
+        let hex = "CE02000001150000000200000001000000";
+        let data = hex::decode(hex).unwrap();
+        let msg = GameMessage::unpack(&data).unwrap();
+        if let GameMessage::UpdatePropertyInt(prop) = msg {
+            assert_eq!(prop.guid, 0x15);
+            assert_eq!(prop.property, 2);
+            assert_eq!(prop.value, 1);
+        } else {
+            panic!("Expected UpdatePropertyInt, got {:?}", msg);
+        }
+    }
 }

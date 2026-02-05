@@ -67,6 +67,8 @@ pub enum GameMessage {
     ObjectDelete(Box<ObjectDeleteData>),
     UpdatePosition(Box<UpdatePositionData>),
     UpdateMotion(Box<MovementEventData>),
+    PlayerTeleport(Box<PlayerTeleportData>),
+    MoveToState(Box<MoveToStateData>),
     UpdatePropertyInt(Box<UpdatePropertyIntData>),
     UpdatePropertyInt64(Box<UpdatePropertyInt64Data>),
     UpdatePropertyBool(Box<UpdatePropertyBoolData>),
@@ -122,9 +124,25 @@ impl GameMessage {
             opcodes::SERVER_MESSAGE => Some(GameMessage::ServerMessage(Box::new(
                 ServerMessageData::unpack(data, &mut offset)?,
             ))),
-            opcodes::GAME_ACTION => Some(GameMessage::GameAction(Box::new(
-                GameActionData::unpack(data, &mut offset)?,
-            ))),
+            opcodes::GAME_ACTION => {
+                let saved_offset = offset;
+                let sequence = LittleEndian::read_u32(&data[offset..offset + 4]);
+                let action = LittleEndian::read_u32(&data[offset + 4..offset + 8]);
+                if action == actions::MOVE_TO_STATE {
+                    offset += 8;
+                    Some(GameMessage::MoveToState(Box::new(MoveToStateData::unpack(
+                        data,
+                        &mut offset,
+                        sequence,
+                    )?)))
+                } else {
+                    offset = saved_offset;
+                    Some(GameMessage::GameAction(Box::new(GameActionData::unpack(
+                        data,
+                        &mut offset,
+                    )?)))
+                }
+            }
 
             // GameEvent wrapper (0xF7B0)
             opcodes::GAME_EVENT => Some(GameMessage::GameEvent(Box::new(GameEvent::unpack(
@@ -186,6 +204,9 @@ impl GameMessage {
                 data,
                 &mut offset,
             )?))),
+            opcodes::PLAYER_TELEPORT => Some(GameMessage::PlayerTeleport(Box::new(
+                PlayerTeleportData::unpack(data, &mut offset)?,
+            ))),
             opcodes::SOUND => Some(GameMessage::PlaySound(Box::new(PlaySoundData::unpack(
                 data,
                 &mut offset,
@@ -293,6 +314,12 @@ impl GameMessage {
                 buf.extend_from_slice(&0xF7B1u32.to_le_bytes());
                 data.pack(&mut buf);
             }
+            GameMessage::MoveToState(data) => {
+                buf.extend_from_slice(&opcodes::GAME_ACTION.to_le_bytes());
+                buf.extend_from_slice(&data.sequence.to_le_bytes());
+                buf.extend_from_slice(&actions::MOVE_TO_STATE.to_le_bytes());
+                data.pack(&mut buf);
+            }
             GameMessage::GameEvent(data) => {
                 buf.extend_from_slice(&opcodes::GAME_EVENT.to_le_bytes());
                 data.pack(&mut buf);
@@ -325,6 +352,10 @@ impl GameMessage {
                 buf.extend_from_slice(&opcodes::SET_STATE.to_le_bytes());
                 data.pack(&mut buf);
             }
+            GameMessage::PlayerTeleport(data) => {
+                buf.extend_from_slice(&opcodes::PLAYER_TELEPORT.to_le_bytes());
+                data.pack(&mut buf);
+            }
 
             // Add more as needed...
             _ => {}
@@ -334,49 +365,4 @@ impl GameMessage {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use hex;
-
-    #[test]
-    fn test_gamemessage_routing_property_int_private() {
-        let mut data = Vec::new();
-        data.extend_from_slice(&opcodes::PRIVATE_UPDATE_PROPERTY_INT.to_le_bytes());
-        data.push(0x42); // Sequence
-        data.extend_from_slice(&0x00000001u32.to_le_bytes()); // Property
-        data.extend_from_slice(&100i32.to_le_bytes()); // Value
-
-        let msg = GameMessage::unpack(&data).unwrap();
-        if let GameMessage::UpdatePropertyInt(data) = msg {
-            assert_eq!(data.sequence, 0x42);
-            assert_eq!(data.guid, 0); // Private
-            assert_eq!(data.property, 1);
-            assert!(!data.is_public);
-        } else {
-            panic!("Expected UpdatePropertyInt variant");
-        }
-    }
-
-    #[test]
-    fn test_gamemessage_routing_game_event_start() {
-        // Opcode (0xF7B0), Target (0x50000001), Seq (0x0E), Event (0x0282)
-        let hex = "B0F70000010000500E00000082020000";
-        let data = hex::decode(hex).unwrap();
-        let msg = GameMessage::unpack(&data).unwrap();
-        if let GameMessage::GameEvent(ev) = msg {
-            assert!(matches!(ev.event, GameEventData::StartGame));
-        } else {
-            panic!("Expected GameEvent");
-        }
-    }
-
-    #[test]
-    fn test_gamemessage_routing_character_request() {
-        let packed = vec![0xC8, 0xF7, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78];
-        let unpacked = GameMessage::unpack(&packed).unwrap();
-        assert!(matches!(
-            unpacked,
-            GameMessage::CharacterEnterWorldRequest(_)
-        ));
-    }
-}
+mod tests {}

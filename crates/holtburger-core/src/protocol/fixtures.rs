@@ -32,4 +32,6 @@ pub const PLAY_EFFECT: &[u8] = include_bytes!("../../tests/fixtures/play_effect.
 pub const EMOTE_TEXT: &[u8] = include_bytes!("../../tests/fixtures/emote_text.bin");
 pub const SOUL_EMOTE: &[u8] = include_bytes!("../../tests/fixtures/soul_emote.bin");
 pub const HEAR_SPEECH: &[u8] = include_bytes!("../../tests/fixtures/hear_speech.bin");
+pub const PLAYER_TELEPORT: &[u8] = include_bytes!("../../tests/fixtures/player_teleport.bin");
+pub const MOVE_TO_STATE: &[u8] = include_bytes!("../../tests/fixtures/move_to_state.bin");
 pub const HEAR_RANGED_SPEECH: &[u8] = include_bytes!("../../tests/fixtures/hear_ranged_speech.bin");

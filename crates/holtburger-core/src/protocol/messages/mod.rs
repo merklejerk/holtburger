@@ -114,9 +114,10 @@ impl GameMessage {
             ))),
 
             // GameEvent wrapper (0xF7B0)
-            opcodes::GAME_EVENT => Some(GameMessage::GameEvent(Box::new(
-                GameEvent::unpack(data, &mut offset)?,
-            ))),
+            opcodes::GAME_EVENT => Some(GameMessage::GameEvent(Box::new(GameEvent::unpack(
+                data,
+                &mut offset,
+            )?))),
 
             opcodes::HEAR_SPEECH => Some(GameMessage::HearSpeech(Box::new(
                 HearSpeechData::unpack(data, &mut offset)?,

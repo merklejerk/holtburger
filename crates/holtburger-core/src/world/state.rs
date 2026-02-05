@@ -99,17 +99,17 @@ impl WorldState {
                 let guid = data.guid;
                 if let Some(entity) = self.entities.get_mut(guid) {
                     let old_lb = entity.position.landblock_id;
-                    entity.position = data.pos;
+                    entity.position = data.pos.pos;
                     self.scene
-                        .update_entity(guid, old_lb, data.pos.landblock_id);
+                        .update_entity(guid, old_lb, data.pos.pos.landblock_id);
                     events.push(WorldEvent::EntityMoved {
                         guid,
-                        pos: data.pos,
+                        pos: data.pos.pos,
                     });
                 }
             }
-            GameMessage::GameEvent(ev) => match &ev.event {
-                GameEventData::PlayerDescription(data) => {
+            GameMessage::GameEvent(ev) => {
+                if let GameEventData::PlayerDescription(data) = &ev.event {
                     let guid = data.guid;
                     let name = &data.name;
                     let pos = &data.pos;
@@ -216,8 +216,7 @@ impl WorldState {
 
                     self.player.emit_derived_stats(&mut events);
                 }
-                _ => {}
-            },
+            }
             GameMessage::SetState(data) => {
                 if let Some(entity) = self.entities.get_mut(data.guid) {
                     entity.physics_state =

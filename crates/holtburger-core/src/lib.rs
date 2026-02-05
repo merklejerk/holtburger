@@ -644,8 +644,7 @@ impl Client {
         }
 
         let msg =
-            GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
-            }));
+            GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {}));
         self.session.send_message(&msg).await?;
         Ok(())
     }

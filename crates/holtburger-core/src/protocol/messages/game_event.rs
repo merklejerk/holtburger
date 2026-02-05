@@ -1,9 +1,9 @@
-use crate::protocol::messages::{
-    PlayerDescriptionData, MagicUpdateEnchantmentData, MagicUpdateMultipleEnchantmentsData,
-    MagicRemoveEnchantmentData, MagicRemoveMultipleEnchantmentsData,
-    MagicPurgeEnchantmentsData, MagicPurgeBadEnchantmentsData, game_event_opcodes,
-};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::{
+    MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
+    MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
+    MagicUpdateMultipleEnchantmentsData, PlayerDescriptionData, game_event_opcodes,
+};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -37,14 +37,9 @@ impl GameEvent {
         *offset += 12;
 
         let event = match event_type {
-            game_event_opcodes::PLAYER_DESCRIPTION => {
-                GameEventData::PlayerDescription(Box::new(PlayerDescriptionData::unpack(
-                    target,
-                    sequence,
-                    data,
-                    offset,
-                )?))
-            }
+            game_event_opcodes::PLAYER_DESCRIPTION => GameEventData::PlayerDescription(Box::new(
+                PlayerDescriptionData::unpack(target, sequence, data, offset)?,
+            )),
             game_event_opcodes::START_GAME => GameEventData::StartGame,
             game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT => {
                 let mut d = MagicUpdateEnchantmentData::unpack(data, offset)?;
@@ -102,32 +97,41 @@ impl GameEvent {
 
         match &self.event {
             GameEventData::PlayerDescription(data) => {
-                buf.write_u32::<LittleEndian>(game_event_opcodes::PLAYER_DESCRIPTION).unwrap();
+                buf.write_u32::<LittleEndian>(game_event_opcodes::PLAYER_DESCRIPTION)
+                    .unwrap();
                 data.pack(buf);
             }
             GameEventData::StartGame => {
-                buf.write_u32::<LittleEndian>(game_event_opcodes::START_GAME).unwrap();
+                buf.write_u32::<LittleEndian>(game_event_opcodes::START_GAME)
+                    .unwrap();
             }
             GameEventData::MagicUpdateEnchantment(data) => {
-                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT).unwrap();
+                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT)
+                    .unwrap();
                 data.pack(buf);
             }
             GameEventData::MagicUpdateMultipleEnchantments(data) => {
-                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS)
-                    .unwrap();
+                buf.write_u32::<LittleEndian>(
+                    game_event_opcodes::MAGIC_UPDATE_MULTIPLE_ENCHANTMENTS,
+                )
+                .unwrap();
                 data.pack(buf);
             }
             GameEventData::MagicRemoveEnchantment(data) => {
-                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_REMOVE_ENCHANTMENT).unwrap();
-                data.pack(buf);
-            }
-            GameEventData::MagicRemoveMultipleEnchantments(data) => {
-                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS)
+                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_REMOVE_ENCHANTMENT)
                     .unwrap();
                 data.pack(buf);
             }
+            GameEventData::MagicRemoveMultipleEnchantments(data) => {
+                buf.write_u32::<LittleEndian>(
+                    game_event_opcodes::MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS,
+                )
+                .unwrap();
+                data.pack(buf);
+            }
             GameEventData::MagicPurgeEnchantments(data) => {
-                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_PURGE_ENCHANTMENTS).unwrap();
+                buf.write_u32::<LittleEndian>(game_event_opcodes::MAGIC_PURGE_ENCHANTMENTS)
+                    .unwrap();
                 data.pack(buf);
             }
             GameEventData::MagicPurgeBadEnchantments(data) => {

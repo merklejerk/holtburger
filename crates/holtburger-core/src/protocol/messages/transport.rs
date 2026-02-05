@@ -55,7 +55,7 @@ impl ConnectRequestData {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PacketHeader {
     pub sequence: u32,
     pub flags: u32,
@@ -64,6 +64,20 @@ pub struct PacketHeader {
     pub time: u16,
     pub size: u16,
     pub iteration: u16,
+}
+
+impl Default for PacketHeader {
+    fn default() -> Self {
+        Self {
+            sequence: 0,
+            flags: 0,
+            checksum: 0,
+            id: 0,
+            time: 0,
+            size: 0,
+            iteration: 0, // Match pre-refactor working state
+        }
+    }
 }
 
 impl PacketHeader {

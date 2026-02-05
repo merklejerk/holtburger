@@ -49,6 +49,16 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct EnchantmentMask: u32 {
+        const MULTIPLICATIVE = 0x01;
+        const ADDITIVE = 0x02;
+        const COOLDOWN = 0x04;
+        const VITAE = 0x08;
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct CharacterOptionDataFlag: u32 {
         const SHORTCUT = 0x00000001;
         const SQUELCH_LIST = 0x00000002;
@@ -136,6 +146,17 @@ impl PlayerDescriptionData {
             }
         }
 
+        if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT64) {
+            let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
+            *offset += 4;
+            for _ in 0..count {
+                let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+                let val = LittleEndian::read_i64(&data[*offset + 4..*offset + 12]);
+                *offset += 12;
+                properties_int64.insert(key, val);
+            }
+        }
+
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_BOOL) {
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
@@ -158,17 +179,6 @@ impl PlayerDescriptionData {
             }
         }
 
-        if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DID) {
-            let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
-            *offset += 4;
-            for _ in 0..count {
-                let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-                *offset += 8;
-                properties_did.insert(key, val);
-            }
-        }
-
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_STRING) {
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
@@ -180,15 +190,14 @@ impl PlayerDescriptionData {
             }
         }
 
-        if property_flags.contains(DescriptionPropertyFlag::POSITION) {
+        if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DID) {
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                *offset += 4;
-                if let Some(pos) = WorldPosition::unpack(data, offset) {
-                    positions.insert(key, pos);
-                }
+                let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+                *offset += 8;
+                properties_did.insert(key, val);
             }
         }
 
@@ -203,14 +212,15 @@ impl PlayerDescriptionData {
             }
         }
 
-        if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT64) {
+        if property_flags.contains(DescriptionPropertyFlag::POSITION) {
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                let val = LittleEndian::read_i64(&data[*offset + 4..*offset + 12]);
-                *offset += 12;
-                properties_int64.insert(key, val);
+                *offset += 4;
+                if let Some(pos) = WorldPosition::unpack(data, offset) {
+                    positions.insert(key, pos);
+                }
             }
         }
 
@@ -296,9 +306,42 @@ impl PlayerDescriptionData {
 
         let mut enchantments = Vec::new();
         if vector_flags.contains(DescriptionVectorFlag::ENCHANTMENT) {
-            let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let mask = EnchantmentMask::from_bits_retain(LittleEndian::read_u32(
+                &data[*offset..*offset + 4],
+            ));
             *offset += 4;
-            for _ in 0..count {
+
+            if mask.contains(EnchantmentMask::MULTIPLICATIVE) {
+                let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+                *offset += 4;
+                for _ in 0..count {
+                    if let Some(e) = Enchantment::unpack(data, offset) {
+                        enchantments.push(e);
+                    }
+                }
+            }
+            if mask.contains(EnchantmentMask::ADDITIVE) {
+                let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+                *offset += 4;
+                for _ in 0..count {
+                    if let Some(e) = Enchantment::unpack(data, offset) {
+                        enchantments.push(e);
+                    }
+                }
+            }
+            if mask.contains(EnchantmentMask::COOLDOWN) {
+                let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+                *offset += 4;
+                for _ in 0..count {
+                    if let Some(e) = Enchantment::unpack(data, offset) {
+                        enchantments.push(e);
+                    }
+                }
+            }
+            if mask.contains(EnchantmentMask::VITAE) {
                 if let Some(e) = Enchantment::unpack(data, offset) {
                     enchantments.push(e);
                 }

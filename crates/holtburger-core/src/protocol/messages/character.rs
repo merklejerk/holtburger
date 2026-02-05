@@ -119,23 +119,16 @@ impl MessagePack for CharacterListData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEnterWorldRequestData {
-    pub guid: u32,
 }
 
 impl MessageUnpack for CharacterEnterWorldRequestData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        Some(CharacterEnterWorldRequestData { guid })
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(CharacterEnterWorldRequestData {})
     }
 }
 
 impl MessagePack for CharacterEnterWorldRequestData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+    fn pack(&self, _buf: &mut Vec<u8>) {
     }
 }
 
@@ -206,21 +199,18 @@ mod tests {
         let data = fixtures::CHARACTER_ENTER_WORLD_REQUEST;
         // Skip opcode (4 bytes)
         let mut offset = 4;
-        let unpacked = CharacterEnterWorldRequestData::unpack(data, &mut offset).unwrap();
+        let _unpacked = CharacterEnterWorldRequestData::unpack(data, &mut offset).unwrap();
 
-        assert_eq!(unpacked.guid, 0x12345678);
-        assert_eq!(offset, data.len());
+        // We don't read anything anymore
+        assert_eq!(offset, 4);
     }
 
     #[test]
     fn test_character_enter_world_request_pack() {
-        let msg = CharacterEnterWorldRequestData { guid: 0x12345678 };
+        let msg = CharacterEnterWorldRequestData {};
         let mut buf = Vec::new();
-        // Pack doesn't include opcode usually (wait, does it?)
-        // Let's check traits. Roundtrip tests usually pack the whole thing.
-        // Actually CharacterListData::pack doesn't include opcode.
         msg.pack(&mut buf);
-        assert_eq!(buf, fixtures::CHARACTER_ENTER_WORLD_REQUEST[4..]);
+        assert!(buf.is_empty());
     }
 
     #[test]

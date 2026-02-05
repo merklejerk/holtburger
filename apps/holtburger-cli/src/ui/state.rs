@@ -1,11 +1,16 @@
-use super::types::{ContextView, DashboardTab, FocusedPane, UIState, WIDTH_BREAKPOINT};
+use super::types::{AppAction, ContextView, DashboardTab, FocusedPane, UIState, WIDTH_BREAKPOINT};
+use crate::actions::{self, ActionHandler, ActionTarget};
 use crate::classification;
+use crate::ui;
 use crate::ui::widgets::effects::get_enchantment_name;
+use crossterm::event::{KeyCode, MouseButton, MouseEventKind};
+use holtburger_core::ClientEvent;
 use holtburger_core::protocol::messages::{CharacterEntry, Enchantment};
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, Skill, Vital};
-use holtburger_core::{ChatMessage, ClientState};
+use holtburger_core::world::WorldEvent;
+use holtburger_core::{ChatMessage, ClientCommand, ClientState};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -74,6 +79,588 @@ impl AppState {
         let max_scroll = current_total.saturating_sub(height);
         *scroll_offset = (*scroll_offset).min(max_scroll);
         *old_total = current_total;
+    }
+
+    pub fn refresh_context_buffer(&mut self) {
+        if self.context_view == ContextView::Custom {
+            return;
+        }
+        self.context_buffer.clear();
+    }
+
+    pub fn handle_action(&mut self, action: AppAction) -> Vec<ClientCommand> {
+        let mut commands = Vec::new();
+
+        match action {
+            AppAction::Tick(elapsed) => {
+                // Enforce dashboard index bounds
+                let dashboard_count = self.dashboard_item_count();
+                if self.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
+                    self.selected_dashboard_index = dashboard_count - 1;
+                } else if dashboard_count == 0 {
+                    self.selected_dashboard_index = 0;
+                }
+
+                // Proactive enchantment purge
+                self.player_enchantments.retain(|e| {
+                    if e.duration < 0.0 {
+                        return true;
+                    }
+                    let expires_at = e.start_time + e.duration;
+                    expires_at > 0.0
+                });
+
+                // Update enchantment timers locally
+                for enchant in &mut self.player_enchantments {
+                    if enchant.duration >= 0.0 {
+                        enchant.start_time -= elapsed;
+                    }
+                }
+            }
+            AppAction::KeyPress(key, width, _height, main_chunks) => {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Char('Q')
+                        if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    {
+                        commands.push(ClientCommand::Quit);
+                    }
+                    KeyCode::Tab | KeyCode::BackTab => {
+                        if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                            || key.code == KeyCode::BackTab
+                        {
+                            self.focused_pane = ui::get_prev_pane(self.focused_pane, width);
+                        } else {
+                            self.focused_pane = ui::get_next_pane(self.focused_pane, width);
+                        }
+                    }
+                    KeyCode::Esc => {
+                        if self.focused_pane == FocusedPane::Input {
+                            self.focused_pane = self.previous_focused_pane;
+                        } else if self.state == UIState::CharacterSelection {
+                            self.state = UIState::Chat;
+                        }
+                    }
+                    KeyCode::Enter => match self.state {
+                        UIState::Chat => {
+                            if self.focused_pane == FocusedPane::Input {
+                                let input = self.input.drain(..).collect::<String>();
+                                if input.is_empty() {
+                                    self.focused_pane = self.previous_focused_pane;
+                                    return commands;
+                                }
+                                if input == "/quit" || input == "/exit" {
+                                    commands.push(ClientCommand::Quit);
+                                    return commands;
+                                }
+                                if input == "/clear" {
+                                    self.messages.clear();
+                                    self.input.clear();
+                                    return commands;
+                                }
+                                if input == "/help" {
+                                    self.messages.push(ChatMessage {
+                                        kind: holtburger_core::MessageKind::System,
+                                        text: "Available commands: /quit, /exit, /clear, /help".to_string(),
+                                    });
+                                    self.messages.push(ChatMessage {
+                                        kind: holtburger_core::MessageKind::System,
+                                        text: "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)".to_string(),
+                                    });
+                                    self.input.clear();
+                                    return commands;
+                                }
+                                self.input_history.push(input.clone());
+                                self.history_index = None;
+                                commands.push(ClientCommand::Talk(input));
+                                self.focused_pane = self.previous_focused_pane;
+                            } else {
+                                self.previous_focused_pane = self.focused_pane;
+                                self.focused_pane = FocusedPane::Input;
+                            }
+                        }
+                        UIState::CharacterSelection => {
+                            if !self.characters.is_empty() {
+                                commands.push(ClientCommand::SelectCharacterByIndex(
+                                    self.selected_character_index + 1,
+                                ));
+                                self.state = UIState::Chat;
+                            }
+                        }
+                    },
+                    KeyCode::Backspace => {
+                        if self.state == UIState::Chat && self.focused_pane == FocusedPane::Input {
+                            self.input.pop();
+                        }
+                    }
+                    KeyCode::Up => match self.state {
+                        UIState::Chat => match self.focused_pane {
+                            FocusedPane::Input => {
+                                if !self.input_history.is_empty() {
+                                    let idx = self
+                                        .history_index
+                                        .map(|i| i.saturating_sub(1))
+                                        .unwrap_or(self.input_history.len() - 1);
+                                    self.history_index = Some(idx);
+                                    self.input = self.input_history[idx].clone();
+                                }
+                            }
+                            FocusedPane::Chat => {
+                                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                            }
+                            FocusedPane::Context => {
+                                self.context_scroll_offset =
+                                    self.context_scroll_offset.saturating_add(1);
+                            }
+                            FocusedPane::Dashboard => {
+                                if self.selected_dashboard_index > 0 {
+                                    self.selected_dashboard_index -= 1;
+                                }
+                            }
+                        },
+                        UIState::CharacterSelection => {
+                            if self.selected_character_index > 0 {
+                                self.selected_character_index -= 1;
+                            }
+                        }
+                    },
+                    KeyCode::Down => match self.state {
+                        UIState::Chat => match self.focused_pane {
+                            FocusedPane::Input => {
+                                if let Some(idx) = self.history_index {
+                                    if idx + 1 < self.input_history.len() {
+                                        let next = idx + 1;
+                                        self.history_index = Some(next);
+                                        self.input = self.input_history[next].clone();
+                                    } else {
+                                        self.history_index = None;
+                                        self.input.clear();
+                                    }
+                                }
+                            }
+                            FocusedPane::Chat => {
+                                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                            }
+                            FocusedPane::Context => {
+                                self.context_scroll_offset =
+                                    self.context_scroll_offset.saturating_sub(1);
+                            }
+                            FocusedPane::Dashboard => {
+                                let dashboard_count = self.dashboard_item_count();
+                                if dashboard_count > 0
+                                    && self.selected_dashboard_index + 1 < dashboard_count
+                                {
+                                    self.selected_dashboard_index += 1;
+                                }
+                            }
+                        },
+                        UIState::CharacterSelection => {
+                            if !self.characters.is_empty()
+                                && self.selected_character_index + 1 < self.characters.len()
+                            {
+                                self.selected_character_index += 1;
+                            }
+                        }
+                    },
+                    KeyCode::PageUp => {
+                        if let UIState::Chat = self.state {
+                            match self.focused_pane {
+                                FocusedPane::Chat => {
+                                    let h = main_chunks[1].height.saturating_sub(2) as usize;
+                                    let step = (h / 2) + 1;
+                                    self.scroll_offset = self.scroll_offset.saturating_add(step);
+                                }
+                                FocusedPane::Context => {
+                                    let h = main_chunks[2].height.saturating_sub(2) as usize;
+                                    let step = (h / 2) + 1;
+                                    self.context_scroll_offset =
+                                        self.context_scroll_offset.saturating_add(step);
+                                }
+                                FocusedPane::Dashboard => {
+                                    let h = self.last_dashboard_height;
+                                    let step = (h / 2) + 1;
+                                    self.selected_dashboard_index =
+                                        self.selected_dashboard_index.saturating_sub(step);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    KeyCode::PageDown => {
+                        if let UIState::Chat = self.state {
+                            match self.focused_pane {
+                                FocusedPane::Chat => {
+                                    let h = main_chunks[1].height.saturating_sub(2) as usize;
+                                    let step = (h / 2) + 1;
+                                    self.scroll_offset = self.scroll_offset.saturating_sub(step);
+                                }
+                                FocusedPane::Context => {
+                                    let h = main_chunks[2].height.saturating_sub(2) as usize;
+                                    let step = (h / 2) + 1;
+                                    self.context_scroll_offset =
+                                        self.context_scroll_offset.saturating_sub(step);
+                                }
+                                FocusedPane::Dashboard => {
+                                    let h = self.last_dashboard_height;
+                                    let step = (h / 2) + 1;
+                                    let count = self.dashboard_item_count();
+                                    self.selected_dashboard_index = (self.selected_dashboard_index
+                                        + step)
+                                        .min(count.saturating_sub(1));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    KeyCode::Char(c) => {
+                        if let UIState::Chat = self.state {
+                            match self.focused_pane {
+                                FocusedPane::Input => {
+                                    self.input.push(c);
+                                }
+                                FocusedPane::Chat | FocusedPane::Context | FocusedPane::Dashboard =>
+                                {
+                                    match c {
+                                        '1' => {
+                                            self.dashboard_tab = DashboardTab::Entities;
+                                            self.selected_dashboard_index = 0;
+                                        }
+                                        '2' => {
+                                            self.dashboard_tab = DashboardTab::Inventory;
+                                            self.selected_dashboard_index = 0;
+                                        }
+                                        '3' => {
+                                            self.dashboard_tab = DashboardTab::Character;
+                                            self.selected_dashboard_index = 0;
+                                        }
+                                        '4' => {
+                                            self.dashboard_tab = DashboardTab::Effects;
+                                            self.selected_dashboard_index = 0;
+                                        }
+                                        'x' | 'X' => {
+                                            self.context_view = ContextView::Default;
+                                            self.context_buffer.clear(); // equivalent to refresh_context_buffer
+                                        }
+                                        _ => {
+                                            // Action processing
+                                            let target = match self.dashboard_tab {
+                                                DashboardTab::Entities
+                                                | DashboardTab::Inventory => {
+                                                    let entities = self.get_filtered_nearby_tab();
+                                                    entities
+                                                        .get(self.selected_dashboard_index)
+                                                        .map(|(e, _, _)| ActionTarget::Entity(e))
+                                                        .unwrap_or(ActionTarget::None)
+                                                }
+                                                DashboardTab::Effects => {
+                                                    let enchants =
+                                                        self.get_effects_list_enchantments();
+                                                    enchants
+                                                        .get(self.selected_dashboard_index)
+                                                        .map(|(e, _)| ActionTarget::Enchantment(e))
+                                                        .unwrap_or(ActionTarget::None)
+                                                }
+                                                DashboardTab::Character => ActionTarget::None,
+                                            };
+
+                                            let player_guid = self.player_guid;
+                                            let actions = actions::get_actions_for_target(
+                                                &target,
+                                                &self.entities,
+                                                player_guid,
+                                            );
+                                            if let Some(handler) = actions
+                                                .iter()
+                                                .find(|a| {
+                                                    a.shortcut_char() == c.to_ascii_lowercase()
+                                                })
+                                                .and_then(|action| action.handler(&target, player_guid))
+                                            {
+                                                match handler {
+                                                    ActionHandler::Command(cmd) => {
+                                                        commands.push(cmd);
+                                                    }
+                                                    ActionHandler::ToggleDebug => {
+                                                        let lines = actions::get_debug_info(
+                                                            &target,
+                                                            |id| {
+                                                                self.entities
+                                                                    .get(&id)
+                                                                    .map(|e| e.name.clone())
+                                                                    .or_else(|| {
+                                                                        if Some(id) == player_guid {
+                                                                            Some("You".to_string())
+                                                                        } else {
+                                                                            None
+                                                                        }
+                                                                    })
+                                                            },
+                                                        );
+                                                        self.context_view = ContextView::Custom;
+                                                        self.context_buffer = lines;
+                                                        self.context_scroll_offset = 0;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    KeyCode::Home => {
+                        if let UIState::Chat = self.state {
+                            match self.focused_pane {
+                                FocusedPane::Chat => {
+                                    let max_scroll = self.chat_total_lines.saturating_sub(1);
+                                    self.scroll_offset = max_scroll;
+                                }
+                                FocusedPane::Context => {
+                                    let max_scroll = self.context_buffer.len().saturating_sub(1);
+                                    self.context_scroll_offset = max_scroll;
+                                }
+                                FocusedPane::Dashboard => {
+                                    self.selected_dashboard_index = 0;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    KeyCode::End => {
+                        if let UIState::Chat = self.state {
+                            match self.focused_pane {
+                                FocusedPane::Chat => self.scroll_offset = 0,
+                                FocusedPane::Context => self.context_scroll_offset = 0,
+                                FocusedPane::Dashboard => {
+                                    let dashboard_count = self.dashboard_item_count();
+                                    self.selected_dashboard_index =
+                                        dashboard_count.saturating_sub(1);
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            AppAction::Mouse(mouse, chunks, main_chunks) => {
+                match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if mouse.row >= chunks[2].y
+                            && mouse.row < chunks[2].y + chunks[2].height
+                            && mouse.column >= chunks[2].x
+                            && mouse.column < chunks[2].x + chunks[2].width
+                        {
+                            self.focused_pane = FocusedPane::Input;
+                        } else if mouse.row >= main_chunks[0].y
+                            && mouse.row < main_chunks[0].y + main_chunks[0].height
+                            && mouse.column >= main_chunks[0].x
+                            && mouse.column < main_chunks[0].x + main_chunks[0].width
+                        {
+                            self.focused_pane = FocusedPane::Dashboard;
+                        } else if mouse.row >= main_chunks[1].y
+                            && mouse.row < main_chunks[1].y + main_chunks[1].height
+                            && mouse.column >= main_chunks[1].x
+                            && mouse.column < main_chunks[1].x + main_chunks[1].width
+                        {
+                            self.focused_pane = FocusedPane::Chat;
+                        } else if mouse.row >= main_chunks[2].y
+                            && mouse.row < main_chunks[2].y + main_chunks[2].height
+                            && mouse.column >= main_chunks[2].x
+                            && mouse.column < main_chunks[2].x + main_chunks[2].width
+                        {
+                            self.focused_pane = FocusedPane::Context;
+                        }
+                    }
+                    MouseEventKind::ScrollUp => {
+                        if mouse.row >= main_chunks[1].y
+                            && mouse.row < main_chunks[1].y + main_chunks[1].height
+                            && mouse.column >= main_chunks[1].x
+                            && mouse.column < main_chunks[1].x + main_chunks[1].width
+                        {
+                            self.scroll_offset = self.scroll_offset.saturating_add(ui::SCROLL_STEP);
+                        } else if mouse.row >= main_chunks[2].y
+                            && mouse.row < main_chunks[2].y + main_chunks[2].height
+                            && mouse.column >= main_chunks[2].x
+                            && mouse.column < main_chunks[2].x + main_chunks[2].width
+                        {
+                            self.context_scroll_offset =
+                                self.context_scroll_offset.saturating_add(ui::SCROLL_STEP);
+                        } else if mouse.row >= main_chunks[0].y
+                            && mouse.row < main_chunks[0].y + main_chunks[0].height
+                            && mouse.column >= main_chunks[0].x
+                            && mouse.column < main_chunks[0].x + main_chunks[0].width
+                        {
+                            self.selected_dashboard_index =
+                                self.selected_dashboard_index.saturating_sub(1);
+                        }
+                    }
+                    MouseEventKind::ScrollDown => {
+                        if mouse.row >= main_chunks[1].y
+                            && mouse.row < main_chunks[1].y + main_chunks[1].height
+                            && mouse.column >= main_chunks[1].x
+                            && mouse.column < main_chunks[1].x + main_chunks[1].width
+                        {
+                            self.scroll_offset = self.scroll_offset.saturating_sub(ui::SCROLL_STEP);
+                        } else if mouse.row >= main_chunks[2].y
+                            && mouse.row < main_chunks[2].y + main_chunks[2].height
+                            && mouse.column >= main_chunks[2].x
+                            && mouse.column < main_chunks[2].x + main_chunks[2].width
+                        {
+                            self.context_scroll_offset =
+                                self.context_scroll_offset.saturating_sub(ui::SCROLL_STEP);
+                        } else if mouse.row >= main_chunks[0].y
+                            && mouse.row < main_chunks[0].y + main_chunks[0].height
+                            && mouse.column >= main_chunks[0].x
+                            && mouse.column < main_chunks[0].x + main_chunks[0].width
+                        {
+                            self.selected_dashboard_index =
+                                self.selected_dashboard_index.saturating_add(1);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            AppAction::ReceivedEvent(event) => {
+                match event {
+                    ClientEvent::LogMessage(_) => {}
+                    ClientEvent::Message(msg) => {
+                        self.messages.push(msg);
+                    }
+                    ClientEvent::CharacterList(chars) => {
+                        self.characters = chars;
+                        self.state = UIState::CharacterSelection;
+                        self.selected_character_index = 0;
+                    }
+                    ClientEvent::PlayerEntered { guid, name } => {
+                        self.player_guid = Some(guid);
+                        self.character_name = Some(name);
+                    }
+                    ClientEvent::World(world_event) => {
+                        match *world_event {
+                            WorldEvent::PlayerInfo {
+                                guid,
+                                name,
+                                pos,
+                                attributes,
+                                vitals,
+                                skills,
+                                enchantments,
+                            } => {
+                                self.player_guid = Some(guid);
+                                self.character_name = Some(name);
+                                if let Some(p) = pos {
+                                    self.player_pos = Some(p);
+                                }
+                                self.attributes = attributes;
+                                self.vitals = vitals;
+                                self.skills = skills;
+                                self.player_enchantments = enchantments;
+                                self.refresh_context_buffer();
+                            }
+                            WorldEvent::AttributeUpdated(attr) => {
+                                if let Some(existing) = self
+                                    .attributes
+                                    .iter_mut()
+                                    .find(|a| a.attr_type == attr.attr_type)
+                                {
+                                    *existing = attr;
+                                } else {
+                                    self.attributes.push(attr);
+                                }
+                                self.refresh_context_buffer();
+                            }
+                            WorldEvent::VitalUpdated(vital) => {
+                                if let Some(existing) = self
+                                    .vitals
+                                    .iter_mut()
+                                    .find(|v| v.vital_type == vital.vital_type)
+                                {
+                                    *existing = vital;
+                                } else {
+                                    self.vitals.push(vital);
+                                }
+                                self.refresh_context_buffer();
+                            }
+                            WorldEvent::SkillUpdated(skill) => {
+                                if let Some(existing) = self
+                                    .skills
+                                    .iter_mut()
+                                    .find(|s| s.skill_type == skill.skill_type)
+                                {
+                                    *existing = skill;
+                                } else {
+                                    self.skills.push(skill);
+                                }
+                                self.refresh_context_buffer();
+                            }
+                            WorldEvent::PropertyUpdated { .. } => {}
+                            WorldEvent::EntitySpawned(entity) => {
+                                let guid = entity.guid;
+                                if Some(guid) == self.player_guid {
+                                    if entity.name != "Unknown" {
+                                        self.character_name = Some(entity.name.clone());
+                                    }
+                                    self.player_pos = Some(entity.position);
+                                }
+                                self.entities.insert(guid, *entity);
+                            }
+                            WorldEvent::EntityDespawned(guid) => {
+                                self.entities.remove(&guid);
+                            }
+                            WorldEvent::EntityMoved { guid, pos } => {
+                                if let Some(entity) = self.entities.get_mut(&guid) {
+                                    entity.position = pos;
+                                }
+                                if Some(guid) == self.player_guid {
+                                    self.player_pos = Some(pos);
+                                }
+                            }
+                            WorldEvent::EnchantmentUpdated(enchantment) => {
+                                if let Some(existing) = self.player_enchantments.iter_mut().find(|e| {
+                                    e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
+                                }) {
+                                    *existing = enchantment;
+                                } else {
+                                    self.player_enchantments.push(enchantment);
+                                }
+                            }
+                            WorldEvent::EnchantmentRemoved { spell_id, layer } => {
+                                self.player_enchantments
+                                    .retain(|e| e.spell_id != spell_id || e.layer != layer);
+                            }
+                            WorldEvent::EnchantmentsPurged => {
+                                self.player_enchantments.clear();
+                            }
+                            WorldEvent::DerivedStatsUpdated {
+                                attributes,
+                                vitals,
+                                skills,
+                            } => {
+                                self.attributes = attributes;
+                                self.vitals = vitals;
+                                self.skills = skills;
+                                self.refresh_context_buffer();
+                            }
+                            WorldEvent::ServerTimeUpdate(t) => {
+                                self.server_time = Some((t, Instant::now()));
+                            }
+                        }
+                    }
+                    ClientEvent::StatusUpdate {
+                        state,
+                        logon_retry,
+                        enter_retry,
+                    } => {
+                        self.core_state = state;
+                        self.logon_retry = logon_retry;
+                        self.enter_retry = enter_retry;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        commands
     }
 
     pub fn current_server_time(&self) -> f64 {

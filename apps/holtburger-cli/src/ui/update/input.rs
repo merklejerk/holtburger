@@ -56,13 +56,20 @@ impl AppState {
                             self.input.clear();
                             return commands;
                         }
+                        if input == "/ping" {
+                            commands.push(ClientCommand::Ping);
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
                         if input == "/help" {
                             self.messages.push(ChatMessage {
-                                kind: holtburger_core::MessageKind::System,
-                                text: "Available commands: /quit, /exit, /clear, /help".to_string(),
+                                kind: holtburger_core::ChatMessageKind::System,
+                                text: "Available commands: /quit, /exit, /clear, /help, /ping".to_string(),
                             });
                             self.messages.push(ChatMessage {
-                                kind: holtburger_core::MessageKind::System,
+                                kind: holtburger_core::ChatMessageKind::System,
                                 text: "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)".to_string(),
                             });
                             self.input.clear();

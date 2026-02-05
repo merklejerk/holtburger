@@ -107,6 +107,22 @@ impl AppState {
                 self.logon_retry = logon_retry;
                 self.enter_retry = enter_retry;
             }
+            ClientEvent::PingResponse => {
+                self.messages.push(holtburger_core::ChatMessage {
+                    kind: holtburger_core::ChatMessageKind::System,
+                    text: "Pong! (Received PingResponse)".to_string(),
+                });
+            }
+            ClientEvent::ViewContents { container, items } => {
+                self.messages.push(holtburger_core::ChatMessage {
+                    kind: holtburger_core::ChatMessageKind::System,
+                    text: format!(
+                        "Received ViewContents for {:08X} ({} items)",
+                        container,
+                        items.len()
+                    ),
+                });
+            }
             _ => {}
         }
     }

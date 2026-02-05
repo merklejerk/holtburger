@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
 
     if args.verbose > 0 {
         app_state.messages.push(holtburger_core::ChatMessage {
-            kind: holtburger_core::MessageKind::System,
+            kind: holtburger_core::ChatMessageKind::System,
             text: format!("Verbosity level {} enabled.", args.verbose),
         });
     }
@@ -295,7 +295,7 @@ async fn main() -> Result<()> {
                     }
                 } else {
                     app_state.messages.push(holtburger_core::ChatMessage {
-                        kind: holtburger_core::MessageKind::System,
+                        kind: holtburger_core::ChatMessageKind::System,
                         text: text.clone(),
                     });
                 }

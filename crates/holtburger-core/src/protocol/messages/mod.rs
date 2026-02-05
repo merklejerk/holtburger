@@ -6,11 +6,13 @@ pub mod game_event;
 pub mod magic;
 pub mod misc;
 pub mod movement;
+pub mod net;
 pub mod object;
 pub mod player;
 pub mod traits;
 pub mod transport;
 pub mod utils;
+pub mod world;
 
 pub use character::*;
 pub use chat::*;
@@ -20,11 +22,13 @@ pub use game_event::*;
 pub use magic::*;
 pub use misc::*;
 pub use movement::*;
+pub use net::*;
 pub use object::*;
 pub use player::*;
 pub use traits::*;
 pub use transport::*;
 pub use utils::*;
+pub use world::*;
 
 use byteorder::{ByteOrder, LittleEndian};
 

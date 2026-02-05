@@ -2,7 +2,8 @@ use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::{
     MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
     MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
-    MagicUpdateMultipleEnchantmentsData, PlayerDescriptionData, game_event_opcodes,
+    MagicUpdateMultipleEnchantmentsData, PlayerDescriptionData, PingResponseData,
+    ViewContentsData, game_event_opcodes,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -16,6 +17,8 @@ pub struct GameEvent {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEventData {
     PlayerDescription(Box<PlayerDescriptionData>),
+    PingResponse(Box<PingResponseData>),
+    ViewContents(Box<ViewContentsData>),
     StartGame,
     MagicUpdateEnchantment(Box<MagicUpdateEnchantmentData>),
     MagicUpdateMultipleEnchantments(Box<MagicUpdateMultipleEnchantmentsData>),
@@ -39,6 +42,12 @@ impl GameEvent {
         let event = match event_type {
             game_event_opcodes::PLAYER_DESCRIPTION => GameEventData::PlayerDescription(Box::new(
                 PlayerDescriptionData::unpack(target, sequence, data, offset)?,
+            )),
+            game_event_opcodes::PING_RESPONSE => {
+                GameEventData::PingResponse(Box::new(PingResponseData::unpack(data, offset)?))
+            }
+            game_event_opcodes::VIEW_CONTENTS => GameEventData::ViewContents(Box::new(
+                ViewContentsData::unpack(data, offset)?,
             )),
             game_event_opcodes::START_GAME => GameEventData::StartGame,
             game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT => {
@@ -106,6 +115,16 @@ impl GameEvent {
         match &self.event {
             GameEventData::PlayerDescription(data) => {
                 buf.write_u32::<LittleEndian>(game_event_opcodes::PLAYER_DESCRIPTION)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::PingResponse(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::PING_RESPONSE)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::ViewContents(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::VIEW_CONTENTS)
                     .unwrap();
                 data.pack(buf);
             }

@@ -1,7 +1,7 @@
 use crate::ui::AppState;
 use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, FocusedPane};
 use super::super::utils::wrap_text;
-use holtburger_core::MessageKind;
+use holtburger_core::ChatMessageKind;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -24,13 +24,13 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let mut all_lines = Vec::new();
     for m in &state.messages[window_start..] {
         let color = match m.kind {
-            MessageKind::Chat => Color::White,
-            MessageKind::Tell => Color::Magenta,
-            MessageKind::Emote => Color::Green,
-            MessageKind::Info => Color::Cyan,
-            MessageKind::System => Color::DarkGray,
-            MessageKind::Error => Color::Red,
-            MessageKind::Warning => Color::Yellow,
+            ChatMessageKind::Chat => Color::White,
+            ChatMessageKind::Tell => Color::Magenta,
+            ChatMessageKind::Emote => Color::Green,
+            ChatMessageKind::Info => Color::Cyan,
+            ChatMessageKind::System => Color::DarkGray,
+            ChatMessageKind::Error => Color::Red,
+            ChatMessageKind::Warning => Color::Yellow,
         };
 
         let wrapped = wrap_text(&m.text, width);

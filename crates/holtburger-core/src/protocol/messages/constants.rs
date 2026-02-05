@@ -47,6 +47,7 @@ pub mod opcodes {
 
 pub mod actions {
     pub const TALK: u32 = 0x0015;
+    pub const PING_REQUEST: u32 = 0x01E9;
     pub const DROP_ITEM: u32 = 0x0019;
     pub const PUT_ITEM_IN_CONTAINER: u32 = 0x001A;
     pub const USE: u32 = 0x0113;
@@ -58,6 +59,8 @@ pub mod game_event_opcodes {
     pub const PLAYER_DESCRIPTION: u32 = 0x0013;
     pub const START_GAME: u32 = 0x0282;
     pub const CHANNEL_BROADCAST: u32 = 0x0147;
+    pub const VIEW_CONTENTS: u32 = 0x0196;
+    pub const PING_RESPONSE: u32 = 0x01EA;
     pub const TELL: u32 = 0x02BD;
     pub const MAGIC_UPDATE_ENCHANTMENT: u32 = 0x02C2;
     pub const MAGIC_REMOVE_ENCHANTMENT: u32 = 0x02C3;

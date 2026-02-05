@@ -18,6 +18,8 @@ pub const OBJECT_CREATE_COMPLEX: &[u8] =
     include_bytes!("../../tests/fixtures/object_create_complex.bin");
 pub const CREATURE_SKILL_MELEE_DEF: &[u8] =
     include_bytes!("../../tests/fixtures/creature_skill_melee_def.bin");
+pub const PING_RESPONSE: &[u8] = include_bytes!("../../tests/fixtures/ping_response.bin");
+pub const VIEW_CONTENTS: &[u8] = include_bytes!("../../tests/fixtures/view_contents.bin");
 pub const ENCHANTMENT_SIMPLE: &[u8] = include_bytes!("../../tests/fixtures/enchantment_simple.bin");
 pub const DDD_INTERROGATION_RESPONSE: &[u8] =
     include_bytes!("../../tests/fixtures/ddd_interrogation_response.bin");

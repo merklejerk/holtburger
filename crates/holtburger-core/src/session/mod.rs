@@ -387,7 +387,7 @@ impl Session {
         let header = PacketHeader {
             flags: packet_flags::BLOB_FRAGMENTS,
             sequence: self.packet_sequence,
-            id: self.client_id,
+            id: 0,
             ..Default::default()
         };
         self.packet_sequence += 1;
@@ -399,7 +399,7 @@ impl Session {
         let header = PacketHeader {
             flags: packet_flags::ACK_SEQUENCE,
             sequence: 0,
-            id: self.client_id,
+            id: 0,
             ..Default::default()
         };
 
@@ -508,12 +508,8 @@ impl Session {
         if header.flags & packet_flags::CONNECT_REQUEST != 0 {
             let mut offset = self.get_payload_offset(header.flags, &data);
             if offset + transport::CONNECT_REQUEST_SIZE <= data.len() {
-                let mut crd = ConnectRequestData::unpack(&data, &mut offset)
+                let crd = ConnectRequestData::unpack(&data, &mut offset)
                     .ok_or_else(|| anyhow::anyhow!("Failed to unpack connect request"))?;
-                // If the body CID is 0, use the one from the packet header
-                if crd.client_id == 0 && header.id != 0 {
-                    crd.client_id = header.id;
-                }
                 events.push(SessionEvent::HandshakeRequest(crd));
             }
         }

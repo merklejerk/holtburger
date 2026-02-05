@@ -320,7 +320,7 @@ mod tests {
 
     #[test]
     fn test_gamemessage_routing_character_request() {
-        let packed = vec![0xC8, 0xF7, 0x00, 0x00, 0x78, 0x56, 0x34, 0x12];
+        let packed = vec![0xC8, 0xF7, 0x00, 0x00];
         let unpacked = GameMessage::unpack(&packed).unwrap();
         assert!(matches!(
             unpacked,

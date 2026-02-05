@@ -355,7 +355,7 @@ impl Client {
         let header = PacketHeader {
             flags: packet_flags::DISCONNECT,
             sequence: self.session.packet_sequence,
-            id: self.session.client_id,
+            id: 0,
             ..Default::default()
         };
         self.session.packet_sequence += 1;
@@ -645,7 +645,6 @@ impl Client {
 
         let msg =
             GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
-                guid: char_id,
             }));
         self.session.send_message(&msg).await?;
         Ok(())
@@ -716,7 +715,7 @@ impl Client {
         let resp_header = PacketHeader {
             flags: packet_flags::CONNECT_RESPONSE,
             sequence: 1,
-            id: self.session.client_id,
+            id: 0,
             size: 8,
             ..Default::default()
         };

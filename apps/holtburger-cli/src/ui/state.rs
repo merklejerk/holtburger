@@ -6,7 +6,6 @@ use holtburger_core::world::entity::Entity;
 use holtburger_core::world::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, Skill, Vital};
 use holtburger_core::{ChatMessage, ClientState};
-use ratatui::style::Color;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -44,11 +43,39 @@ pub struct AppState {
     pub entities: HashMap<u32, Entity>,
     pub server_time: Option<(f64, Instant)>,
     pub use_emojis: bool,
-    pub chat_cache: Vec<(String, Color)>,
-    pub last_rendered_width: usize,
 }
 
 impl AppState {
+    pub fn maintain_scroll(
+        &mut self,
+        is_context: bool,
+        current_total: usize,
+        height: usize,
+    ) {
+        let (scroll_offset, old_total) = if is_context {
+            (&mut self.context_scroll_offset, &mut self.context_total_lines)
+        } else {
+            (&mut self.scroll_offset, &mut self.chat_total_lines)
+        };
+
+        if *old_total > 0 && current_total != *old_total {
+            if current_total > *old_total {
+                let diff = current_total - *old_total;
+                if *scroll_offset > 0 {
+                    *scroll_offset += diff;
+                }
+            } else {
+                // Buffer shrank (pruning)
+                let diff = *old_total - current_total;
+                *scroll_offset = scroll_offset.saturating_sub(diff);
+            }
+        }
+
+        let max_scroll = current_total.saturating_sub(height);
+        *scroll_offset = (*scroll_offset).min(max_scroll);
+        *old_total = current_total;
+    }
+
     pub fn current_server_time(&self) -> f64 {
         match self.server_time {
             Some((server_val, local_then)) => {

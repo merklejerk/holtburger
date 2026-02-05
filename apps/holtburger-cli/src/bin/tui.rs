@@ -200,8 +200,6 @@ async fn main() -> Result<()> {
         entities: std::collections::HashMap::new(),
         server_time: None,
         use_emojis: !args.no_emojis,
-        chat_cache: Vec::new(),
-        last_rendered_width: 0,
     };
 
     refresh_context_buffer(&mut app_state);

@@ -52,6 +52,9 @@ pub enum ClientEvent {
         enter_retry: Option<(u32, u32, Option<Instant>)>,
     },
     World(Box<crate::world::WorldEvent>),
+    GameMessage(Box<crate::protocol::messages::GameMessage>),
+    RawMessage(Vec<u8>),
+    LogMessage(String),
 }
 
 #[derive(Debug, Clone)]
@@ -448,6 +451,10 @@ impl Client {
     }
 
     async fn handle_message(&mut self, data: &[u8]) -> Result<()> {
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientEvent::RawMessage(data.to_vec()));
+        }
+
         if let Some(ref dump_dir) = self.message_dump_dir {
             let path = dump_dir.join(format!("{:05}.bin", self.message_counter));
             std::fs::write(path, data)?;
@@ -456,9 +463,14 @@ impl Client {
 
         let message = GameMessage::unpack(data);
         if message.is_none() {
+            log::warn!("Failed to unpack GameMessage ({} bytes): {:02X?}", data.len(), data);
             return Ok(());
         }
         let message = message.unwrap();
+
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientEvent::GameMessage(Box::new(message.clone())));
+        }
 
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);

@@ -18,7 +18,6 @@ pub const CHAT_HISTORY_WINDOW_SIZE: usize = 200;
 
 // Interaction constants
 pub const SCROLL_STEP: usize = 3;
-pub const PAGE_SCROLL_STEP: usize = 10;
 
 #[derive(PartialEq, Debug)]
 pub enum UIState {

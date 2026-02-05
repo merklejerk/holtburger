@@ -82,9 +82,8 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Render Scrollbar
     if total_lines > height {
-        let mut scrollbar_state = ScrollbarState::new(total_lines)
-            .viewport_content_length(height)
-            .position(start);
+        let mut scrollbar_state =
+            ScrollbarState::new(total_lines.saturating_sub(height)).position(start);
         f.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
@@ -135,9 +134,8 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Render Scrollbar
     if total_ctx > height {
-        let mut scrollbar_state = ScrollbarState::new(total_ctx)
-            .viewport_content_length(height)
-            .position(ctx_start);
+        let mut scrollbar_state =
+            ScrollbarState::new(total_ctx.saturating_sub(height)).position(ctx_start);
         f.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)

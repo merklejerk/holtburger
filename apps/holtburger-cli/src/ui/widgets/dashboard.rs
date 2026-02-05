@@ -56,6 +56,8 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         ])
         .split(inner_area);
 
+    f.render_widget(&dashboard_block, area);
+
     // Tab-specific rendering
     match state.dashboard_tab {
         DashboardTab::Entities
@@ -70,6 +72,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 DashboardTab::Effects => crate::ui::widgets::effects::get_effects_list_items(state),
             };
 
+            let total = items.len();
             let dashboard_list = List::new(items)
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                 .highlight_symbol("> ");
@@ -84,14 +87,12 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             );
 
             // Render Scrollbar for List-based tabs
-            let total = state.dashboard_item_count();
             let height = dashboard_inner_chunks[0].height as usize;
             state.last_dashboard_height = height;
 
             if total > height {
-                let mut scrollbar_state = ScrollbarState::new(total)
-                    .viewport_content_length(height)
-                    .position(state.selected_dashboard_index);
+                let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
+                    .position(state.selected_dashboard_index.min(total.saturating_sub(height)));
                 f.render_stateful_widget(
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)
@@ -104,8 +105,6 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         } // Future non-list tabs go here
           // DashboardTab::Party => { render_party_grid(f, state, dashboard_inner_chunks[0]); }
     }
-
-    f.render_widget(dashboard_block, area);
 
     if let Some(action_bar) = crate::ui::utils::render_action_bar(state) {
         f.render_widget(action_bar, dashboard_inner_chunks[1]);

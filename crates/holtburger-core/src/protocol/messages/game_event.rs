@@ -77,7 +77,15 @@ impl GameEvent {
                 d.sequence = sequence;
                 GameEventData::MagicPurgeBadEnchantments(Box::new(d))
             }
-            _ => GameEventData::Unknown(event_type, data[*offset..].to_vec()),
+            _ => {
+                log::warn!(
+                    "<<< Unknown GameEvent Opcode: {:08X} Target: {:08X} Seq: {}",
+                    event_type,
+                    target,
+                    sequence
+                );
+                GameEventData::Unknown(event_type, data[*offset..].to_vec())
+            }
         };
 
         if let GameEventData::Unknown(_, _) = &event {

@@ -85,6 +85,38 @@ bitflags! {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+    pub struct PhysicsState: u32 {
+        const NONE                          = 0x00000000;
+        const STATIC                        = 0x00000001;
+        const UNUSED1                       = 0x00000002;
+        const ETHEREAL                      = 0x00000004;
+        const REPORT_COLLISIONS              = 0x00000008;
+        const IGNORE_COLLISIONS              = 0x00000010;
+        const NO_DRAW                        = 0x00000020;
+        const MISSILE                       = 0x00000040;
+        const PUSHABLE                      = 0x00000080;
+        const ALIGN_PATH                     = 0x00000100;
+        const PATH_CLIPPED                   = 0x00000200;
+        const GRAVITY                       = 0x00000400;
+        const LIGHTING_ON                    = 0x00000800;
+        const PARTICLE_EMITTER               = 0x00001000;
+        const UNUSED2                       = 0x00002000;
+        const HIDDEN                        = 0x00004000;
+        const SCRIPTED_COLLISION             = 0x00008000;
+        const HAS_PHYSICS_BSP                 = 0x00010000;
+        const INELASTIC                     = 0x00020000;
+        const HAS_DEFAULT_ANIM                = 0x00040000;
+        const HAS_DEFAULT_SCRIPT              = 0x00080000;
+        const CLOAKED                       = 0x00100000;
+        const REPORT_COLLISIONS_AS_ENVIRONMENT = 0x00200000;
+        const EDGE_SLIDE                     = 0x00400000;
+        const SLEDDING                      = 0x00800000;
+        const FROZEN                        = 0x01000000;
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct EnchantmentTypeFlags: u32 {
         const UNDEF                  = 0x0000000;
         const ATTRIBUTE              = 0x0000001;
@@ -217,36 +249,6 @@ bitflags! {
         const DID_STATS_TABLE = 0x1000;
         const INT64_STATS_TABLE = 0x2000;
         const ARMOR_LEVELS = 0x4000;
-    }
-}
-
-bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-    pub struct PhysicsState: u32 {
-        const NONE = 0x00000000;
-        const STATIC = 0x00000001;
-        const ETHEREAL = 0x00000004;
-        const REPORT_COLLISIONS = 0x00000008;
-        const IGNORE_COLLISIONS = 0x00000010;
-        const NO_DRAW = 0x00000020;
-        const MISSILE = 0x00000040;
-        const PUSHABLE = 0x00000080;
-        const ALIGN_PATH = 0x00000100;
-        const PATH_CLIPPED = 0x00000200;
-        const GRAVITY = 0x00000400;
-        const LIGHTING_ON = 0x00000800;
-        const PARTICLE_EMITTER = 0x00001000;
-        const HIDDEN = 0x00004000;
-        const SCRIPTED_COLLISION = 0x00008000;
-        const HAS_PHYSICS_BSP = 0x00010000;
-        const INELASTIC = 0x00020000;
-        const HAS_DEFAULT_ANIM = 0x00040000;
-        const HAS_DEFAULT_SCRIPT = 0x00080000;
-        const CLOAKED = 0x00100000;
-        const REPORT_COLLISIONS_AS_ENVIRONMENT = 0x00200000;
-        const EDGE_SLIDE = 0x00400000;
-        const SLEDDING = 0x00800000;
-        const FROZEN = 0x01000000;
     }
 }
 

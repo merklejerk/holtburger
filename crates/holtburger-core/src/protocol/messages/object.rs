@@ -4,7 +4,9 @@ use crate::protocol::messages::utils::{
     write_packed_u32_with_known_type, write_string16,
 };
 use crate::world::position::WorldPosition;
-use crate::world::properties::{ObjectDescriptionFlag, PhysicsDescriptionFlag, WeenieHeaderFlag};
+use crate::world::properties::{
+    ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
+};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,7 +14,7 @@ pub struct ObjectCreateData {
     pub guid: u32,
     pub model_header: u8,
     pub physics_flags: PhysicsDescriptionFlag,
-    pub physics_state: u32,
+    pub physics_state: PhysicsState,
     pub pos: Option<WorldPosition>,
     pub parent_id: Option<u32>,
     pub parent_loc: Option<u32>,
@@ -94,7 +96,8 @@ impl MessageUnpack for ObjectCreateData {
         let physics_flags = PhysicsDescriptionFlag::from_bits_retain(phys_flags_bits);
         *offset += 4;
 
-        let physics_state = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let physics_state =
+            PhysicsState::from_bits_retain(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
 
         if physics_flags.contains(PhysicsDescriptionFlag::MOVEMENT) {
@@ -352,7 +355,8 @@ impl MessagePack for ObjectCreateData {
         // PhysicsData
         buf.write_u32::<LittleEndian>(self.physics_flags.bits())
             .unwrap();
-        buf.write_u32::<LittleEndian>(self.physics_state).unwrap();
+        buf.write_u32::<LittleEndian>(self.physics_state.bits())
+            .unwrap();
 
         if self
             .physics_flags
@@ -917,19 +921,42 @@ impl MessageUnpack for PickupEventData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetStateData {
     pub guid: u32,
-    pub state: u32,
+    pub physics_state: PhysicsState,
+    pub instance_sequence: u16,
+    pub state_sequence: u16,
 }
 
 impl MessageUnpack for SetStateData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() {
+        if *offset + 12 > data.len() {
             return None;
         }
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let state = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let physics_state =
+            PhysicsState::from_bits_retain(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
-        Some(SetStateData { guid, state })
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let state_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        Some(SetStateData {
+            guid,
+            physics_state,
+            instance_sequence,
+            state_sequence,
+        })
+    }
+}
+
+impl MessagePack for SetStateData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        buf.write_u32::<LittleEndian>(self.physics_state.bits())
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.instance_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.state_sequence).unwrap();
     }
 }
 
@@ -937,35 +964,34 @@ impl MessageUnpack for SetStateData {
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
-    fn test_object_create_unpack_minimal() {
-        let data = fixtures::OBJECT_CREATE_MINIMAL;
-        let mut offset = 0;
-        let msg = ObjectCreateData::unpack(data, &mut offset).unwrap();
-
-        assert_eq!(msg.guid, 0x50000001);
-        assert_eq!(msg.model_header, 1);
-        assert_eq!(msg.name, Some("Buddy".to_string()));
-        assert_eq!(msg.wcid, 123);
-        assert_eq!(msg.icon_id, 0x06000000);
-        assert_eq!(msg.item_type, 1);
-        assert_eq!(msg.sequences, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
-        assert_eq!(offset, data.len());
+    fn test_set_state_parity() {
+        let hex = "010000500804400063010100";
+        let expected = SetStateData {
+            guid: 0x50000001,
+            physics_state: PhysicsState::REPORT_COLLISIONS
+                | PhysicsState::GRAVITY
+                | PhysicsState::EDGE_SLIDE,
+            instance_sequence: 355,
+            state_sequence: 1,
+        };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 
     #[test]
-    fn test_object_create_pack_minimal() {
+    fn test_object_create_minimal_fixture() {
         let mut sequences = [0u16; 9];
         for (i, seq) in sequences.iter_mut().enumerate() {
             *seq = i as u16;
         }
 
-        let msg = ObjectCreateData {
+        let expected = ObjectCreateData {
             guid: 0x50000001,
             model_header: 1,
             physics_flags: PhysicsDescriptionFlag::POSITION | PhysicsDescriptionFlag::TIMESTAMPS,
-            physics_state: 0,
+            physics_state: PhysicsState::empty(),
             pos: Some(WorldPosition {
                 landblock_id: 0x12340001,
                 coords: crate::math::Vector3::new(100.0, 200.0, 300.0),
@@ -990,43 +1016,24 @@ mod tests {
             wielder_id: None,
         };
 
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, fixtures::OBJECT_CREATE_MINIMAL);
+        assert_pack_unpack_parity(fixtures::OBJECT_CREATE_MINIMAL, &expected);
     }
 
     #[test]
-    fn test_object_create_unpack_complex() {
-        let data = fixtures::OBJECT_CREATE_COMPLEX;
-        let mut offset = 0;
-        let msg = ObjectCreateData::unpack(data, &mut offset).unwrap();
-
-        assert_eq!(msg.guid, 0x50000002);
-        assert_eq!(msg.name, Some("Fancy Buddy".to_string()));
-        assert_eq!(msg.wcid, 456);
-        assert_eq!(msg.icon_id, 0x0600000A);
-        assert_eq!(msg.parent_id, Some(0x50000001));
-        assert_eq!(msg.container_id, Some(0x50001001));
-        assert_eq!(msg.wielder_id, Some(0x50001002));
-        assert_eq!(msg.sequences, [100, 101, 102, 103, 104, 105, 106, 107, 108]);
-        assert_eq!(offset, data.len());
-    }
-
-    #[test]
-    fn test_object_create_pack_complex() {
+    fn test_object_create_complex_fixture() {
         let mut sequences = [0u16; 9];
         for (i, seq) in sequences.iter_mut().enumerate() {
             *seq = (100 + i) as u16;
         }
 
-        let msg = ObjectCreateData {
+        let expected = ObjectCreateData {
             guid: 0x50000002,
             model_header: 0x11,
             physics_flags: PhysicsDescriptionFlag::POSITION
                 | PhysicsDescriptionFlag::PARENT
                 | PhysicsDescriptionFlag::OBJSCALE
                 | PhysicsDescriptionFlag::TIMESTAMPS,
-            physics_state: 0,
+            physics_state: PhysicsState::empty(),
             pos: Some(WorldPosition {
                 landblock_id: 0x12340001,
                 coords: crate::math::Vector3::new(10.0, 20.0, 30.0),
@@ -1051,9 +1058,7 @@ mod tests {
             wielder_id: Some(0x50001002),
         };
 
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, fixtures::OBJECT_CREATE_COMPLEX);
+        assert_pack_unpack_parity(fixtures::OBJECT_CREATE_COMPLEX, &expected);
     }
     #[test]
     fn test_update_property_int_unpack_private() {
@@ -1108,6 +1113,10 @@ mod tests {
         let mut packed = Vec::new();
         msg.pack(&mut packed);
         assert_eq!(hex::encode(&packed), hex.to_lowercase());
+
+        let mut offset = 0;
+        let unpacked = UpdatePropertyIntData::unpack(&packed, &mut offset, true).unwrap();
+        assert_eq!(unpacked, msg);
     }
 
     #[test]
@@ -1134,6 +1143,10 @@ mod tests {
         let mut packed = Vec::new();
         msg.pack(&mut packed);
         assert_eq!(hex::encode(&packed), hex.to_lowercase());
+
+        let mut offset = 0;
+        let unpacked = UpdatePropertyFloatData::unpack(&packed, &mut offset, false).unwrap();
+        assert_eq!(unpacked, msg);
     }
 
     #[test]
@@ -1160,45 +1173,28 @@ mod tests {
         let mut packed = Vec::new();
         msg.pack(&mut packed);
         assert_eq!(hex::encode(&packed), hex.to_lowercase());
+
+        let mut offset = 0;
+        let unpacked = UpdatePropertyStringData::unpack(&packed, &mut offset, false).unwrap();
+        assert_eq!(unpacked, msg);
     }
 
     #[test]
-    fn test_update_health_unpack() {
+    fn test_update_health_fixture() {
         let hex = "010000500000003f";
         let data = hex::decode(hex).unwrap();
-        let mut offset = 0;
-        let msg = UpdateHealthData::unpack(&data, &mut offset).unwrap();
-        assert_eq!(msg.target, 0x50000001);
-        assert_eq!(msg.health, 0.5);
-    }
-
-    #[test]
-    fn test_update_health_pack() {
-        let hex = "010000500000003f";
-        let msg = UpdateHealthData {
+        let expected = UpdateHealthData {
             target: 0x50000001,
             health: 0.5,
         };
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(hex::encode(packed), hex);
+        assert_pack_unpack_parity(&data, &expected);
     }
 
     #[test]
-    fn test_object_delete_unpack() {
+    fn test_object_delete_fixture() {
         let hex = "01000050";
         let data = hex::decode(hex).unwrap();
-        let mut offset = 0;
-        let msg = ObjectDeleteData::unpack(&data, &mut offset).unwrap();
-        assert_eq!(msg.guid, 0x50000001);
-    }
-
-    #[test]
-    fn test_object_delete_pack() {
-        let hex = "01000050";
-        let msg = ObjectDeleteData { guid: 0x50000001 };
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(hex::encode(packed), hex);
+        let expected = ObjectDeleteData { guid: 0x50000001 };
+        assert_pack_unpack_parity(&data, &expected);
     }
 }

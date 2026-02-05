@@ -67,6 +67,7 @@ impl WorldState {
                 entity.wcid = Some(data.wcid);
                 entity.flags = data.obj_desc_flags;
                 entity.item_type = Some(ItemType::from_bits_truncate(data.item_type));
+                entity.physics_state = data.physics_state;
                 entity.physics_parent_id = data.parent_id;
                 entity.container_id = data.container_id;
                 entity.wielder_id = data.wielder_id;
@@ -219,8 +220,11 @@ impl WorldState {
             }
             GameMessage::SetState(data) => {
                 if let Some(entity) = self.entities.get_mut(data.guid) {
-                    entity.physics_state =
-                        crate::world::properties::PhysicsState::from_bits_retain(data.state);
+                    entity.physics_state = data.physics_state;
+                    events.push(WorldEvent::EntityStateUpdated {
+                        guid: data.guid,
+                        physics_state: data.physics_state,
+                    });
                 }
             }
             GameMessage::UpdatePropertyInt(data) => {

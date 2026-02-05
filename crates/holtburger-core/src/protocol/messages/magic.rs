@@ -176,3 +176,58 @@ impl MessagePack for MagicPurgeBadEnchantmentsData {
         // Body is empty
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_magic_update_enchantment_parity() {
+        let expected = MagicUpdateEnchantmentData {
+            target: 0,
+            sequence: 0,
+            enchantment: Enchantment {
+                spell_id: 1,
+                layer: 1,
+                spell_category: 0,
+                has_spell_set_id: 0,
+                power_level: 100,
+                start_time: 0.0,
+                duration: 3600.0,
+                caster_guid: 0,
+                degrade_modifier: 1.0,
+                degrade_limit: 0.0,
+                last_time_degraded: 0.0,
+                stat_mod_type: 1,
+                stat_mod_key: 2,
+                stat_mod_value: 3.0,
+                spell_set_id: None,
+            },
+        };
+        assert_pack_unpack_parity(fixtures::ENCHANTMENT_SIMPLE, &expected);
+    }
+
+    #[test]
+    fn test_magic_remove_enchantment_parity() {
+        let hex = "01000200";
+        let expected = MagicRemoveEnchantmentData {
+            target: 0,
+            sequence: 0,
+            spell_id: 1,
+            layer: 2,
+        };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_magic_purge_enchantments_parity() {
+        let hex = "";
+        let expected = MagicPurgeEnchantmentsData {
+            target: 0,
+            sequence: 0,
+        };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+}

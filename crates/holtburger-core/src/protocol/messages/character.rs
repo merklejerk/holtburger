@@ -118,16 +118,25 @@ impl MessagePack for CharacterListData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CharacterEnterWorldRequestData {}
+pub struct CharacterEnterWorldRequestData {
+    pub guid: u32,
+}
 
 impl MessageUnpack for CharacterEnterWorldRequestData {
-    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(CharacterEnterWorldRequestData {})
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(CharacterEnterWorldRequestData { guid })
     }
 }
 
 impl MessagePack for CharacterEnterWorldRequestData {
-    fn pack(&self, _buf: &mut Vec<u8>) {}
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.guid.to_le_bytes());
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -191,82 +200,39 @@ impl MessagePack for ServerNameData {
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
-    fn test_character_enter_world_request_unpack() {
-        let data = fixtures::CHARACTER_ENTER_WORLD_REQUEST;
+    fn test_character_enter_world_request_fixture() {
+        let expected = CharacterEnterWorldRequestData { guid: 0x12345678 };
         // Skip opcode (4 bytes)
-        let mut offset = 4;
-        let _unpacked = CharacterEnterWorldRequestData::unpack(data, &mut offset).unwrap();
-
-        // We don't read anything anymore
-        assert_eq!(offset, 4);
+        assert_pack_unpack_parity(&fixtures::CHARACTER_ENTER_WORLD_REQUEST[4..], &expected);
     }
 
     #[test]
-    fn test_character_enter_world_request_pack() {
-        let msg = CharacterEnterWorldRequestData {};
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
-        assert!(buf.is_empty());
-    }
-
-    #[test]
-    fn test_character_enter_world_unpack() {
-        let data = fixtures::CHARACTER_ENTER_WORLD;
-        // Skip opcode (4 bytes)
-        let mut offset = 4;
-        let unpacked = CharacterEnterWorldData::unpack(data, &mut offset).unwrap();
-
-        assert_eq!(unpacked.guid, 0x12345678);
-        assert_eq!(unpacked.account, "Alice");
-        assert_eq!(offset, data.len());
-    }
-
-    #[test]
-    fn test_character_enter_world_pack() {
-        let msg = CharacterEnterWorldData {
+    fn test_character_enter_world_fixture() {
+        let expected = CharacterEnterWorldData {
             guid: 0x12345678,
             account: "Alice".to_string(),
         };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
-        assert_eq!(buf, fixtures::CHARACTER_ENTER_WORLD[4..]);
-    }
-
-    #[test]
-    fn test_character_list_unpack() {
-        let data = fixtures::CHARACTER_LIST;
         // Skip opcode (4 bytes)
-        let mut offset = 4;
-        let unpacked = CharacterListData::unpack(data, &mut offset).unwrap();
-
-        assert_eq!(unpacked.characters.len(), 1);
-        assert_eq!(unpacked.characters[0].guid, 0x12345678);
-        assert_eq!(unpacked.characters[0].name, "Alice");
-        assert_eq!(unpacked.max_slots, 3);
-        assert_eq!(unpacked.account_name, "AliceAccount");
-        assert!(unpacked.use_turbine_chat);
-        assert!(unpacked.has_tod_expansion);
-        assert_eq!(offset, data.len());
+        assert_pack_unpack_parity(&fixtures::CHARACTER_ENTER_WORLD[4..], &expected);
     }
 
     #[test]
-    fn test_character_list_pack() {
-        let entry = CharacterEntry {
-            guid: 0x12345678,
-            name: "Alice".to_string(),
-            delete_time: 0,
-        };
-        let msg = CharacterListData {
-            characters: vec![entry],
+    fn test_character_list_fixture() {
+        let expected = CharacterListData {
+            characters: vec![CharacterEntry {
+                guid: 0x12345678,
+                name: "Alice".to_string(),
+                delete_time: 0,
+            }],
             max_slots: 3,
             account_name: "AliceAccount".to_string(),
             use_turbine_chat: true,
             has_tod_expansion: true,
         };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
-        assert_eq!(buf, fixtures::CHARACTER_LIST[4..]);
+        // Skip opcode (4 bytes)
+        assert_pack_unpack_parity(&fixtures::CHARACTER_LIST[4..], &expected);
     }
 }

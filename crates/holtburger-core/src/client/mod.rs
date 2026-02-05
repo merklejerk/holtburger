@@ -317,8 +317,15 @@ impl Client {
 
         let message = GameMessage::unpack(data);
         if message.is_none() {
+            let opcode_str = if data.len() >= 4 {
+                let opcode = u32::from_le_bytes(data[0..4].try_into().unwrap_or([0; 4]));
+                format!("0x{:08X}", opcode)
+            } else {
+                "Unknown".to_string()
+            };
             log::warn!(
-                "Failed to unpack GameMessage ({} bytes): {:02X?}",
+                "Failed to unpack GameMessage {} ({} bytes): {:02X?}",
+                opcode_str,
                 data.len(),
                 data
             );
@@ -516,7 +523,9 @@ impl Client {
         }
 
         let msg =
-            GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {}));
+            GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
+                guid: char_id,
+            }));
         self.session.send_message(&msg).await?;
         Ok(())
     }

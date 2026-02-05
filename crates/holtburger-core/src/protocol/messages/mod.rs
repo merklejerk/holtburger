@@ -2,6 +2,7 @@ pub mod character;
 pub mod chat;
 pub mod common;
 pub mod constants;
+pub mod effects;
 pub mod game_event;
 pub mod magic;
 pub mod misc;
@@ -14,10 +15,14 @@ pub mod transport;
 pub mod utils;
 pub mod world;
 
+#[cfg(test)]
+pub mod test_helpers;
+
 pub use character::*;
 pub use chat::*;
 pub use common::*;
 pub use constants::*;
+pub use effects::*;
 pub use game_event::*;
 pub use magic::*;
 pub use misc::*;
@@ -52,6 +57,8 @@ pub enum GameMessage {
     UpdateVitalCurrent(Box<UpdateVitalCurrentData>),
 
     HearSpeech(Box<HearSpeechData>),
+    HearRangedSpeech(Box<HearRangedSpeechData>),
+    EmoteText(Box<EmoteTextData>),
     SoulEmote(Box<SoulEmoteData>),
 
     // Object Messages
@@ -72,6 +79,8 @@ pub enum GameMessage {
     ParentEvent(Box<ParentEventData>),
     PickupEvent(Box<PickupEventData>),
     SetState(Box<SetStateData>),
+    PlaySound(Box<PlaySoundData>),
+    PlayEffect(Box<PlayEffectData>),
 
     Unknown(u32, Vec<u8>),
 }
@@ -126,6 +135,13 @@ impl GameMessage {
             opcodes::HEAR_SPEECH => Some(GameMessage::HearSpeech(Box::new(
                 HearSpeechData::unpack(data, &mut offset)?,
             ))),
+            opcodes::HEAR_RANGED_SPEECH => Some(GameMessage::HearRangedSpeech(Box::new(
+                HearRangedSpeechData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::EMOTE_TEXT => Some(GameMessage::EmoteText(Box::new(EmoteTextData::unpack(
+                data,
+                &mut offset,
+            )?))),
             opcodes::SOUL_EMOTE => Some(GameMessage::SoulEmote(Box::new(SoulEmoteData::unpack(
                 data,
                 &mut offset,
@@ -165,6 +181,17 @@ impl GameMessage {
             ))),
             opcodes::PICKUP_EVENT => Some(GameMessage::PickupEvent(Box::new(
                 PickupEventData::unpack(data, &mut offset)?,
+            ))),
+            opcodes::SET_STATE => Some(GameMessage::SetState(Box::new(SetStateData::unpack(
+                data,
+                &mut offset,
+            )?))),
+            opcodes::SOUND => Some(GameMessage::PlaySound(Box::new(PlaySoundData::unpack(
+                data,
+                &mut offset,
+            )?))),
+            opcodes::PLAY_EFFECT => Some(GameMessage::PlayEffect(Box::new(
+                PlayEffectData::unpack(data, &mut offset)?,
             ))),
 
             opcodes::PRIVATE_UPDATE_PROPERTY_INT => Some(GameMessage::UpdatePropertyInt(Box::new(
@@ -274,8 +301,28 @@ impl GameMessage {
                 buf.extend_from_slice(&opcodes::HEAR_SPEECH.to_le_bytes());
                 data.pack(&mut buf);
             }
+            GameMessage::HearRangedSpeech(data) => {
+                buf.extend_from_slice(&opcodes::HEAR_RANGED_SPEECH.to_le_bytes());
+                data.pack(&mut buf);
+            }
+            GameMessage::EmoteText(data) => {
+                buf.extend_from_slice(&opcodes::EMOTE_TEXT.to_le_bytes());
+                data.pack(&mut buf);
+            }
             GameMessage::SoulEmote(data) => {
                 buf.extend_from_slice(&opcodes::SOUL_EMOTE.to_le_bytes());
+                data.pack(&mut buf);
+            }
+            GameMessage::PlaySound(data) => {
+                buf.extend_from_slice(&opcodes::SOUND.to_le_bytes());
+                data.pack(&mut buf);
+            }
+            GameMessage::PlayEffect(data) => {
+                buf.extend_from_slice(&opcodes::PLAY_EFFECT.to_le_bytes());
+                data.pack(&mut buf);
+            }
+            GameMessage::SetState(data) => {
+                buf.extend_from_slice(&opcodes::SET_STATE.to_le_bytes());
                 data.pack(&mut buf);
             }
 
@@ -325,7 +372,7 @@ mod tests {
 
     #[test]
     fn test_gamemessage_routing_character_request() {
-        let packed = vec![0xC8, 0xF7, 0x00, 0x00];
+        let packed = vec![0xC8, 0xF7, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78];
         let unpacked = GameMessage::unpack(&packed).unwrap();
         assert!(matches!(
             unpacked,

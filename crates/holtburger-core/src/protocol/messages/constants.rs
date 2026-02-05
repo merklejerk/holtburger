@@ -11,10 +11,13 @@ pub mod opcodes {
     pub const SET_STATE: u32 = 0xF74B;
     pub const UPDATE_OBJECT: u32 = 0xF7DB;
     pub const PLAY_EFFECT: u32 = 0xF755;
+    pub const SOUND: u32 = 0xF750;
     pub const GAME_EVENT: u32 = 0xF7B0;
     pub const GAME_ACTION: u32 = 0xF7B1;
     pub const SERVER_MESSAGE: u32 = 0xF7E0;
     pub const HEAR_SPEECH: u32 = 0x02BB;
+    pub const HEAR_RANGED_SPEECH: u32 = 0x02BC;
+    pub const EMOTE_TEXT: u32 = 0x01E0;
     pub const SOUL_EMOTE: u32 = 0x01E2;
     pub const CHARACTER_ERROR: u32 = 0xF659;
     pub const SERVER_NAME: u32 = 0xF7E1;

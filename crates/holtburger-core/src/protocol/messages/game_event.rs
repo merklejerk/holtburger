@@ -1,4 +1,5 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::protocol::messages::{
     MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
     MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
@@ -26,6 +27,8 @@ pub enum GameEventData {
     MagicRemoveMultipleEnchantments(Box<MagicRemoveMultipleEnchantmentsData>),
     MagicPurgeEnchantments(Box<MagicPurgeEnchantmentsData>),
     MagicPurgeBadEnchantments(Box<MagicPurgeBadEnchantmentsData>),
+    WeenieError(Box<WeenieErrorData>),
+    WeenieErrorWithString(Box<WeenieErrorWithStringData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -86,6 +89,12 @@ impl GameEvent {
                 d.sequence = sequence;
                 GameEventData::MagicPurgeBadEnchantments(Box::new(d))
             }
+            game_event_opcodes::WEENIE_ERROR => {
+                GameEventData::WeenieError(Box::new(WeenieErrorData::unpack(data, offset)?))
+            }
+            game_event_opcodes::WEENIE_ERROR_WITH_STRING => GameEventData::WeenieErrorWithString(
+                Box::new(WeenieErrorWithStringData::unpack(data, offset)?),
+            ),
             _ => {
                 log::warn!(
                     "<<< Unknown GameEvent Opcode: {:08X} Target: {:08X} Seq: {}",
@@ -166,11 +175,68 @@ impl GameEvent {
                     .unwrap();
                 data.pack(buf);
             }
+            GameEventData::WeenieError(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::WEENIE_ERROR)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::WeenieErrorWithString(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::WEENIE_ERROR_WITH_STRING)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameEventData::Unknown(opcode, data) => {
                 buf.write_u32::<LittleEndian>(*opcode).unwrap();
                 buf.extend_from_slice(data);
             }
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeenieErrorData {
+    pub error_id: u32,
+}
+
+impl MessageUnpack for WeenieErrorData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(WeenieErrorData { error_id })
+    }
+}
+
+impl MessagePack for WeenieErrorData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeenieErrorWithStringData {
+    pub error_id: u32,
+    pub message: String,
+}
+
+impl MessageUnpack for WeenieErrorWithStringData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let message = read_string16(data, offset)?;
+        Some(WeenieErrorWithStringData { error_id, message })
+    }
+}
+
+impl MessagePack for WeenieErrorWithStringData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
+        write_string16(buf, &self.message);
     }
 }
 
@@ -190,5 +256,25 @@ mod tests {
         } else {
             panic!("Expected GameEvent");
         }
+    }
+
+    #[test]
+    fn test_weenie_error_parity() {
+        let hex = "36000000";
+        let data = hex::decode(hex).unwrap();
+        let expected = WeenieErrorData { error_id: 0x36 };
+        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_weenie_error_with_string_parity() {
+        // Structure: [u32 error_id][u16 len][chars][padding to 4-byte boundary including u16 len]
+        let hex = "1E0000000B00497320746F6F2062757379000000";
+        let data = hex::decode(hex).unwrap();
+        let expected = WeenieErrorWithStringData {
+            error_id: 0x1E,
+            message: "Is too busy".to_string(),
+        };
+        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(&data, &expected);
     }
 }

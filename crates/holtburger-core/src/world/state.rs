@@ -217,6 +217,20 @@ impl WorldState {
 
                     self.player.emit_derived_stats(&mut events);
                 }
+                match &ev.event {
+                    GameEventData::WeenieError(data) => {
+                        events.push(WorldEvent::WeenieError {
+                            error_id: data.error_id,
+                        });
+                    }
+                    GameEventData::WeenieErrorWithString(data) => {
+                        events.push(WorldEvent::WeenieErrorWithString {
+                            error_id: data.error_id,
+                            message: data.message.clone(),
+                        });
+                    }
+                    _ => {}
+                }
             }
             GameMessage::SetState(data) => {
                 if let Some(entity) = self.entities.get_mut(data.guid) {

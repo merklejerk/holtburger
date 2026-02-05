@@ -196,6 +196,7 @@ async fn main() -> Result<()> {
         server_time: None,
         chat_log,
         use_emojis: !args.no_emojis,
+        verbosity: args.verbose,
     };
 
     app_state.refresh_context_buffer();

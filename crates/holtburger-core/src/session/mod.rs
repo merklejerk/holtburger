@@ -387,7 +387,7 @@ impl Session {
         let header = PacketHeader {
             flags: packet_flags::BLOB_FRAGMENTS,
             sequence: self.packet_sequence,
-            id: 0,
+            id: self.client_id,
             ..Default::default()
         };
         self.packet_sequence += 1;
@@ -399,7 +399,7 @@ impl Session {
         let header = PacketHeader {
             flags: packet_flags::ACK_SEQUENCE,
             sequence: 0,
-            id: 0,
+            id: self.client_id,
             ..Default::default()
         };
 

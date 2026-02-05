@@ -57,25 +57,11 @@ impl MessagePack for ViewContentsData {
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
-    fn test_view_contents_unpack() {
-        // Skip Opcode(4), Target(4), Seq(4), IntOp(4) = 16 bytes
-        let mut offset = 16;
-        let p = ViewContentsData::unpack(fixtures::VIEW_CONTENTS, &mut offset)
-            .expect("Should unpack ViewContentsData");
-
-        assert_eq!(p.container, 0x11111111);
-        assert_eq!(p.items.len(), 2);
-        assert_eq!(p.items[0].guid, 0x22222222);
-        assert_eq!(p.items[0].container_type, 1);
-        assert_eq!(p.items[1].guid, 0x33333333);
-        assert_eq!(p.items[1].container_type, 0);
-    }
-
-    #[test]
-    fn test_view_contents_pack() {
-        let data = ViewContentsData {
+    fn test_view_contents_fixture() {
+        let expected = ViewContentsData {
             container: 0x11111111,
             items: vec![
                 ViewContentsItem {
@@ -88,10 +74,9 @@ mod tests {
                 },
             ],
         };
-        let mut buf = Vec::new();
-        data.pack(&mut buf);
 
-        // Payload only starts at index 16 in the full message
-        assert_eq!(buf, &fixtures::VIEW_CONTENTS[16..]);
+        // Skip Opcode(4), Target(4), Seq(4), IntOp(4) = 16 bytes
+        let data = &fixtures::VIEW_CONTENTS[16..];
+        assert_pack_unpack_parity(data, &expected);
     }
 }

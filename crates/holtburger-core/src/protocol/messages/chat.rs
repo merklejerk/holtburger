@@ -39,6 +39,46 @@ impl MessagePack for HearSpeechData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct HearRangedSpeechData {
+    pub message: String,
+    pub sender_name: String,
+    pub sender: u32,
+    pub range: f32,
+    pub chat_type: u32,
+}
+
+impl MessageUnpack for HearRangedSpeechData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        let sender_name = read_string16(data, offset)?;
+        if *offset + 12 > data.len() {
+            return None;
+        }
+        let sender = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let range = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        let chat_type = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
+        *offset += 12;
+        Some(HearRangedSpeechData {
+            message,
+            sender_name,
+            sender,
+            range,
+            chat_type,
+        })
+    }
+}
+
+impl MessagePack for HearRangedSpeechData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.message);
+        write_string16(buf, &self.sender_name);
+        buf.extend_from_slice(&self.sender.to_le_bytes());
+        buf.extend_from_slice(&self.range.to_le_bytes());
+        buf.extend_from_slice(&self.chat_type.to_le_bytes());
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct SoulEmoteData {
     pub sender: u32,
     pub sender_name: String,
@@ -70,65 +110,109 @@ impl MessagePack for SoulEmoteData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmoteTextData {
+    pub sender: u32,
+    pub sender_name: String,
+    pub text: String,
+}
+
+impl MessageUnpack for EmoteTextData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let sender = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let sender_name = read_string16(data, offset)?;
+        let text = read_string16(data, offset)?;
+        Some(EmoteTextData {
+            sender,
+            sender_name,
+            text,
+        })
+    }
+}
+
+impl MessagePack for EmoteTextData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.sender.to_le_bytes());
+        write_string16(buf, &self.sender_name);
+        write_string16(buf, &self.text);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
-    fn test_hear_speech_unpack() {
-        let msg = HearSpeechData {
+    fn test_hear_speech_fixture() {
+        let expected = HearSpeechData {
             message: "Hello world".to_string(),
-            sender: 0x50000001,
             sender_name: "Alice".to_string(),
+            sender: 0x50000001,
             chat_type: 2,
         };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
+        let data = &fixtures::HEAR_SPEECH[4..];
+        assert_pack_unpack_parity::<HearSpeechData>(data, &expected);
 
-        let mut offset = 0;
-        let unpacked = HearSpeechData::unpack(&buf, &mut offset).unwrap();
-        assert_eq!(unpacked, msg);
+        match GameMessage::unpack(fixtures::HEAR_SPEECH).unwrap() {
+            GameMessage::HearSpeech(msg) => assert_eq!(*msg, expected),
+            _ => panic!("Expected HearSpeech"),
+        }
     }
 
     #[test]
-    fn test_hear_speech_pack() {
-        let msg = HearSpeechData {
-            message: "Hello world".to_string(),
-            sender: 0x50000001,
-            sender_name: "Alice".to_string(),
+    fn test_hear_ranged_speech_fixture() {
+        let expected = HearRangedSpeechData {
+            message: "I'm within range".to_string(),
+            sender_name: "Bob".to_string(),
+            sender: 0x50000002,
+            range: 10.0,
             chat_type: 2,
         };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
-        // message: 2+11+3=16, sender_name: 2+5+1=8, sender: 4, chat_type: 4. Total: 32.
-        assert_eq!(buf.len(), 32);
+        let data = &fixtures::HEAR_RANGED_SPEECH[4..];
+        assert_pack_unpack_parity::<HearRangedSpeechData>(data, &expected);
+
+        match GameMessage::unpack(fixtures::HEAR_RANGED_SPEECH).unwrap() {
+            GameMessage::HearRangedSpeech(msg) => assert_eq!(*msg, expected),
+            _ => panic!("Expected HearRangedSpeech"),
+        }
     }
 
     #[test]
-    fn test_soul_emote_unpack() {
-        let msg = SoulEmoteData {
+    fn test_emote_text_fixture() {
+        let expected = EmoteTextData {
             sender: 0x50000001,
             sender_name: "Alice".to_string(),
             text: "Alice waves at you.".to_string(),
         };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
+        let data = &fixtures::EMOTE_TEXT[4..];
+        assert_pack_unpack_parity::<EmoteTextData>(data, &expected);
 
-        let mut offset = 0;
-        let unpacked = SoulEmoteData::unpack(&buf, &mut offset).unwrap();
-        assert_eq!(unpacked, msg);
+        match GameMessage::unpack(fixtures::EMOTE_TEXT).unwrap() {
+            GameMessage::EmoteText(msg) => assert_eq!(*msg, expected),
+            _ => panic!("Expected EmoteText"),
+        }
     }
 
     #[test]
-    fn test_soul_emote_pack() {
-        let msg = SoulEmoteData {
+    fn test_soul_emote_fixture() {
+        let expected = SoulEmoteData {
             sender: 0x50000001,
             sender_name: "Alice".to_string(),
             text: "Alice waves at you.".to_string(),
         };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
-        // sender: 4, sender_name: 2+5+1=8, text: 2+19+3=24. Total: 36.
-        assert_eq!(buf.len(), 36);
+        let data = &fixtures::SOUL_EMOTE[4..];
+        assert_pack_unpack_parity::<SoulEmoteData>(data, &expected);
+
+        match GameMessage::unpack(fixtures::SOUL_EMOTE).unwrap() {
+            GameMessage::SoulEmote(msg) => assert_eq!(*msg, expected),
+            _ => panic!("Expected SoulEmote"),
+        }
     }
 }

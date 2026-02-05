@@ -173,19 +173,20 @@ pub struct CreatureSkill {
 
 impl MessageUnpack for CreatureSkill {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 28 > data.len() {
+        if *offset + 32 > data.len() {
             return None;
         }
-        let ranks = LittleEndian::read_u16(&data[*offset..*offset + 2]) as u32;
-        let _const_one = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
-        let status = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let xp = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
-        let init = LittleEndian::read_u32(&data[*offset + 12..*offset + 16]);
-        let resistance = LittleEndian::read_u32(&data[*offset + 16..*offset + 20]);
-        let last_used = LittleEndian::read_f64(&data[*offset + 20..*offset + 28]);
-        *offset += 28;
+        let sk_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let ranks = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]) as u32;
+        let _const_one = LittleEndian::read_u16(&data[*offset + 6..*offset + 8]);
+        let status = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
+        let xp = LittleEndian::read_u32(&data[*offset + 12..*offset + 16]);
+        let init = LittleEndian::read_u32(&data[*offset + 16..*offset + 20]);
+        let resistance = LittleEndian::read_u32(&data[*offset + 20..*offset + 24]);
+        let last_used = LittleEndian::read_f64(&data[*offset + 24..*offset + 32]);
+        *offset += 32;
         Some(CreatureSkill {
-            sk_type: 0,
+            sk_type,
             ranks,
             status,
             xp,
@@ -265,10 +266,11 @@ mod tests {
     use super::*;
     use crate::protocol::fixtures;
 
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
     #[test]
-    fn test_creature_skill_pack_melee_def() {
-        let data = fixtures::CREATURE_SKILL_MELEE_DEF;
-        let skill = CreatureSkill {
+    fn test_creature_skill_fixture() {
+        let expected = CreatureSkill {
             sk_type: 28,
             ranks: 10,
             status: 3,
@@ -277,30 +279,12 @@ mod tests {
             resistance: 0,
             last_used: 0.0,
         };
-
-        let mut packed = Vec::new();
-        skill.pack(&mut packed);
-        assert_eq!(packed, data);
+        assert_pack_unpack_parity(fixtures::CREATURE_SKILL_MELEE_DEF, &expected);
     }
 
     #[test]
-    fn test_creature_skill_unpack_melee_def() {
-        let data = fixtures::CREATURE_SKILL_MELEE_DEF;
-        let mut offset = 4; // sk_type is read by table
-        let mut skill = CreatureSkill::unpack(data, &mut offset).unwrap();
-        skill.sk_type = 28;
-
-        assert_eq!(skill.sk_type, 28);
-        assert_eq!(skill.ranks, 10);
-        assert_eq!(skill.status, 3);
-        assert_eq!(skill.init, 10);
-        assert_eq!(offset, data.len());
-    }
-
-    #[test]
-    fn test_enchantment_pack_simple() {
-        let data = fixtures::ENCHANTMENT_SIMPLE;
-        let enc = Enchantment {
+    fn test_enchantment_fixture() {
+        let expected = Enchantment {
             spell_id: 1,
             layer: 1,
             spell_category: 0,
@@ -317,22 +301,7 @@ mod tests {
             stat_mod_value: 3.0,
             spell_set_id: None,
         };
-
-        let mut packed = Vec::new();
-        enc.pack(&mut packed);
-        assert_eq!(packed, data);
-    }
-
-    #[test]
-    fn test_enchantment_unpack_simple() {
-        let data = fixtures::ENCHANTMENT_SIMPLE;
-        let mut offset = 0;
-        let enc = Enchantment::unpack(data, &mut offset).unwrap();
-
-        assert_eq!(enc.spell_id, 1);
-        assert_eq!(enc.power_level, 100);
-        assert_eq!(enc.duration, 3600.0);
-        assert_eq!(offset, data.len());
+        assert_pack_unpack_parity(fixtures::ENCHANTMENT_SIMPLE, &expected);
     }
 
     #[test]
@@ -356,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shortcut_unpack() {
+    fn test_shortcut_parity() {
         let sc = Shortcut {
             index: 1,
             object_id: 0x100,
@@ -365,22 +334,6 @@ mod tests {
         };
         let mut buf = Vec::new();
         sc.pack(&mut buf);
-
-        let mut offset = 0;
-        let unpacked = Shortcut::unpack(&buf, &mut offset).unwrap();
-        assert_eq!(sc, unpacked);
-    }
-
-    #[test]
-    fn test_shortcut_pack() {
-        let sc = Shortcut {
-            index: 1,
-            object_id: 0x100,
-            spell_id: 10,
-            layer: 1,
-        };
-        let mut buf = Vec::new();
-        sc.pack(&mut buf);
-        assert_eq!(buf.len(), 12);
+        assert_pack_unpack_parity(&buf, &sc);
     }
 }

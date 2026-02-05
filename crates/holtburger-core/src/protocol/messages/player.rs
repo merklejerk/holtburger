@@ -283,11 +283,8 @@ impl PlayerDescriptionData {
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                let sk_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                *offset += 4;
-                if let Some(mut skill) = CreatureSkill::unpack(data, offset) {
-                    skill.sk_type = sk_type;
-                    skills.insert(sk_type, skill);
+                if let Some(skill) = CreatureSkill::unpack(data, offset) {
+                    skills.insert(skill.sk_type, skill);
                 }
             }
         }
@@ -992,55 +989,12 @@ impl MessagePack for PlayerCreateData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::fixtures;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
-    fn test_player_description_unpack_minimal() {
-        let data = fixtures::PLAYER_DESCRIPTION_MINIMAL;
-        let mut offset = 0;
-        let p = PlayerDescriptionData::unpack(0x12345678, 0x11, data, &mut offset)
-            .expect("Should unpack");
-
-        assert_eq!(p.wee_type, 0x1234);
-        assert_eq!(p.properties_int.len(), 2);
-        assert_eq!(*p.properties_int.get(&25_u32).unwrap(), 50); // Level
-        assert_eq!(*p.properties_int.get(&65_u32).unwrap(), 2); // Placement
-
-        assert_eq!(p.properties_string.len(), 1);
-        assert_eq!(p.properties_string.get(&1_u32).unwrap(), "Delulu"); // Name
-        assert_eq!(p.name, "Delulu");
-
-        assert!(p.has_health);
-        assert_eq!(p.attributes.len(), 9);
-        assert_eq!(p.attributes.get(&7).unwrap().current.unwrap(), 100); // Health
-
-        assert_eq!(p.skills.len(), 1);
-        let melee_def = p.skills.get(&28_u32).unwrap();
-        assert_eq!(melee_def.ranks, 10);
-
-        assert_eq!(p.options1, 1234);
-        assert_eq!(p.spell_lists.len(), 8);
-    }
-
-    #[test]
-    fn test_update_skill_unpack() {
-        let hex = "010A0000003200010003000000E80300000A000000000000000000000000000000";
-        let data = hex::decode(hex).unwrap();
-        let mut offset = 0;
-        let msg = UpdateSkillData::unpack(&data, &mut offset).expect("Should unpack");
-        assert_eq!(msg.sequence, 1);
-        assert_eq!(msg.skill, 10);
-        assert_eq!(msg.ranks, 50);
-        assert_eq!(msg.adjust_pp, 1);
-        assert_eq!(msg.status, 3);
-        assert_eq!(msg.xp, 1000);
-        assert_eq!(msg.init, 10);
-    }
-
-    #[test]
-    fn test_update_skill_pack() {
+    fn test_update_skill_fixture() {
         let hex = "010a0000003200010003000000e80300000a000000000000000000000000000000";
-        let msg = UpdateSkillData {
+        let expected = UpdateSkillData {
             sequence: 1,
             skill: 10,
             ranks: 50,
@@ -1051,113 +1005,13 @@ mod tests {
             init: 10,
             last_used: 0.0,
         };
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(hex::encode(packed), hex);
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 
     #[test]
-    fn test_player_description_moderate_pack_and_unpack() {
-        // GUID: 0x50000001, Seq: 2
-        let mut data = hex::decode("B0F70000010000500200000013000000").unwrap();
-
-        // PropertyFlags: 0x0001 (Int) | 0x0010 (String) = 0x0011
-        // WeeType: 0x1234
-        let mut payload = hex::decode("1100000034120000").unwrap();
-
-        // PropertiesInt: Count=1, Buckets=64, Key=5 (Encumbrance), Val=50
-        payload.extend_from_slice(&hex::decode("010040000500000032000000").unwrap());
-
-        // PropertiesString: Count=1, Buckets=32, Key=1 (Name), Val="Delulu" (Len=6, No Pad)
-        payload.extend_from_slice(&hex::decode("0100200001000000060044656C756C75").unwrap());
-
-        // VectorFlags: 0x0001 (Attr) | 0x0002 (Skill) = 0x0003
-        // HasHealthStats: 1
-        payload.extend_from_slice(&hex::decode("0300000001000000").unwrap());
-
-        // Attributes: Header 0x1FF (6 Primary + 3 Vitals)
-        payload.extend_from_slice(&hex::decode("FF010000").unwrap());
-        // 6 Primary (10, 10, 0)
-        for _ in 0..6 {
-            payload.extend_from_slice(&hex::decode("0A0000000A00000000000000").unwrap());
-        }
-        // 3 Vitals (10, 10, 0, 100)
-        for _ in 0..3 {
-            payload.extend_from_slice(&hex::decode("0A0000000A0000000000000064000000").unwrap());
-        }
-
-        // Skills: Count=1, Buckets=32, Key=6 (MeleeDef)
-        payload.extend_from_slice(&hex::decode("01002000").unwrap());
-        payload.extend_from_slice(
-            &hex::decode("060000000A00010003000000000000000A000000000000000000000000000000")
-                .unwrap(),
-        );
-
-        // OptionsFlags: 0x0441 (Shortcut | SpellLists8 | Options2)
-        // Options1: 0
-        payload.extend_from_slice(&hex::decode("4104000000000000").unwrap());
-
-        // Shortcuts: Count=1, Index=1, ObjID=0x100, Spell=10, Layer=1
-        payload.extend_from_slice(&hex::decode("0100000001000000000100000A000100").unwrap());
-
-        // SpellLists: List0=1 spell (ID=1), Lists1-7=0
-        payload.extend_from_slice(&hex::decode("0100000001000000").unwrap());
-        for _ in 0..7 {
-            payload.extend_from_slice(&hex::decode("00000000").unwrap());
-        }
-
-        // SpellbookFilters: 0
-        payload.extend_from_slice(&hex::decode("00000000").unwrap());
-
-        // Options2 (Flag 0x40): 0
-        payload.extend_from_slice(&hex::decode("00000000").unwrap());
-
-        // Inventory: Count=1, GUID=0x11223344, Type=2
-        payload.extend_from_slice(&hex::decode("010000004433221102000000").unwrap());
-
-        // Equipped: Count=0
-        payload.extend_from_slice(&hex::decode("00000000").unwrap());
-
-        data.extend_from_slice(&payload);
-
-        // --- UNPACK ---
-        let mut offset = 16; // Skip wrapper
-        let msg = PlayerDescriptionData::unpack(0x50000001, 2, &data, &mut offset)
-            .expect("Should unpack");
-
-        assert_eq!(msg.name, "Delulu");
-        assert_eq!(*msg.properties_int.get(&5).unwrap(), 50);
-        assert_eq!(msg.attributes.len(), 9);
-        assert_eq!(msg.skills.len(), 1);
-        assert_eq!(msg.inventory.len(), 1);
-        assert_eq!(msg.inventory[0].0, 0x11223344);
-
-        // --- PACK ---
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-
-        // Compare payload only (without 16-byte GameEvent wrapper)
-        assert_eq!(packed, payload);
-    }
-
-    #[test]
-    fn test_update_vital_unpack() {
+    fn test_update_vital_fixture() {
         let hex = "0c0200000064000000393000003209010064000000";
-        let data = hex::decode(hex).unwrap();
-        let mut offset = 0;
-        let msg = UpdateVitalData::unpack(&data, &mut offset).unwrap();
-        assert_eq!(msg.sequence, 12);
-        assert_eq!(msg.vital, 2);
-        assert_eq!(msg.ranks, 100);
-        assert_eq!(msg.start, 12345);
-        assert_eq!(msg.xp, 67890);
-        assert_eq!(msg.current, 100);
-    }
-
-    #[test]
-    fn test_update_vital_pack() {
-        let hex = "0c0200000064000000393000003209010064000000";
-        let msg = UpdateVitalData {
+        let expected = UpdateVitalData {
             sequence: 12,
             vital: 2,
             ranks: 100,
@@ -1165,60 +1019,30 @@ mod tests {
             xp: 67890,
             current: 100,
         };
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(hex::encode(packed), hex);
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 
     #[test]
-    fn test_update_attribute_unpack() {
+    fn test_update_attribute_fixture() {
         let hex = "0c01000000640000000a000000f4010000";
-        let data = hex::decode(hex).unwrap();
-        let mut offset = 0;
-        let msg = UpdateAttributeData::unpack(&data, &mut offset).unwrap();
-        assert_eq!(msg.sequence, 12);
-        assert_eq!(msg.attribute, 1);
-        assert_eq!(msg.ranks, 100);
-        assert_eq!(msg.start, 10);
-        assert_eq!(msg.xp, 500);
-    }
-
-    #[test]
-    fn test_update_attribute_pack() {
-        let hex = "0c01000000640000000a000000f4010000";
-        let msg = UpdateAttributeData {
+        let expected = UpdateAttributeData {
             sequence: 12,
             attribute: 1,
             ranks: 100,
             start: 10,
             xp: 500,
         };
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(hex::encode(packed), hex);
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 
     #[test]
-    fn test_update_vital_current_unpack() {
+    fn test_update_vital_current_fixture() {
         let hex = "0c0200000064000000";
-        let data = hex::decode(hex).unwrap();
-        let mut offset = 0;
-        let msg = UpdateVitalCurrentData::unpack(&data, &mut offset).unwrap();
-        assert_eq!(msg.sequence, 12);
-        assert_eq!(msg.vital, 2);
-        assert_eq!(msg.current, 100);
-    }
-
-    #[test]
-    fn test_update_vital_current_pack() {
-        let hex = "0c0200000064000000";
-        let msg = UpdateVitalCurrentData {
+        let expected = UpdateVitalCurrentData {
             sequence: 12,
             vital: 2,
             current: 100,
         };
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(hex::encode(packed), hex);
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 }

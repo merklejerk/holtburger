@@ -18,8 +18,18 @@ pub const OBJECT_CREATE_COMPLEX: &[u8] =
     include_bytes!("../../tests/fixtures/object_create_complex.bin");
 pub const CREATURE_SKILL_MELEE_DEF: &[u8] =
     include_bytes!("../../tests/fixtures/creature_skill_melee_def.bin");
+pub const MOVEMENT_TURN_TO_OBJ: &[u8] =
+    include_bytes!("../../tests/fixtures/movement_turn_to_obj.bin");
+pub const MOVEMENT_MOVE_TO_POS: &[u8] =
+    include_bytes!("../../tests/fixtures/movement_move_to_pos.bin");
 pub const PING_RESPONSE: &[u8] = include_bytes!("../../tests/fixtures/ping_response.bin");
 pub const VIEW_CONTENTS: &[u8] = include_bytes!("../../tests/fixtures/view_contents.bin");
 pub const ENCHANTMENT_SIMPLE: &[u8] = include_bytes!("../../tests/fixtures/enchantment_simple.bin");
 pub const DDD_INTERROGATION_RESPONSE: &[u8] =
     include_bytes!("../../tests/fixtures/ddd_interrogation_response.bin");
+pub const SOUND: &[u8] = include_bytes!("../../tests/fixtures/sound.bin");
+pub const PLAY_EFFECT: &[u8] = include_bytes!("../../tests/fixtures/play_effect.bin");
+pub const EMOTE_TEXT: &[u8] = include_bytes!("../../tests/fixtures/emote_text.bin");
+pub const SOUL_EMOTE: &[u8] = include_bytes!("../../tests/fixtures/soul_emote.bin");
+pub const HEAR_SPEECH: &[u8] = include_bytes!("../../tests/fixtures/hear_speech.bin");
+pub const HEAR_RANGED_SPEECH: &[u8] = include_bytes!("../../tests/fixtures/hear_ranged_speech.bin");

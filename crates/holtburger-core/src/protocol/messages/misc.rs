@@ -132,8 +132,8 @@ pub struct MostlyConsecutiveIntSet {
     pub values: Vec<i32>,
 }
 
-impl MostlyConsecutiveIntSet {
-    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+impl MessageUnpack for MostlyConsecutiveIntSet {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
         }
@@ -161,8 +161,10 @@ impl MostlyConsecutiveIntSet {
             values,
         })
     }
+}
 
-    pub fn pack(&self, buf: &mut Vec<u8>) {
+impl MessagePack for MostlyConsecutiveIntSet {
+    fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_i32::<LittleEndian>(self.iterations).unwrap();
         for &val in &self.values {
             buf.write_i32::<LittleEndian>(val).unwrap();
@@ -177,8 +179,8 @@ pub struct TaggedIterationList {
     pub list: MostlyConsecutiveIntSet,
 }
 
-impl TaggedIterationList {
-    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+impl MessageUnpack for TaggedIterationList {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
             return None;
         }
@@ -192,8 +194,10 @@ impl TaggedIterationList {
             list,
         })
     }
+}
 
-    pub fn pack(&self, buf: &mut Vec<u8>) {
+impl MessagePack for TaggedIterationList {
+    fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_i32::<LittleEndian>(self.dat_file_type).unwrap();
         buf.write_i32::<LittleEndian>(self.dat_file_id).unwrap();
         self.list.pack(buf);
@@ -238,102 +242,52 @@ impl MessagePack for DddInterrogationResponseData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
-    fn test_server_message_unpack() {
-        let msg = ServerMessageData {
+    fn test_server_message_fixture() {
+        let expected = ServerMessageData {
             message: "Welcome to Asheron's Call!".to_string(),
         };
         let mut buf = Vec::new();
-        msg.pack(&mut buf);
-
-        let mut offset = 0;
-        let unpacked = ServerMessageData::unpack(&buf, &mut offset).unwrap();
-        assert_eq!(unpacked, msg);
-    }
-
-    #[test]
-    fn test_server_message_pack() {
-        let msg = ServerMessageData {
-            message: "Welcome to Asheron's Call!".to_string(),
-        };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
+        expected.pack(&mut buf);
         // String16 length (2) + "Welcome to Asheron's Call!" (26) + pads (0) = 28
         assert_eq!(buf.len(), 28);
+
+        assert_pack_unpack_parity(&buf, &expected);
     }
 
     #[test]
-    fn test_character_error_unpack() {
-        let msg = CharacterErrorData {
+    fn test_character_error_fixture() {
+        let expected = CharacterErrorData {
             error_code: 0x80000001,
         };
         let mut buf = Vec::new();
-        msg.pack(&mut buf);
-
-        let mut offset = 0;
-        let unpacked = CharacterErrorData::unpack(&buf, &mut offset).unwrap();
-        assert_eq!(unpacked, msg);
-    }
-
-    #[test]
-    fn test_character_error_pack() {
-        let msg = CharacterErrorData {
-            error_code: 0x80000001,
-        };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
+        expected.pack(&mut buf);
         assert_eq!(buf.len(), 4);
+
+        assert_pack_unpack_parity(&buf, &expected);
     }
 
     #[test]
-    fn test_game_action_unpack() {
-        let msg = GameActionData {
+    fn test_game_action_fixture() {
+        let expected = GameActionData {
             sequence: 123,
             action: crate::protocol::messages::actions::LOGIN_COMPLETE,
             data: vec![0x11, 0x22, 0x33],
         };
         let mut buf = Vec::new();
-        msg.pack(&mut buf);
-
-        let mut offset = 0;
-        let unpacked = GameActionData::unpack(&buf, &mut offset).unwrap();
-        assert_eq!(unpacked, msg);
-    }
-
-    #[test]
-    fn test_game_action_pack() {
-        let msg = GameActionData {
-            sequence: 123,
-            action: crate::protocol::messages::actions::LOGIN_COMPLETE,
-            data: vec![0x11, 0x22, 0x33],
-        };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
+        expected.pack(&mut buf);
         // seq(4) + action(4) + payload(3) = 11
         assert_eq!(buf.len(), 11);
+
+        assert_pack_unpack_parity(&buf, &expected);
     }
 
     #[test]
-    fn test_ddd_interrogation_response_unpack() {
+    fn test_ddd_interrogation_response_fixture() {
         use crate::protocol::fixtures;
-        let data = fixtures::DDD_INTERROGATION_RESPONSE;
-        let mut offset = 4; // Skip opcode
-        let unpacked = DddInterrogationResponseData::unpack(data, &mut offset).unwrap();
-
-        assert_eq!(unpacked.language, 1);
-        assert_eq!(unpacked.lists.len(), 1);
-        let list = &unpacked.lists[0];
-        assert_eq!(list.dat_file_type, 1);
-        assert_eq!(list.dat_file_id, 1);
-        assert_eq!(list.list.iterations, 2);
-        assert_eq!(list.list.values, vec![100, 101]);
-    }
-
-    #[test]
-    fn test_ddd_interrogation_response_pack() {
-        use crate::protocol::fixtures;
-        let msg = DddInterrogationResponseData {
+        let expected = DddInterrogationResponseData {
             language: 1,
             lists: vec![TaggedIterationList {
                 dat_file_type: 1,
@@ -344,39 +298,21 @@ mod tests {
                 },
             }],
         };
-        let mut buf = Vec::new();
-        msg.pack(&mut buf);
-        assert_eq!(buf, fixtures::DDD_INTERROGATION_RESPONSE[4..]);
+        let data = &fixtures::DDD_INTERROGATION_RESPONSE[4..];
+        assert_pack_unpack_parity(data, &expected);
     }
 
     #[test]
-    fn test_mostly_consecutive_int_set_unpack() {
-        // iterations=5, [1000, -5]
+    fn test_mostly_consecutive_int_set_fixture() {
+        let expected = MostlyConsecutiveIntSet {
+            iterations: 5,
+            values: vec![1000, -5],
+        };
         let data = vec![
             0x05, 0x00, 0x00, 0x00, // count
             0xE8, 0x03, 0x00, 0x00, // 1000
             0xFB, 0xFF, 0xFF, 0xFF, // -5
         ];
-        let mut offset = 0;
-        let unpacked = MostlyConsecutiveIntSet::unpack(&data, &mut offset).unwrap();
-        assert_eq!(unpacked.iterations, 5);
-        assert_eq!(unpacked.values, vec![1000, -5]);
-        assert_eq!(offset, 12);
-    }
-
-    #[test]
-    fn test_mostly_consecutive_int_set_pack() {
-        let set = MostlyConsecutiveIntSet {
-            iterations: 5,
-            values: vec![1000, -5],
-        };
-        let mut buf = Vec::new();
-        set.pack(&mut buf);
-        let expected = vec![
-            0x05, 0x00, 0x00, 0x00, // count
-            0xE8, 0x03, 0x00, 0x00, // 1000
-            0xFB, 0xFF, 0xFF, 0xFF, // -5
-        ];
-        assert_eq!(buf, expected);
+        assert_pack_unpack_parity(&data, &expected);
     }
 }

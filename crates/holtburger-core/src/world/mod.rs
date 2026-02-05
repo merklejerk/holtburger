@@ -49,6 +49,10 @@ pub enum WorldEvent {
         vitals: Vec<stats::Vital>,
         skills: Vec<stats::Skill>,
     },
+    EntityStateUpdated {
+        guid: u32,
+        physics_state: properties::PhysicsState,
+    },
 }
 
 pub use self::state::WorldState;

@@ -73,6 +73,8 @@ pub mod game_event_opcodes {
     pub const MAGIC_REMOVE_MULTIPLE_ENCHANTMENTS: u32 = 0x02C5;
     pub const MAGIC_PURGE_ENCHANTMENTS: u32 = 0x02C6;
     pub const MAGIC_PURGE_BAD_ENCHANTMENTS: u32 = 0x02C7;
+    pub const WEENIE_ERROR: u32 = 0x028A;
+    pub const WEENIE_ERROR_WITH_STRING: u32 = 0x028B;
 }
 
 pub mod character_error_codes {

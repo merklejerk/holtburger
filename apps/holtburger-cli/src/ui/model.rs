@@ -53,6 +53,7 @@ pub struct AppState {
     pub server_time: Option<(f64, Instant)>,
     pub chat_log: Option<Mutex<File>>,
     pub use_emojis: bool,
+    pub verbosity: u8,
 }
 
 impl AppState {

@@ -98,6 +98,22 @@ impl AppState {
                     WorldEvent::ServerTimeUpdate(time) => {
                         self.server_time = Some((time, std::time::Instant::now()));
                     }
+                    WorldEvent::WeenieError { error_id } => {
+                        if self.verbosity >= 1 {
+                            self.log_chat(
+                                ChatMessageKind::Warning,
+                                format!("[WARNING] WeenieError: 0x{:08X}", error_id),
+                            );
+                        }
+                    }
+                    WorldEvent::WeenieErrorWithString { error_id, message } => {
+                        if self.verbosity >= 1 {
+                            self.log_chat(
+                                ChatMessageKind::Warning,
+                                format!("[WARNING] WeenieError: 0x{:08X} - {}", error_id, message),
+                            );
+                        }
+                    }
                     _ => {}
                 }
             }

@@ -53,6 +53,13 @@ pub enum WorldEvent {
         guid: u32,
         physics_state: properties::PhysicsState,
     },
+    WeenieError {
+        error_id: u32,
+    },
+    WeenieErrorWithString {
+        error_id: u32,
+        message: String,
+    },
 }
 
 pub use self::state::WorldState;

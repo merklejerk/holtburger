@@ -46,6 +46,7 @@ pub mod opcodes {
     pub const UPDATE_POSITION: u32 = 0xF748;
     pub const VECTOR_UPDATE: u32 = 0xF74E;
     pub const AUTONOMOUS_POSITION: u32 = 0xF753;
+    pub const PLAYER_TELEPORT: u32 = 0xF751;
 }
 
 pub mod actions {
@@ -56,6 +57,7 @@ pub mod actions {
     pub const USE: u32 = 0x0113;
     pub const LOGIN_COMPLETE: u32 = 0x00A1;
     pub const IDENTIFY_OBJECT: u32 = 0x00C9;
+    pub const MOVE_TO_STATE: u32 = 0xF61C;
 }
 
 pub mod game_event_opcodes {

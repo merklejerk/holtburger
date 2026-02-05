@@ -235,4 +235,15 @@ mod tests {
         // Skip opcode (4 bytes)
         assert_pack_unpack_parity(&fixtures::CHARACTER_LIST[4..], &expected);
     }
+
+    #[test]
+    fn test_gamemessage_routing_character_request() {
+        use crate::protocol::messages::GameMessage;
+        let packed = vec![0xC8, 0xF7, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78];
+        let unpacked = GameMessage::unpack(&packed).expect("Routing failed");
+        assert!(matches!(
+            unpacked,
+            GameMessage::CharacterEnterWorldRequest(_)
+        ));
+    }
 }

@@ -173,3 +173,22 @@ impl GameEvent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::messages::GameMessage;
+
+    #[test]
+    fn test_gamemessage_routing_game_event_start() {
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x0E), Event (0x0282)
+        let hex_str = "B0F70000010000500E00000082020000";
+        let data = hex::decode(hex_str).expect("Hex decode failed");
+        let msg = GameMessage::unpack(&data).expect("Routing failed");
+        if let GameMessage::GameEvent(ev) = msg {
+            assert!(matches!(ev.event, GameEventData::StartGame));
+        } else {
+            panic!("Expected GameEvent");
+        }
+    }
+}

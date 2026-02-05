@@ -2,8 +2,8 @@ use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::{
     MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
     MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
-    MagicUpdateMultipleEnchantmentsData, PlayerDescriptionData, PingResponseData,
-    ViewContentsData, game_event_opcodes,
+    MagicUpdateMultipleEnchantmentsData, PingResponseData, PlayerDescriptionData, ViewContentsData,
+    game_event_opcodes,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -46,9 +46,9 @@ impl GameEvent {
             game_event_opcodes::PING_RESPONSE => {
                 GameEventData::PingResponse(Box::new(PingResponseData::unpack(data, offset)?))
             }
-            game_event_opcodes::VIEW_CONTENTS => GameEventData::ViewContents(Box::new(
-                ViewContentsData::unpack(data, offset)?,
-            )),
+            game_event_opcodes::VIEW_CONTENTS => {
+                GameEventData::ViewContents(Box::new(ViewContentsData::unpack(data, offset)?))
+            }
             game_event_opcodes::START_GAME => GameEventData::StartGame,
             game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT => {
                 let mut d = MagicUpdateEnchantmentData::unpack(data, offset)?;

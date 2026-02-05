@@ -1,23 +1,6 @@
-use std::time::{Duration, Instant};
 use crate::protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use crate::world::WorldEvent;
-
-#[derive(Debug, Clone)]
-pub enum ChatMessageKind {
-    Info,
-    System,
-    Chat,
-    Tell,
-    Emote,
-    Error,
-    Warning,
-}
-
-#[derive(Debug, Clone)]
-pub struct ChatMessage {
-    pub kind: ChatMessageKind,
-    pub text: String,
-}
+use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ClientState {
@@ -29,7 +12,6 @@ pub enum ClientState {
 
 #[derive(Debug, Clone)]
 pub enum ClientEvent {
-    Message(ChatMessage),
     CharacterList(Vec<CharacterEntry>),
     PlayerEntered {
         guid: u32,
@@ -37,11 +19,19 @@ pub enum ClientEvent {
     },
     StatusUpdate {
         state: ClientState,
-        logon_retry: Option<(u32, u32, Option<Instant>)>,
-        enter_retry: Option<(u32, u32, Option<Instant>)>,
     },
+    ServerMessage(String),
+    CharacterError(u32),
     World(Box<WorldEvent>),
     GameMessage(Box<GameMessage>),
+    Chat {
+        sender: String,
+        message: String,
+    },
+    Emote {
+        sender: String,
+        text: String,
+    },
     PingResponse,
     ViewContents {
         container: u32,
@@ -53,8 +43,10 @@ pub enum ClientEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    Login(String),
     SelectCharacter(u32),
     SelectCharacterByIndex(usize),
+    EnterWorld,
     Talk(String),
     Ping,
     Identify(u32),
@@ -70,16 +62,16 @@ pub enum ClientCommand {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct RetryState {
-    pub(crate) active: bool,
-    pub(crate) next_time: Option<Instant>,
-    pub(crate) backoff_secs: u64,
-    pub(crate) attempts: u32,
-    pub(crate) max_attempts: u32,
+pub struct RetryState {
+    pub active: bool,
+    pub next_time: Option<Instant>,
+    pub backoff_secs: u64,
+    pub attempts: u32,
+    pub max_attempts: u32,
 }
 
 impl RetryState {
-    pub(crate) fn new(max_attempts: u32) -> Self {
+    pub fn new(max_attempts: u32) -> Self {
         Self {
             active: false,
             next_time: None,
@@ -89,14 +81,14 @@ impl RetryState {
         }
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.active = false;
         self.next_time = None;
         self.attempts = 0;
         self.backoff_secs = 5;
     }
 
-    pub(crate) fn schedule(&mut self) {
+    pub fn schedule(&mut self) {
         if !self.active {
             self.active = true;
             self.attempts = 0;
@@ -105,7 +97,7 @@ impl RetryState {
         }
     }
 
-    pub(crate) fn tick(&mut self, now: Instant) -> bool {
+    pub fn tick(&mut self, now: Instant) -> bool {
         if self.active && self.next_time.is_some_and(|t| now >= t) {
             if self.attempts >= self.max_attempts {
                 self.active = false;

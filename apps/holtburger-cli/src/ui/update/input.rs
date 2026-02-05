@@ -1,12 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
-use holtburger_core::{ChatMessage, ClientCommand};
+use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
 use crate::actions::{self, ActionHandler, ActionTarget};
-use crate::ui::model::AppState;
-use crate::ui::types::{ContextView, DashboardTab, FocusedPane, UIState};
-use crate::ui::utils::{get_next_pane, get_prev_pane};
 use crate::ui;
+use crate::ui::model::AppState;
+use crate::ui::types::{ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
+use crate::ui::utils::{get_next_pane, get_prev_pane};
 
 impl AppState {
     pub(super) fn handle_key_press(
@@ -19,12 +19,16 @@ impl AppState {
         let mut commands = Vec::new();
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL) =>
             {
                 commands.push(ClientCommand::Quit);
             }
             KeyCode::Tab | KeyCode::BackTab => {
-                if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                if key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
                     || key.code == KeyCode::BackTab
                 {
                     self.focused_pane = get_prev_pane(self.focused_pane, width);
@@ -64,14 +68,16 @@ impl AppState {
                             return commands;
                         }
                         if input == "/help" {
-                            self.messages.push(ChatMessage {
-                                kind: holtburger_core::ChatMessageKind::System,
-                                text: "Available commands: /quit, /exit, /clear, /help, /ping".to_string(),
-                            });
-                            self.messages.push(ChatMessage {
-                                kind: holtburger_core::ChatMessageKind::System,
-                                text: "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)".to_string(),
-                            });
+                            self.log_chat(
+                                ChatMessageKind::System,
+                                "Available commands: /quit, /exit, /clear, /help, /ping"
+                                    .to_string(),
+                            );
+                            self.log_chat(
+                                ChatMessageKind::System,
+                                "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)"
+                                    .to_string(),
+                            );
                             self.input.clear();
                             return commands;
                         }
@@ -114,8 +120,7 @@ impl AppState {
                         self.scroll_offset = self.scroll_offset.saturating_add(1);
                     }
                     FocusedPane::Context => {
-                        self.context_scroll_offset =
-                            self.context_scroll_offset.saturating_add(1);
+                        self.context_scroll_offset = self.context_scroll_offset.saturating_add(1);
                     }
                     FocusedPane::Dashboard => {
                         if self.selected_dashboard_index > 0 {
@@ -147,8 +152,7 @@ impl AppState {
                         self.scroll_offset = self.scroll_offset.saturating_sub(1);
                     }
                     FocusedPane::Context => {
-                        self.context_scroll_offset =
-                            self.context_scroll_offset.saturating_sub(1);
+                        self.context_scroll_offset = self.context_scroll_offset.saturating_sub(1);
                     }
                     FocusedPane::Dashboard => {
                         let dashboard_count = self.dashboard_item_count();
@@ -209,9 +213,8 @@ impl AppState {
                             let h = self.last_dashboard_height;
                             let step = (h / 2) + 1;
                             let count = self.dashboard_item_count();
-                            self.selected_dashboard_index = (self.selected_dashboard_index
-                                + step)
-                                .min(count.saturating_sub(1));
+                            self.selected_dashboard_index =
+                                (self.selected_dashboard_index + step).min(count.saturating_sub(1));
                         }
                         _ => {}
                     }
@@ -223,8 +226,7 @@ impl AppState {
                         FocusedPane::Input => {
                             self.input.push(c);
                         }
-                        FocusedPane::Chat | FocusedPane::Context | FocusedPane::Dashboard =>
-                        {
+                        FocusedPane::Chat | FocusedPane::Context | FocusedPane::Dashboard => {
                             match c {
                                 '1' => {
                                     self.dashboard_tab = DashboardTab::Entities;
@@ -249,8 +251,7 @@ impl AppState {
                                 _ => {
                                     // Action processing
                                     let target = match self.dashboard_tab {
-                                        DashboardTab::Entities
-                                        | DashboardTab::Inventory => {
+                                        DashboardTab::Entities | DashboardTab::Inventory => {
                                             let entities = self.get_filtered_nearby_tab();
                                             entities
                                                 .get(self.selected_dashboard_index)
@@ -258,8 +259,7 @@ impl AppState {
                                                 .unwrap_or(ActionTarget::None)
                                         }
                                         DashboardTab::Effects => {
-                                            let enchants =
-                                                self.get_effects_list_enchantments();
+                                            let enchants = self.get_effects_list_enchantments();
                                             enchants
                                                 .get(self.selected_dashboard_index)
                                                 .map(|(e, _)| ActionTarget::Enchantment(e))
@@ -276,9 +276,7 @@ impl AppState {
                                     );
                                     if let Some(handler) = actions
                                         .iter()
-                                        .find(|a| {
-                                            a.shortcut_char() == c.to_ascii_lowercase()
-                                        })
+                                        .find(|a| a.shortcut_char() == c.to_ascii_lowercase())
                                         .and_then(|action| action.handler(&target, player_guid))
                                     {
                                         match handler {
@@ -286,9 +284,8 @@ impl AppState {
                                                 commands.push(cmd);
                                             }
                                             ActionHandler::ToggleDebug => {
-                                                let lines = actions::get_debug_info(
-                                                    &target,
-                                                    |id| {
+                                                let lines =
+                                                    actions::get_debug_info(&target, |id| {
                                                         self.entities
                                                             .get(&id)
                                                             .map(|e| e.name.clone())
@@ -299,8 +296,7 @@ impl AppState {
                                                                     None
                                                                 }
                                                             })
-                                                    },
-                                                );
+                                                    });
                                                 self.context_view = ContextView::Custom;
                                                 self.context_buffer = lines;
                                                 self.context_scroll_offset = 0;
@@ -338,8 +334,7 @@ impl AppState {
                         FocusedPane::Context => self.context_scroll_offset = 0,
                         FocusedPane::Dashboard => {
                             let dashboard_count = self.dashboard_item_count();
-                            self.selected_dashboard_index =
-                                dashboard_count.saturating_sub(1);
+                            self.selected_dashboard_index = dashboard_count.saturating_sub(1);
                         }
                         _ => {}
                     }
@@ -404,8 +399,7 @@ impl AppState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    self.selected_dashboard_index =
-                        self.selected_dashboard_index.saturating_sub(1);
+                    self.selected_dashboard_index = self.selected_dashboard_index.saturating_sub(1);
                 }
             }
             MouseEventKind::ScrollDown => {
@@ -427,8 +421,7 @@ impl AppState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    self.selected_dashboard_index =
-                        self.selected_dashboard_index.saturating_add(1);
+                    self.selected_dashboard_index = self.selected_dashboard_index.saturating_add(1);
                 }
             }
             _ => {}

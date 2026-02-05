@@ -1,13 +1,16 @@
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
+use std::io::Write;
+use std::sync::Mutex;
 use std::time::Instant;
 
-use holtburger_core::{ChatMessage, ClientState};
 use holtburger_core::protocol::messages::{CharacterEntry, Enchantment};
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
+use holtburger_core::{ClientState, RetryState};
 
-use super::types::{ContextView, DashboardTab, FocusedPane, UIState};
+use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
 use crate::classification;
 use crate::ui::widgets::effects::get_enchantment_name;
 
@@ -39,26 +42,36 @@ pub struct AppState {
     pub context_buffer: Vec<String>,
     pub context_scroll_offset: usize,
     pub context_view: ContextView,
-    pub logon_retry: Option<(u32, u32, Option<Instant>)>,
-    pub enter_retry: Option<(u32, u32, Option<Instant>)>,
+    pub account_password: String,
+    pub logon_retry: RetryState,
+    pub enter_retry: RetryState,
     pub core_state: ClientState,
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
     pub entities: HashMap<u32, Entity>,
     pub inventory_entities: HashMap<u32, Entity>,
     pub server_time: Option<(f64, Instant)>,
+    pub chat_log: Option<Mutex<File>>,
     pub use_emojis: bool,
 }
 
 impl AppState {
-    pub fn maintain_scroll(
-        &mut self,
-        is_context: bool,
-        current_total: usize,
-        height: usize,
-    ) {
+    pub fn log_chat(&mut self, kind: ChatMessageKind, text: String) {
+        if let Some(log_mutex) = &self.chat_log
+            && let Ok(mut file) = log_mutex.lock()
+        {
+            let _ = writeln!(file, "{}", text);
+            let _ = file.flush();
+        }
+        self.messages.push(ChatMessage { kind, text });
+    }
+
+    pub fn maintain_scroll(&mut self, is_context: bool, current_total: usize, height: usize) {
         let (scroll_offset, old_total) = if is_context {
-            (&mut self.context_scroll_offset, &mut self.context_total_lines)
+            (
+                &mut self.context_scroll_offset,
+                &mut self.context_total_lines,
+            )
         } else {
             (&mut self.scroll_offset, &mut self.chat_total_lines)
         };
@@ -116,7 +129,11 @@ impl AppState {
             DashboardTab::Effects => self.get_effects_list_enchantments().len(),
             DashboardTab::Character => {
                 let attr_count = self.attributes.len();
-                let skill_count = self.skills.values().filter(|s| s.skill_type.is_eor()).count();
+                let skill_count = self
+                    .skills
+                    .values()
+                    .filter(|s| s.skill_type.is_eor())
+                    .count();
                 attr_count + skill_count + 3 // 2 headers + 1 spacer
             }
         }

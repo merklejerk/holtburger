@@ -1,6 +1,6 @@
-use crate::ui::AppState;
 use super::types::DashboardTab;
 use crate::actions::ActionTarget;
+use crate::ui::AppState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 

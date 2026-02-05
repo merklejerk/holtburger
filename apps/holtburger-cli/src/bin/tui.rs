@@ -5,7 +5,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use holtburger_cli::ui::{self, AppState};
+use holtburger_cli::ui::{self, AppState, ChatMessageKind};
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
@@ -22,7 +22,7 @@ struct TuiLogger {
 
 impl log::Log for TuiLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Debug
+        metadata.level() <= log::Level::Trace
     }
 
     fn log(&self, record: &log::Record) {
@@ -38,9 +38,10 @@ impl log::Log for TuiLogger {
 
             // Only send to TUI if verbose is high enough or it's a high level message
             let should_send = match record.level() {
-                log::Level::Error | log::Level::Warn | log::Level::Info => true,
-                log::Level::Debug => self.verbosity >= 4,
-                log::Level::Trace => self.verbosity >= 5,
+                log::Level::Error | log::Level::Warn => true,
+                log::Level::Info => self.verbosity >= 2,
+                log::Level::Debug => self.verbosity >= 3,
+                log::Level::Trace => self.verbosity >= 4,
             };
 
             if should_send {
@@ -76,7 +77,7 @@ struct Args {
     #[arg(short, long)]
     log: Option<String>,
     #[arg(long)]
-    debug_file: Option<String>,
+    debug_log: Option<String>,
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
     #[arg(long)]
@@ -90,11 +91,11 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-    let debug_file = if let Some(path) = &args.debug_file {
+    let chat_log = if let Some(path) = &args.log {
         match File::create(path) {
             Ok(f) => Some(Mutex::new(f)),
             Err(e) => {
-                eprintln!("Failed to create debug file: {}", e);
+                eprintln!("Failed to create chat log file: {}", e);
                 None
             }
         }
@@ -102,12 +103,12 @@ async fn main() -> Result<()> {
         None
     };
 
-    if args.verbose > 0 || args.log.is_some() {
-        let log_file = if let Some(path) = &args.log {
+    if args.verbose > 0 || args.debug_log.is_some() {
+        let log_file = if let Some(path) = &args.debug_log {
             match File::create(path) {
                 Ok(f) => Some(Mutex::new(f)),
                 Err(e) => {
-                    eprintln!("Failed to create log file: {}", e);
+                    eprintln!("Failed to create debug log file: {}", e);
                     None
                 }
             }
@@ -121,7 +122,7 @@ async fn main() -> Result<()> {
             verbosity: args.verbose,
         };
         log::set_boxed_logger(Box::new(logger)).ok();
-        log::set_max_level(log::LevelFilter::Debug);
+        log::set_max_level(log::LevelFilter::Trace);
     }
 
     enable_raw_mode()?;
@@ -184,29 +185,31 @@ async fn main() -> Result<()> {
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
         context_view: ui::ContextView::Default,
-        logon_retry: None,
-        enter_retry: None,
+        account_password: args.password.clone(),
+        logon_retry: holtburger_core::RetryState::new(5),
+        enter_retry: holtburger_core::RetryState::new(5),
         core_state: ClientState::Connected,
         player_pos: None,
         player_enchantments: Vec::new(),
         entities: std::collections::HashMap::new(),
         inventory_entities: std::collections::HashMap::new(),
         server_time: None,
+        chat_log,
         use_emojis: !args.no_emojis,
     };
 
     app_state.refresh_context_buffer();
 
     if args.verbose > 0 {
-        app_state.messages.push(holtburger_core::ChatMessage {
-            kind: holtburger_core::ChatMessageKind::System,
-            text: format!("Verbosity level {} enabled.", args.verbose),
-        });
+        app_state.log_chat(
+            ChatMessageKind::System,
+            format!("Verbosity level {} enabled.", args.verbose),
+        );
     }
 
-    let password = args.password.clone();
+    let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
     let client_handle = tokio::spawn(async move {
-        let _ = client.run(&password).await;
+        let _ = client.run().await;
     });
 
     let mut last_tick = Instant::now();
@@ -214,7 +217,10 @@ async fn main() -> Result<()> {
         let elapsed = last_tick.elapsed().as_secs_f64();
         last_tick = Instant::now();
 
-        app_state.handle_action(ui::AppAction::Tick(elapsed));
+        let actions = app_state.handle_action(ui::AppAction::Tick(elapsed));
+        for action in actions {
+            let _ = command_tx.send(action);
+        }
 
         terminal.draw(|f| ui::ui(f, &mut app_state))?;
 
@@ -257,48 +263,30 @@ async fn main() -> Result<()> {
         }
 
         while let Ok(event) = event_rx.try_recv() {
-            let mut log_text = None;
             match &event {
-                ClientEvent::LogMessage(msg) => {
-                    log_text = Some(msg.clone());
-                }
                 ClientEvent::CharacterList(_)
                 | ClientEvent::PlayerEntered { .. }
                 | ClientEvent::StatusUpdate { .. } => {
-                    if args.verbose >= 1 {
-                        log_text = Some(format!("ClientEvent: {:?}", event));
+                    if args.verbose >= 2 {
+                        log::info!("ClientEvent: {:?}", event);
                     }
                 }
                 ClientEvent::World(world_event) => {
                     if args.verbose >= 2 {
-                        log_text = Some(format!("WorldEvent: {:?}", world_event));
+                        log::info!("WorldEvent: {:?}", world_event);
                     }
                 }
                 ClientEvent::GameMessage(msg) => {
                     if args.verbose >= 3 {
-                        log_text = Some(format!("GameMessage: {:?}", msg));
+                        log::debug!("GameMessage: {:?}", msg);
                     }
                 }
                 ClientEvent::RawMessage(data) => {
                     if args.verbose >= 4 {
-                        log_text = Some(format!("RawPacket ({} bytes): {:02X?}", data.len(), data));
+                        log::trace!("RawPacket ({} bytes): {:02X?}", data.len(), data);
                     }
                 }
                 _ => {}
-            }
-
-            if let Some(text) = log_text {
-                if let Some(file_mutex) = &debug_file {
-                    if let Ok(mut file) = file_mutex.lock() {
-                        let _ = writeln!(file, "{}", text);
-                        let _ = file.flush();
-                    }
-                } else {
-                    app_state.messages.push(holtburger_core::ChatMessage {
-                        kind: holtburger_core::ChatMessageKind::System,
-                        text: text.clone(),
-                    });
-                }
             }
 
             app_state.handle_action(ui::AppAction::ReceivedEvent(event));

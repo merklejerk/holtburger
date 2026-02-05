@@ -44,7 +44,8 @@ impl MessageUnpack for ViewContentsData {
 impl MessagePack for ViewContentsData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.container).unwrap();
-        buf.write_u32::<LittleEndian>(self.items.len() as u32).unwrap();
+        buf.write_u32::<LittleEndian>(self.items.len() as u32)
+            .unwrap();
         for item in &self.items {
             buf.write_u32::<LittleEndian>(item.guid).unwrap();
             buf.write_u32::<LittleEndian>(item.container_type).unwrap();

@@ -6,6 +6,7 @@ use holtburger_core::world::entity::Entity;
 use holtburger_core::world::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, Skill, Vital};
 use holtburger_core::{ChatMessage, ClientState};
+use ratatui::style::Color;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -30,6 +31,7 @@ pub struct AppState {
     pub last_dashboard_height: usize,
     pub scroll_offset: usize,
     pub chat_total_lines: usize,
+    pub context_total_lines: usize,
     pub dashboard_tab: DashboardTab,
     pub context_buffer: Vec<String>,
     pub context_scroll_offset: usize,
@@ -42,6 +44,8 @@ pub struct AppState {
     pub entities: HashMap<u32, Entity>,
     pub server_time: Option<(f64, Instant)>,
     pub use_emojis: bool,
+    pub chat_cache: Vec<(String, Color)>,
+    pub last_rendered_width: usize,
 }
 
 impl AppState {

@@ -98,7 +98,10 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                         .orientation(ScrollbarOrientation::VerticalRight)
                         .begin_symbol(Some("▲"))
                         .end_symbol(Some("▼")),
-                    area,
+                    area.inner(&ratatui::layout::Margin {
+                        vertical: 1,
+                        horizontal: 0,
+                    }),
                     &mut scrollbar_state,
                 );
             }

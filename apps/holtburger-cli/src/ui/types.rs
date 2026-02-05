@@ -14,7 +14,7 @@ pub const LAYOUT_NARROW_DASHBOARD_PCT: u16 = 50;
 pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
 
 // Chat constants
-pub const CHAT_HISTORY_WINDOW_SIZE: usize = 200;
+pub const CHAT_HISTORY_WINDOW_SIZE: usize = 10000;
 
 // Interaction constants
 pub const SCROLL_STEP: usize = 3;

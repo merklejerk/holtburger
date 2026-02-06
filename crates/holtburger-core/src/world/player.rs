@@ -505,7 +505,7 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateVitalCurrent(data) => {
+            GameMessage::UpdateAttribute2ndLevel(data) => {
                 let UpdateVitalCurrentData { vital, current, .. } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital)
                     && let Some(vital_obj) = self.vitals.get_mut(&vital_type)

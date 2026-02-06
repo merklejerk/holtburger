@@ -55,6 +55,21 @@ pub fn read_string16(data: &[u8], offset: &mut usize) -> Option<String> {
     Some(s)
 }
 
+pub fn read_hashtable_header(data: &[u8], offset: &mut usize) -> Option<(usize, usize)> {
+    if *offset + 4 > data.len() {
+        return None;
+    }
+    let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
+    let buckets = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]) as usize;
+    *offset += 4;
+    Some((count, buckets))
+}
+
+pub fn write_hashtable_header(buf: &mut Vec<u8>, count: usize, buckets: usize) {
+    buf.write_u16::<LittleEndian>(count as u16).unwrap();
+    buf.write_u16::<LittleEndian>(buckets as u16).unwrap();
+}
+
 pub fn read_string16_unpadded(data: &[u8], offset: &mut usize) -> Option<String> {
     if *offset + 2 > data.len() {
         return None;
@@ -109,7 +124,7 @@ pub fn read_packed_u32(data: &[u8], offset: &mut usize) -> u32 {
 }
 
 pub fn write_packed_u32(buf: &mut Vec<u8>, value: u32) {
-    if value <= 0x7FFF {
+    if value <= 32767 {
         buf.write_u16::<LittleEndian>(value as u16).unwrap();
     } else {
         let packed = (value << 16) | ((value >> 16) | 0x8000);

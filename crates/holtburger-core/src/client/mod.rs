@@ -1,6 +1,5 @@
 use crate::protocol::crypto::Isaac;
 use crate::protocol::errors::CharacterError;
-use crate::protocol::messages::action_opcodes;
 use crate::protocol::messages::*;
 use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
@@ -151,8 +150,10 @@ impl Client {
                         .session
                         .send_message(&GameMessage::GameAction(Box::new(GameAction {
                             sequence: 0,
-                            action_type: action_opcodes::TELL,
-                            data: GameActionData::Tell { target, message },
+                            data: GameActionData::Tell(Box::new(TellActionData {
+                                target,
+                                message,
+                            })),
                         })))
                         .await;
                 }
@@ -163,8 +164,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: action_opcodes::PING_REQUEST,
-                        data: GameActionData::PingRequest,
+                        data: GameActionData::PingRequest(Box::new(PingRequestData)),
                     })))
                     .await
             }
@@ -173,8 +173,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: action_opcodes::IDENTIFY_OBJECT,
-                        data: GameActionData::IdentifyObject(guid),
+                        data: GameActionData::IdentifyObject(Box::new(IdentifyObjectData { guid })),
                     })))
                     .await
             }
@@ -187,7 +186,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: action_opcodes::JUMP,
+
                         data: GameActionData::Jump(Box::new(JumpData {
                             sequence,
                             extent,
@@ -215,8 +214,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: action_opcodes::USE,
-                        data: GameActionData::Use(guid),
+                        data: GameActionData::Use(Box::new(UseData { guid })),
                     })))
                     .await
             }
@@ -225,8 +223,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: action_opcodes::DROP_ITEM,
-                        data: GameActionData::DropItem(guid),
+                        data: GameActionData::DropItem(Box::new(DropItemData { guid })),
                     })))
                     .await
             }
@@ -235,12 +232,13 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: action_opcodes::PUT_ITEM_IN_CONTAINER,
-                        data: GameActionData::PutItemInContainer {
-                            item: guid,
-                            container: self.world.player.guid,
-                            placement: 0,
-                        },
+                        data: GameActionData::PutItemInContainer(Box::new(
+                            PutItemInContainerData {
+                                item: guid,
+                                container: self.world.player.guid,
+                                placement: 0,
+                            },
+                        )),
                     })))
                     .await
             }
@@ -258,12 +256,13 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: action_opcodes::PUT_ITEM_IN_CONTAINER,
-                        data: GameActionData::PutItemInContainer {
-                            item,
-                            container,
-                            placement,
-                        },
+                        data: GameActionData::PutItemInContainer(Box::new(
+                            PutItemInContainerData {
+                                item,
+                                container,
+                                placement,
+                            },
+                        )),
                     })))
                     .await
             }
@@ -277,7 +276,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: action_opcodes::GET_AND_WIELD_ITEM,
+
                         data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
                             sequence,
                             item_guid: item,
@@ -301,7 +300,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: action_opcodes::STACKABLE_SPLIT_TO_WIELD,
+
                         data: GameActionData::StackableSplitToWield(Box::new(
                             StackableSplitToWieldData {
                                 sequence,
@@ -319,7 +318,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: action_opcodes::MOVE_TO_STATE,
+
                         data: GameActionData::MoveToState(Box::new(MoveToStateData {
                             sequence,
                             raw_motion_state: RawMotionState {
@@ -655,9 +654,7 @@ impl Client {
                 Ok(())
             }
             GameMessage::UpdatePropertyInt(_) => Ok(()),
-            GameMessage::GameAction(data) => {
-                self.handle_game_action(data.action_type, &data.data).await
-            }
+            GameMessage::GameAction(data) => self.handle_game_action(&data.data).await,
             GameMessage::ServerMessage(data) => {
                 if let Some(tx) = &self.event_tx {
                     let _ = tx.send(ClientEvent::ServerMessage(data.message.clone()));
@@ -753,8 +750,8 @@ impl Client {
         Ok(())
     }
 
-    async fn handle_game_action(&mut self, action_type: u32, _data: &GameActionData) -> Result<()> {
-        if action_type == action_opcodes::LOGIN_COMPLETE {
+    async fn handle_game_action(&mut self, data: &GameActionData) -> Result<()> {
+        if let GameActionData::LoginComplete(_) = data {
             self.state = ClientState::InWorld;
             self.send_status_event();
         }
@@ -814,8 +811,7 @@ impl Client {
     async fn send_login_complete(&mut self) -> Result<()> {
         let msg = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0,
-            action_type: action_opcodes::LOGIN_COMPLETE,
-            data: GameActionData::LoginComplete,
+            data: GameActionData::LoginComplete(Box::new(LoginCompleteData)),
         }));
         self.session.send_message(&msg).await?;
         Ok(())
@@ -824,8 +820,9 @@ impl Client {
     async fn send_talk(&mut self, text: &str) -> Result<()> {
         let msg = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0,
-            action_type: action_opcodes::TALK,
-            data: GameActionData::Talk(text.to_string()),
+            data: GameActionData::Talk(Box::new(TalkData {
+                text: text.to_string(),
+            })),
         }));
         self.session.send_message(&msg).await?;
         Ok(())

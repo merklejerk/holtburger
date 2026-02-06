@@ -40,6 +40,38 @@ impl MessagePack for CharacterErrorData {
     }
 }
 
+/// Data for a ping request (empty payload).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PingRequestData;
+
+impl MessageUnpack for PingRequestData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl MessagePack for PingRequestData {
+    fn pack(&self, _buf: &mut Vec<u8>) {
+        // No payload
+    }
+}
+
+/// Data for a login complete (empty payload).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoginCompleteData;
+
+impl MessageUnpack for LoginCompleteData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl MessagePack for LoginCompleteData {
+    fn pack(&self, _buf: &mut Vec<u8>) {
+        // No payload
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BootAccountData {
     pub reason: Option<String>,
@@ -397,5 +429,27 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(fixtures::WEENIE_ERROR_WITH_STRING, &expected);
+    }
+
+    #[test]
+    fn test_ping_request_parity() {
+        use crate::protocol::fixtures;
+        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 3,
+            data: GameActionData::PingRequest(Box::new(PingRequestData)),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_PING_REQUEST, &action);
+    }
+
+    #[test]
+    fn test_login_complete_parity() {
+        use crate::protocol::fixtures;
+        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 8,
+            data: GameActionData::LoginComplete(Box::new(LoginCompleteData)),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_LOGIN_COMPLETE, &action);
     }
 }

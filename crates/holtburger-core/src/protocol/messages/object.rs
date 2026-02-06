@@ -1,7 +1,7 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{
-    align_to_4, read_packed_u32, read_packed_u32_with_known_type, read_string16,
-    write_packed_u32_with_known_type, write_string16,
+    align_to_4, read_packed_u32_with_known_type, read_string16, write_packed_u32_with_known_type,
+    write_string16,
 };
 use crate::world::position::WorldPosition;
 use crate::world::properties::{
@@ -13,7 +13,7 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectDescriptionData {
     pub guid: u32,
-    pub model_header: u8,
+    pub model_data: ModelData,
     pub physics_flags: PhysicsDescriptionFlag,
     pub physics_state: PhysicsState,
     pub pos: Option<WorldPosition>,
@@ -36,7 +36,49 @@ pub struct ObjectDescriptionData {
     pub burden: Option<u16>,
 }
 
-impl MessageUnpack for ObjectDescriptionData {
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ModelData {
+    pub header: u8,
+    pub palette_id: Option<u32>,
+    pub sub_palettes: Vec<SubPalette>,
+    pub texture_changes: Vec<TextureChange>,
+    pub model_changes: Vec<ModelChange>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SubPalette {
+    pub id: u32,
+    pub offset: u8,
+    pub length: u8,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextureChange {
+    pub part_index: u8,
+    pub old_id: u32,
+    pub new_id: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelChange {
+    pub index: u8,
+    pub animation_id: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjDescEventData {
+    pub guid: u32,
+    pub model_data: ModelData,
+    pub instance_sequence: u32,
+    pub visual_desc_sequence: u32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ForceObjectDescSendData {
+    pub guid: u32,
+}
+
+impl MessageUnpack for ObjDescEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -44,13 +86,66 @@ impl MessageUnpack for ObjectDescriptionData {
         let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
+        let model_data = ModelData::unpack(data, offset)?;
+
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let instance_sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let visual_desc_sequence = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
+
+        Some(ObjDescEventData {
+            guid,
+            model_data,
+            instance_sequence,
+            visual_desc_sequence,
+        })
+    }
+}
+
+impl MessagePack for ObjDescEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.model_data.pack(buf);
+        buf.write_u32::<LittleEndian>(self.instance_sequence)
+            .unwrap();
+        buf.write_u32::<LittleEndian>(self.visual_desc_sequence)
+            .unwrap();
+    }
+}
+
+impl MessageUnpack for ForceObjectDescSendData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(ForceObjectDescSendData { guid })
+    }
+}
+
+impl MessagePack for ForceObjectDescSendData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+    }
+}
+
+impl MessageUnpack for ModelData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset >= data.len() {
             return None;
         }
-        // ModelData
-        let model_header = data[*offset];
-        if model_header == 0x11 {
-            *offset += 1;
+        let header = data[*offset];
+        *offset += 1;
+
+        let mut palette_id = None;
+        let mut sub_palettes = Vec::new();
+        let mut texture_changes = Vec::new();
+        let mut model_changes = Vec::new();
+
+        if header == 0x11 {
             if *offset + 3 > data.len() {
                 return None;
             }
@@ -60,39 +155,120 @@ impl MessageUnpack for ObjectDescriptionData {
             *offset += 3;
 
             if num_p > 0 {
-                read_packed_u32(data, offset); // PaletteID
+                palette_id = Some(read_packed_u32_with_known_type(data, offset, 0x04000000));
                 for _ in 0..num_p {
-                    read_packed_u32(data, offset); // SubPaletteId
+                    let id = read_packed_u32_with_known_type(data, offset, 0x04000000);
                     if *offset + 2 > data.len() {
                         return None;
                     }
-                    *offset += 2; // Offset and Length
+                    let offset_val = data[*offset];
+                    let length = data[*offset + 1];
+                    *offset += 2;
+                    sub_palettes.push(SubPalette {
+                        id,
+                        offset: offset_val,
+                        length,
+                    });
                 }
             }
+
             for _ in 0..num_t {
-                if *offset + 1 > data.len() {
+                if *offset >= data.len() {
                     return None;
                 }
-                *offset += 1; // PartIndex
-                read_packed_u32(data, offset); // OldTexture
-                read_packed_u32(data, offset); // NewTexture
+                let part_index = data[*offset];
+                *offset += 1;
+                let old_id = read_packed_u32_with_known_type(data, offset, 0x05000000);
+                let new_id = read_packed_u32_with_known_type(data, offset, 0x05000000);
+                texture_changes.push(TextureChange {
+                    part_index,
+                    old_id,
+                    new_id,
+                });
             }
+
             for _ in 0..num_m {
-                if *offset + 1 > data.len() {
+                if *offset >= data.len() {
                     return None;
                 }
-                *offset += 1; // Index
-                read_packed_u32(data, offset); // AnimationId
+                let index = data[*offset];
+                *offset += 1;
+                let animation_id = read_packed_u32_with_known_type(data, offset, 0x01000000);
+                model_changes.push(ModelChange {
+                    index,
+                    animation_id,
+                });
             }
             *offset = align_to_4(*offset);
         } else {
-            // Modern ACE / Minimal ModelData is just 4 bytes + Align
-            // If it's not 0x11, it's usually flags (u8), num_p (u8), num_t (u8), num_m (u8)
-            if *offset + 4 <= data.len() {
-                *offset += 4;
+            // Modern ACE / Minimal ModelData
+            if *offset + 3 <= data.len() {
+                // We just skip the counts for now as we don't know the exact structure of "non-0x11" models if they exist.
+                // In ACE they seem to always use 0x11 for SerializeModelData.
+                *offset += 3;
                 *offset = align_to_4(*offset);
             }
         }
+
+        Some(ModelData {
+            header,
+            palette_id,
+            sub_palettes,
+            texture_changes,
+            model_changes,
+        })
+    }
+}
+
+impl MessagePack for ModelData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.push(self.header);
+        if self.header == 0x11 {
+            buf.push(self.sub_palettes.len() as u8);
+            buf.push(self.texture_changes.len() as u8);
+            buf.push(self.model_changes.len() as u8);
+
+            if !self.sub_palettes.is_empty() {
+                write_packed_u32_with_known_type(buf, self.palette_id.unwrap_or(0), 0x04000000);
+                for p in &self.sub_palettes {
+                    write_packed_u32_with_known_type(buf, p.id, 0x04000000);
+                    buf.push(p.offset);
+                    buf.push(p.length);
+                }
+            }
+
+            for t in &self.texture_changes {
+                buf.push(t.part_index);
+                write_packed_u32_with_known_type(buf, t.old_id, 0x05000000);
+                write_packed_u32_with_known_type(buf, t.new_id, 0x05000000);
+            }
+
+            for m in &self.model_changes {
+                buf.push(m.index);
+                write_packed_u32_with_known_type(buf, m.animation_id, 0x01000000);
+            }
+
+            while !buf.len().is_multiple_of(4) {
+                buf.push(0);
+            }
+        } else {
+            // Minimal 4-byte version
+            buf.push(0);
+            buf.push(0);
+            buf.push(0);
+        }
+    }
+}
+
+impl MessageUnpack for ObjectDescriptionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+
+        let model_data = ModelData::unpack(data, offset)?;
 
         if *offset + 8 > data.len() {
             return None;
@@ -557,7 +733,7 @@ impl MessageUnpack for ObjectDescriptionData {
 
         Some(ObjectDescriptionData {
             guid,
-            model_header,
+            model_data,
             physics_flags,
             physics_state,
             pos,
@@ -587,13 +763,7 @@ impl MessagePack for ObjectDescriptionData {
         buf.write_u32::<LittleEndian>(self.guid).unwrap();
 
         // ModelData
-        buf.push(self.model_header);
-        buf.push(0); // num_p
-        buf.push(0); // num_t
-        buf.push(0); // num_m
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        self.model_data.pack(buf);
 
         // PhysicsData
         buf.write_u32::<LittleEndian>(self.physics_flags.bits())
@@ -1243,6 +1413,52 @@ impl MessagePack for SetStateData {
     }
 }
 
+/// Data for identifying an object.
+#[derive(Debug, Clone, PartialEq)]
+pub struct IdentifyObjectData {
+    pub guid: u32,
+}
+
+impl MessageUnpack for IdentifyObjectData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(Self { guid })
+    }
+}
+
+impl MessagePack for IdentifyObjectData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+    }
+}
+
+/// Data for using an object.
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseData {
+    pub guid: u32,
+}
+
+impl MessageUnpack for UseData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(Self { guid })
+    }
+}
+
+impl MessagePack for UseData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1272,7 +1488,10 @@ mod tests {
 
         let expected = ObjectDescriptionData {
             guid: 0x50000001,
-            model_header: 1,
+            model_data: ModelData {
+                header: 1,
+                ..Default::default()
+            },
             physics_flags: PhysicsDescriptionFlag::POSITION | PhysicsDescriptionFlag::TIMESTAMPS,
             physics_state: PhysicsState::empty(),
             pos: Some(WorldPosition {
@@ -1316,7 +1535,10 @@ mod tests {
 
         let expected = ObjectDescriptionData {
             guid: 0x50000002,
-            model_header: 0x11,
+            model_data: ModelData {
+                header: 0x11,
+                ..Default::default()
+            },
             physics_flags: PhysicsDescriptionFlag::POSITION
                 | PhysicsDescriptionFlag::PARENT
                 | PhysicsDescriptionFlag::OBJSCALE
@@ -1504,5 +1726,53 @@ mod tests {
         } else {
             panic!("Expected UpdatePropertyInt, got {:?}", msg);
         }
+    }
+
+    #[test]
+    fn test_use_parity() {
+        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 6,
+            data: GameActionData::Use(Box::new(UseData { guid: 0x33333333 })),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_USE, &action);
+    }
+
+    #[test]
+    fn test_obj_desc_event_parity() {
+        use crate::protocol::messages::GameMessage;
+        let expected = GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+            guid: 0x50000001,
+            model_data: ModelData {
+                header: 0x11,
+                palette_id: Some(0x04000001),
+                sub_palettes: vec![SubPalette {
+                    id: 0x04000002,
+                    offset: 0,
+                    length: 32,
+                }],
+                texture_changes: vec![TextureChange {
+                    part_index: 0,
+                    old_id: 0x05000001,
+                    new_id: 0x05000002,
+                }],
+                model_changes: vec![ModelChange {
+                    index: 0,
+                    animation_id: 0x01000001,
+                }],
+            },
+            instance_sequence: 1234,
+            visual_desc_sequence: 5678,
+        }));
+        assert_pack_unpack_parity(fixtures::OBJ_DESC_EVENT, &expected);
+    }
+
+    #[test]
+    fn test_force_obj_desc_send_parity() {
+        use crate::protocol::messages::GameMessage;
+        let expected = GameMessage::ForceObjectDescSend(Box::new(ForceObjectDescSendData {
+            guid: 0x50000001,
+        }));
+        assert_pack_unpack_parity(fixtures::FORCE_OBJ_DESC_SEND, &expected);
     }
 }

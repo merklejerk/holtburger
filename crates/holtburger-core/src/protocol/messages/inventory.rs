@@ -303,6 +303,60 @@ impl MessagePack for SetStackSizeData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropItemData {
+    pub guid: u32,
+}
+
+impl MessageUnpack for DropItemData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(DropItemData { guid })
+    }
+}
+
+impl MessagePack for DropItemData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PutItemInContainerData {
+    pub item: u32,
+    pub container: u32,
+    pub placement: u32,
+}
+
+impl MessageUnpack for PutItemInContainerData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 12 > data.len() {
+            return None;
+        }
+        let item = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let container = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let placement = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
+        *offset += 12;
+        Some(PutItemInContainerData {
+            item,
+            container,
+            placement,
+        })
+    }
+}
+
+impl MessagePack for PutItemInContainerData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.item).unwrap();
+        buf.write_u32::<LittleEndian>(self.container).unwrap();
+        buf.write_u32::<LittleEndian>(self.placement).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,11 +386,11 @@ mod tests {
 
     #[test]
     fn test_get_and_wield_item_fixture() {
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage, action_opcodes};
+        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
         let hex = "B1F700002A0000001A0000000100005000001000";
         let expected = GameMessage::GameAction(Box::new(GameAction {
             sequence: 42,
-            action_type: action_opcodes::GET_AND_WIELD_ITEM,
+
             data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
                 sequence: 42,
                 item_guid: 0x50000001,
@@ -348,11 +402,11 @@ mod tests {
 
     #[test]
     fn test_stackable_split_to_wield_fixture() {
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage, action_opcodes};
+        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
         let hex = "B1F700002B0000009B010000020000500000800032000000";
         let expected = GameMessage::GameAction(Box::new(GameAction {
             sequence: 43,
-            action_type: action_opcodes::STACKABLE_SPLIT_TO_WIELD,
+
             data: GameActionData::StackableSplitToWield(Box::new(StackableSplitToWieldData {
                 sequence: 43,
                 stack_guid: 0x50000002,
@@ -437,5 +491,29 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_drop_item_parity() {
+        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 4,
+            data: GameActionData::DropItem(Box::new(DropItemData { guid: 0x12345678 })),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_DROP_ITEM, &action);
+    }
+
+    #[test]
+    fn test_put_item_parity() {
+        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 5,
+            data: GameActionData::PutItemInContainer(Box::new(PutItemInContainerData {
+                item: 0x11111111,
+                container: 0x22222222,
+                placement: 0,
+            })),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_PUT_ITEM, &action);
     }
 }

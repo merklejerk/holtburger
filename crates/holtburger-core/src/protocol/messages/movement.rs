@@ -58,6 +58,172 @@ bitflags::bitflags! {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum PositionType {
+    Undef = 0,
+    Location = 1,
+    Destination = 2,
+    Instantiation = 3,
+    Sanctuary = 4,
+    Home = 5,
+    ActivationMove = 6,
+    Target = 7,
+    LinkedPortalOne = 8,
+    LastPortal = 9,
+    PortalStorm = 10,
+    CrashAndTurn = 11,
+    PortalSummonLoc = 12,
+    HouseBoot = 13,
+    LastOutsideDeath = 14,
+    LinkedLifestone = 15,
+    LinkedPortalTwo = 16,
+    Save1 = 17,
+    Save2 = 18,
+    Save3 = 19,
+    Save4 = 20,
+    Save5 = 21,
+    Save6 = 22,
+    Save7 = 23,
+    Save8 = 24,
+    Save9 = 25,
+    RelativeDestination = 26,
+    TeleportedCharacter = 27,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PrivateUpdatePositionData {
+    pub sequence: u8,
+    pub position_type: PositionType,
+    pub pos: WorldPosition,
+}
+
+impl MessageUnpack for PrivateUpdatePositionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 5 > data.len() {
+            return None;
+        }
+        let sequence = data[*offset];
+        *offset += 1;
+        let position_type_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let position_type = match position_type_raw {
+            0 => PositionType::Undef,
+            1 => PositionType::Location,
+            2 => PositionType::Destination,
+            3 => PositionType::Instantiation,
+            4 => PositionType::Sanctuary,
+            5 => PositionType::Home,
+            6 => PositionType::ActivationMove,
+            7 => PositionType::Target,
+            8 => PositionType::LinkedPortalOne,
+            9 => PositionType::LastPortal,
+            10 => PositionType::PortalStorm,
+            11 => PositionType::CrashAndTurn,
+            12 => PositionType::PortalSummonLoc,
+            13 => PositionType::HouseBoot,
+            14 => PositionType::LastOutsideDeath,
+            15 => PositionType::LinkedLifestone,
+            16 => PositionType::LinkedPortalTwo,
+            17 => PositionType::Save1,
+            18 => PositionType::Save2,
+            19 => PositionType::Save3,
+            20 => PositionType::Save4,
+            21 => PositionType::Save5,
+            22 => PositionType::Save6,
+            23 => PositionType::Save7,
+            24 => PositionType::Save8,
+            25 => PositionType::Save9,
+            26 => PositionType::RelativeDestination,
+            27 => PositionType::TeleportedCharacter,
+            _ => return None,
+        };
+        let pos = WorldPosition::unpack(data, offset)?;
+        Some(PrivateUpdatePositionData {
+            sequence,
+            position_type,
+            pos,
+        })
+    }
+}
+
+impl MessagePack for PrivateUpdatePositionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.push(self.sequence);
+        buf.extend_from_slice(&(self.position_type as u32).to_le_bytes());
+        self.pos.pack(buf);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PublicUpdatePositionData {
+    pub sequence: u8,
+    pub guid: u32,
+    pub position_type: PositionType,
+    pub pos: WorldPosition,
+}
+
+impl MessageUnpack for PublicUpdatePositionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 9 > data.len() {
+            return None;
+        }
+        let sequence = data[*offset];
+        *offset += 1;
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let position_type_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let position_type = match position_type_raw {
+            0 => PositionType::Undef,
+            1 => PositionType::Location,
+            2 => PositionType::Destination,
+            3 => PositionType::Instantiation,
+            4 => PositionType::Sanctuary,
+            5 => PositionType::Home,
+            6 => PositionType::ActivationMove,
+            7 => PositionType::Target,
+            8 => PositionType::LinkedPortalOne,
+            9 => PositionType::LastPortal,
+            10 => PositionType::PortalStorm,
+            11 => PositionType::CrashAndTurn,
+            12 => PositionType::PortalSummonLoc,
+            13 => PositionType::HouseBoot,
+            14 => PositionType::LastOutsideDeath,
+            15 => PositionType::LinkedLifestone,
+            16 => PositionType::LinkedPortalTwo,
+            17 => PositionType::Save1,
+            18 => PositionType::Save2,
+            19 => PositionType::Save3,
+            20 => PositionType::Save4,
+            21 => PositionType::Save5,
+            22 => PositionType::Save6,
+            23 => PositionType::Save7,
+            24 => PositionType::Save8,
+            25 => PositionType::Save9,
+            26 => PositionType::RelativeDestination,
+            27 => PositionType::TeleportedCharacter,
+            _ => return None,
+        };
+        let pos = WorldPosition::unpack(data, offset)?;
+        Some(PublicUpdatePositionData {
+            sequence,
+            guid,
+            position_type,
+            pos,
+        })
+    }
+}
+
+impl MessagePack for PublicUpdatePositionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.push(self.sequence);
+        buf.extend_from_slice(&self.guid.to_le_bytes());
+        buf.extend_from_slice(&(self.position_type as u32).to_le_bytes());
+        self.pos.pack(buf);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePositionData {
     pub guid: u32,
@@ -937,48 +1103,115 @@ impl MoveToStateData {
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
+    use crate::protocol::messages::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
-    fn test_movement_event_turn_to_obj_parity() {
-        let fixture = fixtures::MOVEMENT_TURN_TO_OBJ;
-        let mut offset = 0;
-        let unpacked = MovementEventData::unpack(fixture, &mut offset).unwrap();
-
-        let mut packed = Vec::new();
-        unpacked.pack(&mut packed);
-        assert_eq!(fixture, packed);
-
-        // Verify the values from the Gold Standard fixture
-        assert_eq!(unpacked.guid, 0x50000002);
-        assert_eq!(unpacked.movement_type, MovementType::TurnToObject);
-        if let MovementTypeData::TurnToObject(data) = unpacked.data {
-            assert_eq!(data.target, 0x8000038A);
-            assert_eq!(data.desired_heading, 0.0);
-            assert_eq!(data.params.speed, 0.0);
-        } else {
-            panic!("Expected TurnToObject data");
-        }
+    fn test_public_update_position_fixture() {
+        let expected = GameMessage::PublicUpdatePosition(Box::new(PublicUpdatePositionData {
+            sequence: 12,
+            guid: 0x50000001,
+            position_type: PositionType::Location,
+            pos: WorldPosition {
+                landblock_id: 0x12345678,
+                coords: crate::math::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+        }));
+        assert_pack_unpack_parity(fixtures::PUBLIC_UPDATE_POSITION, &expected);
     }
 
     #[test]
-    fn test_movement_event_move_to_pos_parity() {
+    fn test_private_update_position_fixture() {
+        let expected = GameMessage::PrivateUpdatePosition(Box::new(PrivateUpdatePositionData {
+            sequence: 12,
+            position_type: PositionType::Location,
+            pos: WorldPosition {
+                landblock_id: 0x12345678,
+                coords: crate::math::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+        }));
+        assert_pack_unpack_parity(fixtures::PRIVATE_UPDATE_POSITION, &expected);
+    }
+
+    #[test]
+    fn test_movement_event_turn_to_obj_fixture() {
+        let fixture = fixtures::MOVEMENT_TURN_TO_OBJ;
+        let expected = MovementEventData {
+            guid: 0x50000002,
+            object_instance_sequence: 14,
+            movement_sequence: 85,
+            server_control_sequence: 15,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: 73,
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target: 0x8000038A,
+                desired_heading: 0.0,
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: 0.0,
+                    desired_heading: 0.0,
+                },
+            }),
+        };
+        assert_pack_unpack_parity(fixture, &expected);
+    }
+
+    #[test]
+    fn test_movement_event_move_to_pos_fixture() {
         let fixture = fixtures::MOVEMENT_MOVE_TO_POS;
-        let mut offset = 0;
-        let unpacked = MovementEventData::unpack(fixture, &mut offset).unwrap();
-
-        let mut packed = Vec::new();
-        unpacked.pack(&mut packed);
-        assert_eq!(fixture, packed);
-
-        // Verify the values
-        assert_eq!(unpacked.guid, 0x50000002);
-        assert_eq!(unpacked.movement_type, MovementType::MoveToPosition);
-        if let MovementTypeData::MoveToPosition(data) = unpacked.data {
-            assert_eq!(data.origin.cell_id, 0x12345678);
-            assert_eq!(data.run_rate, 1.0);
-        } else {
-            panic!("Expected MoveToPosition data");
-        }
+        let expected = MovementEventData {
+            guid: 0x50000002,
+            object_instance_sequence: 14,
+            movement_sequence: 86,
+            server_control_sequence: 16,
+            is_autonomous: true,
+            movement_type: MovementType::MoveToPosition,
+            motion_flags: 0,
+            current_style: 74,
+            data: MovementTypeData::MoveToPosition(MoveToPosition {
+                origin: Origin {
+                    cell_id: 0x12345678,
+                    position: crate::math::Vector3 {
+                        x: 100.0,
+                        y: 200.0,
+                        z: 300.0,
+                    },
+                },
+                params: MoveToParameters {
+                    movement_parameters: 0,
+                    distance_to_object: 0.0,
+                    min_distance: 0.0,
+                    fail_distance: 100.0,
+                    speed: 1.0,
+                    walk_run_threshold: 5.0,
+                    desired_heading: 0.0,
+                },
+                run_rate: 1.0,
+            }),
+        };
+        assert_pack_unpack_parity(fixture, &expected);
     }
 
     #[test]
@@ -1007,25 +1240,38 @@ mod tests {
     }
 
     #[test]
-    fn test_move_to_state_parity() {
+    fn test_move_to_state_fixture() {
         let fixture = fixtures::MOVE_TO_STATE;
-
-        // We need to unpack this via GameMessage to handle the wrapper
-        use crate::protocol::messages::GameMessage;
-        let msg = GameMessage::unpack(fixture).unwrap();
-
-        if let GameMessage::MoveToState(ref data) = msg {
-            assert_eq!(data.sequence, 0x5678);
-            assert_eq!(data.instance_sequence, 0xFF01);
-            assert_eq!(data.contact_long_jump, 0x03);
-            assert_eq!(data.raw_motion_state.commands.len(), 1);
-            assert_eq!(data.raw_motion_state.commands[0].command, 0x0001);
-
-            let packed = msg.pack();
-            assert_eq!(fixture, packed);
-        } else {
-            panic!("Expected MoveToState message");
-        }
+        let expected = GameMessage::MoveToState(Box::new(MoveToStateData {
+            sequence: 0x5678,
+            raw_motion_state: RawMotionState {
+                flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                current_hold_key: Some(2),
+                forward_speed: Some(5.0),
+                commands: vec![MotionItem::new(1, 5, true, 1.0)],
+                ..Default::default()
+            },
+            position: WorldPosition {
+                landblock_id: 0x12345678,
+                coords: crate::math::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            instance_sequence: 0xFF01,
+            server_control_sequence: 0xFF02,
+            teleport_sequence: 0xFF03,
+            force_position_sequence: 0xFF04,
+            contact_long_jump: 0x03,
+        }));
+        assert_pack_unpack_parity(fixture, &expected);
     }
 
     #[test]
@@ -1041,15 +1287,23 @@ mod tests {
     }
 
     #[test]
-    fn test_routing_player_teleport() {
-        use crate::protocol::messages::GameMessage;
+    fn test_player_teleport_fixture() {
+        let expected = GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+            teleport_sequence: 0,
+        }));
         let hex = "51F7000000000000";
         let data = hex::decode(hex).unwrap();
-        let msg = GameMessage::unpack(&data).unwrap();
-        if let GameMessage::PlayerTeleport(tele) = msg {
-            assert_eq!(tele.teleport_sequence, 0);
-        } else {
-            panic!("Expected PlayerTeleport, got {:?}", msg);
-        }
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_gamemessage_routing_update_position() {
+        use crate::protocol::messages::GameMessage;
+        // UPDATE_POSITION (0xF748)
+        // Opcode(4) + GUID(4) + Flags(4) + LB(4) + Pos(12) + Rot(16) + Sequences(8) = 52 bytes
+        let pos_hex = "48F7000015000000000000005C8F1E120000000000000000000000000000803F0000000000000000000000000100020003000400";
+        let pos_data = hex::decode(pos_hex).unwrap();
+        let pos_msg = GameMessage::unpack(&pos_data).unwrap();
+        assert!(matches!(pos_msg, GameMessage::UpdatePosition(_)));
     }
 }

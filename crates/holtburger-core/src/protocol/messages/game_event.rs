@@ -1,10 +1,9 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
-use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::protocol::messages::{
     MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
     MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
     MagicUpdateMultipleEnchantmentsData, PingResponseData, PlayerDescriptionData, ViewContentsData,
-    game_event_opcodes,
+    WeenieErrorData, WeenieErrorWithStringData, game_event_opcodes,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -193,88 +192,22 @@ impl GameEvent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct WeenieErrorData {
-    pub error_id: u32,
-}
-
-impl MessageUnpack for WeenieErrorData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        Some(WeenieErrorData { error_id })
-    }
-}
-
-impl MessagePack for WeenieErrorData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct WeenieErrorWithStringData {
-    pub error_id: u32,
-    pub message: String,
-}
-
-impl MessageUnpack for WeenieErrorWithStringData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        let message = read_string16(data, offset)?;
-        Some(WeenieErrorWithStringData { error_id, message })
-    }
-}
-
-impl MessagePack for WeenieErrorWithStringData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
-        write_string16(buf, &self.message);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::messages::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
     fn test_gamemessage_routing_game_event_start() {
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x0E), Event (0x0282)
         let hex_str = "B0F70000010000500E00000082020000";
         let data = hex::decode(hex_str).expect("Hex decode failed");
-        let msg = GameMessage::unpack(&data).expect("Routing failed");
-        if let GameMessage::GameEvent(ev) = msg {
-            assert!(matches!(ev.event, GameEventData::StartGame));
-        } else {
-            panic!("Expected GameEvent");
-        }
-    }
-
-    #[test]
-    fn test_weenie_error_parity() {
-        let hex = "36000000";
-        let data = hex::decode(hex).unwrap();
-        let expected = WeenieErrorData { error_id: 0x36 };
-        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(&data, &expected);
-    }
-
-    #[test]
-    fn test_weenie_error_with_string_parity() {
-        // Structure: [u32 error_id][u16 len][chars][padding to 4-byte boundary including u16 len]
-        let hex = "1E0000000B00497320746F6F2062757379000000";
-        let data = hex::decode(hex).unwrap();
-        let expected = WeenieErrorWithStringData {
-            error_id: 0x1E,
-            message: "Is too busy".to_string(),
-        };
-        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(&data, &expected);
+        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+            target: 0x50000001,
+            sequence: 0x0E,
+            event: GameEventData::StartGame,
+        }));
+        assert_pack_unpack_parity(&data, &expected);
     }
 }

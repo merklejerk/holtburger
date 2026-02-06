@@ -12,40 +12,6 @@ impl MessageUnpack for OrderingResetData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GameActionData {
-    pub sequence: u32,
-    pub action: u32,
-    pub data: Vec<u8>,
-}
-
-impl MessageUnpack for GameActionData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() {
-            return None;
-        }
-        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        let action = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        let payload = data[*offset..].to_vec();
-        *offset = data.len();
-        Some(GameActionData {
-            sequence,
-            action,
-            data: payload,
-        })
-    }
-}
-
-impl MessagePack for GameActionData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.sequence).unwrap();
-        buf.write_u32::<LittleEndian>(self.action).unwrap();
-        buf.extend_from_slice(&self.data);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct CharacterErrorData {
     pub error_code: u32,
 }
@@ -281,21 +247,6 @@ mod tests {
         let mut buf = Vec::new();
         expected.pack(&mut buf);
         assert_eq!(buf.len(), 4);
-
-        assert_pack_unpack_parity(&buf, &expected);
-    }
-
-    #[test]
-    fn test_game_action_fixture() {
-        let expected = GameActionData {
-            sequence: 123,
-            action: crate::protocol::messages::actions::LOGIN_COMPLETE,
-            data: vec![0x11, 0x22, 0x33],
-        };
-        let mut buf = Vec::new();
-        expected.pack(&mut buf);
-        // seq(4) + action(4) + payload(3) = 11
-        assert_eq!(buf.len(), 11);
 
         assert_pack_unpack_parity(&buf, &expected);
     }

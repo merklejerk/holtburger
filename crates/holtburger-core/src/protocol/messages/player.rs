@@ -4,6 +4,7 @@ use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::world::position::WorldPosition;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 bitflags! {
@@ -71,6 +72,108 @@ bitflags! {
         const GENERIC_QUALITIES_DATA = 0x00000100;
         const GAMEPLAY_OPTIONS = 0x00000200;
         const SPELL_LISTS8 = 0x00000400;
+    }
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+    pub struct EquipMask: u32 {
+        const NONE = 0x00000000;
+        const HEAD_WEAR = 0x00000001;
+        const CHEST_WEAR = 0x00000002;
+        const ABDOMEN_WEAR = 0x00000004;
+        const UPPER_ARM_WEAR = 0x00000008;
+        const LOWER_ARM_WEAR = 0x00000010;
+        const HAND_WEAR = 0x00000020;
+        const UPPER_LEG_WEAR = 0x00000040;
+        const LOWER_LEG_WEAR = 0x00000080;
+        const FOOT_WEAR = 0x00000100;
+        const CHEST_ARMOR = 0x00000200;
+        const ABDOMEN_ARMOR = 0x00000400;
+        const UPPER_ARM_ARMOR = 0x00000800;
+        const LOWER_ARM_ARMOR = 0x00001000;
+        const UPPER_LEG_ARMOR = 0x00002000;
+        const LOWER_LEG_ARMOR = 0x00004000;
+        const NECK_WEAR = 0x00008000;
+        const WRIST_WEAR_LEFT = 0x00010000;
+        const WRIST_WEAR_RIGHT = 0x00020000;
+        const FINGER_WEAR_LEFT = 0x00040000;
+        const FINGER_WEAR_RIGHT = 0x00080000;
+        const MELEE_WEAPON = 0x00100000;
+        const SHIELD = 0x00200000;
+        const MISSILE_WEAPON = 0x00400000;
+        const MISSILE_AMMO = 0x00800000;
+        const HELD = 0x01000000;
+        const TWO_HANDED = 0x02000000;
+        const TRINKET_ONE = 0x04000000;
+        const CLOAK = 0x08000000;
+        const SIGIL_ONE = 0x10000000;
+        const SIGIL_TWO = 0x20000000;
+        const SIGIL_THREE = 0x40000000;
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GetAndWieldItemData {
+    pub sequence: u32,
+    pub item_guid: u32,
+    pub equip_mask: EquipMask,
+}
+
+impl GetAndWieldItemData {
+    pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let item_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let equip_mask =
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
+        *offset += 8;
+        Some(GetAndWieldItemData {
+            sequence,
+            item_guid,
+            equip_mask,
+        })
+    }
+
+    pub fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.item_guid).unwrap();
+        buf.write_u32::<LittleEndian>(self.equip_mask.bits())
+            .unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct StackableSplitToWieldData {
+    pub sequence: u32,
+    pub stack_guid: u32,
+    pub equip_mask: EquipMask,
+    pub amount: i32,
+}
+
+impl StackableSplitToWieldData {
+    pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
+        if *offset + 12 > data.len() {
+            return None;
+        }
+        let stack_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let equip_mask =
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
+        let amount = LittleEndian::read_i32(&data[*offset + 8..*offset + 12]);
+        *offset += 12;
+        Some(StackableSplitToWieldData {
+            sequence,
+            stack_guid,
+            equip_mask,
+            amount,
+        })
+    }
+
+    pub fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.stack_guid).unwrap();
+        buf.write_u32::<LittleEndian>(self.equip_mask.bits())
+            .unwrap();
+        buf.write_i32::<LittleEndian>(self.amount).unwrap();
     }
 }
 
@@ -990,6 +1093,7 @@ impl MessagePack for PlayerCreateData {
 mod tests {
     use super::*;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::protocol::messages::{constants::actions, game_action::GameActionData};
 
     #[test]
     fn test_update_skill_fixture() {
@@ -1050,6 +1154,39 @@ mod tests {
     fn test_player_create_fixture() {
         let hex = "01000050";
         let expected = PlayerCreateData { guid: 0x50000001 };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_get_and_wield_item_fixture() {
+        use crate::protocol::messages::{GameAction, GameMessage};
+        let hex = "B1F700002A0000001A0000000100005000001000";
+        let expected = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 42,
+            action_type: actions::GET_AND_WIELD_ITEM,
+            data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
+                sequence: 42,
+                item_guid: 0x50000001,
+                equip_mask: EquipMask::MELEE_WEAPON,
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_stackable_split_to_wield_fixture() {
+        use crate::protocol::messages::{GameAction, GameMessage};
+        let hex = "B1F700002B0000009B010000020000500000800032000000";
+        let expected = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 43,
+            action_type: actions::STACKABLE_SPLIT_TO_WIELD,
+            data: GameActionData::StackableSplitToWield(Box::new(StackableSplitToWieldData {
+                sequence: 43,
+                stack_guid: 0x50000002,
+                equip_mask: EquipMask::MISSILE_AMMO,
+                amount: 50,
+            })),
+        }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 }

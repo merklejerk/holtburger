@@ -143,57 +143,103 @@ impl Client {
                 }
                 Ok(())
             }
+            ClientCommand::Tell { target, message } => {
+                if matches!(self.state, ClientState::InWorld) {
+                    log::info!(">>> You tell {}, \"{}\"", target, message);
+                    return self
+                        .session
+                        .send_message(&GameMessage::GameAction(Box::new(GameAction {
+                            sequence: 0,
+                            action_type: actions::TELL,
+                            data: GameActionData::Tell { target, message },
+                        })))
+                        .await;
+                }
+                Ok(())
+            }
             ClientCommand::Ping => {
                 log::info!(">>> Sending Ping");
                 self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action: actions::PING_REQUEST,
-                        data: Vec::new(),
+                        action_type: actions::PING_REQUEST,
+                        data: GameActionData::PingRequest,
                     })))
                     .await
             }
             ClientCommand::Identify(guid) => {
                 log::info!(">>> Identifying: 0x{:08X}", guid);
                 self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action: actions::IDENTIFY_OBJECT,
-                        data: guid.to_le_bytes().to_vec(),
+                        action_type: actions::IDENTIFY_OBJECT,
+                        data: GameActionData::IdentifyObject(guid),
+                    })))
+                    .await
+            }
+            ClientCommand::Jump {
+                extent,
+                velocity: _,
+            } => {
+                log::info!(">>> Jumping: extent={}", extent);
+                let sequence = 0; // TODO: Real sequence?
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
+                        sequence,
+                        action_type: actions::JUMP,
+                        data: GameActionData::Jump(Box::new(JumpData {
+                            sequence,
+                            extent,
+                            velocity: Default::default(),
+                            instance_sequence: 0,
+                            server_control_sequence: 0,
+                            teleport_sequence: 0,
+                            force_position_sequence: 0,
+                            object_guid: self.world.player.guid,
+                            spell_id: 0,
+                        })),
+                    })))
+                    .await
+            }
+            ClientCommand::SetAutonomyLevel(level) => {
+                log::info!(">>> Setting Autonomy Level: {}", level);
+                self.session
+                    .send_message(&GameMessage::AutonomyLevel(Box::new(AutonomyLevelData {
+                        level,
                     })))
                     .await
             }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
                 self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action: actions::USE,
-                        data: guid.to_le_bytes().to_vec(),
+                        action_type: actions::USE,
+                        data: GameActionData::Use(guid),
                     })))
                     .await
             }
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
                 self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action: actions::DROP_ITEM,
-                        data: guid.to_le_bytes().to_vec(),
+                        action_type: actions::DROP_ITEM,
+                        data: GameActionData::DropItem(guid),
                     })))
                     .await
             }
             ClientCommand::Get(guid) => {
                 log::info!(">>> Getting: 0x{:08X}", guid);
-                let mut data = guid.to_le_bytes().to_vec();
-                let pguid = self.world.player.guid;
-                data.extend_from_slice(&pguid.to_le_bytes());
-                data.extend_from_slice(&0u32.to_le_bytes()); // placement
                 self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action: actions::PUT_ITEM_IN_CONTAINER,
-                        data,
+                        action_type: actions::PUT_ITEM_IN_CONTAINER,
+                        data: GameActionData::PutItemInContainer {
+                            item: guid,
+                            container: self.world.player.guid,
+                            placement: 0,
+                        },
                     })))
                     .await
             }
@@ -208,15 +254,157 @@ impl Client {
                     container,
                     placement
                 );
-                let mut data = item.to_le_bytes().to_vec();
-                data.extend_from_slice(&container.to_le_bytes());
-                data.extend_from_slice(&placement.to_le_bytes());
                 self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionData {
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action: actions::PUT_ITEM_IN_CONTAINER,
-                        data,
+                        action_type: actions::PUT_ITEM_IN_CONTAINER,
+                        data: GameActionData::PutItemInContainer {
+                            item,
+                            container,
+                            placement,
+                        },
                     })))
+                    .await
+            }
+            ClientCommand::GetAndWield { item, equip_mask } => {
+                log::info!(
+                    ">>> Getting and wielding item 0x{:08X} (mask 0x{:08X})",
+                    item,
+                    equip_mask
+                );
+                let sequence = 0; // TODO
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
+                        sequence,
+                        action_type: actions::GET_AND_WIELD_ITEM,
+                        data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
+                            sequence,
+                            item_guid: item,
+                            equip_mask: EquipMask::from_bits_truncate(equip_mask),
+                        })),
+                    })))
+                    .await
+            }
+            ClientCommand::SplitToWield {
+                item,
+                equip_mask,
+                amount,
+            } => {
+                log::info!(
+                    ">>> Splitting 0x{:08X} ({}x) to wield in (mask 0x{:08X})",
+                    item,
+                    amount,
+                    equip_mask
+                );
+                let sequence = 0; // TODO
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
+                        sequence,
+                        action_type: actions::STACKABLE_SPLIT_TO_WIELD,
+                        data: GameActionData::StackableSplitToWield(Box::new(
+                            StackableSplitToWieldData {
+                                sequence,
+                                stack_guid: item,
+                                amount: amount as i32,
+                                equip_mask: EquipMask::from_bits_truncate(equip_mask),
+                            },
+                        )),
+                    })))
+                    .await
+            }
+            ClientCommand::SetState(state_opcode) => {
+                log::info!(">>> Setting state: 0x{:08X}", state_opcode);
+                let sequence = 0; // TODO
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameAction {
+                        sequence,
+                        action_type: actions::MOVE_TO_STATE,
+                        data: GameActionData::MoveToState(Box::new(MoveToStateData {
+                            sequence,
+                            raw_motion_state: RawMotionState {
+                                flags: RawMotionFlags::CURRENT_STYLE,
+                                current_style: Some(state_opcode),
+                                ..Default::default()
+                            },
+                            position: self.world.player.position,
+                            instance_sequence: 0,
+                            server_control_sequence: 0,
+                            teleport_sequence: 0,
+                            force_position_sequence: 0,
+                            contact_long_jump: 0,
+                        })),
+                    })))
+                    .await
+            }
+            ClientCommand::TurnTo { heading } => {
+                log::info!(">>> Turning to heading: {}", heading);
+                let data = MovementEventData {
+                    guid: self.world.player.guid,
+                    object_instance_sequence: 0,
+                    movement_sequence: 0,
+                    server_control_sequence: 0,
+                    is_autonomous: true,
+                    movement_type: MovementType::TurnToHeading,
+                    motion_flags: 0,
+                    current_style: 0,
+                    data: MovementTypeData::TurnToHeading(TurnToHeading {
+                        params: TurnToParameters {
+                            movement_parameters: 0,
+                            speed: 1.0,
+                            desired_heading: heading,
+                        },
+                    }),
+                };
+                self.session
+                    .send_message(&GameMessage::UpdateMotion(Box::new(data)))
+                    .await
+            }
+            ClientCommand::MoveTo { target } => {
+                log::info!(">>> Moving to target: 0x{:08X}", target);
+                // Use MoveToObject
+                let data = MovementEventData {
+                    guid: self.world.player.guid,
+                    object_instance_sequence: 0,
+                    movement_sequence: 0,
+                    server_control_sequence: 0,
+                    is_autonomous: true,
+                    movement_type: MovementType::MoveToObject,
+                    motion_flags: 0,
+                    current_style: 0,
+                    data: MovementTypeData::MoveToObject(MoveToObject {
+                        target,
+                        origin: Origin {
+                            cell_id: self.world.player.position.landblock_id,
+                            position: self.world.player.position.coords,
+                        },
+                        params: MoveToParameters {
+                            movement_parameters: 0,
+                            distance_to_object: 1.0,
+                            min_distance: 0.5,
+                            fail_distance: 100.0,
+                            speed: 1.0,
+                            walk_run_threshold: 0.0,
+                            desired_heading: 0.0,
+                        },
+                        run_rate: 1.0,
+                    }),
+                };
+                self.session
+                    .send_message(&GameMessage::UpdateMotion(Box::new(data)))
+                    .await
+            }
+            ClientCommand::SyncPosition => {
+                log::debug!(">>> Syncing Position (Heartbeat)");
+                let data = AutonomousPositionData {
+                    position: self.world.player.position,
+                    instance_sequence: 0,
+                    server_control_sequence: 0,
+                    teleport_sequence: 0,
+                    force_position_sequence: 0,
+                    last_contact: 0,
+                };
+                self.session
+                    .send_message(&GameMessage::AutonomousPosition(Box::new(data)))
                     .await
             }
             ClientCommand::Quit => {
@@ -415,8 +603,7 @@ impl Client {
             }
             GameMessage::UpdatePropertyInt(_) => Ok(()),
             GameMessage::GameAction(data) => {
-                self.handle_game_action(data.action, data.data.clone())
-                    .await
+                self.handle_game_action(data.action_type, &data.data).await
             }
             GameMessage::ServerMessage(data) => {
                 if let Some(tx) = &self.event_tx {
@@ -494,8 +681,8 @@ impl Client {
         Ok(())
     }
 
-    async fn handle_game_action(&mut self, action: u32, _data: Vec<u8>) -> Result<()> {
-        if action == actions::LOGIN_COMPLETE {
+    async fn handle_game_action(&mut self, action_type: u32, _data: &GameActionData) -> Result<()> {
+        if action_type == actions::LOGIN_COMPLETE {
             self.state = ClientState::InWorld;
             self.send_status_event();
         }
@@ -540,22 +727,20 @@ impl Client {
     }
 
     async fn send_login_complete(&mut self) -> Result<()> {
-        let msg = GameMessage::GameAction(Box::new(GameActionData {
+        let msg = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0,
-            action: actions::LOGIN_COMPLETE,
-            data: Vec::new(),
+            action_type: actions::LOGIN_COMPLETE,
+            data: GameActionData::LoginComplete,
         }));
         self.session.send_message(&msg).await?;
         Ok(())
     }
 
     async fn send_talk(&mut self, text: &str) -> Result<()> {
-        let mut data = Vec::new();
-        write_string16(&mut data, text);
-        let msg = GameMessage::GameAction(Box::new(GameActionData {
+        let msg = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0,
-            action: actions::TALK,
-            data,
+            action_type: actions::TALK,
+            data: GameActionData::Talk(text.to_string()),
         }));
         self.session.send_message(&msg).await?;
         Ok(())

@@ -48,6 +48,10 @@ pub enum ClientCommand {
     SelectCharacterByIndex(usize),
     EnterWorld,
     Talk(String),
+    Tell {
+        target: String,
+        message: String,
+    },
     Ping,
     Identify(u32),
     Use(u32),
@@ -58,6 +62,28 @@ pub enum ClientCommand {
         container: u32,
         placement: u32,
     },
+    GetAndWield {
+        item: u32,
+        equip_mask: u32,
+    },
+    SplitToWield {
+        item: u32,
+        equip_mask: u32,
+        amount: u32,
+    },
+    Jump {
+        extent: f32,
+        velocity: crate::math::Vector3,
+    },
+    SetAutonomyLevel(u32),
+    SetState(u32),
+    TurnTo {
+        heading: f32,
+    },
+    MoveTo {
+        target: u32,
+    },
+    SyncPosition,
     Quit,
 }
 

@@ -67,6 +67,8 @@ pub mod opcodes {
     /// S2C: Sync player's own position (Client's autonomous view).
     /// Used for resetting the player's position or confirming client-reported coordinates.
     pub const AUTONOMOUS_POSITION: u32 = 0xF753;
+    /// S2C: Set the client's autonomy level (how much gravity/collision to trust client for).
+    pub const AUTONOMY_LEVEL: u32 = 0xF752;
     /// S2C: Force player to teleport.
     /// Triggers the teleport screen and moves player to a new landblock.
     pub const PLAYER_TELEPORT: u32 = 0xF751;
@@ -217,8 +219,8 @@ pub mod actions {
     // --- Communication & Chat ---
     /// C2S: Send chat message.
     pub const TALK: u32 = 0x0015;
-    // /// C2S: Send direct message/tell.
-    // pub const TELL: u32 = 0x005D;
+    /// C2S: Send direct message/tell.
+    pub const TELL: u32 = 0x005D;
     // /// C2S: Set AFK mode.
     // pub const SET_AFK_MODE: u32 = 0x000F;
     // /// C2S: Set AFK message.
@@ -233,8 +235,8 @@ pub mod actions {
     /// C2S: Move an item into a container.
     /// Also used for picking up items from the ground (moving to backpack).
     pub const PUT_ITEM_IN_CONTAINER: u32 = 0x0019;
-    // /// C2S: Pick up and wield an item in one action.
-    // pub const GET_AND_WIELD_ITEM: u32 = 0x001A;
+    /// C2S: Pick up and wield an item in one action.
+    pub const GET_AND_WIELD_ITEM: u32 = 0x001A;
     // /// C2S: Buy item(s) from a vendor.
     // pub const BUY: u32 = 0x005F;
     // /// C2S: Sell item(s) to a vendor.
@@ -245,8 +247,8 @@ pub mod actions {
     // pub const STACKABLE_SPLIT_TO_CONTAINER: u32 = 0x0055;
     // /// C2S: Split stackable items to the ground.
     // pub const STACKABLE_SPLIT_TO_3D: u32 = 0x0056;
-    // /// C2S: Split stackable items and wield.
-    // pub const STACKABLE_SPLIT_TO_WIELD: u32 = 0x019B;
+    /// C2S: Split stackable items and wield.
+    pub const STACKABLE_SPLIT_TO_WIELD: u32 = 0x019B;
     // /// C2S: Give an object to another player.
     // pub const GIVE_OBJECT_REQUEST: u32 = 0x00CD;
 
@@ -342,11 +344,17 @@ pub mod actions {
     /// C2S: Client movement event (jump, turn, etc).
     /// Individual movement packets for granular control.
     pub const UPDATE_MOTION: u32 = 0xF74C;
-    // /// C2S: Perform a jump.
-    // pub const JUMP: u32 = 0xF61B;
-    // /// C2S: Start a movement command (e.g. run forward).
+    /// C2S: Perform a jump.
+    pub const JUMP: u32 = 0xF61B;
+    /// S2C: Request the client to turn to a specific heading or object.
+    pub const TURN_TO: u32 = 0xF649;
+
+    // --- Unused / Legacy Movement ---
+    // These opcodes are defined in the protocol but are strictly unused in ACE
+    // and modern clients, which prefer MoveToState (0xF61C) for all movement updates.
+    // /// C2S: Start a movement command (legacy).
     // pub const DO_MOVEMENT_COMMAND: u32 = 0xF61E;
-    // /// C2S: Stop a movement command.
+    // /// C2S: Stop a movement command (legacy).
     // pub const STOP_MOVEMENT_COMMAND: u32 = 0xF661;
 }
 

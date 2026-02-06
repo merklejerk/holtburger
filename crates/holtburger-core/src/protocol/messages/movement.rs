@@ -1295,7 +1295,9 @@ mod tests {
     use super::*;
     use crate::protocol::fixtures;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-    use crate::protocol::messages::{GameMessage, constants::actions, game_action::GameActionData};
+    use crate::protocol::messages::{
+        GameMessage, game_action::GameActionData, opcodes::action_opcodes,
+    };
 
     #[test]
     fn test_public_update_position_fixture() {
@@ -1436,7 +1438,7 @@ mod tests {
         let fixture = fixtures::MOVE_TO_STATE;
         let expected = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0x5678,
-            action_type: actions::MOVE_TO_STATE,
+            action_type: action_opcodes::MOVE_TO_STATE,
             data: GameActionData::MoveToState(Box::new(MoveToStateData {
                 sequence: 0x5678,
                 raw_motion_state: RawMotionState {
@@ -1536,7 +1538,7 @@ mod tests {
         let hex = "B1F700002A0000001BF60000000020410000803F000000400000404001000200030004007856341200000000";
         let expected = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0x2A,
-            action_type: actions::JUMP,
+            action_type: action_opcodes::JUMP,
             data: GameActionData::Jump(Box::new(JumpData {
                 sequence: 0x2A,
                 extent: 10.0,

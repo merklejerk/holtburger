@@ -1,3 +1,4 @@
+use crate::protocol::errors::CharacterError;
 use crate::protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use crate::world::WorldEvent;
 use std::time::{Duration, Instant};
@@ -22,7 +23,7 @@ pub enum ClientEvent {
         state: ClientState,
     },
     ServerMessage(String),
-    CharacterError(u32),
+    CharacterError(CharacterError),
     WeenieError {
         error_id: u32,
         message: Option<String>,

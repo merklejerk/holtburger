@@ -1,9 +1,11 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::{
-    ChannelBroadcastData, MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData,
-    MagicRemoveEnchantmentData, MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
+    ChannelBroadcastData, InventoryPutObjInContainerData, InventoryPutObjectIn3DData,
+    MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
+    MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
     MagicUpdateMultipleEnchantmentsData, PingResponseData, PlayerDescriptionData, TellData,
-    ViewContentsData, WeenieErrorData, WeenieErrorWithStringData, game_event_opcodes,
+    UseDoneData, ViewContentsData, WeenieErrorData, WeenieErrorWithStringData, WieldObjectData,
+    game_event_opcodes,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -19,6 +21,9 @@ pub enum GameEventData {
     PlayerDescription(Box<PlayerDescriptionData>),
     PingResponse(Box<PingResponseData>),
     ViewContents(Box<ViewContentsData>),
+    InventoryPutObjInContainer(Box<InventoryPutObjInContainerData>),
+    InventoryPutObjectIn3D(Box<InventoryPutObjectIn3DData>),
+    WieldObject(Box<WieldObjectData>),
     Tell(Box<TellData>),
     ChannelBroadcast(Box<ChannelBroadcastData>),
     StartGame,
@@ -30,6 +35,7 @@ pub enum GameEventData {
     MagicPurgeBadEnchantments(Box<MagicPurgeBadEnchantmentsData>),
     WeenieError(Box<WeenieErrorData>),
     WeenieErrorWithString(Box<WeenieErrorWithStringData>),
+    UseDone(Box<UseDoneData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -52,6 +58,19 @@ impl GameEvent {
             }
             game_event_opcodes::VIEW_CONTENTS => {
                 GameEventData::ViewContents(Box::new(ViewContentsData::unpack(data, offset)?))
+            }
+            game_event_opcodes::INVENTORY_PUT_OBJ_IN_CONTAINER => {
+                GameEventData::InventoryPutObjInContainer(Box::new(
+                    InventoryPutObjInContainerData::unpack(data, offset)?,
+                ))
+            }
+            game_event_opcodes::INVENTORY_PUT_OBJECT_IN_3D => {
+                GameEventData::InventoryPutObjectIn3D(Box::new(InventoryPutObjectIn3DData::unpack(
+                    data, offset,
+                )?))
+            }
+            game_event_opcodes::WIELD_OBJECT => {
+                GameEventData::WieldObject(Box::new(WieldObjectData::unpack(data, offset)?))
             }
             game_event_opcodes::TELL => {
                 GameEventData::Tell(Box::new(TellData::unpack(data, offset)?))
@@ -102,6 +121,9 @@ impl GameEvent {
             game_event_opcodes::WEENIE_ERROR_WITH_STRING => GameEventData::WeenieErrorWithString(
                 Box::new(WeenieErrorWithStringData::unpack(data, offset)?),
             ),
+            game_event_opcodes::USE_DONE => {
+                GameEventData::UseDone(Box::new(UseDoneData::unpack(data, offset)?))
+            }
             _ => {
                 log::warn!(
                     "<<< Unknown GameEvent Opcode: {:08X} Target: {:08X} Seq: {}",
@@ -141,6 +163,21 @@ impl GameEvent {
             }
             GameEventData::ViewContents(data) => {
                 buf.write_u32::<LittleEndian>(game_event_opcodes::VIEW_CONTENTS)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::InventoryPutObjInContainer(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::INVENTORY_PUT_OBJ_IN_CONTAINER)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::InventoryPutObjectIn3D(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::INVENTORY_PUT_OBJECT_IN_3D)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::WieldObject(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::WIELD_OBJECT)
                     .unwrap();
                 data.pack(buf);
             }
@@ -199,6 +236,11 @@ impl GameEvent {
             }
             GameEventData::WeenieErrorWithString(data) => {
                 buf.write_u32::<LittleEndian>(game_event_opcodes::WEENIE_ERROR_WITH_STRING)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::UseDone(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::USE_DONE)
                     .unwrap();
                 data.pack(buf);
             }

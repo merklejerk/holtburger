@@ -104,8 +104,8 @@ impl AppState {
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
-                        if input.starts_with("/turn ") {
-                            if let Ok(heading) = input[6..].parse::<f32>() {
+                        if let Some(args) = input.strip_prefix("/turn ") {
+                            if let Ok(heading) = args.parse::<f32>() {
                                 commands.push(ClientCommand::TurnTo { heading });
                             }
                             self.input_history.push(input.clone());
@@ -113,8 +113,8 @@ impl AppState {
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
-                        if input.starts_with("/autonomy ") {
-                            if let Ok(level) = input[10..].parse::<u32>() {
+                        if let Some(args) = input.strip_prefix("/autonomy ") {
+                            if let Ok(level) = args.parse::<u32>() {
                                 commands.push(ClientCommand::SetAutonomyLevel(level));
                             }
                             self.input_history.push(input.clone());

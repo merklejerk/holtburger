@@ -1,3 +1,4 @@
+use crate::protocol::errors::{CharacterError, WeenieError};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{read_string16, write_string16, write_string32};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -13,7 +14,13 @@ impl MessageUnpack for OrderingResetData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterErrorData {
-    pub error_code: u32,
+    pub error_id: u32,
+}
+
+impl CharacterErrorData {
+    pub fn error(&self) -> Option<CharacterError> {
+        CharacterError::from_repr(self.error_id)
+    }
 }
 
 impl MessageUnpack for CharacterErrorData {
@@ -21,15 +28,15 @@ impl MessageUnpack for CharacterErrorData {
         if *offset + 4 > data.len() {
             return None;
         }
-        let error_code = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(CharacterErrorData { error_code })
+        Some(CharacterErrorData { error_id })
     }
 }
 
 impl MessagePack for CharacterErrorData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.error_code).unwrap();
+        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
     }
 }
 
@@ -219,6 +226,12 @@ pub struct WeenieErrorData {
     pub error_id: u32,
 }
 
+impl WeenieErrorData {
+    pub fn error(&self) -> Option<WeenieError> {
+        WeenieError::from_repr(self.error_id)
+    }
+}
+
 impl MessageUnpack for WeenieErrorData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
@@ -242,6 +255,12 @@ pub struct WeenieErrorWithStringData {
     pub message: String,
 }
 
+impl WeenieErrorWithStringData {
+    pub fn error(&self) -> Option<WeenieError> {
+        WeenieError::from_repr(self.error_id)
+    }
+}
+
 impl MessageUnpack for WeenieErrorWithStringData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
@@ -261,6 +280,34 @@ impl MessagePack for WeenieErrorWithStringData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseDoneData {
+    pub error_id: u32,
+}
+
+impl UseDoneData {
+    pub fn error(&self) -> Option<WeenieError> {
+        WeenieError::from_repr(self.error_id)
+    }
+}
+
+impl MessageUnpack for UseDoneData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(UseDoneData { error_id })
+    }
+}
+
+impl MessagePack for UseDoneData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,7 +316,7 @@ mod tests {
     #[test]
     fn test_character_error_fixture() {
         let expected = CharacterErrorData {
-            error_code: 0x80000001,
+            error_id: 0x80000001,
         };
         let mut buf = Vec::new();
         expected.pack(&mut buf);

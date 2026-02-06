@@ -1,5 +1,6 @@
 use crate::protocol::crypto::Isaac;
-use crate::protocol::messages::actions;
+use crate::protocol::errors::CharacterError;
+use crate::protocol::messages::action_opcodes;
 use crate::protocol::messages::*;
 use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
@@ -150,7 +151,7 @@ impl Client {
                         .session
                         .send_message(&GameMessage::GameAction(Box::new(GameAction {
                             sequence: 0,
-                            action_type: actions::TELL,
+                            action_type: action_opcodes::TELL,
                             data: GameActionData::Tell { target, message },
                         })))
                         .await;
@@ -162,7 +163,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: actions::PING_REQUEST,
+                        action_type: action_opcodes::PING_REQUEST,
                         data: GameActionData::PingRequest,
                     })))
                     .await
@@ -172,7 +173,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: actions::IDENTIFY_OBJECT,
+                        action_type: action_opcodes::IDENTIFY_OBJECT,
                         data: GameActionData::IdentifyObject(guid),
                     })))
                     .await
@@ -186,7 +187,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: actions::JUMP,
+                        action_type: action_opcodes::JUMP,
                         data: GameActionData::Jump(Box::new(JumpData {
                             sequence,
                             extent,
@@ -214,7 +215,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: actions::USE,
+                        action_type: action_opcodes::USE,
                         data: GameActionData::Use(guid),
                     })))
                     .await
@@ -224,7 +225,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: actions::DROP_ITEM,
+                        action_type: action_opcodes::DROP_ITEM,
                         data: GameActionData::DropItem(guid),
                     })))
                     .await
@@ -234,7 +235,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: actions::PUT_ITEM_IN_CONTAINER,
+                        action_type: action_opcodes::PUT_ITEM_IN_CONTAINER,
                         data: GameActionData::PutItemInContainer {
                             item: guid,
                             container: self.world.player.guid,
@@ -257,7 +258,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence: 0,
-                        action_type: actions::PUT_ITEM_IN_CONTAINER,
+                        action_type: action_opcodes::PUT_ITEM_IN_CONTAINER,
                         data: GameActionData::PutItemInContainer {
                             item,
                             container,
@@ -276,7 +277,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: actions::GET_AND_WIELD_ITEM,
+                        action_type: action_opcodes::GET_AND_WIELD_ITEM,
                         data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
                             sequence,
                             item_guid: item,
@@ -300,7 +301,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: actions::STACKABLE_SPLIT_TO_WIELD,
+                        action_type: action_opcodes::STACKABLE_SPLIT_TO_WIELD,
                         data: GameActionData::StackableSplitToWield(Box::new(
                             StackableSplitToWieldData {
                                 sequence,
@@ -318,7 +319,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameAction {
                         sequence,
-                        action_type: actions::MOVE_TO_STATE,
+                        action_type: action_opcodes::MOVE_TO_STATE,
                         data: GameActionData::MoveToState(Box::new(MoveToStateData {
                             sequence,
                             raw_motion_state: RawMotionState {
@@ -663,7 +664,7 @@ impl Client {
                 }
                 Ok(())
             }
-            GameMessage::CharacterError(data) => self.handle_character_error(data.error_code),
+            GameMessage::CharacterError(data) => self.handle_character_error(data.error_id),
             GameMessage::BootAccount(data) => self.handle_boot_account(*data),
             GameMessage::DddInterrogation => {
                 let resp =
@@ -753,7 +754,7 @@ impl Client {
     }
 
     async fn handle_game_action(&mut self, action_type: u32, _data: &GameActionData) -> Result<()> {
-        if action_type == actions::LOGIN_COMPLETE {
+        if action_type == action_opcodes::LOGIN_COMPLETE {
             self.state = ClientState::InWorld;
             self.send_status_event();
         }
@@ -762,7 +763,8 @@ impl Client {
 
     fn handle_character_error(&mut self, error_code: u32) -> Result<()> {
         if let Some(tx) = &self.event_tx {
-            let _ = tx.send(ClientEvent::CharacterError(error_code));
+            let error = CharacterError::from_repr(error_code).unwrap_or(CharacterError::None);
+            let _ = tx.send(ClientEvent::CharacterError(error));
         }
         log::warn!("Character Error received: 0x{:08X}", error_code);
         Ok(())
@@ -812,7 +814,7 @@ impl Client {
     async fn send_login_complete(&mut self) -> Result<()> {
         let msg = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0,
-            action_type: actions::LOGIN_COMPLETE,
+            action_type: action_opcodes::LOGIN_COMPLETE,
             data: GameActionData::LoginComplete,
         }));
         self.session.send_message(&msg).await?;
@@ -822,7 +824,7 @@ impl Client {
     async fn send_talk(&mut self, text: &str) -> Result<()> {
         let msg = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0,
-            action_type: actions::TALK,
+            action_type: action_opcodes::TALK,
             data: GameActionData::Talk(text.to_string()),
         }));
         self.session.send_message(&msg).await?;

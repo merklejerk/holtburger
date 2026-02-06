@@ -1,7 +1,7 @@
 use crate::protocol::messages::traits::MessagePack;
 use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::protocol::messages::{
-    GetAndWieldItemData, JumpData, MoveToStateData, StackableSplitToWieldData, actions,
+    GetAndWieldItemData, JumpData, MoveToStateData, StackableSplitToWieldData, action_opcodes,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -46,29 +46,29 @@ impl GameAction {
         *offset += 8;
 
         let action_data = match action_type {
-            actions::JUMP => {
+            action_opcodes::JUMP => {
                 GameActionData::Jump(Box::new(JumpData::unpack(data, offset, sequence)?))
             }
-            actions::MOVE_TO_STATE => GameActionData::MoveToState(Box::new(
+            action_opcodes::MOVE_TO_STATE => GameActionData::MoveToState(Box::new(
                 MoveToStateData::unpack(data, offset, sequence)?,
             )),
-            actions::GET_AND_WIELD_ITEM => GameActionData::GetAndWieldItem(Box::new(
+            action_opcodes::GET_AND_WIELD_ITEM => GameActionData::GetAndWieldItem(Box::new(
                 GetAndWieldItemData::unpack(data, offset, sequence)?,
             )),
-            actions::STACKABLE_SPLIT_TO_WIELD => GameActionData::StackableSplitToWield(Box::new(
-                StackableSplitToWieldData::unpack(data, offset, sequence)?,
-            )),
-            actions::TALK => {
+            action_opcodes::STACKABLE_SPLIT_TO_WIELD => GameActionData::StackableSplitToWield(
+                Box::new(StackableSplitToWieldData::unpack(data, offset, sequence)?),
+            ),
+            action_opcodes::TALK => {
                 let text = read_string16(data, offset)?;
                 GameActionData::Talk(text)
             }
-            actions::TELL => {
+            action_opcodes::TELL => {
                 let message = read_string16(data, offset)?;
                 let target = read_string16(data, offset)?;
                 GameActionData::Tell { target, message }
             }
-            actions::PING_REQUEST => GameActionData::PingRequest,
-            actions::DROP_ITEM => {
+            action_opcodes::PING_REQUEST => GameActionData::PingRequest,
+            action_opcodes::DROP_ITEM => {
                 if *offset + 4 > data.len() {
                     return None;
                 }
@@ -76,7 +76,7 @@ impl GameAction {
                 *offset += 4;
                 GameActionData::DropItem(guid)
             }
-            actions::PUT_ITEM_IN_CONTAINER => {
+            action_opcodes::PUT_ITEM_IN_CONTAINER => {
                 if *offset + 12 > data.len() {
                     return None;
                 }
@@ -90,7 +90,7 @@ impl GameAction {
                     placement,
                 }
             }
-            actions::USE => {
+            action_opcodes::USE => {
                 if *offset + 4 > data.len() {
                     return None;
                 }
@@ -98,7 +98,7 @@ impl GameAction {
                 *offset += 4;
                 GameActionData::Use(guid)
             }
-            actions::IDENTIFY_OBJECT => {
+            action_opcodes::IDENTIFY_OBJECT => {
                 if *offset + 4 > data.len() {
                     return None;
                 }
@@ -106,7 +106,7 @@ impl GameAction {
                 *offset += 4;
                 GameActionData::IdentifyObject(guid)
             }
-            actions::LOGIN_COMPLETE => GameActionData::LoginComplete,
+            action_opcodes::LOGIN_COMPLETE => GameActionData::LoginComplete,
             _ => {
                 let remaining = data[*offset..].to_vec();
                 *offset = data.len();

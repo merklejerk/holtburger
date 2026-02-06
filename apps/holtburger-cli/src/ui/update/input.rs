@@ -67,10 +67,72 @@ impl AppState {
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
+                        if input == "/jump" {
+                            commands.push(ClientCommand::Jump {
+                                extent: 10.0, // Default jump extent
+                                velocity: holtburger_core::math::Vector3::default(),
+                            });
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
+                        if input.starts_with("/tell ") {
+                            let parts: Vec<&str> = input.splitn(3, ' ').collect();
+                            if parts.len() == 3 {
+                                commands.push(ClientCommand::Tell {
+                                    target: parts[1].to_string(),
+                                    message: parts[2].to_string(),
+                                });
+                            }
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
+                        if input == "/sit" {
+                            commands.push(ClientCommand::SetState(0x13)); // Sitting
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
+                        if input == "/stand" {
+                            commands.push(ClientCommand::SetState(0x04)); // Stop
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
+                        if input.starts_with("/turn ") {
+                            if let Ok(heading) = input[6..].parse::<f32>() {
+                                commands.push(ClientCommand::TurnTo { heading });
+                            }
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
+                        if input.starts_with("/autonomy ") {
+                            if let Ok(level) = input[10..].parse::<u32>() {
+                                commands.push(ClientCommand::SetAutonomyLevel(level));
+                            }
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
+                        if input == "/sync" {
+                            commands.push(ClientCommand::SyncPosition);
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
                         if input == "/help" {
                             self.log_chat(
                                 ChatMessageKind::System,
-                                "Available commands: /quit, /exit, /clear, /help, /ping"
+                                "Available commands: /quit, /exit, /clear, /help, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /autonomy <n>, /sync"
                                     .to_string(),
                             );
                             self.log_chat(

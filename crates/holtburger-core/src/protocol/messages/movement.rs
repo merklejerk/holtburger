@@ -98,6 +98,58 @@ pub struct PrivateUpdatePositionData {
     pub pos: WorldPosition,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutonomousPositionData {
+    pub position: WorldPosition,
+    pub instance_sequence: u16,
+    pub server_control_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+    pub last_contact: u8,
+}
+
+impl MessageUnpack for AutonomousPositionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let position = WorldPosition::unpack(data, offset)?;
+        if *offset + 9 > data.len() {
+            return None;
+        }
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let server_control_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        let teleport_sequence = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]);
+        let force_position_sequence = LittleEndian::read_u16(&data[*offset + 6..*offset + 8]);
+        let last_contact = data[*offset + 8];
+        *offset += 9;
+
+        // Alignment
+        *offset = (*offset + 3) & !3;
+
+        Some(Self {
+            position,
+            instance_sequence,
+            server_control_sequence,
+            teleport_sequence,
+            force_position_sequence,
+            last_contact,
+        })
+    }
+}
+
+impl MessagePack for AutonomousPositionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.position.pack(buf);
+        buf.extend_from_slice(&self.instance_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.server_control_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.teleport_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.force_position_sequence.to_le_bytes());
+        buf.push(self.last_contact);
+        // Align
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
+    }
+}
+
 impl MessageUnpack for PrivateUpdatePositionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 5 > data.len() {
@@ -1054,6 +1106,89 @@ pub struct MoveToStateData {
     pub contact_long_jump: u8,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct JumpData {
+    pub sequence: u32,
+    pub extent: f32,
+    pub velocity: crate::math::Vector3,
+    pub instance_sequence: u16,
+    pub server_control_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+    pub object_guid: u32,
+    pub spell_id: u32,
+}
+
+impl JumpData {
+    pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
+        if *offset + 32 > data.len() {
+            return None;
+        }
+        let extent = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        let velocity_x = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        let velocity_y = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
+        let velocity_z = LittleEndian::read_f32(&data[*offset + 12..*offset + 16]);
+        let instance_sequence = LittleEndian::read_u16(&data[*offset + 16..*offset + 18]);
+        let server_control_sequence = LittleEndian::read_u16(&data[*offset + 18..*offset + 20]);
+        let teleport_sequence = LittleEndian::read_u16(&data[*offset + 20..*offset + 22]);
+        let force_position_sequence = LittleEndian::read_u16(&data[*offset + 22..*offset + 24]);
+        let object_guid = LittleEndian::read_u32(&data[*offset + 24..*offset + 28]);
+        let spell_id = LittleEndian::read_u32(&data[*offset + 28..*offset + 32]);
+        *offset += 32;
+
+        Some(JumpData {
+            sequence,
+            extent,
+            velocity: crate::math::Vector3 {
+                x: velocity_x,
+                y: velocity_y,
+                z: velocity_z,
+            },
+            instance_sequence,
+            server_control_sequence,
+            teleport_sequence,
+            force_position_sequence,
+            object_guid,
+            spell_id,
+        })
+    }
+
+    pub fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.extent.to_le_bytes());
+        buf.extend_from_slice(&self.velocity.x.to_le_bytes());
+        buf.extend_from_slice(&self.velocity.y.to_le_bytes());
+        buf.extend_from_slice(&self.velocity.z.to_le_bytes());
+        buf.extend_from_slice(&self.instance_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.server_control_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.teleport_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.force_position_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.object_guid.to_le_bytes());
+        buf.extend_from_slice(&self.spell_id.to_le_bytes());
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct AutonomyLevelData {
+    pub level: u32,
+}
+
+impl MessageUnpack for AutonomyLevelData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let level = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(AutonomyLevelData { level })
+    }
+}
+
+impl MessagePack for AutonomyLevelData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.level.to_le_bytes());
+    }
+}
+
 impl MoveToStateData {
     pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
         let raw_motion_state = RawMotionState::unpack(data, offset)?;
@@ -1103,8 +1238,8 @@ impl MoveToStateData {
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
-    use crate::protocol::messages::GameMessage;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::protocol::messages::{GameMessage, constants::actions, game_action::GameActionData};
 
     #[test]
     fn test_public_update_position_fixture() {
@@ -1241,35 +1376,40 @@ mod tests {
 
     #[test]
     fn test_move_to_state_fixture() {
+        use crate::protocol::messages::GameAction;
         let fixture = fixtures::MOVE_TO_STATE;
-        let expected = GameMessage::MoveToState(Box::new(MoveToStateData {
+        let expected = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0x5678,
-            raw_motion_state: RawMotionState {
-                flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
-                current_hold_key: Some(2),
-                forward_speed: Some(5.0),
-                commands: vec![MotionItem::new(1, 5, true, 1.0)],
-                ..Default::default()
-            },
-            position: WorldPosition {
-                landblock_id: 0x12345678,
-                coords: crate::math::Vector3 {
-                    x: 10.0,
-                    y: 20.0,
-                    z: 30.0,
+            action_type: actions::MOVE_TO_STATE,
+            data: GameActionData::MoveToState(Box::new(MoveToStateData {
+                sequence: 0x5678,
+                raw_motion_state: RawMotionState {
+                    flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                    current_hold_key: Some(2),
+                    forward_speed: Some(5.0),
+                    commands: vec![MotionItem::new(1, 5, true, 1.0)],
+                    ..Default::default()
                 },
-                rotation: crate::math::Quaternion {
-                    w: 1.0,
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
+                position: WorldPosition {
+                    landblock_id: 0x12345678,
+                    coords: crate::math::Vector3 {
+                        x: 10.0,
+                        y: 20.0,
+                        z: 30.0,
+                    },
+                    rotation: crate::math::Quaternion {
+                        w: 1.0,
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
                 },
-            },
-            instance_sequence: 0xFF01,
-            server_control_sequence: 0xFF02,
-            teleport_sequence: 0xFF03,
-            force_position_sequence: 0xFF04,
-            contact_long_jump: 0x03,
+                instance_sequence: 0xFF01,
+                server_control_sequence: 0xFF02,
+                teleport_sequence: 0xFF03,
+                force_position_sequence: 0xFF04,
+                contact_long_jump: 0x03,
+            })),
         }));
         assert_pack_unpack_parity(fixture, &expected);
     }
@@ -1305,5 +1445,78 @@ mod tests {
         let pos_data = hex::decode(pos_hex).unwrap();
         let pos_msg = GameMessage::unpack(&pos_data).unwrap();
         assert!(matches!(pos_msg, GameMessage::UpdatePosition(_)));
+    }
+
+    #[test]
+    fn test_jump_data_fixture() {
+        use crate::protocol::messages::GameAction;
+        // Opcode(4) + Sequence(4) + ActionType(4) + Payload(32) = 44 bytes
+        // ACE Dump: 1BF60000 00002041 0000803F 00000040 00004040 0100 0200 0300 0400 78563412 00000000
+        let hex = "B1F700002A0000001BF60000000020410000803F000000400000404001000200030004007856341200000000";
+        let expected = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 0x2A,
+            action_type: actions::JUMP,
+            data: GameActionData::Jump(Box::new(JumpData {
+                sequence: 0x2A,
+                extent: 10.0,
+                velocity: crate::math::Vector3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                instance_sequence: 1,
+                server_control_sequence: 2,
+                teleport_sequence: 3,
+                force_position_sequence: 4,
+                object_guid: 0x12345678,
+                spell_id: 0,
+            })),
+        }));
+        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(
+            &hex::decode(hex).unwrap(),
+            &expected,
+        );
+    }
+
+    #[test]
+    fn test_autonomy_level_fixture() {
+        // Opcode(4) + Level(4) = 8 bytes
+        let hex = "52F7000002000000";
+        let expected = GameMessage::AutonomyLevel(Box::new(AutonomyLevelData { level: 2 }));
+        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(
+            &hex::decode(hex).unwrap(),
+            &expected,
+        );
+    }
+
+    #[test]
+    fn test_autonomous_position_fixture() {
+        // Opcode(4) + Position(32) + Sequences(8) + Contact(1) + Align(3) = 48 bytes
+        let hex = "53F7000078563412000020410000A0410000F0410000803F000000000000000000000000010002000300040001000000";
+        let expected = GameMessage::AutonomousPosition(Box::new(AutonomousPositionData {
+            position: WorldPosition {
+                landblock_id: 0x12345678,
+                coords: crate::math::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            instance_sequence: 1,
+            server_control_sequence: 2,
+            teleport_sequence: 3,
+            force_position_sequence: 4,
+            last_contact: 1,
+        }));
+        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(
+            &hex::decode(hex).unwrap(),
+            &expected,
+        );
     }
 }

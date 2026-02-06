@@ -3,6 +3,7 @@ pub mod chat;
 pub mod common;
 pub mod constants;
 pub mod effects;
+pub mod game_action;
 pub mod game_event;
 pub mod magic;
 pub mod misc;
@@ -23,6 +24,7 @@ pub use chat::*;
 pub use common::*;
 pub use constants::*;
 pub use effects::*;
+pub use game_action::*;
 pub use game_event::*;
 pub use magic::*;
 pub use misc::*;
@@ -48,7 +50,7 @@ pub enum GameMessage {
     DddInterrogation,
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),
-    GameAction(Box<GameActionData>),
+    GameAction(Box<GameAction>),
     GameEvent(Box<GameEvent>),
 
     UpdateAttribute(Box<UpdateAttributeData>),
@@ -71,7 +73,8 @@ pub enum GameMessage {
     PublicUpdatePosition(Box<PublicUpdatePositionData>),
     UpdateMotion(Box<MovementEventData>),
     PlayerTeleport(Box<PlayerTeleportData>),
-    MoveToState(Box<MoveToStateData>),
+    AutonomousPosition(Box<AutonomousPositionData>),
+    AutonomyLevel(Box<AutonomyLevelData>),
     UpdatePropertyInt(Box<UpdatePropertyIntData>),
     UpdatePropertyInt64(Box<UpdatePropertyInt64Data>),
     UpdatePropertyBool(Box<UpdatePropertyBoolData>),
@@ -126,22 +129,9 @@ impl MessageUnpack for GameMessage {
             opcodes::SERVER_MESSAGE => Some(GameMessage::ServerMessage(Box::new(
                 ServerMessageData::unpack(data, offset)?,
             ))),
-            opcodes::GAME_ACTION => {
-                let saved_offset = *offset;
-                let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                let action = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-                if action == actions::MOVE_TO_STATE {
-                    *offset += 8;
-                    Some(GameMessage::MoveToState(Box::new(MoveToStateData::unpack(
-                        data, offset, sequence,
-                    )?)))
-                } else {
-                    *offset = saved_offset;
-                    Some(GameMessage::GameAction(Box::new(GameActionData::unpack(
-                        data, offset,
-                    )?)))
-                }
-            }
+            opcodes::GAME_ACTION => Some(GameMessage::GameAction(Box::new(GameAction::unpack(
+                data, offset,
+            )?))),
 
             // GameEvent wrapper (0xF7B0)
             opcodes::GAME_EVENT => Some(GameMessage::GameEvent(Box::new(GameEvent::unpack(
@@ -196,6 +186,12 @@ impl MessageUnpack for GameMessage {
             ))),
             opcodes::UPDATE_MOTION => Some(GameMessage::UpdateMotion(Box::new(
                 MovementEventData::unpack(data, offset)?,
+            ))),
+            opcodes::AUTONOMOUS_POSITION => Some(GameMessage::AutonomousPosition(Box::new(
+                AutonomousPositionData::unpack(data, offset)?,
+            ))),
+            opcodes::AUTONOMY_LEVEL => Some(GameMessage::AutonomyLevel(Box::new(
+                AutonomyLevelData::unpack(data, offset)?,
             ))),
             opcodes::PARENT_EVENT => Some(GameMessage::ParentEvent(Box::new(
                 ParentEventData::unpack(data, offset)?,
@@ -311,13 +307,7 @@ impl MessagePack for GameMessage {
                 data.pack(buf);
             }
             GameMessage::GameAction(data) => {
-                buf.extend_from_slice(&0xF7B1u32.to_le_bytes());
-                data.pack(buf);
-            }
-            GameMessage::MoveToState(data) => {
                 buf.extend_from_slice(&opcodes::GAME_ACTION.to_le_bytes());
-                buf.extend_from_slice(&data.sequence.to_le_bytes());
-                buf.extend_from_slice(&actions::MOVE_TO_STATE.to_le_bytes());
                 data.pack(buf);
             }
             GameMessage::GameEvent(data) => {
@@ -354,6 +344,14 @@ impl MessagePack for GameMessage {
             }
             GameMessage::PlayerTeleport(data) => {
                 buf.extend_from_slice(&opcodes::PLAYER_TELEPORT.to_le_bytes());
+                data.pack(buf);
+            }
+            GameMessage::AutonomousPosition(data) => {
+                buf.extend_from_slice(&opcodes::AUTONOMOUS_POSITION.to_le_bytes());
+                data.pack(buf);
+            }
+            GameMessage::AutonomyLevel(data) => {
+                buf.extend_from_slice(&opcodes::AUTONOMY_LEVEL.to_le_bytes());
                 data.pack(buf);
             }
             GameMessage::PrivateUpdatePosition(data) => {

@@ -27,6 +27,7 @@ pub struct PlayerState {
     pub skills: HashMap<stats::SkillType, stats::Skill>,
     /// Stores the raw ranks and init for skills so they can be recalculated
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
+    pub position: WorldPosition,
     pub enchantments: Vec<Enchantment>,
     pub spells: BTreeMap<u32, f32>,
     pub spell_lists: Vec<Vec<u32>>,
@@ -48,6 +49,7 @@ impl PlayerState {
             vital_bases: HashMap::new(),
             skills: HashMap::new(),
             skill_bases: HashMap::new(),
+            position: WorldPosition::default(),
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
             spell_lists: vec![Vec::new(); 8],
@@ -368,6 +370,34 @@ impl PlayerState {
 
     pub fn handle_message(&mut self, msg: &GameMessage, events: &mut Vec<WorldEvent>) -> bool {
         match msg {
+            GameMessage::UpdatePosition(data) => {
+                if data.guid == self.guid && self.guid != 0 {
+                    self.position = data.pos.pos;
+                    events.push(WorldEvent::EntityMoved {
+                        guid: self.guid,
+                        pos: self.position,
+                    });
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdatePosition(data) => {
+                self.position = data.pos;
+                events.push(WorldEvent::EntityMoved {
+                    guid: self.guid,
+                    pos: self.position,
+                });
+                return true;
+            }
+            GameMessage::PublicUpdatePosition(data) => {
+                if data.guid == self.guid && self.guid != 0 {
+                    self.position = data.pos;
+                    events.push(WorldEvent::EntityMoved {
+                        guid: self.guid,
+                        pos: self.position,
+                    });
+                    return true;
+                }
+            }
             GameMessage::UpdateAttribute(data) => {
                 let UpdateAttributeData {
                     attribute,

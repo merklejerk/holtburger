@@ -125,7 +125,7 @@ impl AppState {
                 }
             }
             ClientEvent::ServerMessage(message) => {
-                self.log_chat(ChatMessageKind::System, format!("[SYSTEM] {}", message));
+                self.log_chat(ChatMessageKind::System, message);
             }
             ClientEvent::Chat { sender, message } => {
                 self.log_chat(ChatMessageKind::Chat, format!("{}: {}", sender, message));

@@ -90,6 +90,7 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         ClientState::CharacterSelection(_) => "👥",
         ClientState::EnteringWorld => "🚪",
         ClientState::InWorld => "🌍",
+        ClientState::Disconnected => "💀",
     };
 
     let current_char = state.character_name.as_deref().unwrap_or("Selecting...");

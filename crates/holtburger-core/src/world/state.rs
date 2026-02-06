@@ -135,6 +135,16 @@ impl WorldState {
                     });
                 }
             }
+            GameMessage::VectorUpdate(data) => {
+                let guid = data.guid;
+                // Note: We might want to store velocity/omega in the entity eventually
+                // for client-side interpolation. For now, just emit the event.
+                events.push(WorldEvent::EntityVectorUpdated {
+                    guid,
+                    velocity: data.velocity,
+                    omega: data.omega,
+                });
+            }
             GameMessage::GameEvent(ev) => {
                 if let GameEventData::PlayerDescription(data) = &ev.event {
                     let guid = data.guid;

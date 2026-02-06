@@ -69,6 +69,10 @@ impl AppState {
                             entity.position = pos;
                         }
                     }
+                    WorldEvent::EntityVectorUpdated { .. } => {
+                        // For now we don't do anything with vectors in the CLI,
+                        // but we handle it to avoid the wildcard match.
+                    }
                     WorldEvent::EntitySpawned(entity) => {
                         self.entities.insert(entity.guid, *entity);
                     }

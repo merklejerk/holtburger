@@ -19,6 +19,11 @@ pub enum WorldEvent {
         guid: u32,
         pos: WorldPosition,
     },
+    EntityVectorUpdated {
+        guid: u32,
+        velocity: crate::math::Vector3,
+        omega: crate::math::Vector3,
+    },
     EntityDespawned(u32),
     VitalUpdated(stats::Vital),
     AttributeUpdated(stats::Attribute),

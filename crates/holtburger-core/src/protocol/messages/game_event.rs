@@ -1,9 +1,9 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::{
-    MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
-    MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
-    MagicUpdateMultipleEnchantmentsData, PingResponseData, PlayerDescriptionData, ViewContentsData,
-    WeenieErrorData, WeenieErrorWithStringData, game_event_opcodes,
+    ChannelBroadcastData, MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData,
+    MagicRemoveEnchantmentData, MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
+    MagicUpdateMultipleEnchantmentsData, PingResponseData, PlayerDescriptionData, TellData,
+    ViewContentsData, WeenieErrorData, WeenieErrorWithStringData, game_event_opcodes,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -19,6 +19,8 @@ pub enum GameEventData {
     PlayerDescription(Box<PlayerDescriptionData>),
     PingResponse(Box<PingResponseData>),
     ViewContents(Box<ViewContentsData>),
+    Tell(Box<TellData>),
+    ChannelBroadcast(Box<ChannelBroadcastData>),
     StartGame,
     MagicUpdateEnchantment(Box<MagicUpdateEnchantmentData>),
     MagicUpdateMultipleEnchantments(Box<MagicUpdateMultipleEnchantmentsData>),
@@ -51,6 +53,12 @@ impl GameEvent {
             game_event_opcodes::VIEW_CONTENTS => {
                 GameEventData::ViewContents(Box::new(ViewContentsData::unpack(data, offset)?))
             }
+            game_event_opcodes::TELL => {
+                GameEventData::Tell(Box::new(TellData::unpack(data, offset)?))
+            }
+            game_event_opcodes::CHANNEL_BROADCAST => GameEventData::ChannelBroadcast(Box::new(
+                ChannelBroadcastData::unpack(data, offset)?,
+            )),
             game_event_opcodes::START_GAME => GameEventData::StartGame,
             game_event_opcodes::MAGIC_UPDATE_ENCHANTMENT => {
                 let mut d = MagicUpdateEnchantmentData::unpack(data, offset)?;
@@ -136,6 +144,16 @@ impl GameEvent {
                     .unwrap();
                 data.pack(buf);
             }
+            GameEventData::Tell(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::TELL)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::ChannelBroadcast(data) => {
+                buf.write_u32::<LittleEndian>(game_event_opcodes::CHANNEL_BROADCAST)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameEventData::StartGame => {
                 buf.write_u32::<LittleEndian>(game_event_opcodes::START_GAME)
                     .unwrap();
@@ -209,5 +227,29 @@ mod tests {
             event: GameEventData::StartGame,
         }));
         assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_channel_broadcast_unpack_failure() {
+        // Hex from user report: B0F7...00
+        // Corrected with padded empty string: 00000000 for sender_name
+        let hex_str = "B0F70000010000500D00000047010000040000000000000079002B4275646479206861732063726561746564205368697274202830783830303035443235292061742030784441353530303144205B38352E363730333837203130372E3938343732362031392E3939353030315D20302E34373432303020302E30303030303020302E30303030303020302E3838303431372E00";
+        let data = hex::decode(hex_str).expect("Hex decode failed");
+        let result = GameMessage::unpack(&data);
+        assert!(result.is_some(), "Should unpack successfully now");
+
+        if let Some(GameMessage::GameEvent(ev)) = result {
+            assert_eq!(ev.target, 0x50000001);
+            assert_eq!(ev.sequence, 13);
+            if let GameEventData::ChannelBroadcast(data) = ev.event {
+                assert_eq!(data.channel_id, 4);
+                assert_eq!(data.sender_name, "");
+                assert!(data.message.starts_with("+Buddy has created Shirt"));
+            } else {
+                panic!("Expected ChannelBroadcast");
+            }
+        } else {
+            panic!("Expected GameEvent");
+        }
     }
 }

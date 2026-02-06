@@ -398,6 +398,16 @@ impl PlayerState {
                     return true;
                 }
             }
+            GameMessage::VectorUpdate(data) => {
+                if data.guid == self.guid && self.guid != 0 {
+                    events.push(WorldEvent::EntityVectorUpdated {
+                        guid: data.guid,
+                        velocity: data.velocity,
+                        omega: data.omega,
+                    });
+                    return true;
+                }
+            }
             GameMessage::UpdateAttribute(data) => {
                 let UpdateAttributeData {
                     attribute,
@@ -824,5 +834,43 @@ mod tests {
             health_current, 156,
             "Current Health with 111 Endurance should be 156 (111/2=55.5 rounded to 56)"
         );
+    }
+
+    #[test]
+    fn test_vector_update_routing() {
+        use crate::math::Vector3;
+        use crate::protocol::messages::movement::VectorUpdateData;
+        use crate::protocol::messages::GameMessage;
+        use crate::world::WorldEvent;
+
+        let mut player = PlayerState::new();
+        player.guid = 0x50000001;
+
+        let data = VectorUpdateData {
+            guid: 0x50000001,
+            velocity: Vector3::new(1.0, 2.0, 3.0),
+            omega: Vector3::new(0.1, 0.2, 0.3),
+            instance_sequence: 123,
+            vector_sequence: 456,
+        };
+
+        let msg = GameMessage::VectorUpdate(Box::new(data));
+        let mut events = Vec::new();
+        let handled = player.handle_message(&msg, &mut events);
+
+        assert!(handled);
+        assert_eq!(events.len(), 1);
+        if let WorldEvent::EntityVectorUpdated {
+            guid,
+            velocity,
+            omega,
+        } = &events[0]
+        {
+            assert_eq!(*guid, 0x50000001);
+            assert_eq!(velocity.x, 1.0);
+            assert_eq!(omega.x, 0.1);
+        } else {
+            panic!("Expected EntityVectorUpdated event");
+        }
     }
 }

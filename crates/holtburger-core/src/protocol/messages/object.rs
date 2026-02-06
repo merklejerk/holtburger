@@ -6,6 +6,7 @@ use crate::protocol::messages::utils::{
 use crate::world::position::WorldPosition;
 use crate::world::properties::{
     ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
+    WeenieHeaderFlag2,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -26,8 +27,13 @@ pub struct ObjectDescriptionData {
     pub icon_id: u32,
     pub item_type: u32,
     pub obj_desc_flags: ObjectDescriptionFlag,
+    pub weenie_flags2: WeenieHeaderFlag2,
     pub container_id: Option<u32>,
     pub wielder_id: Option<u32>,
+    pub valid_locations: Option<u32>,
+    pub currently_wielded_location: Option<u32>,
+    pub priority: Option<u32>,
+    pub burden: Option<u16>,
 }
 
 impl MessageUnpack for ObjectDescriptionData {
@@ -255,67 +261,302 @@ impl MessageUnpack for ObjectDescriptionData {
         *offset += 8;
         *offset = align_to_4(*offset);
 
+        let mut weenie_flags2 = WeenieHeaderFlag2::empty();
         if obj_desc_flags.contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER) {
             if *offset + 4 > data.len() {
                 return None;
             }
-            *offset += 4; // weenie_flags2
+            weenie_flags2 = WeenieHeaderFlag2::from_bits_retain(
+                LittleEndian::read_u32(&data[*offset..*offset + 4]),
+            );
+            *offset += 4;
         }
+
+        // ---- Weenie header fields (ACE serialization order) ----
+        // The order here MUST match the ACE server's exact write order.
 
         if weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME) {
             read_string16(data, offset);
         }
-        if weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) && *offset + 4 <= data.len() {
-            *offset += 4;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) && *offset + 4 <= data.len()
-        {
-            *offset += 4;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) && *offset + 2 <= data.len() {
-            *offset += 2;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::VALUE) && *offset + 4 <= data.len() {
-            *offset += 4;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::USABLE) && *offset + 4 <= data.len() {
-            *offset += 4;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) && *offset + 4 <= data.len() {
-            *offset += 4;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) && *offset + 4 <= data.len() {
-            *offset += 4;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) && *offset + 4 <= data.len() {
-            *offset += 4;
-        }
-        if weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) && *offset < data.len() {
+        // ITEMS_CAPACITY: byte (1)
+        if weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) {
+            if *offset >= data.len() {
+                return None;
+            }
             *offset += 1;
         }
-        if weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) && *offset + 2 <= data.len() {
+        // CONTAINERS_CAPACITY: byte (1)
+        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) {
+            if *offset >= data.len() {
+                return None;
+            }
+            *offset += 1;
+        }
+        // AMMO_TYPE: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
             *offset += 2;
         }
-        if weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) && *offset + 2 <= data.len() {
+        // VALUE: int (4)
+        if weenie_flags.contains(WeenieHeaderFlag::VALUE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // USABLE: uint (4)
+        if weenie_flags.contains(WeenieHeaderFlag::USABLE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // USE_RADIUS: float (4)
+        if weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // TARGET_TYPE: uint (4)
+        if weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // UI_EFFECTS: uint (4)
+        if weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // COMBAT_USE: sbyte (1)
+        if weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) {
+            if *offset >= data.len() {
+                return None;
+            }
+            *offset += 1;
+        }
+        // STRUCTURE: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
             *offset += 2;
         }
-        if weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) && *offset + 2 <= data.len() {
+        // MAX_STRUCTURE: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
             *offset += 2;
         }
-        if weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) && *offset + 2 <= data.len() {
+        // STACK_SIZE: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
             *offset += 2;
         }
-
+        // MAX_STACK_SIZE: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            *offset += 2;
+        }
+        // CONTAINER: uint (4)
         let mut container_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::CONTAINER) && *offset + 4 <= data.len() {
+        if weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             container_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
+        // WIELDER: uint (4)
         let mut wielder_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::WIELDER) && *offset + 4 <= data.len() {
+        if weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             wielder_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
+        // VALID_LOCATIONS: uint (4)
+        let mut valid_locations = None;
+        if weenie_flags.contains(WeenieHeaderFlag::VALID_LOCATIONS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            valid_locations = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        // CURRENTLY_WIELDED_LOCATION: uint (4)
+        let mut currently_wielded_location = None;
+        if weenie_flags.contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            currently_wielded_location =
+                Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        // PRIORITY: uint (4)
+        let mut priority = None;
+        if weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            priority = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        // RADAR_BLIP_COLOR: byte (1)
+        if weenie_flags.contains(WeenieHeaderFlag::RADAR_BLIP_COLOR) {
+            if *offset >= data.len() {
+                return None;
+            }
+            *offset += 1;
+        }
+        // RADAR_BEHAVIOR: byte (1)
+        if weenie_flags.contains(WeenieHeaderFlag::RADAR_BEHAVIOR) {
+            if *offset >= data.len() {
+                return None;
+            }
+            *offset += 1;
+        }
+        // PSCRIPT: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::PSCRIPT) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            *offset += 2;
+        }
+        // WORKMANSHIP: float (4)
+        if weenie_flags.contains(WeenieHeaderFlag::WORKMANSHIP) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // BURDEN: ushort (2)
+        let mut burden = None;
+        if weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            burden = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
+            *offset += 2;
+        }
+        // SPELL: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::SPELL) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            *offset += 2;
+        }
+        // HOUSE_OWNER: uint (4)
+        if weenie_flags.contains(WeenieHeaderFlag::HOUSE_OWNER) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // HOUSE_RESTRICTIONS: variable (HAR struct) — skip the AccessList
+        if weenie_flags.contains(WeenieHeaderFlag::HOUSE_RESTRICTIONS) {
+            // HouseAccess: bitmask(4) + MonarchID(4) + GuestList hash table + Roommate list
+            if *offset + 12 > data.len() {
+                return None;
+            }
+            *offset += 4; // bitmask
+            *offset += 4; // MonarchID
+            // Guest list (PackableHashTable<ObjectGuid, GuestInfo>)
+            let guest_count =
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
+            *offset += 4; // count + buckets
+            // Each entry: ObjectGuid(4) + GuestInfo(4)
+            let skip = guest_count * 8;
+            if *offset + skip > data.len() {
+                return None;
+            }
+            *offset += skip;
+            // Roommate list (PackableList<ObjectGuid>)
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let roommate_count =
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+            *offset += 4;
+            let skip = roommate_count * 4;
+            if *offset + skip > data.len() {
+                return None;
+            }
+            *offset += skip;
+        }
+        // HOOK_ITEM_TYPES: uint (4)
+        if weenie_flags.contains(WeenieHeaderFlag::HOOK_ITEM_TYPES) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // MONARCH: uint (4)
+        if weenie_flags.contains(WeenieHeaderFlag::MONARCH) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // HOOK_TYPE: ushort (2)
+        if weenie_flags.contains(WeenieHeaderFlag::HOOK_TYPE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            *offset += 2;
+        }
+        // ICON_OVERLAY: PackedDwordOfKnownType (variable)
+        if weenie_flags.contains(WeenieHeaderFlag::ICON_OVERLAY) {
+            read_packed_u32_with_known_type(data, offset, 0x06000000);
+        }
+        // WeenieHeaderFlag2::ICON_UNDERLAY: PackedDwordOfKnownType (variable)
+        if weenie_flags2.contains(WeenieHeaderFlag2::ICON_UNDERLAY) {
+            read_packed_u32_with_known_type(data, offset, 0x06000000);
+        }
+        // MATERIAL_TYPE: uint (4)
+        if weenie_flags.contains(WeenieHeaderFlag::MATERIAL_TYPE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // WeenieHeaderFlag2::COOLDOWN: int (4)
+        if weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+        // WeenieHeaderFlag2::COOLDOWN_DURATION: double (8)
+        if weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN_DURATION) {
+            if *offset + 8 > data.len() {
+                return None;
+            }
+            *offset += 8;
+        }
+        // WeenieHeaderFlag2::PET_OWNER: uint (4)
+        if weenie_flags2.contains(WeenieHeaderFlag2::PET_OWNER) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            *offset += 4;
+        }
+
+        // Final alignment
+        *offset = align_to_4(*offset);
 
         Some(ObjectDescriptionData {
             guid,
@@ -333,8 +574,13 @@ impl MessageUnpack for ObjectDescriptionData {
             icon_id,
             item_type,
             obj_desc_flags,
+            weenie_flags2,
             container_id,
             wielder_id,
+            valid_locations,
+            currently_wielded_location,
+            priority,
+            burden,
         })
     }
 }
@@ -405,15 +651,39 @@ impl MessagePack for ObjectDescriptionData {
             .obj_desc_flags
             .contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER)
         {
-            buf.write_u32::<LittleEndian>(0).unwrap(); // weenie_flags2
+            buf.write_u32::<LittleEndian>(self.weenie_flags2.bits())
+                .unwrap();
         }
 
+        // ---- Weenie header fields (ACE serialization order) ----
         if self.weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
             buf.write_u32::<LittleEndian>(self.container_id.unwrap())
                 .unwrap();
         }
         if self.weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
             buf.write_u32::<LittleEndian>(self.wielder_id.unwrap())
+                .unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::VALID_LOCATIONS)
+        {
+            buf.write_u32::<LittleEndian>(self.valid_locations.unwrap_or(0))
+                .unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION)
+        {
+            buf.write_u32::<LittleEndian>(self.currently_wielded_location.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
+            buf.write_u32::<LittleEndian>(self.priority.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
+            buf.write_u16::<LittleEndian>(self.burden.unwrap_or(0))
                 .unwrap();
         }
         while !buf.len().is_multiple_of(4) {
@@ -1028,8 +1298,13 @@ mod tests {
             icon_id: 0x06000000,
             item_type: 1,
             obj_desc_flags: ObjectDescriptionFlag::empty(),
+            weenie_flags2: WeenieHeaderFlag2::empty(),
             container_id: None,
             wielder_id: None,
+            valid_locations: None,
+            currently_wielded_location: None,
+            priority: None,
+            burden: None,
         };
 
         assert_pack_unpack_parity(fixtures::OBJECT_CREATE_MINIMAL, &expected);
@@ -1070,8 +1345,13 @@ mod tests {
             icon_id: 0x0600000A,
             item_type: 2,
             obj_desc_flags: ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
+            weenie_flags2: WeenieHeaderFlag2::empty(),
             container_id: Some(0x50001001),
             wielder_id: Some(0x50001002),
+            valid_locations: None,
+            currently_wielded_location: None,
+            priority: None,
+            burden: None,
         };
 
         assert_pack_unpack_parity(fixtures::OBJECT_CREATE_COMPLEX, &expected);

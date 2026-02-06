@@ -8,6 +8,7 @@ pub enum ClientState {
     CharacterSelection(Vec<CharacterEntry>),
     EnteringWorld,
     InWorld,
+    Disconnected,
 }
 
 #[derive(Debug, Clone)]
@@ -22,6 +23,11 @@ pub enum ClientEvent {
     },
     ServerMessage(String),
     CharacterError(u32),
+    WeenieError {
+        error_id: u32,
+        message: Option<String>,
+    },
+    BootAccount(String),
     World(Box<WorldEvent>),
     GameMessage(Box<GameMessage>),
     Chat {

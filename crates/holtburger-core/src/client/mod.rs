@@ -3,7 +3,7 @@ use crate::protocol::messages::actions;
 use crate::protocol::messages::*;
 use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -410,7 +410,7 @@ impl Client {
             ClientCommand::Quit => {
                 log::info!("Disconnecting...");
                 self.disconnect().await?;
-                Err(anyhow!("Graceful disconnect"))
+                Ok(())
             }
         }
     }
@@ -426,6 +426,10 @@ impl Client {
         self.session
             .send_packet_to_addr(header, &[], self.session.server_addr)
             .await?;
+
+        self.state = ClientState::Disconnected;
+        self.send_status_event();
+
         Ok(())
     }
 
@@ -437,6 +441,10 @@ impl Client {
         let mut last_physics_time = Instant::now();
 
         loop {
+            if matches!(self.state, ClientState::Disconnected) {
+                break;
+            }
+
             tokio::select! {
                 res = self.session.recv_message() => {
                     use crate::session::SessionEvent;
@@ -446,6 +454,10 @@ impl Client {
                                 match event {
                                     SessionEvent::Message(msg_data) => {
                                         self.handle_message(&msg_data).await?;
+
+                                        if matches!(self.state, ClientState::Disconnected) {
+                                            return Ok(());
+                                        }
                                     }
                                     SessionEvent::HandshakeRequest(crd) => {
                                         self.handle_handshake_request(crd).await?;
@@ -467,6 +479,8 @@ impl Client {
                         }
                         Err(e) => {
                             log::error!("Session error: {}", e);
+                            self.state = ClientState::Disconnected;
+                            self.send_status_event();
                             return Err(e);
                         }
                     }
@@ -490,6 +504,8 @@ impl Client {
                 }
             }
         }
+
+        Ok(())
     }
 
     async fn handle_message(&mut self, data: &[u8]) -> Result<()> {
@@ -565,6 +581,42 @@ impl Client {
                     }
                     Ok(())
                 }
+                GameEventData::Tell(data) => {
+                    if let Some(tx) = &self.event_tx {
+                        let _ = tx.send(ClientEvent::Chat {
+                            sender: data.sender_name.clone(),
+                            message: data.message.clone(),
+                        });
+                    }
+                    Ok(())
+                }
+                GameEventData::ChannelBroadcast(data) => {
+                    if let Some(tx) = &self.event_tx {
+                        let _ = tx.send(ClientEvent::Chat {
+                            sender: data.sender_name.clone(),
+                            message: data.message.clone(),
+                        });
+                    }
+                    Ok(())
+                }
+                GameEventData::WeenieError(data) => {
+                    if let Some(tx) = &self.event_tx {
+                        let _ = tx.send(ClientEvent::WeenieError {
+                            error_id: data.error_id,
+                            message: None,
+                        });
+                    }
+                    Ok(())
+                }
+                GameEventData::WeenieErrorWithString(data) => {
+                    if let Some(tx) = &self.event_tx {
+                        let _ = tx.send(ClientEvent::WeenieError {
+                            error_id: data.error_id,
+                            message: Some(data.message.clone()),
+                        });
+                    }
+                    Ok(())
+                }
                 _ => Ok(()),
             },
             GameMessage::PlayerCreate(data) => {
@@ -612,6 +664,7 @@ impl Client {
                 Ok(())
             }
             GameMessage::CharacterError(data) => self.handle_character_error(data.error_code),
+            GameMessage::BootAccount(data) => self.handle_boot_account(*data),
             GameMessage::DddInterrogation => {
                 let resp =
                     GameMessage::DddInterrogationResponse(Box::new(DddInterrogationResponseData {
@@ -631,6 +684,24 @@ impl Client {
                     let _ = tx.send(ClientEvent::Chat {
                         sender,
                         message: data.message.clone(),
+                    });
+                }
+                Ok(())
+            }
+            GameMessage::HearRangedSpeech(data) => {
+                if let Some(tx) = &self.event_tx {
+                    let _ = tx.send(ClientEvent::Chat {
+                        sender: data.sender_name.clone(),
+                        message: data.message.clone(),
+                    });
+                }
+                Ok(())
+            }
+            GameMessage::EmoteText(data) => {
+                if let Some(tx) = &self.event_tx {
+                    let _ = tx.send(ClientEvent::Emote {
+                        sender: data.sender_name.clone(),
+                        text: data.text.clone(),
                     });
                 }
                 Ok(())
@@ -694,6 +765,18 @@ impl Client {
             let _ = tx.send(ClientEvent::CharacterError(error_code));
         }
         log::warn!("Character Error received: 0x{:08X}", error_code);
+        Ok(())
+    }
+
+    fn handle_boot_account(&mut self, data: BootAccountData) -> Result<()> {
+        let reason = data.reason.unwrap_or_default();
+        self.state = ClientState::Disconnected;
+        self.send_status_event();
+
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientEvent::BootAccount(reason.clone()));
+        }
+        log::warn!("Boot Account received: {}", reason);
         Ok(())
     }
 

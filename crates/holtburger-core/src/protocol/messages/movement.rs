@@ -98,6 +98,62 @@ pub struct PrivateUpdatePositionData {
     pub pos: WorldPosition,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct VectorUpdateData {
+    pub guid: u32,
+    pub velocity: crate::math::Vector3,
+    pub omega: crate::math::Vector3,
+    pub instance_sequence: u16,
+    pub vector_sequence: u16,
+}
+
+impl MessageUnpack for VectorUpdateData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 32 > data.len() {
+            return None;
+        }
+        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let velocity = crate::math::Vector3 {
+            x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
+            y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
+            z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
+        };
+        *offset += 12;
+        let omega = crate::math::Vector3 {
+            x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
+            y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
+            z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
+        };
+        *offset += 12;
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let vector_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        *offset += 4;
+
+        Some(VectorUpdateData {
+            guid,
+            velocity,
+            omega,
+            instance_sequence,
+            vector_sequence,
+        })
+    }
+}
+
+impl MessagePack for VectorUpdateData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.guid.to_le_bytes());
+        buf.extend_from_slice(&self.velocity.x.to_le_bytes());
+        buf.extend_from_slice(&self.velocity.y.to_le_bytes());
+        buf.extend_from_slice(&self.velocity.z.to_le_bytes());
+        buf.extend_from_slice(&self.omega.x.to_le_bytes());
+        buf.extend_from_slice(&self.omega.y.to_le_bytes());
+        buf.extend_from_slice(&self.omega.z.to_le_bytes());
+        buf.extend_from_slice(&self.instance_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.vector_sequence.to_le_bytes());
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AutonomousPositionData {
     pub position: WorldPosition,
@@ -1424,6 +1480,31 @@ mod tests {
         let mut buf = Vec::new();
         params.pack(&mut buf);
         assert_eq!(buf.len(), 12);
+    }
+
+    #[test]
+    fn test_vector_update_fixture() {
+        // Opcode(4) + GUID(4) + Vel(12) + Omega(12) + Seq(2) + Seq(2) = 36 bytes
+        let hex = "4EF70000010000500000803F0000004000004040CDCCCC3DCDCC4C3E9A99993E7B00C801";
+        let expected = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
+            guid: 0x50000001,
+            velocity: crate::math::Vector3 {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            omega: crate::math::Vector3 {
+                x: 0.1,
+                y: 0.2,
+                z: 0.3,
+            },
+            instance_sequence: 123,
+            vector_sequence: 456,
+        }));
+        crate::protocol::messages::test_helpers::assert_pack_unpack_parity(
+            &hex::decode(hex).unwrap(),
+            &expected,
+        );
     }
 
     #[test]

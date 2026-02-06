@@ -42,3 +42,5 @@ pub const PUBLIC_UPDATE_POSITION: &[u8] =
 pub const WEENIE_ERROR: &[u8] = include_bytes!("../../tests/fixtures/weenie_error.bin");
 pub const WEENIE_ERROR_WITH_STRING: &[u8] =
     include_bytes!("../../tests/fixtures/weenie_error_with_string.bin");
+pub const PLAYER_DESCRIPTION_FULL: &[u8] =
+    include_bytes!("../../tests/fixtures/player_description_full.bin");

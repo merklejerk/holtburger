@@ -34,6 +34,33 @@ impl MessagePack for CharacterErrorData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct BootAccountData {
+    pub reason: Option<String>,
+}
+
+impl MessageUnpack for BootAccountData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        // BOOT_ACCOUNT can have an optional String16 reasoning.
+        // If we've reached the end of the message, there's no reason provided.
+        if *offset >= data.len() {
+            return Some(BootAccountData { reason: None });
+        }
+        let reason = read_string16(data, offset)?;
+        Some(BootAccountData {
+            reason: Some(reason),
+        })
+    }
+}
+
+impl MessagePack for BootAccountData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        if let Some(reason) = &self.reason {
+            write_string16(buf, reason);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct AddEffectData {
     pub target: u32,
     pub effect: u32,
@@ -249,6 +276,21 @@ mod tests {
         assert_eq!(buf.len(), 4);
 
         assert_pack_unpack_parity(&buf, &expected);
+    }
+
+    #[test]
+    fn test_boot_account_fixture() {
+        let expected = BootAccountData {
+            reason: Some(" because you're mid".to_string()),
+        };
+        let mut buf = Vec::new();
+        expected.pack(&mut buf);
+        assert_pack_unpack_parity(&buf, &expected);
+
+        let empty = BootAccountData { reason: None };
+        let mut buf2 = Vec::new();
+        empty.pack(&mut buf2);
+        assert_pack_unpack_parity(&buf2, &empty);
     }
 
     #[test]

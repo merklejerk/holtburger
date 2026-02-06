@@ -50,6 +50,7 @@ pub enum GameMessage {
     DddInterrogation,
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),
+    BootAccount(Box<BootAccountData>),
     GameAction(Box<GameAction>),
     GameEvent(Box<GameEvent>),
 
@@ -71,6 +72,7 @@ pub enum GameMessage {
     UpdatePosition(Box<UpdatePositionData>),
     PrivateUpdatePosition(Box<PrivateUpdatePositionData>),
     PublicUpdatePosition(Box<PublicUpdatePositionData>),
+    VectorUpdate(Box<VectorUpdateData>),
     UpdateMotion(Box<MovementEventData>),
     PlayerTeleport(Box<PlayerTeleportData>),
     AutonomousPosition(Box<AutonomousPositionData>),
@@ -125,6 +127,9 @@ impl MessageUnpack for GameMessage {
             )),
             opcodes::CHARACTER_ERROR => Some(GameMessage::CharacterError(Box::new(
                 CharacterErrorData::unpack(data, offset)?,
+            ))),
+            opcodes::BOOT_ACCOUNT => Some(GameMessage::BootAccount(Box::new(
+                BootAccountData::unpack(data, offset)?,
             ))),
             opcodes::SERVER_MESSAGE => Some(GameMessage::ServerMessage(Box::new(
                 ServerMessageData::unpack(data, offset)?,
@@ -183,6 +188,9 @@ impl MessageUnpack for GameMessage {
             ))),
             opcodes::PUBLIC_UPDATE_POSITION => Some(GameMessage::PublicUpdatePosition(Box::new(
                 PublicUpdatePositionData::unpack(data, offset)?,
+            ))),
+            opcodes::VECTOR_UPDATE => Some(GameMessage::VectorUpdate(Box::new(
+                VectorUpdateData::unpack(data, offset)?,
             ))),
             opcodes::UPDATE_MOTION => Some(GameMessage::UpdateMotion(Box::new(
                 MovementEventData::unpack(data, offset)?,
@@ -302,6 +310,10 @@ impl MessagePack for GameMessage {
                 buf.extend_from_slice(&0xF659u32.to_le_bytes());
                 data.pack(buf);
             }
+            GameMessage::BootAccount(data) => {
+                buf.extend_from_slice(&opcodes::BOOT_ACCOUNT.to_le_bytes());
+                data.pack(buf);
+            }
             GameMessage::ServerMessage(data) => {
                 buf.extend_from_slice(&0xF7E0u32.to_le_bytes());
                 data.pack(buf);
@@ -360,6 +372,10 @@ impl MessagePack for GameMessage {
             }
             GameMessage::PublicUpdatePosition(data) => {
                 buf.extend_from_slice(&opcodes::PUBLIC_UPDATE_POSITION.to_le_bytes());
+                data.pack(buf);
+            }
+            GameMessage::VectorUpdate(data) => {
+                buf.extend_from_slice(&opcodes::VECTOR_UPDATE.to_le_bytes());
                 data.pack(buf);
             }
             GameMessage::UpdatePosition(data) => {

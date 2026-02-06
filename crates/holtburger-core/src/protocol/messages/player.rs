@@ -53,8 +53,8 @@ bitflags! {
     pub struct EnchantmentMask: u32 {
         const MULTIPLICATIVE = 0x01;
         const ADDITIVE = 0x02;
-        const COOLDOWN = 0x04;
-        const VITAE = 0x08;
+        const VITAE = 0x04;
+        const COOLDOWN = 0x08;
     }
 }
 
@@ -239,9 +239,15 @@ impl PlayerDescriptionData {
         let mut positions = BTreeMap::new();
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT32) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -250,9 +256,15 @@ impl PlayerDescriptionData {
         }
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT64) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 12 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_i64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
@@ -261,9 +273,15 @@ impl PlayerDescriptionData {
         }
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_BOOL) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) != 0;
                 *offset += 8;
@@ -272,9 +290,15 @@ impl PlayerDescriptionData {
         }
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DOUBLE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 12 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_f64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
@@ -283,9 +307,15 @@ impl PlayerDescriptionData {
         }
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_STRING) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let val = read_string16(data, offset)?;
@@ -294,9 +324,15 @@ impl PlayerDescriptionData {
         }
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DID) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -305,9 +341,15 @@ impl PlayerDescriptionData {
         }
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_IID) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -316,9 +358,15 @@ impl PlayerDescriptionData {
         }
 
         if property_flags.contains(DescriptionPropertyFlag::POSITION) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 if let Some(pos) = WorldPosition::unpack(data, offset) {
@@ -327,6 +375,9 @@ impl PlayerDescriptionData {
             }
         }
 
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let vector_flags = DescriptionVectorFlag::from_bits_retain(LittleEndian::read_u32(
             &data[*offset..*offset + 4],
         ));
@@ -337,6 +388,9 @@ impl PlayerDescriptionData {
 
         let mut attributes = BTreeMap::new();
         if vector_flags.contains(DescriptionVectorFlag::ATTRIBUTE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let attribute_flags = AttributeCache::from_bits_retain(LittleEndian::read_u32(
                 &data[*offset..*offset + 4],
             ));
@@ -345,6 +399,9 @@ impl PlayerDescriptionData {
             for i in 1..=6 {
                 let bit = 1 << (i - 1);
                 if (attribute_flags.bits() & bit) != 0 {
+                    if *offset + 12 > data.len() {
+                        return None;
+                    }
                     let ranks = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                     let start = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                     let xp = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
@@ -363,6 +420,9 @@ impl PlayerDescriptionData {
             for i in 7..=9 {
                 let bit = 1 << (i - 1);
                 if (attribute_flags.bits() & bit) != 0 {
+                    if *offset + 16 > data.len() {
+                        return None;
+                    }
                     let ranks = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                     let start = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                     let xp = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
@@ -383,6 +443,9 @@ impl PlayerDescriptionData {
 
         let mut skills = BTreeMap::new();
         if vector_flags.contains(DescriptionVectorFlag::SKILL) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
@@ -394,9 +457,15 @@ impl PlayerDescriptionData {
 
         let mut spells = BTreeMap::new();
         if vector_flags.contains(DescriptionVectorFlag::SPELL) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -415,6 +484,9 @@ impl PlayerDescriptionData {
             *offset += 4;
 
             if mask.contains(EnchantmentMask::MULTIPLICATIVE) {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 for _ in 0..count {
@@ -424,6 +496,9 @@ impl PlayerDescriptionData {
                 }
             }
             if mask.contains(EnchantmentMask::ADDITIVE) {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 for _ in 0..count {
@@ -433,6 +508,9 @@ impl PlayerDescriptionData {
                 }
             }
             if mask.contains(EnchantmentMask::COOLDOWN) {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 for _ in 0..count {
@@ -441,13 +519,16 @@ impl PlayerDescriptionData {
                     }
                 }
             }
-            if mask.contains(EnchantmentMask::VITAE)
-                && let Some(e) = Enchantment::unpack(data, offset)
-            {
-                enchantments.push(e);
+            if mask.contains(EnchantmentMask::VITAE) {
+                if let Some(e) = Enchantment::unpack(data, offset) {
+                    enchantments.push(e);
+                }
             }
         }
 
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let option_flags = CharacterOptionDataFlag::from_bits_retain(LittleEndian::read_u32(
             &data[*offset..*offset + 4],
         ));
@@ -456,6 +537,9 @@ impl PlayerDescriptionData {
 
         let mut shortcuts = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::SHORTCUT) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
             *offset += 4;
             for _ in 0..count {
@@ -468,10 +552,16 @@ impl PlayerDescriptionData {
         let mut spell_lists = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::SPELL_LISTS8) {
             for _ in 0..8 {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 let mut list = Vec::with_capacity(count);
                 for _ in 0..count {
+                    if *offset + 4 > data.len() {
+                        return None;
+                    }
                     list.push(LittleEndian::read_u32(&data[*offset..*offset + 4]));
                     *offset += 4;
                 }
@@ -482,6 +572,9 @@ impl PlayerDescriptionData {
             *offset += 4;
             let mut list = Vec::with_capacity(count);
             for _ in 0..count {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 list.push(LittleEndian::read_u32(&data[*offset..*offset + 4]));
                 *offset += 4;
             }
@@ -490,9 +583,15 @@ impl PlayerDescriptionData {
 
         let mut desired_comps = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::DESIRED_COMPS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let amt = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -510,12 +609,18 @@ impl PlayerDescriptionData {
 
         let mut options2 = 0;
         if option_flags.contains(CharacterOptionDataFlag::CHARACTER_OPTIONS2) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             options2 = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
         }
 
         let mut gameplay_options = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
             *offset += 4;
             if *offset + count <= data.len() {
@@ -1188,5 +1293,42 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_player_description_full_fixture() {
+        use crate::protocol::fixtures;
+        use crate::protocol::messages::GameMessage;
+
+        let data = fixtures::PLAYER_DESCRIPTION_FULL;
+        eprintln!("Total fixture size: {} bytes", data.len());
+
+        let result = GameMessage::unpack(data);
+        assert!(
+            result.is_some(),
+            "GameMessage::unpack returned None for player_description_full fixture"
+        );
+
+        let msg = result.unwrap();
+        if let GameMessage::GameEvent(event) = &msg {
+            if let crate::protocol::messages::GameEventData::PlayerDescription(pd) = &event.event {
+                eprintln!("Player: {} (guid=0x{:08X})", pd.name, pd.guid);
+                eprintln!("  INT32 props: {}", pd.properties_int.len());
+                eprintln!("  INT64 props: {}", pd.properties_int64.len());
+                eprintln!("  BOOL props: {}", pd.properties_bool.len());
+                eprintln!("  DOUBLE props: {}", pd.properties_float.len());
+                eprintln!("  STRING props: {}", pd.properties_string.len());
+                eprintln!("  DID props: {}", pd.properties_did.len());
+                eprintln!("  Positions: {}", pd.positions.len());
+                eprintln!("  Attributes: {}", pd.attributes.len());
+                eprintln!("  Skills: {}", pd.skills.len());
+                eprintln!("  Spells: {}", pd.spells.len());
+                eprintln!("  Enchantments: {}", pd.enchantments.len());
+                eprintln!("  Inventory: {}", pd.inventory.len());
+                eprintln!("  Equipped: {}", pd.equipped_objects.len());
+                return;
+            }
+        }
+        panic!("Expected GameEvent/PlayerDescription");
     }
 }

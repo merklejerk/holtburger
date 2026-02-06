@@ -3,24 +3,6 @@ use crate::protocol::messages::utils::{read_string16, write_string16, write_stri
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ServerMessageData {
-    pub message: String,
-}
-
-impl MessageUnpack for ServerMessageData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let message = read_string16(data, offset)?;
-        Some(ServerMessageData { message })
-    }
-}
-
-impl MessagePack for ServerMessageData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        write_string16(buf, &self.message);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct OrderingResetData;
 
 impl MessageUnpack for OrderingResetData {
@@ -239,23 +221,57 @@ impl MessagePack for DddInterrogationResponseData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeenieErrorData {
+    pub error_id: u32,
+}
+
+impl MessageUnpack for WeenieErrorData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(WeenieErrorData { error_id })
+    }
+}
+
+impl MessagePack for WeenieErrorData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct WeenieErrorWithStringData {
+    pub error_id: u32,
+    pub message: String,
+}
+
+impl MessageUnpack for WeenieErrorWithStringData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let message = read_string16(data, offset)?;
+        Some(WeenieErrorWithStringData { error_id, message })
+    }
+}
+
+impl MessagePack for WeenieErrorWithStringData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.error_id).unwrap();
+        write_string16(buf, &self.message);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-
-    #[test]
-    fn test_server_message_fixture() {
-        let expected = ServerMessageData {
-            message: "Welcome to Asheron's Call!".to_string(),
-        };
-        let mut buf = Vec::new();
-        expected.pack(&mut buf);
-        // String16 length (2) + "Welcome to Asheron's Call!" (26) + pads (0) = 28
-        assert_eq!(buf.len(), 28);
-
-        assert_pack_unpack_parity(&buf, &expected);
-    }
 
     #[test]
     fn test_character_error_fixture() {
@@ -314,5 +330,32 @@ mod tests {
             0xFB, 0xFF, 0xFF, 0xFF, // -5
         ];
         assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_weenie_error_fixture() {
+        use crate::protocol::fixtures;
+        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+            target: 0x50000001,
+            sequence: 0x0E,
+            event: GameEventData::WeenieError(Box::new(WeenieErrorData { error_id: 0x1234 })),
+        }));
+        assert_pack_unpack_parity(fixtures::WEENIE_ERROR, &expected);
+    }
+
+    #[test]
+    fn test_weenie_error_with_string_fixture() {
+        use crate::protocol::fixtures;
+        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+            target: 0x50000001,
+            sequence: 0x0E,
+            event: GameEventData::WeenieErrorWithString(Box::new(WeenieErrorWithStringData {
+                error_id: 0x1234,
+                message: "Test error".to_string(),
+            })),
+        }));
+        assert_pack_unpack_parity(fixtures::WEENIE_ERROR_WITH_STRING, &expected);
     }
 }

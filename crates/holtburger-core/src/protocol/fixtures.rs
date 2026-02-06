@@ -35,3 +35,10 @@ pub const HEAR_SPEECH: &[u8] = include_bytes!("../../tests/fixtures/hear_speech.
 pub const PLAYER_TELEPORT: &[u8] = include_bytes!("../../tests/fixtures/player_teleport.bin");
 pub const MOVE_TO_STATE: &[u8] = include_bytes!("../../tests/fixtures/move_to_state.bin");
 pub const HEAR_RANGED_SPEECH: &[u8] = include_bytes!("../../tests/fixtures/hear_ranged_speech.bin");
+pub const PRIVATE_UPDATE_POSITION: &[u8] =
+    include_bytes!("../../tests/fixtures/private_update_position.bin");
+pub const PUBLIC_UPDATE_POSITION: &[u8] =
+    include_bytes!("../../tests/fixtures/public_update_position.bin");
+pub const WEENIE_ERROR: &[u8] = include_bytes!("../../tests/fixtures/weenie_error.bin");
+pub const WEENIE_ERROR_WITH_STRING: &[u8] =
+    include_bytes!("../../tests/fixtures/weenie_error_with_string.bin");

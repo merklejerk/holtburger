@@ -142,12 +142,43 @@ impl MessagePack for EmoteTextData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ServerMessageData {
+    pub message: String,
+}
+
+impl MessageUnpack for ServerMessageData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        Some(ServerMessageData { message })
+    }
+}
+
+impl MessagePack for ServerMessageData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.message);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
     use crate::protocol::messages::GameMessage;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_server_message_fixture() {
+        let expected = ServerMessageData {
+            message: "Welcome to Asheron's Call!".to_string(),
+        };
+        let mut buf = Vec::new();
+        expected.pack(&mut buf);
+        // String16 length (2) + "Welcome to Asheron's Call!" (26) + pads (0) = 28
+        assert_eq!(buf.len(), 28);
+
+        assert_pack_unpack_parity(&buf, &expected);
+    }
 
     #[test]
     fn test_hear_speech_fixture() {

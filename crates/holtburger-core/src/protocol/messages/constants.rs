@@ -47,12 +47,12 @@ pub mod opcodes {
     // pub const SET_STACK_SIZE: u32 = 0x0197;
     // /// S2C: Inventory object removal.
     // pub const INVENTORY_REMOVE_OBJECT: u32 = 0x0024;
-    // /// S2C: Position and movement update (all-in-one packet).
-    // pub const POSITION_AND_MOVEMENT: u32 = 0xF619;
-    // /// S2C: Object description event.
-    // pub const OBJ_DESC_EVENT: u32 = 0xF625;
-    // /// S2C: Force object description send.
-    // pub const FORCE_OBJECT_DESC_SEND: u32 = 0xF6EA;
+    /// S2C: Position and movement update (all-in-one packet).
+    pub const POSITION_AND_MOVEMENT: u32 = 0xF619;
+    /// S2C: Object description event.
+    pub const OBJ_DESC_EVENT: u32 = 0xF625;
+    /// S2C: Force object description send.
+    pub const FORCE_OBJECT_DESC_SEND: u32 = 0xF6EA;
 
     // --- Movement & Physics ---
     /// S2C: Update object motion (animations).
@@ -70,10 +70,10 @@ pub mod opcodes {
     /// S2C: Force player to teleport.
     /// Triggers the teleport screen and moves player to a new landblock.
     pub const PLAYER_TELEPORT: u32 = 0xF751;
-    // /// S2C: Update private position (for private houses/zones).
-    // pub const PRIVATE_UPDATE_POSITION: u32 = 0x02DB;
-    // /// S2C: Update public position.
-    // pub const PUBLIC_UPDATE_POSITION: u32 = 0x02DC;
+    /// S2C: Update private position (for private houses/zones).
+    pub const PRIVATE_UPDATE_POSITION: u32 = 0x02DB;
+    /// S2C: Update public position.
+    pub const PUBLIC_UPDATE_POSITION: u32 = 0x02DC;
 
     // --- Property Updates (Public/Private) ---
     /// S2C: Update private Int property.

@@ -1045,4 +1045,11 @@ mod tests {
         };
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
+
+    #[test]
+    fn test_player_create_fixture() {
+        let hex = "01000050";
+        let expected = PlayerCreateData { guid: 0x50000001 };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
 }

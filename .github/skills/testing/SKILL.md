@@ -23,7 +23,10 @@ For all protocol messages and structures, we maintain a "Gold Standard" of 100% 
 
 ## 🧪 Parity Testing Strategy
 
-We prioritize **Binary Parity** above all else. For protocol messages, we use the `assert_pack_unpack_parity` helper to ensure that our Rust implementation is 100% bit-compatible with official server captures or ACE dumps.
+We prioritize **Binary Parity** above all else. For protocol messages, we **MANDATORILY** use the `assert_pack_unpack_parity` helper to ensure that our Rust implementation is 100% bit-compatible with official server captures or ACE dumps.
+
+> [!CAUTION]
+> **DO NOT write manual assertions for pack/unpack parity.** If you find yourself writing `assert_eq!(msg.pack(), fixture)`, you are DRIFTING from the vibe. Use the helper. It ensures that the unpacked struct matches your `expected` values AND that the re-packed bytes are identical to the fixture.
 
 ### 1. Parity Tests (`test_..._fixture`)
 - Load a binary fixture from `fixtures`.

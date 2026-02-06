@@ -22,3 +22,13 @@ pub fn assert_pack_unpack_parity<T: MessagePack + MessageUnpack + Debug + Partia
         hex::encode(data)
     );
 }
+
+pub fn get_fixture(name: &str) -> Vec<u8> {
+    use std::fs;
+    use std::path::PathBuf;
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("tests");
+    path.push("fixtures");
+    path.push(name);
+    fs::read(path).expect(&format!("Fixture not found: {}", name))
+}

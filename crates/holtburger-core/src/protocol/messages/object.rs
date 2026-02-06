@@ -10,7 +10,7 @@ use crate::world::properties::{
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ObjectCreateData {
+pub struct ObjectDescriptionData {
     pub guid: u32,
     pub model_header: u8,
     pub physics_flags: PhysicsDescriptionFlag,
@@ -30,7 +30,7 @@ pub struct ObjectCreateData {
     pub wielder_id: Option<u32>,
 }
 
-impl MessageUnpack for ObjectCreateData {
+impl MessageUnpack for ObjectDescriptionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -317,7 +317,7 @@ impl MessageUnpack for ObjectCreateData {
             *offset += 4;
         }
 
-        Some(ObjectCreateData {
+        Some(ObjectDescriptionData {
             guid,
             model_header,
             physics_flags,
@@ -339,7 +339,7 @@ impl MessageUnpack for ObjectCreateData {
     }
 }
 
-impl MessagePack for ObjectCreateData {
+impl MessagePack for ObjectDescriptionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.guid).unwrap();
 
@@ -899,6 +899,14 @@ impl MessageUnpack for ParentEventData {
     }
 }
 
+impl MessagePack for ParentEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.child_guid.to_le_bytes());
+        buf.extend_from_slice(&self.parent_guid.to_le_bytes());
+        buf.extend_from_slice(&self.location.to_le_bytes());
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickupEventData {
     pub guid: u32,
@@ -915,6 +923,14 @@ impl MessageUnpack for PickupEventData {
         let success = LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0;
         *offset += 4;
         Some(PickupEventData { guid, success })
+    }
+}
+
+impl MessagePack for PickupEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.guid.to_le_bytes());
+        buf.write_u32::<LittleEndian>(if self.success { 1 } else { 0 })
+            .unwrap();
     }
 }
 
@@ -987,7 +1003,7 @@ mod tests {
             *seq = i as u16;
         }
 
-        let expected = ObjectCreateData {
+        let expected = ObjectDescriptionData {
             guid: 0x50000001,
             model_header: 1,
             physics_flags: PhysicsDescriptionFlag::POSITION | PhysicsDescriptionFlag::TIMESTAMPS,
@@ -1026,7 +1042,7 @@ mod tests {
             *seq = (100 + i) as u16;
         }
 
-        let expected = ObjectCreateData {
+        let expected = ObjectDescriptionData {
             guid: 0x50000002,
             model_header: 0x11,
             physics_flags: PhysicsDescriptionFlag::POSITION

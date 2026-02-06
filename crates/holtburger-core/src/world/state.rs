@@ -109,6 +109,32 @@ impl WorldState {
                     });
                 }
             }
+            GameMessage::PrivateUpdatePosition(data) => {
+                let guid = self.player.guid;
+                if let Some(entity) = self.entities.get_mut(guid) {
+                    let old_lb = entity.position.landblock_id;
+                    entity.position = data.pos;
+                    self.scene
+                        .update_entity(guid, old_lb, data.pos.landblock_id);
+                    events.push(WorldEvent::EntityMoved {
+                        guid,
+                        pos: data.pos,
+                    });
+                }
+            }
+            GameMessage::PublicUpdatePosition(data) => {
+                let guid = data.guid;
+                if let Some(entity) = self.entities.get_mut(guid) {
+                    let old_lb = entity.position.landblock_id;
+                    entity.position = data.pos;
+                    self.scene
+                        .update_entity(guid, old_lb, data.pos.landblock_id);
+                    events.push(WorldEvent::EntityMoved {
+                        guid,
+                        pos: data.pos,
+                    });
+                }
+            }
             GameMessage::GameEvent(ev) => {
                 if let GameEventData::PlayerDescription(data) = &ev.event {
                     let guid = data.guid;

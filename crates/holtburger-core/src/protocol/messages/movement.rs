@@ -1,8 +1,9 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 pub use crate::world::position::{PositionPack, WorldPosition};
 use byteorder::{ByteOrder, LittleEndian};
+use strum_macros::FromRepr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 #[repr(u8)]
 pub enum MovementType {
     Invalid = 0,
@@ -58,7 +59,7 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr)]
 #[repr(u32)]
 pub enum PositionType {
     Undef = 0,
@@ -215,37 +216,7 @@ impl MessageUnpack for PrivateUpdatePositionData {
         *offset += 1;
         let position_type_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let position_type = match position_type_raw {
-            0 => PositionType::Undef,
-            1 => PositionType::Location,
-            2 => PositionType::Destination,
-            3 => PositionType::Instantiation,
-            4 => PositionType::Sanctuary,
-            5 => PositionType::Home,
-            6 => PositionType::ActivationMove,
-            7 => PositionType::Target,
-            8 => PositionType::LinkedPortalOne,
-            9 => PositionType::LastPortal,
-            10 => PositionType::PortalStorm,
-            11 => PositionType::CrashAndTurn,
-            12 => PositionType::PortalSummonLoc,
-            13 => PositionType::HouseBoot,
-            14 => PositionType::LastOutsideDeath,
-            15 => PositionType::LinkedLifestone,
-            16 => PositionType::LinkedPortalTwo,
-            17 => PositionType::Save1,
-            18 => PositionType::Save2,
-            19 => PositionType::Save3,
-            20 => PositionType::Save4,
-            21 => PositionType::Save5,
-            22 => PositionType::Save6,
-            23 => PositionType::Save7,
-            24 => PositionType::Save8,
-            25 => PositionType::Save9,
-            26 => PositionType::RelativeDestination,
-            27 => PositionType::TeleportedCharacter,
-            _ => return None,
-        };
+        let position_type = PositionType::from_repr(position_type_raw)?;
         let pos = WorldPosition::unpack(data, offset)?;
         Some(PrivateUpdatePositionData {
             sequence,
@@ -282,37 +253,7 @@ impl MessageUnpack for PublicUpdatePositionData {
         *offset += 4;
         let position_type_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let position_type = match position_type_raw {
-            0 => PositionType::Undef,
-            1 => PositionType::Location,
-            2 => PositionType::Destination,
-            3 => PositionType::Instantiation,
-            4 => PositionType::Sanctuary,
-            5 => PositionType::Home,
-            6 => PositionType::ActivationMove,
-            7 => PositionType::Target,
-            8 => PositionType::LinkedPortalOne,
-            9 => PositionType::LastPortal,
-            10 => PositionType::PortalStorm,
-            11 => PositionType::CrashAndTurn,
-            12 => PositionType::PortalSummonLoc,
-            13 => PositionType::HouseBoot,
-            14 => PositionType::LastOutsideDeath,
-            15 => PositionType::LinkedLifestone,
-            16 => PositionType::LinkedPortalTwo,
-            17 => PositionType::Save1,
-            18 => PositionType::Save2,
-            19 => PositionType::Save3,
-            20 => PositionType::Save4,
-            21 => PositionType::Save5,
-            22 => PositionType::Save6,
-            23 => PositionType::Save7,
-            24 => PositionType::Save8,
-            25 => PositionType::Save9,
-            26 => PositionType::RelativeDestination,
-            27 => PositionType::TeleportedCharacter,
-            _ => return None,
-        };
+        let position_type = PositionType::from_repr(position_type_raw)?;
         let pos = WorldPosition::unpack(data, offset)?;
         Some(PublicUpdatePositionData {
             sequence,
@@ -575,18 +516,8 @@ impl MessageUnpack for MovementEventData {
             return None;
         }
         let movement_type_raw = data[*offset];
-        let movement_type = match movement_type_raw {
-            1 => MovementType::RawCommand,
-            2 => MovementType::InterpretedCommand,
-            3 => MovementType::StopRawCommand,
-            4 => MovementType::StopInterpretedCommand,
-            5 => MovementType::StopCompletely,
-            6 => MovementType::MoveToObject,
-            7 => MovementType::MoveToPosition,
-            8 => MovementType::TurnToObject,
-            9 => MovementType::TurnToHeading,
-            _ => MovementType::Invalid,
-        };
+        let movement_type =
+            MovementType::from_repr(movement_type_raw).unwrap_or(MovementType::Invalid);
         *offset += 1;
 
         if *offset + 1 > data.len() {
@@ -614,7 +545,14 @@ impl MessageUnpack for MovementEventData {
             MovementType::TurnToHeading => {
                 MovementTypeData::TurnToHeading(TurnToHeading::unpack(data, offset)?)
             }
-            _ => MovementTypeData::Invalid(MovementInvalid::unpack(data, offset, motion_flags)?),
+            MovementType::Invalid
+            | MovementType::RawCommand
+            | MovementType::InterpretedCommand
+            | MovementType::StopRawCommand
+            | MovementType::StopInterpretedCommand
+            | MovementType::StopCompletely => {
+                MovementTypeData::Invalid(MovementInvalid::unpack(data, offset, motion_flags)?)
+            }
         };
 
         Some(MovementEventData {
@@ -1295,9 +1233,7 @@ mod tests {
     use super::*;
     use crate::protocol::fixtures;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-    use crate::protocol::messages::{
-        GameMessage, game_action::GameActionData, opcodes::action_opcodes,
-    };
+    use crate::protocol::messages::{GameMessage, game_action::GameActionData};
 
     #[test]
     fn test_public_update_position_fixture() {
@@ -1438,7 +1374,7 @@ mod tests {
         let fixture = fixtures::MOVE_TO_STATE;
         let expected = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0x5678,
-            action_type: action_opcodes::MOVE_TO_STATE,
+
             data: GameActionData::MoveToState(Box::new(MoveToStateData {
                 sequence: 0x5678,
                 raw_motion_state: RawMotionState {
@@ -1538,7 +1474,7 @@ mod tests {
         let hex = "B1F700002A0000001BF60000000020410000803F000000400000404001000200030004007856341200000000";
         let expected = GameMessage::GameAction(Box::new(GameAction {
             sequence: 0x2A,
-            action_type: action_opcodes::JUMP,
+
             data: GameActionData::Jump(Box::new(JumpData {
                 sequence: 0x2A,
                 extent: 10.0,

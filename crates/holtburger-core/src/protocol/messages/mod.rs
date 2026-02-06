@@ -16,6 +16,7 @@ pub mod player;
 pub mod traits;
 pub mod transport;
 pub mod utils;
+pub mod world;
 
 #[cfg(test)]
 pub mod test_helpers;
@@ -38,3 +39,4 @@ pub use player::*;
 pub use traits::*;
 pub use transport::*;
 pub use utils::*;
+pub use world::*;

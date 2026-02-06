@@ -85,10 +85,10 @@ mod tests {
         assert_pack_unpack_parity::<PlaySoundData>(data, &expected);
 
         // Verify top-level dispatch
-        match GameMessage::unpack(fixtures::SOUND).unwrap() {
-            GameMessage::PlaySound(msg) => assert_eq!(*msg, expected),
-            _ => panic!("Expected PlaySound"),
-        }
+        let GameMessage::PlaySound(msg) = GameMessage::unpack(fixtures::SOUND).unwrap() else {
+            panic!("Expected PlaySound");
+        };
+        assert_eq!(*msg, expected);
     }
 
     #[test]
@@ -104,9 +104,10 @@ mod tests {
         assert_pack_unpack_parity::<PlayEffectData>(data, &expected);
 
         // Verify top-level dispatch
-        match GameMessage::unpack(fixtures::PLAY_EFFECT).unwrap() {
-            GameMessage::PlayEffect(msg) => assert_eq!(*msg, expected),
-            _ => panic!("Expected PlayEffect"),
-        }
+        let GameMessage::PlayEffect(msg) = GameMessage::unpack(fixtures::PLAY_EFFECT).unwrap()
+        else {
+            panic!("Expected PlayEffect");
+        };
+        assert_eq!(*msg, expected);
     }
 }

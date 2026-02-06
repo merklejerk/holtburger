@@ -234,12 +234,74 @@ impl MessagePack for ServerMessageData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TalkData {
+    pub text: String,
+}
+
+impl MessageUnpack for TalkData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let text = read_string16(data, offset)?;
+        Some(TalkData { text })
+    }
+}
+
+impl MessagePack for TalkData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.text);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TellActionData {
+    pub message: String,
+    pub target: String,
+}
+
+impl MessageUnpack for TellActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        let target = read_string16(data, offset)?;
+        Some(TellActionData { message, target })
+    }
+}
+
+impl MessagePack for TellActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.message);
+        write_string16(buf, &self.target);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
-    use crate::protocol::messages::GameMessage;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+
+    #[test]
+    fn test_talk_parity() {
+        let action = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 1,
+            data: GameActionData::Talk(Box::new(TalkData {
+                text: "Hello World".to_string(),
+            })),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_TALK, &action);
+    }
+
+    #[test]
+    fn test_tell_parity() {
+        let action = GameMessage::GameAction(Box::new(GameAction {
+            sequence: 2,
+            data: GameActionData::Tell(Box::new(TellActionData {
+                message: "Rizzler".to_string(),
+                target: "Bestie".to_string(),
+            })),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_TELL, &action);
+    }
 
     #[test]
     fn test_server_message_fixture() {
@@ -265,10 +327,11 @@ mod tests {
         let data = &fixtures::HEAR_SPEECH[4..];
         assert_pack_unpack_parity::<HearSpeechData>(data, &expected);
 
-        match GameMessage::unpack(fixtures::HEAR_SPEECH).unwrap() {
-            GameMessage::HearSpeech(msg) => assert_eq!(*msg, expected),
-            _ => panic!("Expected HearSpeech"),
-        }
+        let GameMessage::HearSpeech(msg) = GameMessage::unpack(fixtures::HEAR_SPEECH).unwrap()
+        else {
+            panic!("Expected HearSpeech");
+        };
+        assert_eq!(*msg, expected);
     }
 
     #[test]
@@ -283,10 +346,12 @@ mod tests {
         let data = &fixtures::HEAR_RANGED_SPEECH[4..];
         assert_pack_unpack_parity::<HearRangedSpeechData>(data, &expected);
 
-        match GameMessage::unpack(fixtures::HEAR_RANGED_SPEECH).unwrap() {
-            GameMessage::HearRangedSpeech(msg) => assert_eq!(*msg, expected),
-            _ => panic!("Expected HearRangedSpeech"),
-        }
+        let GameMessage::HearRangedSpeech(msg) =
+            GameMessage::unpack(fixtures::HEAR_RANGED_SPEECH).unwrap()
+        else {
+            panic!("Expected HearRangedSpeech");
+        };
+        assert_eq!(*msg, expected);
     }
 
     #[test]
@@ -299,10 +364,10 @@ mod tests {
         let data = &fixtures::EMOTE_TEXT[4..];
         assert_pack_unpack_parity::<EmoteTextData>(data, &expected);
 
-        match GameMessage::unpack(fixtures::EMOTE_TEXT).unwrap() {
-            GameMessage::EmoteText(msg) => assert_eq!(*msg, expected),
-            _ => panic!("Expected EmoteText"),
-        }
+        let GameMessage::EmoteText(msg) = GameMessage::unpack(fixtures::EMOTE_TEXT).unwrap() else {
+            panic!("Expected EmoteText");
+        };
+        assert_eq!(*msg, expected);
     }
 
     #[test]
@@ -315,9 +380,9 @@ mod tests {
         let data = &fixtures::SOUL_EMOTE[4..];
         assert_pack_unpack_parity::<SoulEmoteData>(data, &expected);
 
-        match GameMessage::unpack(fixtures::SOUL_EMOTE).unwrap() {
-            GameMessage::SoulEmote(msg) => assert_eq!(*msg, expected),
-            _ => panic!("Expected SoulEmote"),
-        }
+        let GameMessage::SoulEmote(msg) = GameMessage::unpack(fixtures::SOUL_EMOTE).unwrap() else {
+            panic!("Expected SoulEmote");
+        };
+        assert_eq!(*msg, expected);
     }
 }

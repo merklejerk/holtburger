@@ -1068,6 +1068,58 @@ impl MessagePack for UpdateSkillData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct UpdateSkillLevelData {
+    pub sequence: u8,
+    pub guid: Option<u32>,
+    pub skill: u32,
+    pub ranks: u32,
+}
+
+impl UpdateSkillLevelData {
+    pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
+        if *offset >= data.len() {
+            return None;
+        }
+        let sequence = data[*offset];
+        *offset += 1;
+
+        let mut guid = None;
+        if is_public {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            guid = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let skill = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let ranks = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
+
+        Some(UpdateSkillLevelData {
+            sequence,
+            guid,
+            skill,
+            ranks,
+        })
+    }
+}
+
+impl MessagePack for UpdateSkillLevelData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.push(self.sequence);
+        if let Some(guid) = self.guid {
+            buf.write_u32::<LittleEndian>(guid).unwrap();
+        }
+        buf.write_u32::<LittleEndian>(self.skill).unwrap();
+        buf.write_u32::<LittleEndian>(self.ranks).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct UpdateVitalData {
     pub sequence: u8,
     pub object_guid: Option<u32>,
@@ -1323,29 +1375,54 @@ mod tests {
     }
 
     #[test]
-    fn test_game_message_public_vital_current() {
+    fn test_game_message_private_vital_tick() {
         use crate::protocol::messages::GameMessage;
-        use crate::protocol::messages::opcodes;
+        use crate::protocol::messages::GameOpcode;
 
         let mut data = Vec::new();
-        data.extend_from_slice(&opcodes::PUBLIC_UPDATE_VITAL_CURRENT.to_le_bytes());
+        data.extend_from_slice(&(GameOpcode::PrivateUpdateVitalCurrent as u32).to_le_bytes());
         data.push(0x0C); // Sequence
-        data.extend_from_slice(&0x50000001u32.to_le_bytes()); // GUID
         data.extend_from_slice(&0x00000002u32.to_le_bytes()); // Vital (Health)
         data.extend_from_slice(&0x00000064u32.to_le_bytes()); // Current (100)
 
         let msg = GameMessage::unpack(&data).unwrap();
-        if let GameMessage::UpdateVitalCurrent(d) = msg {
-            assert_eq!(d.object_guid, Some(0x50000001));
+        if let GameMessage::UpdateAttribute2ndLevel(d) = msg {
+            assert_eq!(d.object_guid, None); // Private has no GUID
             assert_eq!(d.vital, 2);
             assert_eq!(d.current, 100);
 
             // Test packing back
-            let msg = GameMessage::UpdateVitalCurrent(d);
+            let msg = GameMessage::UpdateAttribute2ndLevel(d);
             let msg_packed = msg.pack();
             assert_eq!(msg_packed, data);
         } else {
-            panic!("Expected UpdateVitalCurrent");
+            panic!("Expected UpdateAttribute2ndLevel");
         }
+    }
+
+    #[test]
+    fn test_update_skill_level_private_parity() {
+        use crate::protocol::fixtures;
+        use crate::protocol::messages::GameMessage;
+        let expected = GameMessage::UpdateSkillLevel(Box::new(UpdateSkillLevelData {
+            sequence: 12,
+            guid: None,
+            skill: 10,
+            ranks: 50,
+        }));
+        assert_pack_unpack_parity(fixtures::UPDATE_SKILL_LEVEL_PRIVATE, &expected);
+    }
+
+    #[test]
+    fn test_update_skill_level_public_parity() {
+        use crate::protocol::fixtures;
+        use crate::protocol::messages::GameMessage;
+        let expected = GameMessage::UpdateSkillLevel(Box::new(UpdateSkillLevelData {
+            sequence: 12,
+            guid: Some(0x50000001),
+            skill: 10,
+            ranks: 50,
+        }));
+        assert_pack_unpack_parity(fixtures::UPDATE_SKILL_LEVEL_PUBLIC, &expected);
     }
 }

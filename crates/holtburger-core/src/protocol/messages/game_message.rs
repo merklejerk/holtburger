@@ -1,5 +1,5 @@
 use super::*;
-use byteorder::{ByteOrder, LittleEndian};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameMessage {
@@ -18,8 +18,9 @@ pub enum GameMessage {
 
     UpdateAttribute(Box<UpdateAttributeData>),
     UpdateSkill(Box<UpdateSkillData>),
+    UpdateSkillLevel(Box<UpdateSkillLevelData>),
     UpdateVital(Box<UpdateVitalData>),
-    UpdateVitalCurrent(Box<UpdateVitalCurrentData>),
+    UpdateAttribute2ndLevel(Box<UpdateVitalCurrentData>),
 
     HearSpeech(Box<HearSpeechData>),
     HearRangedSpeech(Box<HearRangedSpeechData>),
@@ -31,6 +32,8 @@ pub enum GameMessage {
     PlayerCreate(Box<PlayerCreateData>),
     UpdateObject(Box<ObjectDescriptionData>),
     ObjectDelete(Box<ObjectDeleteData>),
+    ObjDescEvent(Box<ObjDescEventData>),
+    ForceObjectDescSend(Box<ForceObjectDescSendData>),
     UpdatePosition(Box<UpdatePositionData>),
     PrivateUpdatePosition(Box<PrivateUpdatePositionData>),
     PublicUpdatePosition(Box<PublicUpdatePositionData>),
@@ -64,197 +67,203 @@ impl MessageUnpack for GameMessage {
         if *offset + 4 > data.len() {
             return None;
         }
-        let opcode = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let opcode_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
-        match opcode {
-            opcodes::CHARACTER_LIST => Some(GameMessage::CharacterList(Box::new(
+        let op = GameOpcode::from_repr(opcode_raw);
+        if op.is_none() {
+            log::warn!(
+                "<<< Unknown Opcode: {:08X} Data Len: {}",
+                opcode_raw,
+                data.len() - *offset
+            );
+            let remaining = data[*offset..].to_vec();
+            *offset = data.len();
+            return Some(GameMessage::Unknown(opcode_raw, remaining));
+        }
+
+        match op.unwrap() {
+            GameOpcode::CharacterList => Some(GameMessage::CharacterList(Box::new(
                 CharacterListData::unpack(data, offset)?,
             ))),
-            opcodes::CHARACTER_ENTER_WORLD_REQUEST => {
+            GameOpcode::CharacterEnterWorldRequest => {
                 Some(GameMessage::CharacterEnterWorldRequest(Box::new(
                     CharacterEnterWorldRequestData::unpack(data, offset)?,
                 )))
             }
-            opcodes::CHARACTER_ENTER_WORLD => Some(GameMessage::CharacterEnterWorld(Box::new(
+            GameOpcode::CharacterEnterWorld => Some(GameMessage::CharacterEnterWorld(Box::new(
                 CharacterEnterWorldData::unpack(data, offset)?,
             ))),
-            opcodes::SERVER_NAME => Some(GameMessage::ServerName(Box::new(
+            GameOpcode::ServerName => Some(GameMessage::ServerName(Box::new(
                 ServerNameData::unpack(data, offset)?,
             ))),
-            opcodes::CHARACTER_ENTER_WORLD_SERVER_READY => {
+            GameOpcode::CharacterEnterWorldServerReady => {
                 Some(GameMessage::CharacterEnterWorldServerReady)
             }
-            opcodes::DDD_INTERROGATION => Some(GameMessage::DddInterrogation),
-            opcodes::DDD_INTERROGATION_RESPONSE => Some(GameMessage::DddInterrogationResponse(
+            GameOpcode::DddInterrogation => Some(GameMessage::DddInterrogation),
+            GameOpcode::DddInterrogationResponse => Some(GameMessage::DddInterrogationResponse(
                 Box::new(DddInterrogationResponseData::unpack(data, offset)?),
             )),
-            opcodes::CHARACTER_ERROR => Some(GameMessage::CharacterError(Box::new(
+            GameOpcode::CharacterError => Some(GameMessage::CharacterError(Box::new(
                 CharacterErrorData::unpack(data, offset)?,
             ))),
-            opcodes::BOOT_ACCOUNT => Some(GameMessage::BootAccount(Box::new(
+            GameOpcode::BootAccount => Some(GameMessage::BootAccount(Box::new(
                 BootAccountData::unpack(data, offset)?,
             ))),
-            opcodes::SERVER_MESSAGE => Some(GameMessage::ServerMessage(Box::new(
+            GameOpcode::ServerMessage => Some(GameMessage::ServerMessage(Box::new(
                 ServerMessageData::unpack(data, offset)?,
             ))),
-            opcodes::GAME_ACTION => Some(GameMessage::GameAction(Box::new(GameAction::unpack(
+            GameOpcode::GameAction => Some(GameMessage::GameAction(Box::new(GameAction::unpack(
                 data, offset,
             )?))),
-
-            // GameEvent wrapper (0xF7B0)
-            opcodes::GAME_EVENT => Some(GameMessage::GameEvent(Box::new(GameEvent::unpack(
+            GameOpcode::GameEvent => Some(GameMessage::GameEvent(Box::new(GameEvent::unpack(
                 data, offset,
             )?))),
-
-            opcodes::HEAR_SPEECH => Some(GameMessage::HearSpeech(Box::new(
+            GameOpcode::HearSpeech => Some(GameMessage::HearSpeech(Box::new(
                 HearSpeechData::unpack(data, offset)?,
             ))),
-            opcodes::HEAR_RANGED_SPEECH => Some(GameMessage::HearRangedSpeech(Box::new(
+            GameOpcode::HearRangedSpeech => Some(GameMessage::HearRangedSpeech(Box::new(
                 HearRangedSpeechData::unpack(data, offset)?,
             ))),
-            opcodes::EMOTE_TEXT => Some(GameMessage::EmoteText(Box::new(EmoteTextData::unpack(
+            GameOpcode::EmoteText => Some(GameMessage::EmoteText(Box::new(EmoteTextData::unpack(
                 data, offset,
             )?))),
-            opcodes::SOUL_EMOTE => Some(GameMessage::SoulEmote(Box::new(SoulEmoteData::unpack(
+            GameOpcode::SoulEmote => Some(GameMessage::SoulEmote(Box::new(SoulEmoteData::unpack(
                 data, offset,
             )?))),
-            opcodes::PRIVATE_UPDATE_ATTRIBUTE => Some(GameMessage::UpdateAttribute(Box::new(
+            GameOpcode::PrivateUpdateAttribute => Some(GameMessage::UpdateAttribute(Box::new(
                 UpdateAttributeData::unpack_private(data, offset)?,
             ))),
-            opcodes::PUBLIC_UPDATE_ATTRIBUTE => Some(GameMessage::UpdateAttribute(Box::new(
+            GameOpcode::PublicUpdateAttribute => Some(GameMessage::UpdateAttribute(Box::new(
                 UpdateAttributeData::unpack_public(data, offset)?,
             ))),
-            opcodes::PRIVATE_UPDATE_SKILL => Some(GameMessage::UpdateSkill(Box::new(
+            GameOpcode::PrivateUpdateSkill => Some(GameMessage::UpdateSkill(Box::new(
                 UpdateSkillData::unpack_private(data, offset)?,
             ))),
-            opcodes::PUBLIC_UPDATE_SKILL => Some(GameMessage::UpdateSkill(Box::new(
+            GameOpcode::PublicUpdateSkill => Some(GameMessage::UpdateSkill(Box::new(
                 UpdateSkillData::unpack_public(data, offset)?,
             ))),
-            opcodes::PRIVATE_UPDATE_VITAL => Some(GameMessage::UpdateVital(Box::new(
+            GameOpcode::PrivateUpdateVital => Some(GameMessage::UpdateVital(Box::new(
                 UpdateVitalData::unpack_private(data, offset)?,
             ))),
-            opcodes::PUBLIC_UPDATE_VITAL => Some(GameMessage::UpdateVital(Box::new(
+            GameOpcode::PublicUpdateVital => Some(GameMessage::UpdateVital(Box::new(
                 UpdateVitalData::unpack_public(data, offset)?,
             ))),
-            opcodes::PRIVATE_UPDATE_VITAL_CURRENT => Some(GameMessage::UpdateVitalCurrent(
+            GameOpcode::PrivateUpdateVitalCurrent => Some(GameMessage::UpdateAttribute2ndLevel(
                 Box::new(UpdateVitalCurrentData::unpack_private(data, offset)?),
             )),
-            opcodes::PUBLIC_UPDATE_VITAL_CURRENT => Some(GameMessage::UpdateVitalCurrent(
-                Box::new(UpdateVitalCurrentData::unpack_public(data, offset)?),
-            )),
-
-            opcodes::OBJECT_CREATE => Some(GameMessage::ObjectCreate(Box::new(
+            GameOpcode::ObjectCreate => Some(GameMessage::ObjectCreate(Box::new(
                 ObjectDescriptionData::unpack(data, offset)?,
             ))),
-            opcodes::PLAYER_CREATE => Some(GameMessage::PlayerCreate(Box::new(
+            GameOpcode::PlayerCreate => Some(GameMessage::PlayerCreate(Box::new(
                 PlayerCreateData::unpack(data, offset)?,
             ))),
-            opcodes::UPDATE_OBJECT => Some(GameMessage::UpdateObject(Box::new(
+            GameOpcode::UpdateObject => Some(GameMessage::UpdateObject(Box::new(
                 ObjectDescriptionData::unpack(data, offset)?,
             ))),
-            opcodes::OBJECT_DELETE => Some(GameMessage::ObjectDelete(Box::new(
+            GameOpcode::ObjectDelete => Some(GameMessage::ObjectDelete(Box::new(
                 ObjectDeleteData::unpack(data, offset)?,
             ))),
-            opcodes::UPDATE_POSITION => Some(GameMessage::UpdatePosition(Box::new(
+            GameOpcode::UpdatePosition => Some(GameMessage::UpdatePosition(Box::new(
                 UpdatePositionData::unpack(data, offset)?,
             ))),
-            opcodes::PRIVATE_UPDATE_POSITION => Some(GameMessage::PrivateUpdatePosition(Box::new(
-                PrivateUpdatePositionData::unpack(data, offset)?,
-            ))),
-            opcodes::PUBLIC_UPDATE_POSITION => Some(GameMessage::PublicUpdatePosition(Box::new(
+            GameOpcode::PrivateUpdatePosition => Some(GameMessage::PrivateUpdatePosition(
+                Box::new(PrivateUpdatePositionData::unpack(data, offset)?),
+            )),
+            GameOpcode::PublicUpdatePosition => Some(GameMessage::PublicUpdatePosition(Box::new(
                 PublicUpdatePositionData::unpack(data, offset)?,
             ))),
-            opcodes::VECTOR_UPDATE => Some(GameMessage::VectorUpdate(Box::new(
+            GameOpcode::VectorUpdate => Some(GameMessage::VectorUpdate(Box::new(
                 VectorUpdateData::unpack(data, offset)?,
             ))),
-            opcodes::UPDATE_MOTION => Some(GameMessage::UpdateMotion(Box::new(
+            GameOpcode::UpdateMotion => Some(GameMessage::UpdateMotion(Box::new(
                 MovementEventData::unpack(data, offset)?,
             ))),
-            opcodes::AUTONOMOUS_POSITION => Some(GameMessage::AutonomousPosition(Box::new(
+            GameOpcode::AutonomousPosition => Some(GameMessage::AutonomousPosition(Box::new(
                 AutonomousPositionData::unpack(data, offset)?,
             ))),
-            opcodes::AUTONOMY_LEVEL => Some(GameMessage::AutonomyLevel(Box::new(
+            GameOpcode::AutonomyLevel => Some(GameMessage::AutonomyLevel(Box::new(
                 AutonomyLevelData::unpack(data, offset)?,
             ))),
-            opcodes::PARENT_EVENT => Some(GameMessage::ParentEvent(Box::new(
+            GameOpcode::ParentEvent => Some(GameMessage::ParentEvent(Box::new(
                 ParentEventData::unpack(data, offset)?,
             ))),
-            opcodes::PICKUP_EVENT => Some(GameMessage::PickupEvent(Box::new(
+            GameOpcode::PickupEvent => Some(GameMessage::PickupEvent(Box::new(
                 PickupEventData::unpack(data, offset)?,
             ))),
-            opcodes::INVENTORY_REMOVE_OBJECT => Some(GameMessage::InventoryRemoveObject(Box::new(
-                InventoryRemoveObjectData::unpack(data, offset)?,
-            ))),
-            opcodes::SET_STACK_SIZE => Some(GameMessage::SetStackSize(Box::new(
+            GameOpcode::InventoryRemoveObject => Some(GameMessage::InventoryRemoveObject(
+                Box::new(InventoryRemoveObjectData::unpack(data, offset)?),
+            )),
+            GameOpcode::SetStackSize => Some(GameMessage::SetStackSize(Box::new(
                 SetStackSizeData::unpack(data, offset)?,
             ))),
-            opcodes::SET_STATE => Some(GameMessage::SetState(Box::new(SetStateData::unpack(
+            GameOpcode::SetState => Some(GameMessage::SetState(Box::new(SetStateData::unpack(
                 data, offset,
             )?))),
-            opcodes::PLAYER_TELEPORT => Some(GameMessage::PlayerTeleport(Box::new(
+            GameOpcode::PlayerTeleport => Some(GameMessage::PlayerTeleport(Box::new(
                 PlayerTeleportData::unpack(data, offset)?,
             ))),
-            opcodes::SOUND => Some(GameMessage::PlaySound(Box::new(PlaySoundData::unpack(
+            GameOpcode::Sound => Some(GameMessage::PlaySound(Box::new(PlaySoundData::unpack(
                 data, offset,
             )?))),
-            opcodes::PLAY_EFFECT => Some(GameMessage::PlayEffect(Box::new(
+            GameOpcode::PlayEffect => Some(GameMessage::PlayEffect(Box::new(
                 PlayEffectData::unpack(data, offset)?,
             ))),
-
-            opcodes::PRIVATE_UPDATE_PROPERTY_INT => Some(GameMessage::UpdatePropertyInt(Box::new(
+            GameOpcode::PrivateUpdatePropertyInt => Some(GameMessage::UpdatePropertyInt(Box::new(
                 UpdatePropertyIntData::unpack(data, offset, false)?,
             ))),
-            opcodes::PUBLIC_UPDATE_PROPERTY_INT => Some(GameMessage::UpdatePropertyInt(Box::new(
+            GameOpcode::PublicUpdatePropertyInt => Some(GameMessage::UpdatePropertyInt(Box::new(
                 UpdatePropertyIntData::unpack(data, offset, true)?,
             ))),
-            opcodes::PRIVATE_UPDATE_PROPERTY_INT64 => Some(GameMessage::UpdatePropertyInt64(
+            GameOpcode::PrivateUpdatePropertyInt64 => Some(GameMessage::UpdatePropertyInt64(
                 Box::new(UpdatePropertyInt64Data::unpack(data, offset, false)?),
             )),
-            opcodes::PUBLIC_UPDATE_PROPERTY_INT64 => Some(GameMessage::UpdatePropertyInt64(
+            GameOpcode::PublicUpdatePropertyInt64 => Some(GameMessage::UpdatePropertyInt64(
                 Box::new(UpdatePropertyInt64Data::unpack(data, offset, true)?),
             )),
-            opcodes::PRIVATE_UPDATE_PROPERTY_BOOL => Some(GameMessage::UpdatePropertyBool(
+            GameOpcode::PrivateUpdatePropertyBool => Some(GameMessage::UpdatePropertyBool(
                 Box::new(UpdatePropertyBoolData::unpack(data, offset, false)?),
             )),
-            opcodes::PUBLIC_UPDATE_PROPERTY_BOOL => Some(GameMessage::UpdatePropertyBool(
+            GameOpcode::PublicUpdatePropertyBool => Some(GameMessage::UpdatePropertyBool(
                 Box::new(UpdatePropertyBoolData::unpack(data, offset, true)?),
             )),
-            opcodes::PRIVATE_UPDATE_PROPERTY_FLOAT => Some(GameMessage::UpdatePropertyFloat(
+            GameOpcode::PrivateUpdatePropertyFloat => Some(GameMessage::UpdatePropertyFloat(
                 Box::new(UpdatePropertyFloatData::unpack(data, offset, false)?),
             )),
-            opcodes::PUBLIC_UPDATE_PROPERTY_FLOAT => Some(GameMessage::UpdatePropertyFloat(
+            GameOpcode::PublicUpdatePropertyFloat => Some(GameMessage::UpdatePropertyFloat(
                 Box::new(UpdatePropertyFloatData::unpack(data, offset, true)?),
             )),
-            opcodes::PRIVATE_UPDATE_PROPERTY_STRING => Some(GameMessage::UpdatePropertyString(
+            GameOpcode::PrivateUpdatePropertyString => Some(GameMessage::UpdatePropertyString(
                 Box::new(UpdatePropertyStringData::unpack(data, offset, false)?),
             )),
-            opcodes::PUBLIC_UPDATE_PROPERTY_STRING => Some(GameMessage::UpdatePropertyString(
+            GameOpcode::PublicUpdatePropertyString => Some(GameMessage::UpdatePropertyString(
                 Box::new(UpdatePropertyStringData::unpack(data, offset, true)?),
             )),
-            opcodes::PRIVATE_UPDATE_PROPERTY_DID => Some(GameMessage::UpdatePropertyDataId(
+            GameOpcode::PrivateUpdatePropertyDid => Some(GameMessage::UpdatePropertyDataId(
                 Box::new(UpdatePropertyDataIdData::unpack(data, offset, false)?),
             )),
-            opcodes::PUBLIC_UPDATE_PROPERTY_DID => Some(GameMessage::UpdatePropertyDataId(
+            GameOpcode::PublicUpdatePropertyDid => Some(GameMessage::UpdatePropertyDataId(
                 Box::new(UpdatePropertyDataIdData::unpack(data, offset, true)?),
             )),
-            opcodes::PRIVATE_UPDATE_PROPERTY_IID => Some(GameMessage::UpdatePropertyInstanceId(
+            GameOpcode::PrivateUpdatePropertyIid => Some(GameMessage::UpdatePropertyInstanceId(
                 Box::new(UpdatePropertyInstanceIdData::unpack(data, offset, false)?),
             )),
-            opcodes::PUBLIC_UPDATE_PROPERTY_IID => Some(GameMessage::UpdatePropertyInstanceId(
+            GameOpcode::PublicUpdatePropertyIid => Some(GameMessage::UpdatePropertyInstanceId(
                 Box::new(UpdatePropertyInstanceIdData::unpack(data, offset, true)?),
             )),
 
-            _ => {
-                log::warn!(
-                    "<<< Unknown Opcode: {:08X} Data Len: {}",
-                    opcode,
-                    data.len() - *offset
-                );
-                let remaining = data[*offset..].to_vec();
-                *offset = data.len();
-                Some(GameMessage::Unknown(opcode, remaining))
-            }
+            GameOpcode::ObjDescEvent => Some(GameMessage::ObjDescEvent(Box::new(
+                ObjDescEventData::unpack(data, offset)?,
+            ))),
+            GameOpcode::ForceObjectDescSend => Some(GameMessage::ForceObjectDescSend(Box::new(
+                ForceObjectDescSendData::unpack(data, offset)?,
+            ))),
+            GameOpcode::PrivateUpdateSkillLevel => Some(GameMessage::UpdateSkillLevel(Box::new(
+                UpdateSkillLevelData::unpack(data, offset, false)?,
+            ))),
+            GameOpcode::PublicUpdateSkillLevel => Some(GameMessage::UpdateSkillLevel(Box::new(
+                UpdateSkillLevelData::unpack(data, offset, true)?,
+            ))),
         }
     }
 }
@@ -263,249 +272,299 @@ impl MessagePack for GameMessage {
     fn pack(&self, buf: &mut Vec<u8>) {
         match self {
             GameMessage::CharacterList(data) => {
-                buf.extend_from_slice(&0xF658u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterList as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::CharacterEnterWorldRequest(data) => {
-                buf.extend_from_slice(&0xF7C8u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterEnterWorldRequest as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::CharacterEnterWorld(data) => {
-                buf.extend_from_slice(&0xF657u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterEnterWorld as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::CharacterEnterWorldServerReady => {
-                buf.extend_from_slice(&0xF7DFu32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterEnterWorldServerReady as u32)
+                    .unwrap();
             }
             GameMessage::ServerName(data) => {
-                buf.extend_from_slice(&0xF7E1u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::ServerName as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::DddInterrogationResponse(data) => {
-                buf.extend_from_slice(&0xF7E6u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::DddInterrogationResponse as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::DddInterrogation => {
-                buf.extend_from_slice(&0xF7E5u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::DddInterrogation as u32)
+                    .unwrap();
             }
             GameMessage::CharacterError(data) => {
-                buf.extend_from_slice(&0xF659u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterError as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::BootAccount(data) => {
-                buf.extend_from_slice(&opcodes::BOOT_ACCOUNT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::BootAccount as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::ServerMessage(data) => {
-                buf.extend_from_slice(&0xF7E0u32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::ServerMessage as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::GameAction(data) => {
-                buf.extend_from_slice(&opcodes::GAME_ACTION.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::GameAction as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::GameEvent(data) => {
-                buf.extend_from_slice(&opcodes::GAME_EVENT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::GameEvent as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::HearSpeech(data) => {
-                buf.extend_from_slice(&opcodes::HEAR_SPEECH.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::HearSpeech as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::HearRangedSpeech(data) => {
-                buf.extend_from_slice(&0x02BCu32.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::HearRangedSpeech as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::EmoteText(data) => {
-                buf.extend_from_slice(&opcodes::EMOTE_TEXT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::EmoteText as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::SoulEmote(data) => {
-                buf.extend_from_slice(&opcodes::SOUL_EMOTE.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::SoulEmote as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::PlaySound(data) => {
-                buf.extend_from_slice(&opcodes::SOUND.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::Sound as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::PlayEffect(data) => {
-                buf.extend_from_slice(&opcodes::PLAY_EFFECT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayEffect as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::SetState(data) => {
-                buf.extend_from_slice(&opcodes::SET_STATE.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::SetState as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::InventoryRemoveObject(data) => {
-                buf.extend_from_slice(&opcodes::INVENTORY_REMOVE_OBJECT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::InventoryRemoveObject as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::SetStackSize(data) => {
-                buf.extend_from_slice(&opcodes::SET_STACK_SIZE.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::SetStackSize as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::PlayerTeleport(data) => {
-                buf.extend_from_slice(&opcodes::PLAYER_TELEPORT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayerTeleport as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::AutonomousPosition(data) => {
-                buf.extend_from_slice(&opcodes::AUTONOMOUS_POSITION.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::AutonomousPosition as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::AutonomyLevel(data) => {
-                buf.extend_from_slice(&opcodes::AUTONOMY_LEVEL.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::AutonomyLevel as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::PrivateUpdatePosition(data) => {
-                buf.extend_from_slice(&opcodes::PRIVATE_UPDATE_POSITION.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePosition as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::PublicUpdatePosition(data) => {
-                buf.extend_from_slice(&opcodes::PUBLIC_UPDATE_POSITION.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePosition as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::VectorUpdate(data) => {
-                buf.extend_from_slice(&opcodes::VECTOR_UPDATE.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::VectorUpdate as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePosition(data) => {
-                buf.extend_from_slice(&opcodes::UPDATE_POSITION.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::UpdatePosition as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdateObject(data) => {
-                buf.extend_from_slice(&opcodes::UPDATE_OBJECT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::UpdateObject as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::ObjectCreate(data) => {
-                buf.extend_from_slice(&opcodes::OBJECT_CREATE.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::ObjectCreate as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::PlayerCreate(data) => {
-                buf.extend_from_slice(&opcodes::PLAYER_CREATE.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayerCreate as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::ObjectDelete(data) => {
-                buf.extend_from_slice(&opcodes::OBJECT_DELETE.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::ObjectDelete as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdateAttribute(data) => {
                 let opcode = if data.object_guid.is_some() {
-                    opcodes::PUBLIC_UPDATE_ATTRIBUTE
+                    GameOpcode::PublicUpdateAttribute
                 } else {
-                    opcodes::PRIVATE_UPDATE_ATTRIBUTE
+                    GameOpcode::PrivateUpdateAttribute
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdateSkill(data) => {
                 let opcode = if data.object_guid.is_some() {
-                    opcodes::PUBLIC_UPDATE_SKILL
+                    GameOpcode::PublicUpdateSkill
                 } else {
-                    opcodes::PRIVATE_UPDATE_SKILL
+                    GameOpcode::PrivateUpdateSkill
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
+                data.pack(buf);
+            }
+            GameMessage::UpdateSkillLevel(data) => {
+                let opcode = if data.guid.is_some() {
+                    GameOpcode::PublicUpdateSkillLevel
+                } else {
+                    GameOpcode::PrivateUpdateSkillLevel
+                };
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdateVital(data) => {
                 let opcode = if data.object_guid.is_some() {
-                    opcodes::PUBLIC_UPDATE_VITAL
+                    GameOpcode::PublicUpdateVital
                 } else {
-                    opcodes::PRIVATE_UPDATE_VITAL
+                    GameOpcode::PrivateUpdateVital
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdateVitalCurrent(data) => {
-                let opcode = if data.object_guid.is_some() {
-                    opcodes::PUBLIC_UPDATE_VITAL_CURRENT
-                } else {
-                    opcodes::PRIVATE_UPDATE_VITAL_CURRENT
-                };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+            GameMessage::UpdateAttribute2ndLevel(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateVitalCurrent as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdateMotion(data) => {
-                buf.extend_from_slice(&opcodes::UPDATE_MOTION.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::UpdateMotion as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePropertyInt(data) => {
                 let opcode = if data.is_public {
-                    opcodes::PUBLIC_UPDATE_PROPERTY_INT
+                    GameOpcode::PublicUpdatePropertyInt
                 } else {
-                    opcodes::PRIVATE_UPDATE_PROPERTY_INT
+                    GameOpcode::PrivateUpdatePropertyInt
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePropertyInt64(data) => {
                 let opcode = if data.is_public {
-                    opcodes::PUBLIC_UPDATE_PROPERTY_INT64
+                    GameOpcode::PublicUpdatePropertyInt64
                 } else {
-                    opcodes::PRIVATE_UPDATE_PROPERTY_INT64
+                    GameOpcode::PrivateUpdatePropertyInt64
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePropertyBool(data) => {
                 let opcode = if data.is_public {
-                    opcodes::PUBLIC_UPDATE_PROPERTY_BOOL
+                    GameOpcode::PublicUpdatePropertyBool
                 } else {
-                    opcodes::PRIVATE_UPDATE_PROPERTY_BOOL
+                    GameOpcode::PrivateUpdatePropertyBool
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePropertyFloat(data) => {
                 let opcode = if data.is_public {
-                    opcodes::PUBLIC_UPDATE_PROPERTY_FLOAT
+                    GameOpcode::PublicUpdatePropertyFloat
                 } else {
-                    opcodes::PRIVATE_UPDATE_PROPERTY_FLOAT
+                    GameOpcode::PrivateUpdatePropertyFloat
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePropertyString(data) => {
                 let opcode = if data.is_public {
-                    opcodes::PUBLIC_UPDATE_PROPERTY_STRING
+                    GameOpcode::PublicUpdatePropertyString
                 } else {
-                    opcodes::PRIVATE_UPDATE_PROPERTY_STRING
+                    GameOpcode::PrivateUpdatePropertyString
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePropertyDataId(data) => {
                 let opcode = if data.is_public {
-                    opcodes::PUBLIC_UPDATE_PROPERTY_DID
+                    GameOpcode::PublicUpdatePropertyDid
                 } else {
-                    opcodes::PRIVATE_UPDATE_PROPERTY_DID
+                    GameOpcode::PrivateUpdatePropertyDid
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdatePropertyInstanceId(data) => {
                 let opcode = if data.is_public {
-                    opcodes::PUBLIC_UPDATE_PROPERTY_IID
+                    GameOpcode::PublicUpdatePropertyIid
                 } else {
-                    opcodes::PRIVATE_UPDATE_PROPERTY_IID
+                    GameOpcode::PrivateUpdatePropertyIid
                 };
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
                 data.pack(buf);
             }
             GameMessage::UpdateHealth(data) => {
-                // GameEvent wrapper
-                buf.extend_from_slice(&opcodes::GAME_EVENT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::GameEvent as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::ParentEvent(data) => {
-                buf.extend_from_slice(&opcodes::PARENT_EVENT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::ParentEvent as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::PickupEvent(data) => {
-                buf.extend_from_slice(&opcodes::PICKUP_EVENT.to_le_bytes());
+                buf.write_u32::<LittleEndian>(GameOpcode::PickupEvent as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::ObjDescEvent(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::ObjDescEvent as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::ForceObjectDescSend(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::ForceObjectDescSend as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::Unknown(opcode, data) => {
-                buf.extend_from_slice(&opcode.to_le_bytes());
+                buf.write_u32::<LittleEndian>(*opcode).unwrap();
                 buf.extend_from_slice(data);
             }
         }

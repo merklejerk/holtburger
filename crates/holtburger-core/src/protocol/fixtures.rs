@@ -44,3 +44,20 @@ pub const WEENIE_ERROR_WITH_STRING: &[u8] =
     include_bytes!("../../tests/fixtures/weenie_error_with_string.bin");
 pub const PLAYER_DESCRIPTION_FULL: &[u8] =
     include_bytes!("../../tests/fixtures/player_description_full.bin");
+pub const ACTION_TALK: &[u8] = include_bytes!("../../tests/fixtures/action_talk.bin");
+pub const ACTION_TELL: &[u8] = include_bytes!("../../tests/fixtures/action_tell.bin");
+pub const ACTION_PING_REQUEST: &[u8] =
+    include_bytes!("../../tests/fixtures/action_ping_request.bin");
+pub const ACTION_DROP_ITEM: &[u8] = include_bytes!("../../tests/fixtures/action_drop_item.bin");
+pub const ACTION_PUT_ITEM: &[u8] = include_bytes!("../../tests/fixtures/action_put_item.bin");
+pub const ACTION_USE: &[u8] = include_bytes!("../../tests/fixtures/action_use.bin");
+pub const ACTION_IDENTIFY: &[u8] = include_bytes!("../../tests/fixtures/action_identify.bin");
+pub const ACTION_LOGIN_COMPLETE: &[u8] =
+    include_bytes!("../../tests/fixtures/action_login_complete.bin");
+pub const OBJ_DESC_EVENT: &[u8] = include_bytes!("../../tests/fixtures/obj_desc_event.bin");
+pub const FORCE_OBJ_DESC_SEND: &[u8] =
+    include_bytes!("../../tests/fixtures/force_obj_desc_send.bin");
+pub const UPDATE_SKILL_LEVEL_PRIVATE: &[u8] =
+    include_bytes!("../../tests/fixtures/update_skill_level_private.bin");
+pub const UPDATE_SKILL_LEVEL_PUBLIC: &[u8] =
+    include_bytes!("../../tests/fixtures/update_skill_level_public.bin");

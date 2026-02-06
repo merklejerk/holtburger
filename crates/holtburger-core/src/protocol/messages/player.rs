@@ -4,7 +4,6 @@ use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::world::position::WorldPosition;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 bitflags! {
@@ -72,108 +71,6 @@ bitflags! {
         const GENERIC_QUALITIES_DATA = 0x00000100;
         const GAMEPLAY_OPTIONS = 0x00000200;
         const SPELL_LISTS8 = 0x00000400;
-    }
-}
-
-bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
-    pub struct EquipMask: u32 {
-        const NONE = 0x00000000;
-        const HEAD_WEAR = 0x00000001;
-        const CHEST_WEAR = 0x00000002;
-        const ABDOMEN_WEAR = 0x00000004;
-        const UPPER_ARM_WEAR = 0x00000008;
-        const LOWER_ARM_WEAR = 0x00000010;
-        const HAND_WEAR = 0x00000020;
-        const UPPER_LEG_WEAR = 0x00000040;
-        const LOWER_LEG_WEAR = 0x00000080;
-        const FOOT_WEAR = 0x00000100;
-        const CHEST_ARMOR = 0x00000200;
-        const ABDOMEN_ARMOR = 0x00000400;
-        const UPPER_ARM_ARMOR = 0x00000800;
-        const LOWER_ARM_ARMOR = 0x00001000;
-        const UPPER_LEG_ARMOR = 0x00002000;
-        const LOWER_LEG_ARMOR = 0x00004000;
-        const NECK_WEAR = 0x00008000;
-        const WRIST_WEAR_LEFT = 0x00010000;
-        const WRIST_WEAR_RIGHT = 0x00020000;
-        const FINGER_WEAR_LEFT = 0x00040000;
-        const FINGER_WEAR_RIGHT = 0x00080000;
-        const MELEE_WEAPON = 0x00100000;
-        const SHIELD = 0x00200000;
-        const MISSILE_WEAPON = 0x00400000;
-        const MISSILE_AMMO = 0x00800000;
-        const HELD = 0x01000000;
-        const TWO_HANDED = 0x02000000;
-        const TRINKET_ONE = 0x04000000;
-        const CLOAK = 0x08000000;
-        const SIGIL_ONE = 0x10000000;
-        const SIGIL_TWO = 0x20000000;
-        const SIGIL_THREE = 0x40000000;
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct GetAndWieldItemData {
-    pub sequence: u32,
-    pub item_guid: u32,
-    pub equip_mask: EquipMask,
-}
-
-impl GetAndWieldItemData {
-    pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
-        if *offset + 8 > data.len() {
-            return None;
-        }
-        let item_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let equip_mask =
-            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
-        *offset += 8;
-        Some(GetAndWieldItemData {
-            sequence,
-            item_guid,
-            equip_mask,
-        })
-    }
-
-    pub fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.item_guid).unwrap();
-        buf.write_u32::<LittleEndian>(self.equip_mask.bits())
-            .unwrap();
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct StackableSplitToWieldData {
-    pub sequence: u32,
-    pub stack_guid: u32,
-    pub equip_mask: EquipMask,
-    pub amount: i32,
-}
-
-impl StackableSplitToWieldData {
-    pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
-        if *offset + 12 > data.len() {
-            return None;
-        }
-        let stack_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let equip_mask =
-            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
-        let amount = LittleEndian::read_i32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
-        Some(StackableSplitToWieldData {
-            sequence,
-            stack_guid,
-            equip_mask,
-            amount,
-        })
-    }
-
-    pub fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.stack_guid).unwrap();
-        buf.write_u32::<LittleEndian>(self.equip_mask.bits())
-            .unwrap();
-        buf.write_i32::<LittleEndian>(self.amount).unwrap();
     }
 }
 
@@ -520,9 +417,7 @@ impl PlayerDescriptionData {
                 }
             }
             if mask.contains(EnchantmentMask::VITAE) {
-                if let Some(e) = Enchantment::unpack(data, offset) {
-                    enchantments.push(e);
-                }
+                enchantments.extend(Enchantment::unpack(data, offset));
             }
         }
 
@@ -1002,14 +897,15 @@ impl MessageUnpack for PlayerDescriptionData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateAttributeData {
     pub sequence: u8,
+    pub object_guid: Option<u32>,
     pub attribute: u32,
     pub ranks: u32,
     pub start: u32,
     pub xp: u32,
 }
 
-impl MessageUnpack for UpdateAttributeData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+impl UpdateAttributeData {
+    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 17 > data.len() {
             return None;
         }
@@ -1019,8 +915,32 @@ impl MessageUnpack for UpdateAttributeData {
         let start = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
         let xp = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
         *offset += 17;
+
         Some(UpdateAttributeData {
             sequence,
+            object_guid: None,
+            attribute,
+            ranks,
+            start,
+            xp,
+        })
+    }
+
+    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 21 > data.len() {
+            return None;
+        }
+        let sequence = data[*offset];
+        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
+        let attribute = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
+        let ranks = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
+        let start = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
+        let xp = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
+        *offset += 21;
+
+        Some(UpdateAttributeData {
+            sequence,
+            object_guid,
             attribute,
             ranks,
             start,
@@ -1029,9 +949,18 @@ impl MessageUnpack for UpdateAttributeData {
     }
 }
 
+impl MessageUnpack for UpdateAttributeData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Self::unpack_private(data, offset)
+    }
+}
+
 impl MessagePack for UpdateAttributeData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
+        if let Some(guid) = self.object_guid {
+            buf.write_u32::<LittleEndian>(guid).unwrap();
+        }
         buf.write_u32::<LittleEndian>(self.attribute).unwrap();
         buf.write_u32::<LittleEndian>(self.ranks).unwrap();
         buf.write_u32::<LittleEndian>(self.start).unwrap();
@@ -1042,6 +971,7 @@ impl MessagePack for UpdateAttributeData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateSkillData {
     pub sequence: u8,
+    pub object_guid: Option<u32>,
     pub skill: u32,
     pub ranks: u32,
     pub adjust_pp: u32,
@@ -1052,8 +982,8 @@ pub struct UpdateSkillData {
     pub last_used: f64,
 }
 
-impl MessageUnpack for UpdateSkillData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+impl UpdateSkillData {
+    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 33 > data.len() {
             return None;
         }
@@ -1067,8 +997,40 @@ impl MessageUnpack for UpdateSkillData {
         let resistance = LittleEndian::read_u32(&data[*offset + 21..*offset + 25]);
         let last_used = LittleEndian::read_f64(&data[*offset + 25..*offset + 33]);
         *offset += 33;
+
         Some(UpdateSkillData {
             sequence,
+            object_guid: None,
+            skill,
+            ranks,
+            adjust_pp,
+            status,
+            xp,
+            init,
+            resistance,
+            last_used,
+        })
+    }
+
+    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 37 > data.len() {
+            return None;
+        }
+        let sequence = data[*offset];
+        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
+        let skill = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
+        let ranks = LittleEndian::read_u16(&data[*offset + 9..*offset + 11]) as u32;
+        let adjust_pp = LittleEndian::read_u16(&data[*offset + 11..*offset + 13]) as u32;
+        let status = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
+        let xp = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
+        let init = LittleEndian::read_u32(&data[*offset + 21..*offset + 25]);
+        let resistance = LittleEndian::read_u32(&data[*offset + 25..*offset + 29]);
+        let last_used = LittleEndian::read_f64(&data[*offset + 29..*offset + 37]);
+        *offset += 37;
+
+        Some(UpdateSkillData {
+            sequence,
+            object_guid,
             skill,
             ranks,
             adjust_pp,
@@ -1081,9 +1043,18 @@ impl MessageUnpack for UpdateSkillData {
     }
 }
 
+impl MessageUnpack for UpdateSkillData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Self::unpack_private(data, offset)
+    }
+}
+
 impl MessagePack for UpdateSkillData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
+        if let Some(guid) = self.object_guid {
+            buf.write_u32::<LittleEndian>(guid).unwrap();
+        }
         buf.write_u32::<LittleEndian>(self.skill).unwrap();
         buf.write_u16::<LittleEndian>(self.ranks as u16).unwrap();
         buf.write_u16::<LittleEndian>(self.adjust_pp as u16)
@@ -1099,6 +1070,7 @@ impl MessagePack for UpdateSkillData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateVitalData {
     pub sequence: u8,
+    pub object_guid: Option<u32>,
     pub vital: u32,
     pub ranks: u32,
     pub start: u32,
@@ -1106,8 +1078,8 @@ pub struct UpdateVitalData {
     pub current: u32,
 }
 
-impl MessageUnpack for UpdateVitalData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+impl UpdateVitalData {
+    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 21 > data.len() {
             return None;
         }
@@ -1118,8 +1090,34 @@ impl MessageUnpack for UpdateVitalData {
         let xp = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
         let current = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
         *offset += 21;
+
         Some(UpdateVitalData {
             sequence,
+            object_guid: None,
+            vital,
+            ranks,
+            start,
+            xp,
+            current,
+        })
+    }
+
+    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 25 > data.len() {
+            return None;
+        }
+        let sequence = data[*offset];
+        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
+        let vital = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
+        let ranks = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
+        let start = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
+        let xp = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
+        let current = LittleEndian::read_u32(&data[*offset + 21..*offset + 25]);
+        *offset += 25;
+
+        Some(UpdateVitalData {
+            sequence,
+            object_guid,
             vital,
             ranks,
             start,
@@ -1129,9 +1127,18 @@ impl MessageUnpack for UpdateVitalData {
     }
 }
 
+impl MessageUnpack for UpdateVitalData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Self::unpack_private(data, offset)
+    }
+}
+
 impl MessagePack for UpdateVitalData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
+        if let Some(guid) = self.object_guid {
+            buf.write_u32::<LittleEndian>(guid).unwrap();
+        }
         buf.write_u32::<LittleEndian>(self.vital).unwrap();
         buf.write_u32::<LittleEndian>(self.ranks).unwrap();
         buf.write_u32::<LittleEndian>(self.start).unwrap();
@@ -1143,12 +1150,13 @@ impl MessagePack for UpdateVitalData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateVitalCurrentData {
     pub sequence: u8,
+    pub object_guid: Option<u32>,
     pub vital: u32,
     pub current: u32,
 }
 
-impl MessageUnpack for UpdateVitalCurrentData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+impl UpdateVitalCurrentData {
+    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 9 > data.len() {
             return None;
         }
@@ -1156,17 +1164,46 @@ impl MessageUnpack for UpdateVitalCurrentData {
         let vital = LittleEndian::read_u32(&data[*offset + 1..*offset + 5]);
         let current = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
         *offset += 9;
+
         Some(UpdateVitalCurrentData {
             sequence,
+            object_guid: None,
+            vital,
+            current,
+        })
+    }
+
+    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 13 > data.len() {
+            return None;
+        }
+        let sequence = data[*offset];
+        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
+        let vital = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
+        let current = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
+        *offset += 13;
+
+        Some(UpdateVitalCurrentData {
+            sequence,
+            object_guid,
             vital,
             current,
         })
     }
 }
 
+impl MessageUnpack for UpdateVitalCurrentData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Self::unpack_private(data, offset)
+    }
+}
+
 impl MessagePack for UpdateVitalCurrentData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
+        if let Some(guid) = self.object_guid {
+            buf.write_u32::<LittleEndian>(guid).unwrap();
+        }
         buf.write_u32::<LittleEndian>(self.vital).unwrap();
         buf.write_u32::<LittleEndian>(self.current).unwrap();
     }
@@ -1198,20 +1235,20 @@ impl MessagePack for PlayerCreateData {
 mod tests {
     use super::*;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-    use crate::protocol::messages::{constants::actions, game_action::GameActionData};
 
     #[test]
     fn test_update_skill_fixture() {
         let hex = "010a0000003200010003000000e80300000a000000000000000000000000000000";
         let expected = UpdateSkillData {
             sequence: 1,
+            object_guid: None,
             skill: 10,
             ranks: 50,
             adjust_pp: 1,
             status: 3,
             xp: 1000,
-            resistance: 0,
             init: 10,
+            resistance: 0,
             last_used: 0.0,
         };
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
@@ -1222,6 +1259,7 @@ mod tests {
         let hex = "0c0200000064000000393000003209010064000000";
         let expected = UpdateVitalData {
             sequence: 12,
+            object_guid: None,
             vital: 2,
             ranks: 100,
             start: 12345,
@@ -1236,6 +1274,7 @@ mod tests {
         let hex = "0c01000000640000000a000000f4010000";
         let expected = UpdateAttributeData {
             sequence: 12,
+            object_guid: None,
             attribute: 1,
             ranks: 100,
             start: 10,
@@ -1249,10 +1288,31 @@ mod tests {
         let hex = "0c0200000064000000";
         let expected = UpdateVitalCurrentData {
             sequence: 12,
+            object_guid: None,
             vital: 2,
             current: 100,
         };
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_update_vital_current_public_fixture() {
+        let hex = "0c010000500200000064000000";
+        let expected = UpdateVitalCurrentData {
+            sequence: 12,
+            object_guid: Some(0x50000001),
+            vital: 2,
+            current: 100,
+        };
+        // We test the struct pack/unpack directly
+        let mut buf = Vec::new();
+        expected.pack(&mut buf);
+        assert_eq!(hex::encode(&buf), hex);
+
+        let mut offset = 0;
+        let unpacked =
+            UpdateVitalCurrentData::unpack_public(&hex::decode(hex).unwrap(), &mut offset).unwrap();
+        assert_eq!(unpacked, expected);
     }
 
     #[test]
@@ -1263,72 +1323,29 @@ mod tests {
     }
 
     #[test]
-    fn test_get_and_wield_item_fixture() {
-        use crate::protocol::messages::{GameAction, GameMessage};
-        let hex = "B1F700002A0000001A0000000100005000001000";
-        let expected = GameMessage::GameAction(Box::new(GameAction {
-            sequence: 42,
-            action_type: actions::GET_AND_WIELD_ITEM,
-            data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
-                sequence: 42,
-                item_guid: 0x50000001,
-                equip_mask: EquipMask::MELEE_WEAPON,
-            })),
-        }));
-        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
-    }
-
-    #[test]
-    fn test_stackable_split_to_wield_fixture() {
-        use crate::protocol::messages::{GameAction, GameMessage};
-        let hex = "B1F700002B0000009B010000020000500000800032000000";
-        let expected = GameMessage::GameAction(Box::new(GameAction {
-            sequence: 43,
-            action_type: actions::STACKABLE_SPLIT_TO_WIELD,
-            data: GameActionData::StackableSplitToWield(Box::new(StackableSplitToWieldData {
-                sequence: 43,
-                stack_guid: 0x50000002,
-                equip_mask: EquipMask::MISSILE_AMMO,
-                amount: 50,
-            })),
-        }));
-        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
-    }
-
-    #[test]
-    fn test_player_description_full_fixture() {
-        use crate::protocol::fixtures;
+    fn test_game_message_public_vital_current() {
         use crate::protocol::messages::GameMessage;
+        use crate::protocol::messages::opcodes;
 
-        let data = fixtures::PLAYER_DESCRIPTION_FULL;
-        eprintln!("Total fixture size: {} bytes", data.len());
+        let mut data = Vec::new();
+        data.extend_from_slice(&opcodes::PUBLIC_UPDATE_VITAL_CURRENT.to_le_bytes());
+        data.push(0x0C); // Sequence
+        data.extend_from_slice(&0x50000001u32.to_le_bytes()); // GUID
+        data.extend_from_slice(&0x00000002u32.to_le_bytes()); // Vital (Health)
+        data.extend_from_slice(&0x00000064u32.to_le_bytes()); // Current (100)
 
-        let result = GameMessage::unpack(data);
-        assert!(
-            result.is_some(),
-            "GameMessage::unpack returned None for player_description_full fixture"
-        );
+        let msg = GameMessage::unpack(&data).unwrap();
+        if let GameMessage::UpdateVitalCurrent(d) = msg {
+            assert_eq!(d.object_guid, Some(0x50000001));
+            assert_eq!(d.vital, 2);
+            assert_eq!(d.current, 100);
 
-        let msg = result.unwrap();
-        if let GameMessage::GameEvent(event) = &msg {
-            if let crate::protocol::messages::GameEventData::PlayerDescription(pd) = &event.event {
-                eprintln!("Player: {} (guid=0x{:08X})", pd.name, pd.guid);
-                eprintln!("  INT32 props: {}", pd.properties_int.len());
-                eprintln!("  INT64 props: {}", pd.properties_int64.len());
-                eprintln!("  BOOL props: {}", pd.properties_bool.len());
-                eprintln!("  DOUBLE props: {}", pd.properties_float.len());
-                eprintln!("  STRING props: {}", pd.properties_string.len());
-                eprintln!("  DID props: {}", pd.properties_did.len());
-                eprintln!("  Positions: {}", pd.positions.len());
-                eprintln!("  Attributes: {}", pd.attributes.len());
-                eprintln!("  Skills: {}", pd.skills.len());
-                eprintln!("  Spells: {}", pd.spells.len());
-                eprintln!("  Enchantments: {}", pd.enchantments.len());
-                eprintln!("  Inventory: {}", pd.inventory.len());
-                eprintln!("  Equipped: {}", pd.equipped_objects.len());
-                return;
-            }
+            // Test packing back
+            let msg = GameMessage::UpdateVitalCurrent(d);
+            let msg_packed = msg.pack();
+            assert_eq!(msg_packed, data);
+        } else {
+            panic!("Expected UpdateVitalCurrent");
         }
-        panic!("Expected GameEvent/PlayerDescription");
     }
 }

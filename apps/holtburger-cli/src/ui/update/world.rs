@@ -137,9 +137,9 @@ impl AppState {
             ClientEvent::Emote { sender, text } => {
                 self.log_chat(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
-            ClientEvent::CharacterError(error_code) => {
-                use holtburger_core::protocol::messages::character_error_codes;
-                if error_code == character_error_codes::ACCOUNT_ALREADY_LOGGED_ON {
+            ClientEvent::CharacterError(error) => {
+                use holtburger_core::protocol::errors::CharacterError;
+                if error == CharacterError::Logon {
                     self.logon_retry.schedule();
                     self.log_chat(
                         ChatMessageKind::Warning,
@@ -148,7 +148,7 @@ impl AppState {
                             self.logon_retry.backoff_secs
                         ),
                     );
-                } else if error_code == character_error_codes::ENTER_GAME_CHARACTER_IN_WORLD {
+                } else if error == CharacterError::EnterGameCharacterInWorld {
                     self.enter_retry.schedule();
                     self.log_chat(
                         ChatMessageKind::Warning,

@@ -30,5 +30,5 @@ pub fn get_fixture(name: &str) -> Vec<u8> {
     path.push("tests");
     path.push("fixtures");
     path.push(name);
-    fs::read(path).expect(&format!("Fixture not found: {}", name))
+    fs::read(path).unwrap_or_else(|_| panic!("Fixture not found: {}", name))
 }

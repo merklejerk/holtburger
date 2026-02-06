@@ -266,9 +266,9 @@ impl MessageUnpack for ObjectDescriptionData {
             if *offset + 4 > data.len() {
                 return None;
             }
-            weenie_flags2 = WeenieHeaderFlag2::from_bits_retain(
-                LittleEndian::read_u32(&data[*offset..*offset + 4]),
-            );
+            weenie_flags2 = WeenieHeaderFlag2::from_bits_retain(LittleEndian::read_u32(
+                &data[*offset..*offset + 4],
+            ));
             *offset += 4;
         }
 
@@ -402,8 +402,7 @@ impl MessageUnpack for ObjectDescriptionData {
             if *offset + 4 > data.len() {
                 return None;
             }
-            currently_wielded_location =
-                Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            currently_wielded_location = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
         // PRIORITY: uint (4)
@@ -475,8 +474,7 @@ impl MessageUnpack for ObjectDescriptionData {
             *offset += 4; // bitmask
             *offset += 4; // MonarchID
             // Guest list (PackableHashTable<ObjectGuid, GuestInfo>)
-            let guest_count =
-                LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
+            let guest_count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4; // count + buckets
             // Each entry: ObjectGuid(4) + GuestInfo(4)
             let skip = guest_count * 8;
@@ -488,8 +486,7 @@ impl MessageUnpack for ObjectDescriptionData {
             if *offset + 4 > data.len() {
                 return None;
             }
-            let roommate_count =
-                LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+            let roommate_count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
             *offset += 4;
             let skip = roommate_count * 4;
             if *offset + skip > data.len() {

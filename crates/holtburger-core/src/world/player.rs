@@ -839,8 +839,8 @@ mod tests {
     #[test]
     fn test_vector_update_routing() {
         use crate::math::Vector3;
-        use crate::protocol::messages::movement::VectorUpdateData;
         use crate::protocol::messages::GameMessage;
+        use crate::protocol::messages::movement::VectorUpdateData;
         use crate::world::WorldEvent;
 
         let mut player = PlayerState::new();

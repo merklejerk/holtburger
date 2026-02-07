@@ -1,4 +1,5 @@
 use super::WorldEvent;
+use super::guid::Guid;
 use super::stats;
 use crate::protocol::messages::*;
 use crate::world::properties::EnchantmentTypeFlags;
@@ -18,7 +19,7 @@ pub struct VitalBase {
 
 #[derive(Debug, Clone)]
 pub struct PlayerState {
-    pub guid: u32,
+    pub guid: Guid,
     pub name: String,
     pub attributes: HashMap<stats::AttributeType, u32>,
     pub vitals: HashMap<stats::VitalType, stats::Vital>,
@@ -42,7 +43,7 @@ impl Default for PlayerState {
 impl PlayerState {
     pub fn new() -> Self {
         Self {
-            guid: 0,
+            guid: Guid::NULL,
             name: "Unknown".to_string(),
             attributes: HashMap::new(),
             vitals: HashMap::new(),
@@ -371,7 +372,7 @@ impl PlayerState {
     pub fn handle_message(&mut self, msg: &GameMessage, events: &mut Vec<WorldEvent>) -> bool {
         match msg {
             GameMessage::UpdatePosition(data) => {
-                if data.guid == self.guid && self.guid != 0 {
+                if data.guid == self.guid && self.guid != Guid::NULL {
                     self.position = data.pos.pos;
                     events.push(WorldEvent::EntityMoved {
                         guid: self.guid,
@@ -389,7 +390,7 @@ impl PlayerState {
                 return true;
             }
             GameMessage::PublicUpdatePosition(data) => {
-                if data.guid == self.guid && self.guid != 0 {
+                if data.guid == self.guid && self.guid != Guid::NULL {
                     self.position = data.pos;
                     events.push(WorldEvent::EntityMoved {
                         guid: self.guid,
@@ -399,7 +400,7 @@ impl PlayerState {
                 }
             }
             GameMessage::VectorUpdate(data) => {
-                if data.guid == self.guid && self.guid != 0 {
+                if data.guid == self.guid && self.guid != Guid::NULL {
                     events.push(WorldEvent::EntityVectorUpdated {
                         guid: data.guid,
                         velocity: data.velocity,
@@ -629,10 +630,14 @@ impl PlayerState {
             GameMessage::UpdateHealth(data) => {
                 let target = data.target;
                 let health = data.health;
-                let target_guid = if target == 0 { self.guid } else { target };
+                let target_guid = if target == Guid::NULL {
+                    self.guid
+                } else {
+                    target
+                };
 
                 if target_guid == self.guid
-                    && target_guid != 0
+                    && target_guid != Guid::NULL
                     && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health)
                 {
                     // UpdateHealth is a percentage float (0.0 to 1.0)
@@ -844,10 +849,10 @@ mod tests {
         use crate::world::WorldEvent;
 
         let mut player = PlayerState::new();
-        player.guid = 0x50000001;
+        player.guid = Guid(0x50000001);
 
         let data = VectorUpdateData {
-            guid: 0x50000001,
+            guid: Guid(0x50000001),
             velocity: Vector3::new(1.0, 2.0, 3.0),
             omega: Vector3::new(0.1, 0.2, 0.3),
             instance_sequence: 123,
@@ -866,7 +871,7 @@ mod tests {
             omega,
         } = &events[0]
         {
-            assert_eq!(*guid, 0x50000001);
+            assert_eq!(*guid, Guid(0x50000001));
             assert_eq!(velocity.x, 1.0);
             assert_eq!(omega.x, 0.1);
         } else {

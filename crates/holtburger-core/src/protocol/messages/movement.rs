@@ -1,6 +1,8 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::world::Guid;
 pub use crate::world::position::{PositionPack, WorldPosition};
 use byteorder::{ByteOrder, LittleEndian};
+use serde::{Deserialize, Serialize};
 use strum_macros::FromRepr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
@@ -101,7 +103,7 @@ pub struct PrivateUpdatePositionData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct VectorUpdateData {
-    pub guid: u32,
+    pub guid: Guid,
     pub velocity: crate::math::Vector3,
     pub omega: crate::math::Vector3,
     pub instance_sequence: u16,
@@ -110,11 +112,10 @@ pub struct VectorUpdateData {
 
 impl MessageUnpack for VectorUpdateData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 32 > data.len() {
+        let guid = Guid::unpack(data, offset)?;
+        if *offset + 28 > data.len() {
             return None;
         }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
         let velocity = crate::math::Vector3 {
             x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
             y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
@@ -143,7 +144,7 @@ impl MessageUnpack for VectorUpdateData {
 
 impl MessagePack for VectorUpdateData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        self.guid.pack(buf);
         buf.extend_from_slice(&self.velocity.x.to_le_bytes());
         buf.extend_from_slice(&self.velocity.y.to_le_bytes());
         buf.extend_from_slice(&self.velocity.z.to_le_bytes());
@@ -237,20 +238,22 @@ impl MessagePack for PrivateUpdatePositionData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct PublicUpdatePositionData {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub position_type: PositionType,
     pub pos: WorldPosition,
 }
 
 impl MessageUnpack for PublicUpdatePositionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 9 > data.len() {
+        if *offset + 1 > data.len() {
             return None;
         }
         let sequence = data[*offset];
         *offset += 1;
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let position_type_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let position_type = PositionType::from_repr(position_type_raw)?;
@@ -267,7 +270,7 @@ impl MessageUnpack for PublicUpdatePositionData {
 impl MessagePack for PublicUpdatePositionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        self.guid.pack(buf);
         buf.extend_from_slice(&(self.position_type as u32).to_le_bytes());
         self.pos.pack(buf);
     }
@@ -275,17 +278,13 @@ impl MessagePack for PublicUpdatePositionData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePositionData {
-    pub guid: u32,
+    pub guid: Guid,
     pub pos: PositionPack,
 }
 
 impl MessageUnpack for UpdatePositionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         let pos = PositionPack::unpack(data, offset)?;
         Some(UpdatePositionData { guid, pos })
     }
@@ -293,14 +292,14 @@ impl MessageUnpack for UpdatePositionData {
 
 impl MessagePack for UpdatePositionData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        self.guid.pack(buf);
         self.pos.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MovementEventData {
-    pub guid: u32,
+    pub guid: Guid,
     pub object_instance_sequence: u16,
     pub movement_sequence: u16,
     pub server_control_sequence: u16,
@@ -353,12 +352,12 @@ pub enum MovementTypeData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MovementInvalid {
     pub state: InterpretedMotionState,
-    pub sticky_object: Option<u32>,
+    pub sticky_object: Option<Guid>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MoveToObject {
-    pub target: u32,
+    pub target: Guid,
     pub origin: Origin,
     pub params: MoveToParameters,
     pub run_rate: f32,
@@ -373,7 +372,7 @@ pub struct MoveToPosition {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TurnToObject {
-    pub target: u32,
+    pub target: Guid,
     pub desired_heading: f32,
     pub params: TurnToParameters,
 }
@@ -420,8 +419,6 @@ pub struct InterpretedMotionState {
     pub turn_speed: Option<f32>,
     pub commands: Vec<MotionItem>,
 }
-
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MotionItem {
@@ -479,11 +476,7 @@ impl MessagePack for MotionItem {
 
 impl MessageUnpack for MovementEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
 
         if *offset + 2 > data.len() {
             return None;
@@ -571,7 +564,7 @@ impl MessageUnpack for MovementEventData {
 
 impl MessagePack for MovementEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        self.guid.pack(buf);
         buf.extend_from_slice(&self.object_instance_sequence.to_le_bytes());
         buf.extend_from_slice(&self.movement_sequence.to_le_bytes());
         buf.extend_from_slice(&self.server_control_sequence.to_le_bytes());
@@ -689,12 +682,7 @@ impl MovementInvalid {
     fn unpack(data: &[u8], offset: &mut usize, flags: u8) -> Option<Self> {
         let state = InterpretedMotionState::unpack(data, offset)?;
         let sticky_object = if (flags & 0x01) != 0 {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            Some(guid)
+            Guid::unpack(data, offset)
         } else {
             None
         };
@@ -709,18 +697,14 @@ impl MessagePack for MovementInvalid {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.state.pack(buf);
         if let Some(guid) = self.sticky_object {
-            buf.extend_from_slice(&guid.to_le_bytes());
+            guid.pack(buf);
         }
     }
 }
 
 impl MessageUnpack for MoveToObject {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let target = Guid::unpack(data, offset)?;
         let origin = Origin::unpack(data, offset)?;
         let params = MoveToParameters::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -739,7 +723,7 @@ impl MessageUnpack for MoveToObject {
 
 impl MessagePack for MoveToObject {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.target.to_le_bytes());
+        self.target.pack(buf);
         self.origin.pack(buf);
         self.params.pack(buf);
         buf.extend_from_slice(&self.run_rate.to_le_bytes());
@@ -773,11 +757,7 @@ impl MessagePack for MoveToPosition {
 
 impl MessageUnpack for TurnToObject {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let target = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
             return None;
         }
@@ -794,7 +774,7 @@ impl MessageUnpack for TurnToObject {
 
 impl MessagePack for TurnToObject {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.target.to_le_bytes());
+        self.target.pack(buf);
         buf.extend_from_slice(&self.desired_heading.to_le_bytes());
         self.params.pack(buf);
     }
@@ -1109,7 +1089,7 @@ pub struct JumpData {
     pub server_control_sequence: u16,
     pub teleport_sequence: u16,
     pub force_position_sequence: u16,
-    pub object_guid: u32,
+    pub object_guid: Guid,
     pub spell_id: u32,
 }
 
@@ -1126,7 +1106,7 @@ impl JumpData {
         let server_control_sequence = LittleEndian::read_u16(&data[*offset + 18..*offset + 20]);
         let teleport_sequence = LittleEndian::read_u16(&data[*offset + 20..*offset + 22]);
         let force_position_sequence = LittleEndian::read_u16(&data[*offset + 22..*offset + 24]);
-        let object_guid = LittleEndian::read_u32(&data[*offset + 24..*offset + 28]);
+        let object_guid = Guid::unpack(data, &mut (*offset + 24))?;
         let spell_id = LittleEndian::read_u32(&data[*offset + 28..*offset + 32]);
         *offset += 32;
 
@@ -1156,7 +1136,7 @@ impl JumpData {
         buf.extend_from_slice(&self.server_control_sequence.to_le_bytes());
         buf.extend_from_slice(&self.teleport_sequence.to_le_bytes());
         buf.extend_from_slice(&self.force_position_sequence.to_le_bytes());
-        buf.extend_from_slice(&self.object_guid.to_le_bytes());
+        self.object_guid.pack(buf);
         buf.extend_from_slice(&self.spell_id.to_le_bytes());
     }
 }
@@ -1239,7 +1219,7 @@ mod tests {
     fn test_public_update_position_fixture() {
         let expected = GameMessage::PublicUpdatePosition(Box::new(PublicUpdatePositionData {
             sequence: 12,
-            guid: 0x50000001,
+            guid: Guid(0x50000001),
             position_type: PositionType::Location,
             pos: WorldPosition {
                 landblock_id: 0x12345678,
@@ -1286,7 +1266,7 @@ mod tests {
     fn test_movement_event_turn_to_obj_fixture() {
         let fixture = fixtures::MOVEMENT_TURN_TO_OBJ;
         let expected = MovementEventData {
-            guid: 0x50000002,
+            guid: Guid(0x50000002),
             object_instance_sequence: 14,
             movement_sequence: 85,
             server_control_sequence: 15,
@@ -1295,7 +1275,7 @@ mod tests {
             motion_flags: 0,
             current_style: 73,
             data: MovementTypeData::TurnToObject(TurnToObject {
-                target: 0x8000038A,
+                target: Guid(0x8000038A),
                 desired_heading: 0.0,
                 params: TurnToParameters {
                     movement_parameters: 0,
@@ -1311,7 +1291,7 @@ mod tests {
     fn test_movement_event_move_to_pos_fixture() {
         let fixture = fixtures::MOVEMENT_MOVE_TO_POS;
         let expected = MovementEventData {
-            guid: 0x50000002,
+            guid: Guid(0x50000002),
             object_instance_sequence: 14,
             movement_sequence: 86,
             server_control_sequence: 16,
@@ -1425,7 +1405,7 @@ mod tests {
         // Opcode(4) + GUID(4) + Vel(12) + Omega(12) + Seq(2) + Seq(2) = 36 bytes
         let hex = "4EF70000010000500000803F0000004000004040CDCCCC3DCDCC4C3E9A99993E7B00C801";
         let expected = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
-            guid: 0x50000001,
+            guid: Guid(0x50000001),
             velocity: crate::math::Vector3 {
                 x: 1.0,
                 y: 2.0,
@@ -1487,7 +1467,7 @@ mod tests {
                 server_control_sequence: 2,
                 teleport_sequence: 3,
                 force_position_sequence: 4,
-                object_guid: 0x12345678,
+                object_guid: Guid(0x12345678),
                 spell_id: 0,
             })),
         }));

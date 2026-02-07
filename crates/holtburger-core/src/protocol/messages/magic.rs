@@ -1,10 +1,11 @@
 pub use crate::protocol::messages::common::Enchantment;
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MagicUpdateEnchantmentData {
-    pub target: u32,
+    pub target: Guid,
     pub sequence: u32,
     pub enchantment: Enchantment,
 }
@@ -13,7 +14,7 @@ impl MessageUnpack for MagicUpdateEnchantmentData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let enchantment = Enchantment::unpack(data, offset)?;
         Some(MagicUpdateEnchantmentData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
             enchantment,
         })
@@ -28,7 +29,7 @@ impl MessagePack for MagicUpdateEnchantmentData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MagicUpdateMultipleEnchantmentsData {
-    pub target: u32,
+    pub target: Guid,
     pub sequence: u32,
     pub enchantments: Vec<Enchantment>,
 }
@@ -45,7 +46,7 @@ impl MessageUnpack for MagicUpdateMultipleEnchantmentsData {
             enchantments.push(Enchantment::unpack(data, offset)?);
         }
         Some(MagicUpdateMultipleEnchantmentsData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
             enchantments,
         })
@@ -63,7 +64,7 @@ impl MessagePack for MagicUpdateMultipleEnchantmentsData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MagicRemoveEnchantmentData {
-    pub target: u32,
+    pub target: Guid,
     pub sequence: u32,
     pub spell_id: u16,
     pub layer: u16,
@@ -78,7 +79,7 @@ impl MessageUnpack for MagicRemoveEnchantmentData {
         let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         *offset += 4;
         Some(MagicRemoveEnchantmentData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
             spell_id,
             layer,
@@ -95,7 +96,7 @@ impl MessagePack for MagicRemoveEnchantmentData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MagicRemoveMultipleEnchantmentsData {
-    pub target: u32,
+    pub target: Guid,
     pub sequence: u32,
     pub spells: Vec<(u16, u16)>,
 }
@@ -118,7 +119,7 @@ impl MessageUnpack for MagicRemoveMultipleEnchantmentsData {
             spells.push((spell_id, layer));
         }
         Some(MagicRemoveMultipleEnchantmentsData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
             spells,
         })
@@ -137,14 +138,14 @@ impl MessagePack for MagicRemoveMultipleEnchantmentsData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MagicPurgeEnchantmentsData {
-    pub target: u32,
+    pub target: Guid,
     pub sequence: u32,
 }
 
 impl MessageUnpack for MagicPurgeEnchantmentsData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(MagicPurgeEnchantmentsData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
         })
     }
@@ -158,14 +159,14 @@ impl MessagePack for MagicPurgeEnchantmentsData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MagicPurgeBadEnchantmentsData {
-    pub target: u32,
+    pub target: Guid,
     pub sequence: u32,
 }
 
 impl MessageUnpack for MagicPurgeBadEnchantmentsData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(MagicPurgeBadEnchantmentsData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
         })
     }
@@ -186,7 +187,7 @@ mod tests {
     #[test]
     fn test_magic_update_enchantment_parity() {
         let expected = MagicUpdateEnchantmentData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
             enchantment: Enchantment {
                 spell_id: 1,
@@ -196,7 +197,7 @@ mod tests {
                 power_level: 100,
                 start_time: 0.0,
                 duration: 3600.0,
-                caster_guid: 0,
+                caster_guid: Guid::NULL,
                 degrade_modifier: 1.0,
                 degrade_limit: 0.0,
                 last_time_degraded: 0.0,
@@ -213,7 +214,7 @@ mod tests {
     fn test_magic_remove_enchantment_parity() {
         let hex = "01000200";
         let expected = MagicRemoveEnchantmentData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
             spell_id: 1,
             layer: 2,
@@ -225,7 +226,7 @@ mod tests {
     fn test_magic_purge_enchantments_parity() {
         let hex = "";
         let expected = MagicPurgeEnchantmentsData {
-            target: 0,
+            target: Guid::NULL,
             sequence: 0,
         };
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);

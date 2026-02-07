@@ -1,4 +1,5 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::world::Guid;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
@@ -44,19 +45,19 @@ bitflags! {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct GetAndWieldItemData {
     pub sequence: u32,
-    pub item_guid: u32,
+    pub item_guid: Guid,
     pub equip_mask: EquipMask,
 }
 
 impl GetAndWieldItemData {
     pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
-        if *offset + 8 > data.len() {
+        let item_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let item_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let equip_mask =
-            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
-        *offset += 8;
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        *offset += 4;
         Some(GetAndWieldItemData {
             sequence,
             item_guid,
@@ -65,7 +66,7 @@ impl GetAndWieldItemData {
     }
 
     pub fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.item_guid).unwrap();
+        self.item_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.equip_mask.bits())
             .unwrap();
     }
@@ -74,21 +75,21 @@ impl GetAndWieldItemData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct StackableSplitToWieldData {
     pub sequence: u32,
-    pub stack_guid: u32,
+    pub stack_guid: Guid,
     pub equip_mask: EquipMask,
     pub amount: i32,
 }
 
 impl StackableSplitToWieldData {
     pub fn unpack(data: &[u8], offset: &mut usize, sequence: u32) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        let stack_guid = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
             return None;
         }
-        let stack_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let equip_mask =
-            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
-        let amount = LittleEndian::read_i32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        let amount = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
         Some(StackableSplitToWieldData {
             sequence,
             stack_guid,
@@ -98,7 +99,7 @@ impl StackableSplitToWieldData {
     }
 
     pub fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.stack_guid).unwrap();
+        self.stack_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.equip_mask.bits())
             .unwrap();
         buf.write_i32::<LittleEndian>(self.amount).unwrap();
@@ -107,34 +108,33 @@ impl StackableSplitToWieldData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewContentsItem {
-    pub guid: u32,
+    pub guid: Guid,
     pub container_type: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewContentsData {
-    pub container: u32,
+    pub container: Guid,
     pub items: Vec<ViewContentsItem>,
 }
 
 impl MessageUnpack for ViewContentsData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() {
+        let container = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let container = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let count = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) as usize;
-        *offset += 8;
-
-        if *offset + (count * 8) > data.len() {
-            return None;
-        }
+        let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+        *offset += 4;
 
         let mut items = Vec::with_capacity(count);
         for _ in 0..count {
-            let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            let container_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-            *offset += 8;
+            let guid = Guid::unpack(data, offset)?;
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let container_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+            *offset += 4;
             items.push(ViewContentsItem {
                 guid,
                 container_type,
@@ -147,11 +147,11 @@ impl MessageUnpack for ViewContentsData {
 
 impl MessagePack for ViewContentsData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.container).unwrap();
+        self.container.pack(buf);
         buf.write_u32::<LittleEndian>(self.items.len() as u32)
             .unwrap();
         for item in &self.items {
-            buf.write_u32::<LittleEndian>(item.guid).unwrap();
+            item.guid.pack(buf);
             buf.write_u32::<LittleEndian>(item.container_type).unwrap();
         }
     }
@@ -159,22 +159,22 @@ impl MessagePack for ViewContentsData {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InventoryPutObjInContainerData {
-    pub item_guid: u32,
-    pub container_guid: u32,
+    pub item_guid: Guid,
+    pub container_guid: Guid,
     pub slot: u32,
     pub container_type: u32,
 }
 
 impl MessageUnpack for InventoryPutObjInContainerData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 16 > data.len() {
+        let item_guid = Guid::unpack(data, offset)?;
+        let container_guid = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
             return None;
         }
-        let item_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let container_guid = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let slot = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
-        let container_type = LittleEndian::read_u32(&data[*offset + 12..*offset + 16]);
-        *offset += 16;
+        let slot = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let container_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
         Some(InventoryPutObjInContainerData {
             item_guid,
             container_guid,
@@ -186,8 +186,8 @@ impl MessageUnpack for InventoryPutObjInContainerData {
 
 impl MessagePack for InventoryPutObjInContainerData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.item_guid).unwrap();
-        buf.write_u32::<LittleEndian>(self.container_guid).unwrap();
+        self.item_guid.pack(buf);
+        self.container_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.slot).unwrap();
         buf.write_u32::<LittleEndian>(self.container_type).unwrap();
     }
@@ -195,41 +195,37 @@ impl MessagePack for InventoryPutObjInContainerData {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InventoryPutObjectIn3DData {
-    pub object_guid: u32,
+    pub object_guid: Guid,
 }
 
 impl MessageUnpack for InventoryPutObjectIn3DData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let object_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let object_guid = Guid::unpack(data, offset)?;
         Some(InventoryPutObjectIn3DData { object_guid })
     }
 }
 
 impl MessagePack for InventoryPutObjectIn3DData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.object_guid).unwrap();
+        self.object_guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WieldObjectData {
-    pub object_guid: u32,
+    pub object_guid: Guid,
     pub equip_mask: EquipMask,
 }
 
 impl MessageUnpack for WieldObjectData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() {
+        let object_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let object_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let equip_mask =
-            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
-        *offset += 8;
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        *offset += 4;
         Some(WieldObjectData {
             object_guid,
             equip_mask,
@@ -239,7 +235,7 @@ impl MessageUnpack for WieldObjectData {
 
 impl MessagePack for WieldObjectData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.object_guid).unwrap();
+        self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.equip_mask.bits())
             .unwrap();
     }
@@ -247,44 +243,44 @@ impl MessagePack for WieldObjectData {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InventoryRemoveObjectData {
-    pub object_guid: u32,
+    pub object_guid: Guid,
 }
 
 impl MessageUnpack for InventoryRemoveObjectData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let object_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let object_guid = Guid::unpack(data, offset)?;
         Some(InventoryRemoveObjectData { object_guid })
     }
 }
 
 impl MessagePack for InventoryRemoveObjectData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.object_guid).unwrap();
+        self.object_guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetStackSizeData {
     pub sequence: u32,
-    pub object_guid: u32,
+    pub object_guid: Guid,
     pub stack_size: u32,
     pub value: u32,
 }
 
 impl MessageUnpack for SetStackSizeData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 16 > data.len() {
+        if *offset + 4 > data.len() {
             return None;
         }
         let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let object_guid = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let stack_size = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
-        let value = LittleEndian::read_u32(&data[*offset + 12..*offset + 16]);
-        *offset += 16;
+        *offset += 4;
+        let object_guid = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let stack_size = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let value = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
         Some(SetStackSizeData {
             sequence,
             object_guid,
@@ -297,7 +293,7 @@ impl MessageUnpack for SetStackSizeData {
 impl MessagePack for SetStackSizeData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
-        buf.write_u32::<LittleEndian>(self.object_guid).unwrap();
+        self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.stack_size).unwrap();
         buf.write_u32::<LittleEndian>(self.value).unwrap();
     }
@@ -305,42 +301,38 @@ impl MessagePack for SetStackSizeData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DropItemData {
-    pub guid: u32,
+    pub guid: Guid,
 }
 
 impl MessageUnpack for DropItemData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         Some(DropItemData { guid })
     }
 }
 
 impl MessagePack for DropItemData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PutItemInContainerData {
-    pub item: u32,
-    pub container: u32,
+    pub item: Guid,
+    pub container: Guid,
     pub placement: u32,
 }
 
 impl MessageUnpack for PutItemInContainerData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        let item = Guid::unpack(data, offset)?;
+        let container = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let item = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let container = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let placement = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
+        let placement = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
         Some(PutItemInContainerData {
             item,
             container,
@@ -351,8 +343,8 @@ impl MessageUnpack for PutItemInContainerData {
 
 impl MessagePack for PutItemInContainerData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.item).unwrap();
-        buf.write_u32::<LittleEndian>(self.container).unwrap();
+        self.item.pack(buf);
+        self.container.pack(buf);
         buf.write_u32::<LittleEndian>(self.placement).unwrap();
     }
 }
@@ -366,14 +358,14 @@ mod tests {
     #[test]
     fn test_view_contents_fixture() {
         let expected = ViewContentsData {
-            container: 0x11111111,
+            container: Guid(0x11111111),
             items: vec![
                 ViewContentsItem {
-                    guid: 0x22222222,
+                    guid: Guid(0x22222222),
                     container_type: 1,
                 },
                 ViewContentsItem {
-                    guid: 0x33333333,
+                    guid: Guid(0x33333333),
                     container_type: 0,
                 },
             ],
@@ -393,7 +385,7 @@ mod tests {
 
             data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
                 sequence: 42,
-                item_guid: 0x50000001,
+                item_guid: Guid(0x50000001),
                 equip_mask: EquipMask::MELEE_WEAPON,
             })),
         }));
@@ -409,7 +401,7 @@ mod tests {
 
             data: GameActionData::StackableSplitToWield(Box::new(StackableSplitToWieldData {
                 sequence: 43,
-                stack_guid: 0x50000002,
+                stack_guid: Guid(0x50000002),
                 equip_mask: EquipMask::MISSILE_AMMO,
                 amount: 50,
             })),
@@ -423,12 +415,12 @@ mod tests {
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x10), Event (0x0022), Item (0x80000001), Cont (0x80000002), Slot (3), Type (1)
         let hex = "B0F7000001000050100000002200000001000080020000800300000001000000";
         let expected = GameMessage::GameEvent(Box::new(GameEvent {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sequence: 0x10,
             event: GameEventData::InventoryPutObjInContainer(Box::new(
                 InventoryPutObjInContainerData {
-                    item_guid: 0x80000001,
-                    container_guid: 0x80000002,
+                    item_guid: Guid(0x80000001),
+                    container_guid: Guid(0x80000002),
                     slot: 3,
                     container_type: 1,
                 },
@@ -443,10 +435,10 @@ mod tests {
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x11), Event (0x019A), Obj (0x80000001)
         let hex = "B0F7000001000050110000009A01000001000080";
         let expected = GameMessage::GameEvent(Box::new(GameEvent {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sequence: 0x11,
             event: GameEventData::InventoryPutObjectIn3D(Box::new(InventoryPutObjectIn3DData {
-                object_guid: 0x80000001,
+                object_guid: Guid(0x80000001),
             })),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
@@ -458,7 +450,7 @@ mod tests {
         // Opcode (0x0024), Obj (0x80000001)
         let hex = "2400000001000080";
         let expected = GameMessage::InventoryRemoveObject(Box::new(InventoryRemoveObjectData {
-            object_guid: 0x80000001,
+            object_guid: Guid(0x80000001),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
@@ -470,7 +462,7 @@ mod tests {
         let hex = "97010000200000000100008032000000E8030000";
         let expected = GameMessage::SetStackSize(Box::new(SetStackSizeData {
             sequence: 0x20,
-            object_guid: 0x80000001,
+            object_guid: Guid(0x80000001),
             stack_size: 50,
             value: 1000,
         }));
@@ -483,10 +475,10 @@ mod tests {
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x12), Event (0x0023), Obj (0x80000001), Mask (MELEE_WEAPON=0x00100000)
         let hex = "B0F700000100005012000000230000000100008000001000";
         let expected = GameMessage::GameEvent(Box::new(GameEvent {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sequence: 0x12,
             event: GameEventData::WieldObject(Box::new(WieldObjectData {
-                object_guid: 0x80000001,
+                object_guid: Guid(0x80000001),
                 equip_mask: EquipMask::MELEE_WEAPON,
             })),
         }));
@@ -498,7 +490,9 @@ mod tests {
         use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
         let action = GameMessage::GameAction(Box::new(GameAction {
             sequence: 4,
-            data: GameActionData::DropItem(Box::new(DropItemData { guid: 0x12345678 })),
+            data: GameActionData::DropItem(Box::new(DropItemData {
+                guid: Guid(0x12345678),
+            })),
         }));
         assert_pack_unpack_parity(fixtures::ACTION_DROP_ITEM, &action);
     }
@@ -509,8 +503,8 @@ mod tests {
         let action = GameMessage::GameAction(Box::new(GameAction {
             sequence: 5,
             data: GameActionData::PutItemInContainer(Box::new(PutItemInContainerData {
-                item: 0x11111111,
-                container: 0x22222222,
+                item: Guid(0x11111111),
+                container: Guid(0x22222222),
                 placement: 0,
             })),
         }));

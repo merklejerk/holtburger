@@ -1,11 +1,12 @@
 use crate::math::Vector3;
+use crate::world::guid::Guid;
 use crate::world::position::WorldPosition;
 use crate::world::properties::{ItemType, ObjectDescriptionFlag, PhysicsState};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Entity {
-    pub guid: u32,
+    pub guid: Guid,
     pub wcid: Option<u32>,
     pub name: String,
     pub position: WorldPosition,
@@ -15,9 +16,9 @@ pub struct Entity {
     pub flags: ObjectDescriptionFlag,
     pub item_type: Option<ItemType>,
     pub physics_state: PhysicsState,
-    pub physics_parent_id: Option<u32>,
-    pub container_id: Option<u32>,
-    pub wielder_id: Option<u32>,
+    pub physics_parent_id: Option<Guid>,
+    pub container_id: Option<Guid>,
+    pub wielder_id: Option<Guid>,
 
     pub int_properties: HashMap<u32, i32>,
     pub bool_properties: HashMap<u32, bool>,
@@ -28,7 +29,7 @@ pub struct Entity {
 }
 
 impl Entity {
-    pub fn new(guid: u32, name: String, position: WorldPosition) -> Self {
+    pub fn new(guid: Guid, name: String, position: WorldPosition) -> Self {
         Self {
             guid,
             wcid: None,
@@ -57,7 +58,7 @@ impl Entity {
 }
 
 pub struct EntityManager {
-    pub entities: HashMap<u32, Entity>,
+    pub entities: HashMap<Guid, Entity>,
 }
 
 impl Default for EntityManager {
@@ -77,15 +78,15 @@ impl EntityManager {
         self.entities.insert(entity.guid, entity);
     }
 
-    pub fn get(&self, guid: u32) -> Option<&Entity> {
-        self.entities.get(&guid)
+    pub fn get(&self, guid: impl Into<Guid>) -> Option<&Entity> {
+        self.entities.get(&guid.into())
     }
 
-    pub fn get_mut(&mut self, guid: u32) -> Option<&mut Entity> {
-        self.entities.get_mut(&guid)
+    pub fn get_mut(&mut self, guid: impl Into<Guid>) -> Option<&mut Entity> {
+        self.entities.get_mut(&guid.into())
     }
 
-    pub fn remove(&mut self, guid: u32) -> Option<Entity> {
-        self.entities.remove(&guid)
+    pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {
+        self.entities.remove(&guid.into())
     }
 }

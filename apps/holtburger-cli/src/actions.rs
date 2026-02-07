@@ -5,6 +5,7 @@ use holtburger_core::protocol::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString,
 };
 use holtburger_core::world::entity::Entity;
+use holtburger_core::world::guid::Guid;
 use holtburger_core::world::properties::ObjectDescriptionFlag;
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +15,7 @@ pub enum Action {
     Use,
     Drop,
     PickUp,
-    MoveToSlot(u32), // Move item to specific container GUID
+    MoveToSlot(Guid), // Move item to specific container GUID
     Debug,
 }
 
@@ -73,7 +74,7 @@ impl Action {
     pub fn handler(
         &self,
         target: &ActionTarget,
-        player_guid: Option<u32>,
+        player_guid: Option<Guid>,
     ) -> Option<ActionHandler> {
         match (self, target) {
             (Action::Assess, ActionTarget::Entity(e)) => {
@@ -114,8 +115,8 @@ impl Action {
 
 pub fn is_owned_by_player(
     entity: &Entity,
-    entities: &HashMap<u32, Entity>,
-    player_guid: u32,
+    entities: &HashMap<Guid, Entity>,
+    player_guid: Guid,
 ) -> bool {
     let mut current_guid = entity.guid;
     let mut visited = HashSet::new();
@@ -144,8 +145,8 @@ pub fn is_owned_by_player(
 
 pub fn get_actions_for_target(
     target: &ActionTarget,
-    entities: &HashMap<u32, Entity>,
-    player_guid: Option<u32>,
+    entities: &HashMap<Guid, Entity>,
+    player_guid: Option<Guid>,
 ) -> Vec<Action> {
     let mut actions = match target {
         ActionTarget::Entity(e) => {
@@ -220,7 +221,7 @@ fn should_show_debug(target: &ActionTarget) -> bool {
 /// Generates a list of strings representing the debug information for a target.
 pub fn get_debug_info(
     target: &ActionTarget,
-    name_lookup: impl Fn(u32) -> Option<String>,
+    name_lookup: impl Fn(Guid) -> Option<String>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
 

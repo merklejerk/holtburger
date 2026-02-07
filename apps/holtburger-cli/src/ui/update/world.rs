@@ -65,7 +65,8 @@ impl AppState {
                     WorldEvent::EntityMoved { guid, pos } => {
                         if Some(guid) == self.player_guid {
                             self.player_pos = Some(pos);
-                        } else if let Some(entity) = self.entities.get_mut(&guid) {
+                        }
+                        if let Some(entity) = self.entities.get_mut(&guid) {
                             entity.position = pos;
                         }
                     }
@@ -74,6 +75,9 @@ impl AppState {
                         // but we handle it to avoid the wildcard match.
                     }
                     WorldEvent::EntitySpawned(entity) => {
+                        if Some(entity.guid) == self.player_guid {
+                            self.player_pos = Some(entity.position);
+                        }
                         self.entities.insert(entity.guid, *entity);
                     }
                     WorldEvent::EntityDespawned(guid) => {

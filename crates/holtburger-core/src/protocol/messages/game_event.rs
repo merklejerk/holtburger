@@ -7,11 +7,12 @@ use crate::protocol::messages::{
     PlayerDescriptionData, TellData, UseDoneData, ViewContentsData, WeenieErrorData,
     WeenieErrorWithStringData, WieldObjectData,
 };
+use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameEvent {
-    pub target: u32,
+    pub target: Guid,
     pub sequence: u32,
     pub event: GameEventData,
 }
@@ -42,13 +43,13 @@ pub enum GameEventData {
 
 impl GameEvent {
     pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        let target = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
             return None;
         }
-        let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let sequence = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let event_type_raw = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
+        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let event_type_raw = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
 
         let event_op = GameEventOpcode::from_repr(event_type_raw);
 
@@ -151,7 +152,7 @@ impl GameEvent {
     }
 
     pub fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.target).unwrap();
+        self.target.pack(buf);
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.event {
@@ -273,7 +274,7 @@ mod tests {
         let hex_str = "B0F70000010000500E00000082020000";
         let data = hex::decode(hex_str).expect("Hex decode failed");
         let expected = GameMessage::GameEvent(Box::new(GameEvent {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEventData::StartGame,
         }));
@@ -292,7 +293,7 @@ mod tests {
         let Some(GameMessage::GameEvent(ev)) = result else {
             panic!("Expected GameEvent");
         };
-        assert_eq!(ev.target, 0x50000001);
+        assert_eq!(ev.target, Guid(0x50000001));
         assert_eq!(ev.sequence, 13);
         let GameEventData::ChannelBroadcast(data) = &ev.event else {
             panic!("Expected ChannelBroadcast");

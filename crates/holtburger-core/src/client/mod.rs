@@ -2,7 +2,7 @@ use crate::protocol::crypto::Isaac;
 use crate::protocol::errors::CharacterError;
 use crate::protocol::messages::*;
 use crate::session::Session;
-use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
+use crate::world::{Guid, WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -16,7 +16,7 @@ pub struct Client {
     pub world: WorldState,
     account_name: String,
     characters: Vec<CharacterEntry>,
-    character_id: Option<u32>,
+    character_id: Option<Guid>,
     character_preference: Option<String>,
     state: ClientState,
     event_tx: Option<mpsc::UnboundedSender<ClientEvent>>,
@@ -779,7 +779,7 @@ impl Client {
         Ok(())
     }
 
-    async fn select_character(&mut self, char_id: u32) -> Result<()> {
+    async fn select_character(&mut self, char_id: Guid) -> Result<()> {
         self.character_id = Some(char_id);
         self.state = ClientState::EnteringWorld;
         self.send_status_event();
@@ -799,7 +799,7 @@ impl Client {
         Ok(())
     }
 
-    async fn send_character_enter_world(&mut self, char_id: u32) -> Result<()> {
+    async fn send_character_enter_world(&mut self, char_id: Guid) -> Result<()> {
         let msg = GameMessage::CharacterEnterWorld(Box::new(CharacterEnterWorldData {
             guid: char_id,
             account: self.account_name.clone(),

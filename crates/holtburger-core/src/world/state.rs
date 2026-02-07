@@ -1,3 +1,4 @@
+use super::Guid;
 use super::WorldEvent;
 use super::entity::{Entity, EntityManager};
 use super::player::PlayerState;
@@ -116,10 +117,7 @@ impl WorldState {
                     entity.position = data.pos;
                     self.scene
                         .update_entity(guid, old_lb, data.pos.landblock_id);
-                    events.push(WorldEvent::EntityMoved {
-                        guid,
-                        pos: data.pos,
-                    });
+                    events.push(WorldEvent::EntityMoved { guid, pos: data.pos });
                 }
             }
             GameMessage::PublicUpdatePosition(data) => {
@@ -147,7 +145,7 @@ impl WorldState {
             }
             GameMessage::GameEvent(ev) => {
                 if let GameEventData::PlayerDescription(data) = &ev.event {
-                    let guid = data.guid;
+                    let guid: Guid = data.guid;
                     let name = &data.name;
                     let pos = &data.pos;
 
@@ -278,7 +276,7 @@ impl WorldState {
                 }
             }
             GameMessage::UpdatePropertyInt(data) => {
-                let target_guid = if data.guid == 0 {
+                let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
                     data.guid
@@ -293,7 +291,7 @@ impl WorldState {
                 });
             }
             GameMessage::UpdatePropertyInt64(data) => {
-                let target_guid = if data.guid == 0 {
+                let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
                     data.guid
@@ -310,7 +308,7 @@ impl WorldState {
                 });
             }
             GameMessage::UpdatePropertyBool(data) => {
-                let target_guid = if data.guid == 0 {
+                let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
                     data.guid
@@ -325,7 +323,7 @@ impl WorldState {
                 });
             }
             GameMessage::UpdatePropertyFloat(data) => {
-                let target_guid = if data.guid == 0 {
+                let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
                     data.guid
@@ -340,7 +338,7 @@ impl WorldState {
                 });
             }
             GameMessage::UpdatePropertyString(data) => {
-                let target_guid = if data.guid == 0 {
+                let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
                     data.guid
@@ -357,7 +355,7 @@ impl WorldState {
                 });
             }
             GameMessage::UpdatePropertyDataId(data) => {
-                let target_guid = if data.guid == 0 {
+                let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
                     data.guid
@@ -372,7 +370,7 @@ impl WorldState {
                 });
             }
             GameMessage::UpdatePropertyInstanceId(data) => {
-                let target_guid = if data.guid == 0 {
+                let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
                     data.guid
@@ -384,14 +382,14 @@ impl WorldState {
                         entity.container_id = if data.value == 0 {
                             None
                         } else {
-                            Some(data.value)
+                            Some(Guid(data.value))
                         };
                     }
                     if data.property == PropertyInstanceId::Wielder as u32 {
                         entity.wielder_id = if data.value == 0 {
                             None
                         } else {
-                            Some(data.value)
+                            Some(Guid(data.value))
                         };
                     }
                 }
@@ -415,7 +413,8 @@ impl WorldState {
         self.scene.update_entity(guid, lb, lb);
     }
 
-    pub fn remove_entity(&mut self, guid: u32) -> Option<Entity> {
+    pub fn remove_entity<G: Into<Guid> + Copy>(&mut self, guid: G) -> Option<Entity> {
+        let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
             self.scene.remove_entity(guid, entity.position.landblock_id);
             Some(entity)
@@ -425,7 +424,7 @@ impl WorldState {
     }
 
     pub fn get_nearby_entities(&self) -> Vec<Entity> {
-        if self.player.guid == 0 {
+        if self.player.guid == Guid::NULL {
             return Vec::new();
         }
 
@@ -479,7 +478,7 @@ impl WorldState {
     }
 
     pub fn tick(&mut self, dt: f32, radius: f32) {
-        if self.player.guid == 0 {
+        if self.player.guid == Guid::NULL {
             return;
         }
 

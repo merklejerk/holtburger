@@ -29,7 +29,7 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>) {
         ])
         .split(area);
 
-    let main_chunks = if area.width < WIDTH_BREAKPOINT {
+    let main_chunks = if area.width < WIDTH_BREAKPOINT || area.height > area.width {
         let vertical_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([

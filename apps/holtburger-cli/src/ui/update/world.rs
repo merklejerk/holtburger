@@ -141,6 +141,15 @@ impl AppState {
             ClientEvent::Emote { sender, text } => {
                 self.log_chat(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
+            ClientEvent::InventoryServerSaveFailed { item_guid, error } => {
+                self.log_chat(
+                    ChatMessageKind::Warning,
+                    format!(
+                        "[WARNING] Inventory save failed for item 0x{:08X}: {:?}",
+                        item_guid.0, error
+                    ),
+                );
+            }
             ClientEvent::CharacterError(error) => {
                 use holtburger_core::protocol::errors::CharacterError;
                 if error == CharacterError::Logon {

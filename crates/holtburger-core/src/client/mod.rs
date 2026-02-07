@@ -617,6 +617,15 @@ impl Client {
                     }
                     Ok(())
                 }
+                GameEventData::InventoryServerSaveFailed(data) => {
+                    if let Some(tx) = &self.event_tx {
+                        let _ = tx.send(ClientEvent::InventoryServerSaveFailed {
+                            item_guid: data.item_guid,
+                            error: data.error,
+                        });
+                    }
+                    Ok(())
+                }
                 _ => Ok(()),
             },
             GameMessage::PlayerCreate(data) => {

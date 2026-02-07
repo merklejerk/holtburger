@@ -117,7 +117,10 @@ impl WorldState {
                     entity.position = data.pos;
                     self.scene
                         .update_entity(guid, old_lb, data.pos.landblock_id);
-                    events.push(WorldEvent::EntityMoved { guid, pos: data.pos });
+                    events.push(WorldEvent::EntityMoved {
+                        guid,
+                        pos: data.pos,
+                    });
                 }
             }
             GameMessage::PublicUpdatePosition(data) => {

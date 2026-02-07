@@ -28,6 +28,10 @@ pub enum ClientEvent {
         error_id: u32,
         message: Option<String>,
     },
+    InventoryServerSaveFailed {
+        item_guid: Guid,
+        error: crate::protocol::errors::WeenieError,
+    },
     BootAccount(String),
     World(Box<WorldEvent>),
     GameMessage(Box<GameMessage>),

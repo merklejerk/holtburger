@@ -1,8 +1,10 @@
+use serde::{Deserialize, Serialize};
 use strum_macros::FromRepr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, FromRepr, Serialize, Deserialize, Default)]
 #[repr(u32)]
 pub enum WeenieError {
+    #[default]
     None = 0x0000,
     NoMem = 0x0001,
     BadParam = 0x0002,

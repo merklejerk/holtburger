@@ -500,7 +500,7 @@ impl Session {
 
     /// Higher-level receiver that handles fragmentation and returns complete message payloads or handshake events.
     pub async fn recv_message(&mut self) -> Result<Vec<SessionEvent>> {
-        let mut buf = [0u8; 1024 * 64];
+        let mut buf = [0u8; 1024 * 128];
         let (header, data) = self.recv_packet(&mut buf).await?;
         let mut events = Vec::new();
 
@@ -578,6 +578,9 @@ impl Session {
                     events.push(SessionEvent::Message(full));
                 }
                 offset += frag_data_size;
+
+                // Fragments are 4-byte aligned in AC
+                offset = (offset + 3) & !3;
             }
         }
 

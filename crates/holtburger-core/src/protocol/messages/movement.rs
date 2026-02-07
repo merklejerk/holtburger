@@ -1357,12 +1357,12 @@ mod tests {
 
     #[test]
     fn test_move_to_state_fixture() {
-        use crate::protocol::messages::GameAction;
+        use crate::protocol::messages::GameActionMessage;
         let fixture = fixtures::MOVE_TO_STATE;
-        let expected = GameMessage::GameAction(Box::new(GameAction {
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0x5678,
 
-            data: GameActionData::MoveToState(Box::new(MoveToStateData {
+            action: GameActionData::MoveToState(Box::new(MoveToStateData {
                 sequence: 0x5678,
                 raw_motion_state: RawMotionState {
                     flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
@@ -1455,14 +1455,14 @@ mod tests {
 
     #[test]
     fn test_jump_data_fixture() {
-        use crate::protocol::messages::GameAction;
+        use crate::protocol::messages::GameActionMessage;
         // Opcode(4) + Sequence(4) + ActionType(4) + Payload(32) = 44 bytes
         // ACE Dump: 1BF60000 00002041 0000803F 00000040 00004040 0100 0200 0300 0400 78563412 00000000
         let hex = "B1F700002A0000001BF60000000020410000803F000000400000404001000200030004007856341200000000";
-        let expected = GameMessage::GameAction(Box::new(GameAction {
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0x2A,
 
-            data: GameActionData::Jump(Box::new(JumpData {
+            action: GameActionData::Jump(Box::new(JumpData {
                 sequence: 0x2A,
                 extent: 10.0,
                 velocity: crate::math::Vector3 {

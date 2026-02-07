@@ -1658,10 +1658,10 @@ mod tests {
 
     #[test]
     fn test_use_parity() {
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
-        let action = GameMessage::GameAction(Box::new(GameAction {
+        use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 6,
-            data: GameActionData::Use(Box::new(UseData {
+            action: GameActionData::Use(Box::new(UseData {
                 guid: Guid(0x33333333),
             })),
         }));

@@ -405,12 +405,12 @@ mod tests {
 
     #[test]
     fn test_get_and_wield_item_fixture() {
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+        use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
         let hex = "B1F700002A0000001A0000000100005000001000";
-        let expected = GameMessage::GameAction(Box::new(GameAction {
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 42,
 
-            data: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
+            action: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
                 sequence: 42,
                 item_guid: Guid(0x50000001),
                 equip_mask: EquipMask::MELEE_WEAPON,
@@ -421,12 +421,12 @@ mod tests {
 
     #[test]
     fn test_stackable_split_to_wield_fixture() {
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+        use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
         let hex = "B1F700002B0000009B010000020000500000800032000000";
-        let expected = GameMessage::GameAction(Box::new(GameAction {
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 43,
 
-            data: GameActionData::StackableSplitToWield(Box::new(StackableSplitToWieldData {
+            action: GameActionData::StackableSplitToWield(Box::new(StackableSplitToWieldData {
                 sequence: 43,
                 stack_guid: Guid(0x50000002),
                 equip_mask: EquipMask::MISSILE_AMMO,
@@ -438,10 +438,10 @@ mod tests {
 
     #[test]
     fn test_inventory_put_obj_in_container_fixture() {
-        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::protocol::messages::{GameEventData, GameEventMessage, GameMessage};
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x10), Event (0x0022), Item (0x80000001), Cont (0x80000002), Slot (3), Type (1)
         let hex = "B0F7000001000050100000002200000001000080020000800300000001000000";
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x10,
             event: GameEventData::InventoryPutObjInContainer(Box::new(
@@ -458,10 +458,10 @@ mod tests {
 
     #[test]
     fn test_inventory_put_object_in_3d_fixture() {
-        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::protocol::messages::{GameEventData, GameEventMessage, GameMessage};
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x11), Event (0x019A), Obj (0x80000001)
         let hex = "B0F7000001000050110000009A01000001000080";
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x11,
             event: GameEventData::InventoryPutObjectIn3D(Box::new(InventoryPutObjectIn3DData {
@@ -498,10 +498,10 @@ mod tests {
 
     #[test]
     fn test_wield_object_fixture() {
-        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::protocol::messages::{GameEventData, GameEventMessage, GameMessage};
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x12), Event (0x0023), Obj (0x80000001), Mask (MELEE_WEAPON=0x00100000)
         let hex = "B0F700000100005012000000230000000100008000001000";
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x12,
             event: GameEventData::WieldObject(Box::new(WieldObjectData {
@@ -514,10 +514,10 @@ mod tests {
 
     #[test]
     fn test_inventory_server_save_failed_fixture() {
-        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::protocol::messages::{GameEventData, GameEventMessage, GameMessage};
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x12), Event (0x00A0), Obj (0x80000001), Error (0x03EE)
         let hex = "B0F700000100005012000000A000000001000080EE030000";
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x12,
             event: GameEventData::InventoryServerSaveFailed(Box::new(
@@ -532,10 +532,10 @@ mod tests {
 
     #[test]
     fn test_drop_item_parity() {
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
-        let action = GameMessage::GameAction(Box::new(GameAction {
+        use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 4,
-            data: GameActionData::DropItem(Box::new(DropItemData {
+            action: GameActionData::DropItem(Box::new(DropItemData {
                 guid: Guid(0x12345678),
             })),
         }));
@@ -544,10 +544,10 @@ mod tests {
 
     #[test]
     fn test_put_item_parity() {
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
-        let action = GameMessage::GameAction(Box::new(GameAction {
+        use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 5,
-            data: GameActionData::PutItemInContainer(Box::new(PutItemInContainerData {
+            action: GameActionData::PutItemInContainer(Box::new(PutItemInContainerData {
                 item: Guid(0x11111111),
                 container: Guid(0x22222222),
                 placement: 0,

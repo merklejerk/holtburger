@@ -742,7 +742,7 @@ impl MessagePack for IdentifyObjectResponseData {
 mod tests {
     use super::*;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-    use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+    use crate::protocol::messages::{GameEventData, GameEventMessage, GameMessage};
     use crate::world::Guid;
 
     #[test]
@@ -758,7 +758,7 @@ mod tests {
         let mut string_stats = BTreeMap::new();
         string_stats.insert(1, "Sword of Awesome".to_string());
 
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 123,
             event: GameEventData::IdentifyObjectResponse(Box::new(IdentifyObjectResponseData {

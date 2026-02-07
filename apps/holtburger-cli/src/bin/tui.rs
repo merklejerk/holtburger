@@ -277,15 +277,11 @@ async fn main() -> Result<()> {
                         log::info!("WorldEvent: {:?}", world_event);
                     }
                 }
-                ClientEvent::GameMessage(msg) => {
-                    if args.verbose >= 3 {
-                        log::debug!("GameMessage: {:?}", msg);
-                    }
+                ClientEvent::GameMessage(_msg) => {
+                    // Logged by holtburger-core
                 }
-                ClientEvent::RawMessage(data) => {
-                    if args.verbose >= 4 {
-                        log::trace!("RawPacket ({} bytes): {:02X?}", data.len(), data);
-                    }
+                ClientEvent::RawMessage(_data) => {
+                    // Logged by holtburger-core
                 }
                 _ => {}
             }

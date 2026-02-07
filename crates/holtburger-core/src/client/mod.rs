@@ -11,6 +11,14 @@ use tokio::sync::mpsc;
 pub mod types;
 use types::*;
 
+/// Maximum distance (in meters) to allow an automated server-controlled teleport.
+/// ACE (the server) typically hard-caps instant movement at 50m.
+/// Maximum distance we allow the server to "auto-move" us before we suspect a desync/teleport bug
+const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
+
+/// Physics tick interval in milliseconds.
+const PHYSICS_TICK_MS: u64 = 30;
+
 pub struct Client {
     pub session: Session,
     pub world: WorldState,
@@ -437,7 +445,7 @@ impl Client {
         // Initial handshake: If this is an activation/logon session, the bin should send ClientCommand::Login
         self.send_status_event();
 
-        let mut physics_tick = tokio::time::interval(Duration::from_millis(30));
+        let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
         let mut last_physics_time = Instant::now();
 
         loop {
@@ -550,6 +558,13 @@ impl Client {
         }
 
         match message {
+            GameMessage::UpdateMotion(data) => {
+                if data.guid == self.world.player.guid && !data.is_autonomous {
+                    self.handle_server_controlled_movement(*data).await
+                } else {
+                    Ok(())
+                }
+            }
             GameMessage::CharacterList(data) => self.handle_character_list(*data).await,
             GameMessage::CharacterEnterWorldServerReady => {
                 if let Some(char_id) = self.character_id {
@@ -900,6 +915,122 @@ impl Client {
         );
         self.connection_cookie = cookie;
         self.session.client_id = client_id;
+
+        Ok(())
+    }
+
+    async fn handle_server_controlled_movement(&mut self, data: MovementEventData) -> Result<()> {
+        log::info!(
+            ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
+            data.movement_type,
+            data.server_control_sequence
+        );
+
+        let mut next_pos = self.world.player.position;
+
+        match &data.data {
+            MovementTypeData::MoveToObject(mto) => {
+                // We use the origin provided in the packet as the source of truth for the target's position.
+                // This is more reliable than our local entity tracking which might be uninitialized (e.g. landblock 0).
+                next_pos.landblock_id = mto.origin.cell_id;
+                next_pos.coords = mto.origin.position;
+
+                let arrival_dist = mto.params.distance_to_object;
+
+                // Calculate arrival on the line between the player and the target
+                if self.world.player.position.landblock_id >> 16 == next_pos.landblock_id >> 16 {
+                    let to_player = self.world.player.position.coords - next_pos.coords;
+                    if to_player.length_squared() > 1e-6 {
+                        next_pos.coords = next_pos.coords + (to_player.normalize() * arrival_dist);
+                    } else {
+                        // If we are exactly on top, just offset X
+                        next_pos.coords.x += arrival_dist;
+                    }
+                } else {
+                    // Different landblocks, fallback to simple offset 
+                    next_pos.coords.x += arrival_dist;
+                }
+            }
+            MovementTypeData::MoveToPosition(mtp) => {
+                next_pos.landblock_id = mtp.origin.cell_id;
+                next_pos.coords = mtp.origin.position;
+            }
+            _ => {
+                // Ignore Turns for now
+                return Ok(());
+            }
+        }
+
+        // Update local world state (Teleport)
+        // Check distance safely - ignore check if we are uninitialized (landblock 0) or just logging in
+        let distance = if self.world.player.position.landblock_id == 0 {
+            0.0
+        } else {
+            self.world.player.position.distance_to(&next_pos)
+        };
+
+        if distance > AUTO_MOVE_DISTANCE_LIMIT {
+            log::warn!(
+                "Aborting auto-move: target is {:.2}m away (limit {}m)",
+                distance,
+                AUTO_MOVE_DISTANCE_LIMIT
+            );
+            if let Some(tx) = &self.event_tx {
+                let _ = tx.send(ClientEvent::ClientError(format!(
+                    "Item is too far away ({:.1}m). Move closer!",
+                    distance
+                )));
+            }
+            return Ok(());
+        }
+
+        self.world.player.position = next_pos;
+
+        // Emit event so TUI knows we "arrived"
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::EntityMoved {
+                guid: self.world.player.guid,
+                pos: next_pos,
+            })));
+        }
+
+        // Respond with MoveToState heartbeat to confirm arrival
+        let action = GameAction {
+            sequence: 0,
+            data: GameActionData::MoveToState(Box::new(MoveToStateData {
+                sequence: 0,
+                raw_motion_state: RawMotionState {
+                    flags: RawMotionFlags::empty(),
+                    current_hold_key: None,
+                    current_style: None,
+                    forward_command: None,
+                    forward_hold_key: None,
+                    forward_speed: None,
+                    sidestep_command: None,
+                    sidestep_hold_key: None,
+                    sidestep_speed: None,
+                    turn_command: None,
+                    turn_hold_key: None,
+                    turn_speed: None,
+                    commands: Vec::new(),
+                },
+                position: next_pos,
+                instance_sequence: self.world.player.instance_sequence,
+                server_control_sequence: self.world.player.server_control_sequence,
+                teleport_sequence: self.world.player.teleport_sequence,
+                force_position_sequence: self.world.player.force_position_sequence,
+                contact_long_jump: 1, // Logged as 0x1 (Contact) in retail
+            })),
+        };
+
+        log::debug!(
+            ">>> Sending MoveToState heartbeat. ServerSeq: {}, Pos: {:?}",
+            self.world.player.server_control_sequence,
+            next_pos
+        );
+        self.session
+            .send_message(&GameMessage::GameAction(Box::new(action)))
+            .await?;
 
         Ok(())
     }

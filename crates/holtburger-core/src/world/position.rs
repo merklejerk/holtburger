@@ -297,13 +297,32 @@ impl std::fmt::Display for WorldCoordinates {
 
 impl WorldPosition {
     pub fn is_indoors(&self) -> bool {
+        // In Asheron's Call, the low 16 bits of the landblock ID contain the cell.
+        // Cell IDs 0x0000 - 0x003F are used for the 64 outdoor cells in a landblock.
+        // Cell IDs 0x0100 and above are used for indoor/dungeon cells.
         (self.landblock_id & 0xFFFF) >= 0x0100
     }
 
     pub fn landblock_coords(&self) -> (u8, u8) {
+        // X = Longitude byte, Y = Latitude byte (high word of Landblock ID)
         let x = ((self.landblock_id >> 24) & 0xFF) as u8;
         let y = ((self.landblock_id >> 16) & 0xFF) as u8;
         (x, y)
+    }
+
+    pub fn cell_coords(&self) -> (u8, u8) {
+        if self.is_indoors() {
+            return (0, 0); // Indoor cells don't have a 2d grid layout in the same way
+        }
+        let cell_id = (self.landblock_id & 0xFFFF) as i32;
+        let cell_index = cell_id - 1;
+        if cell_index < 0 || cell_index >= 64 {
+            // For block-only landblocks (low word 0xFFFF), x/y is 0
+            return (0, 0);
+        }
+        let cx = ((cell_index >> 3) & 0x7) as u8;
+        let cy = (cell_index & 0x7) as u8;
+        (cx, cy)
     }
 
     pub fn to_world_coords(&self) -> WorldCoordinates {
@@ -313,20 +332,20 @@ impl WorldPosition {
             };
         }
 
-        let lb_x = ((self.landblock_id >> 24) & 0xFF) as f32;
-        let lb_y = ((self.landblock_id >> 16) & 0xFF) as f32;
+        let (lb_x, lb_y) = self.landblock_coords();
 
-        // In Asheron's Call, outdoor coordinates are relative to the landblock, not the cell.
-        // The world is 256x256 landblocks.
         // 1 landblock = 192 meters = 0.8 degrees.
-        // 1 degree = 1.25 landblocks = 240 meters.
-        // The coordinate system is centered such that 0.0, 0.0 is at an offset of 101.95 degrees.
+        // 1 degree = 240 meters.
+        // The local coords (self.coords.x/y) in an outdoor WorldPosition are 0-192.
+        // They are relative to the landblock origin, NOT the cell origin.
 
-        let total_x = lb_x * 0.8 + (self.coords.x / 240.0);
-        let total_y = lb_y * 0.8 + (self.coords.y / 240.0);
+        let total_x_meters = (lb_x as f32 * 192.0) + self.coords.x;
+        let total_y_meters = (lb_y as f32 * 192.0) + self.coords.y;
 
-        let lon = total_x - 101.95;
-        let lat = total_y - 101.95;
+        // Origin (0.0, 0.0) is the center of the world at landblock 0x8080.
+        // Longitude center is 102.0.
+        let lon = ((total_x_meters - 24576.0) / 240.0) + 102.0;
+        let lat = (total_y_meters - 24576.0) / 240.0;
 
         WorldCoordinates::Outdoor {
             lat,
@@ -341,18 +360,20 @@ impl WorldPosition {
         }
 
         if self.is_indoors() || other.is_indoors() {
-            // Different indoor landblocks/cells - can't compute distance easily without map data
+            // Different indoor landblocks/cells - can't compute distance easily without map data.
+            // If they are the same dungeon cell, it would have caught in the same-id check above.
             return 999.9;
         }
 
         // Outdoor distance calculation in meters
-        let (x1, y1) = self.landblock_coords();
-        let (x2, y2) = other.landblock_coords();
+        let (lb_x1, lb_y1) = self.landblock_coords();
+        let (lb_x2, lb_y2) = other.landblock_coords();
 
-        let wx1 = (x1 as f32 * 192.0) + self.coords.x;
-        let wy1 = (y1 as f32 * 192.0) + self.coords.y;
-        let wx2 = (x2 as f32 * 192.0) + other.coords.x;
-        let wy2 = (y2 as f32 * 192.0) + other.coords.y;
+        // Coordinates are 0-192 relative to the landblock.
+        let wx1 = (lb_x1 as f32 * 192.0) + self.coords.x;
+        let wy1 = (lb_y1 as f32 * 192.0) + self.coords.y;
+        let wx2 = (lb_x2 as f32 * 192.0) + other.coords.x;
+        let wy2 = (lb_y2 as f32 * 192.0) + other.coords.y;
 
         let dx = wx1 - wx2;
         let dy = wy1 - wy2;
@@ -390,6 +411,8 @@ mod tests {
             coords: Vector3::new(84.0, 108.0, 0.0),
             rotation: Quaternion::identity(),
         };
+        assert!(!pos.is_indoors());
+        
         let coords = pos.to_world_coords();
         if let WorldCoordinates::Outdoor { lat, lon, alt: _ } = coords {
             assert!((lat - (-33.5)).abs() < 1e-4);
@@ -398,6 +421,27 @@ mod tests {
             panic!("Expected outdoor coordinates");
         }
         assert_eq!(coords.to_string(), "33.50S, 72.80E, 0.0Z");
+    }
+
+    #[test]
+    fn test_distance_between_adjacent_cells() {
+        let lb = (0xDAu32 << 24) | (0x55u32 << 16);
+        // Cell 0x1C (index 27): X=3, Y=3.
+        let pos1 = WorldPosition {
+            landblock_id: lb | 0x1C,
+            coords: Vector3::new(84.0, 84.0, 0.0), // Abs X = 218*192 + 84
+            rotation: Quaternion::identity(),
+        };
+        // Cell 0x1D (index 28): X=3, Y=4.
+        let pos2 = WorldPosition {
+            landblock_id: lb | 0x1D,
+            coords: Vector3::new(84.0, 108.0, 0.0), // Abs X = 218*192 + 84, Abs Y = 85*192 + 108
+            rotation: Quaternion::identity(),
+        };
+
+        // Distance should be exactly 24m (difference in Y coordinates)
+        let dist = pos1.distance_to(&pos2);
+        assert!((dist - 24.0).abs() < 1e-4, "Distance was {}", dist);
     }
 
     #[test]

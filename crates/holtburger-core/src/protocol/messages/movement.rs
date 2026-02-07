@@ -390,12 +390,19 @@ pub struct Origin {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MoveToParameters {
+    /// Bitmask of MovementParamFlags (e.g. 0x400 for UseSpheres)
     pub movement_parameters: u32,
+    /// Desired gap between the physical boundaries (radii) of the player and target
     pub distance_to_object: f32,
+    /// Minimum gap allowed before movement stops
     pub min_distance: f32,
+    /// Distance from starting point at which the move is considered failed (e.g. for charging)
     pub fail_distance: f32,
+    /// Velocity modifier (1.0 is standard)
     pub speed: f32,
+    /// Distance from target at which to switch from running to walking
     pub walk_run_threshold: f32,
+    /// Final orientation the player should face after arriving
     pub desired_heading: f32,
 }
 

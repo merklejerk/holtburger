@@ -272,4 +272,81 @@ impl AppState {
         }
         flattened
     }
+
+    pub fn display_client_info(&mut self) {
+        self.log_chat(ChatMessageKind::System, "═══ CLIENT DEBUG INFO ═══".to_string());
+        
+        // Character info
+        self.log_chat(ChatMessageKind::System, format!("Account: {}", self.account_name));
+        if let Some(name) = &self.character_name {
+            self.log_chat(ChatMessageKind::System, format!("Character: {}", name));
+        }
+        if let Some(guid) = self.player_guid {
+            self.log_chat(ChatMessageKind::System, format!("GUID: {:#010X}", guid.0));
+        }
+        
+        // Client state
+        let state_str = match &self.core_state {
+            ClientState::Connected => "Connected",
+            ClientState::CharacterSelection(_) => "Character Selection",
+            ClientState::EnteringWorld => "Entering World",
+            ClientState::InWorld => "In World",
+            ClientState::Disconnected => "Disconnected",
+        };
+        self.log_chat(ChatMessageKind::System, format!("State: {}", state_str));
+        
+        // Position info - copy position first to avoid borrow issues
+        let pos_copy = self.player_pos;
+        if let Some(pos) = pos_copy {
+            self.log_chat(ChatMessageKind::System, "".to_string());
+            self.log_chat(ChatMessageKind::System, "═══ POSITION ═══".to_string());
+            self.log_chat(ChatMessageKind::System, format!("Landblock: {:#010X}", pos.landblock_id));
+            self.log_chat(ChatMessageKind::System, format!("Euclidean: ({:.2}, {:.2}, {:.2})", 
+                pos.coords.x, pos.coords.y, pos.coords.z));
+            
+            let world_coords = pos.to_world_coords();
+            self.log_chat(ChatMessageKind::System, format!("Geographic: {}", world_coords));
+            
+            if pos.is_indoors() {
+                self.log_chat(ChatMessageKind::System, "Location: Indoors".to_string());
+            } else {
+                let (lb_x, lb_y) = pos.landblock_coords();
+                let (cell_x, cell_y) = pos.cell_coords();
+                self.log_chat(ChatMessageKind::System, format!("Landblock Coords: ({}, {})", lb_x, lb_y));
+                self.log_chat(ChatMessageKind::System, format!("Cell Coords: ({}, {})", cell_x, cell_y));
+            }
+            
+            self.log_chat(ChatMessageKind::System, format!("Rotation: (w={:.3}, x={:.3}, y={:.3}, z={:.3})",
+                pos.rotation.w, pos.rotation.x, pos.rotation.y, pos.rotation.z));
+        } else {
+            self.log_chat(ChatMessageKind::System, "Position: Unknown".to_string());
+        }
+        
+        // Entity counts
+        self.log_chat(ChatMessageKind::System, "".to_string());
+        self.log_chat(ChatMessageKind::System, "═══ ENTITIES ═══".to_string());
+        let world_entities = self.entities.values().filter(|e| e.position.landblock_id != 0).count();
+        let inventory_items = self.entities.values().filter(|e| e.position.landblock_id == 0).count();
+        self.log_chat(ChatMessageKind::System, format!("World Entities: {}", world_entities));
+        self.log_chat(ChatMessageKind::System, format!("Inventory Items: {}", inventory_items));
+        self.log_chat(ChatMessageKind::System, format!("Total Entities: {}", self.entities.len()));
+        
+        // Effects
+        if !self.player_enchantments.is_empty() {
+            self.log_chat(ChatMessageKind::System, format!("Active Effects: {}", self.player_enchantments.len()));
+        }
+        
+        // Server time
+        if let Some((server_time, instant)) = self.server_time {
+            self.log_chat(ChatMessageKind::System, "".to_string());
+            self.log_chat(ChatMessageKind::System, "═══ TIME ═══".to_string());
+            let current = self.current_server_time();
+            self.log_chat(ChatMessageKind::System, format!("Server Time: {:.2}", current));
+            let elapsed = instant.elapsed().as_secs_f64();
+            self.log_chat(ChatMessageKind::System, format!("Sync Elapsed: {:.2}s", elapsed));
+            self.log_chat(ChatMessageKind::System, format!("Original Sync: {:.2}", server_time));
+        }
+        
+        self.log_chat(ChatMessageKind::System, "═══════════════════".to_string());
+    }
 }

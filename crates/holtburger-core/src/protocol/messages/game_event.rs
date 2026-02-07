@@ -1,11 +1,11 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
-use crate::protocol::messages::{
+pub use crate::protocol::messages::{
     ChannelBroadcastData, GameEventOpcode, IdentifyObjectResponseData,
-    InventoryPutObjInContainerData, InventoryPutObjectIn3DData, MagicPurgeBadEnchantmentsData,
-    MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData, MagicRemoveMultipleEnchantmentsData,
-    MagicUpdateEnchantmentData, MagicUpdateMultipleEnchantmentsData, PingResponseData,
-    PlayerDescriptionData, TellData, UseDoneData, ViewContentsData, WeenieErrorData,
-    WeenieErrorWithStringData, WieldObjectData,
+    InventoryPutObjInContainerData, InventoryPutObjectIn3DData, InventoryServerSaveFailedData,
+    MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
+    MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
+    MagicUpdateMultipleEnchantmentsData, PingResponseData, PlayerDescriptionData, TellData,
+    UseDoneData, ViewContentsData, WeenieErrorData, WeenieErrorWithStringData, WieldObjectData,
 };
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -38,6 +38,7 @@ pub enum GameEventData {
     WeenieErrorWithString(Box<WeenieErrorWithStringData>),
     UseDone(Box<UseDoneData>),
     IdentifyObjectResponse(Box<IdentifyObjectResponseData>),
+    InventoryServerSaveFailed(Box<InventoryServerSaveFailedData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -130,6 +131,11 @@ impl GameEvent {
                 GameEventOpcode::IdentifyObjectResponse => GameEventData::IdentifyObjectResponse(
                     Box::new(IdentifyObjectResponseData::unpack(data, offset)?),
                 ),
+                GameEventOpcode::InventoryServerSaveFailed => {
+                    GameEventData::InventoryServerSaveFailed(Box::new(
+                        InventoryServerSaveFailedData::unpack(data, offset)?,
+                    ))
+                }
             },
             None => {
                 log::warn!(
@@ -251,6 +257,11 @@ impl GameEvent {
             }
             GameEventData::IdentifyObjectResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::IdentifyObjectResponse as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEventData::InventoryServerSaveFailed(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::InventoryServerSaveFailed as u32)
                     .unwrap();
                 data.pack(buf);
             }

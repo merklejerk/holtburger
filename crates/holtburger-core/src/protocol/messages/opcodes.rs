@@ -602,10 +602,7 @@ pub enum GameEventOpcode {
     WeenieError = 0x028A,
     /// S2C: Error from the game engine with an extra description.
     WeenieErrorWithString = 0x028B,
-    /// S2C: Acknowledge that an action (Use) is complete.
-    UseDone = 0x01C7,
-    /// S2C: Returns detailed identification data for an object.
-    IdentifyObjectResponse = 0x00C9,
+
     // --- Fellowship ---
     // /// S2C: Complete fellowship update.
     // FellowshipFullUpdate = 0x02BE,
@@ -627,6 +624,11 @@ pub enum GameEventOpcode {
     // CharacterConfirmationDone = 0x0276,
     // /// S2C: Confirms the player has joined the game session.
     // JoinGameResponse = 0x0281,
+    /// S2C: Acknowledge that an action (Use) is complete.
+    UseDone = 0x01C7,
+    /// S2C: Result of an object appraisal (Assess/Identify).
+    /// Includes full properties on success, or a failure flag if skill check failed.
+    IdentifyObjectResponse = 0x00C9,
 
     // --- Social & Communication (Extra) ---
     // /// S2C: List of available chat channels.
@@ -665,14 +667,9 @@ pub enum GameEventOpcode {
     // --- Inventory & World (Extra) ---
     // /// S2C: Closes the view of a container on the ground.
     // CloseGroundContainer = 0x0052,
-    // /// S2C: Notification that an inventory save operation failed on the server.
-    // InventoryServerSaveFailed = 0x00A0,
-
+    /// S2C: Notification that an inventory save operation failed on the server.
+    InventoryServerSaveFailed = 0x00A0,
     // --- Visuals & Identification ---
-    // /// S2C: Returns detailed identification data for an object (Identify spell).
-    // IdentifyObjectResponse = 0x00C9,
-    // /// S2C: Indicates the appraisal of an item is finished.
-    // ItemAppraiseDone = 0x01CB,
     // /// S2C: Returns the inscription text for an object.
     // GetInscriptionResponse = 0x00C3,
 
@@ -814,4 +811,8 @@ pub enum GameEventOpcode {
     // --- Miscellaneous ---
     // /// S2C: Opens the character barber (customization) UI.
     // StartBarber = 0x0075,
+
+    // --- Unused ---
+    // /// This is a "ghost" opcode—defined in headers but not implemented or used in ACE.
+    // ItemAppraiseDone = 0x01CB,
 }

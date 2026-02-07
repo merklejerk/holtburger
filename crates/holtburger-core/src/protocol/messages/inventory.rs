@@ -1,3 +1,4 @@
+use crate::protocol::errors::WeenieError;
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::world::Guid;
 use bitflags::bitflags;
@@ -349,6 +350,32 @@ impl MessagePack for PutItemInContainerData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct InventoryServerSaveFailedData {
+    pub item_guid: Guid,
+    pub error: WeenieError,
+}
+
+impl MessageUnpack for InventoryServerSaveFailedData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let item_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let error_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let error = WeenieError::from_repr(error_raw).unwrap_or(WeenieError::None);
+        Some(InventoryServerSaveFailedData { item_guid, error })
+    }
+}
+
+impl MessagePack for InventoryServerSaveFailedData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.item_guid.pack(buf);
+        buf.write_u32::<LittleEndian>(self.error as u32).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,6 +508,24 @@ mod tests {
                 object_guid: Guid(0x80000001),
                 equip_mask: EquipMask::MELEE_WEAPON,
             })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_inventory_server_save_failed_fixture() {
+        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x12), Event (0x00A0), Obj (0x80000001), Error (0x03EE)
+        let hex = "B0F700000100005012000000A000000001000080EE030000";
+        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+            target: Guid(0x50000001),
+            sequence: 0x12,
+            event: GameEventData::InventoryServerSaveFailed(Box::new(
+                InventoryServerSaveFailedData {
+                    item_guid: Guid(0x80000001),
+                    error: WeenieError::TheContainerIsClosed,
+                },
+            )),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }

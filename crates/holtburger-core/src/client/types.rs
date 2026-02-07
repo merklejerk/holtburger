@@ -24,6 +24,7 @@ pub enum ClientEvent {
     },
     ServerMessage(String),
     CharacterError(CharacterError),
+    ClientError(String),
     WeenieError {
         error_id: u32,
         message: Option<String>,

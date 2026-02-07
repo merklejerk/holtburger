@@ -114,6 +114,89 @@ pub struct PlayerDescriptionData {
     pub equipped_objects: Vec<(Guid, u32, u32)>, // (guid, loc, prio)
 }
 
+fn unpack_inventory_and_equipped_strict(
+    data: &[u8],
+    offset: &mut usize,
+) -> Option<(Vec<(Guid, u32)>, Vec<(Guid, u32, u32)>)> {
+    if *offset + 4 > data.len() {
+        return None;
+    }
+    let inv_count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+    *offset += 4;
+    if inv_count > 10_000 {
+        return None;
+    }
+
+    let mut inventory = Vec::with_capacity(inv_count);
+    for _ in 0..inv_count {
+        let guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let wtype = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        // ACE writes a ContainerType enum here:
+        //   NonContainer=0, Container=1, Foci=2
+        if wtype > 2 {
+            return None;
+        }
+        inventory.push((guid, wtype));
+    }
+
+    if *offset + 4 > data.len() {
+        return None;
+    }
+    let eq_count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+    *offset += 4;
+    if eq_count > 10_000 {
+        return None;
+    }
+
+    let mut equipped_objects = Vec::with_capacity(eq_count);
+    for _ in 0..eq_count {
+        let guid = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let loc = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let prio = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
+        equipped_objects.push((guid, loc, prio));
+    }
+
+    Some((inventory, equipped_objects))
+}
+
+fn find_inventory_start_after_gameplay_options(
+    data: &[u8],
+    gameplay_options_start: usize,
+) -> Option<(usize, usize, Vec<(Guid, u32)>, Vec<(Guid, u32, u32)>)> {
+    // Need at least 8 bytes available for inv_count + eq_count.
+    if gameplay_options_start + 8 > data.len() {
+        return None;
+    }
+
+    // Inventory starts at a u32, so only consider 4-byte aligned candidates.
+    let mut candidate = gameplay_options_start;
+    let misalign = candidate % 4;
+    if misalign != 0 {
+        candidate = candidate.saturating_add(4 - misalign);
+    }
+
+    let last_candidate = data.len().saturating_sub(8);
+    while candidate <= last_candidate {
+        let mut tmp = candidate;
+        if let Some((inv, eq)) = unpack_inventory_and_equipped_strict(data, &mut tmp) {
+            if tmp == data.len() {
+                return Some((candidate, tmp, inv, eq));
+            }
+        }
+        candidate += 4;
+    }
+
+    None
+}
+
 impl PlayerDescriptionData {
     pub fn unpack(guid: Guid, sequence: u32, data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
@@ -267,9 +350,8 @@ impl PlayerDescriptionData {
                 }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
-                if let Some(pos) = WorldPosition::unpack(data, offset) {
-                    positions.insert(key, pos);
-                }
+                let pos = WorldPosition::unpack(data, offset)?;
+                positions.insert(key, pos);
             }
         }
 
@@ -347,9 +429,8 @@ impl PlayerDescriptionData {
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if let Some(skill) = CreatureSkill::unpack(data, offset) {
-                    skills.insert(skill.sk_type, skill);
-                }
+                let skill = CreatureSkill::unpack(data, offset)?;
+                skills.insert(skill.sk_type, skill);
             }
         }
 
@@ -388,9 +469,7 @@ impl PlayerDescriptionData {
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 for _ in 0..count {
-                    if let Some(e) = Enchantment::unpack(data, offset) {
-                        enchantments.push(e);
-                    }
+                    enchantments.push(Enchantment::unpack(data, offset)?);
                 }
             }
             if mask.contains(EnchantmentMask::ADDITIVE) {
@@ -400,9 +479,7 @@ impl PlayerDescriptionData {
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 for _ in 0..count {
-                    if let Some(e) = Enchantment::unpack(data, offset) {
-                        enchantments.push(e);
-                    }
+                    enchantments.push(Enchantment::unpack(data, offset)?);
                 }
             }
             if mask.contains(EnchantmentMask::COOLDOWN) {
@@ -412,9 +489,7 @@ impl PlayerDescriptionData {
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 for _ in 0..count {
-                    if let Some(e) = Enchantment::unpack(data, offset) {
-                        enchantments.push(e);
-                    }
+                    enchantments.push(Enchantment::unpack(data, offset)?);
                 }
             }
             if mask.contains(EnchantmentMask::VITAE) {
@@ -439,9 +514,7 @@ impl PlayerDescriptionData {
             let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if let Some(s) = Shortcut::unpack(data, offset) {
-                    shortcuts.push(s);
-                }
+                shortcuts.push(Shortcut::unpack(data, offset)?);
             }
         }
 
@@ -512,58 +585,23 @@ impl PlayerDescriptionData {
             *offset += 4;
         }
 
+        // ACE writes GameplayOptions as an opaque byte blob with no explicit length.
+        // To keep parsing deterministic, we locate the start of the inventory section by
+        // scanning for a 4-byte aligned split point where the trailing inventory/equipped
+        // structures parse cleanly through the end of the message.
+        let gameplay_options_start = *offset;
         let mut gameplay_options = Vec::new();
-        if option_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
-            *offset += 4;
-            if *offset + count <= data.len() {
-                gameplay_options.reserve(count);
-                gameplay_options.extend_from_slice(&data[*offset..*offset + count]);
-                *offset += count;
-            }
-        }
 
-        let inv_count = if *offset + 4 <= data.len() {
-            let val = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
-            *offset += 4;
-            val
+        let (inventory, equipped_objects) = if option_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
+            let (inv_start, end, inv, eq) =
+                find_inventory_start_after_gameplay_options(data, gameplay_options_start)?;
+            gameplay_options.extend_from_slice(&data[gameplay_options_start..inv_start]);
+            *offset = end;
+            (inv, eq)
         } else {
-            0
+            let (inv, eq) = unpack_inventory_and_equipped_strict(data, offset)?;
+            (inv, eq)
         };
-
-        let mut inventory = Vec::with_capacity(inv_count);
-        for _ in 0..inv_count {
-            let guid = Guid::unpack(data, offset)?;
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let wtype = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            inventory.push((guid, wtype));
-        }
-
-        let eq_count = if *offset + 4 <= data.len() {
-            let val = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
-            *offset += 4;
-            val
-        } else {
-            0
-        };
-
-        let mut equipped_objects = Vec::with_capacity(eq_count);
-        for _ in 0..eq_count {
-            let guid = Guid::unpack(data, offset)?;
-            if *offset + 8 > data.len() {
-                return None;
-            }
-            let loc = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            let prio = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-            *offset += 8;
-            equipped_objects.push((guid, loc, prio));
-        }
 
         let name = properties_string
             .get(&1_u32)
@@ -867,8 +905,6 @@ impl MessagePack for PlayerDescriptionData {
         buf.write_u32::<LittleEndian>(self.options2).unwrap();
 
         if o_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
-            buf.write_u32::<LittleEndian>(self.gameplay_options.len() as u32)
-                .unwrap();
             buf.extend_from_slice(&self.gameplay_options);
         }
 
@@ -1423,5 +1459,67 @@ mod tests {
             ranks: 50,
         }));
         assert_pack_unpack_parity(fixtures::UPDATE_SKILL_LEVEL_PUBLIC, &expected);
+    }
+
+    #[test]
+    fn test_player_description_tui_2026_02_07_fixture_sanity() {
+        use crate::protocol::messages::test_helpers::get_fixture;
+        use crate::protocol::messages::{GameEventOpcode, GameOpcode};
+        use byteorder::{ByteOrder, LittleEndian};
+
+        let data = get_fixture("player_description_tui_2026_02_07.bin");
+        assert_eq!(data.len(), 6784);
+
+        // GameMessage opcode (0xF7B0 = GameEvent)
+        assert_eq!(LittleEndian::read_u32(&data[0..4]), GameOpcode::GameEvent as u32);
+
+        // GameEvent header: target (0x50000001), sequence (0x00000001), event type (0x0013)
+        assert_eq!(LittleEndian::read_u32(&data[4..8]), 0x5000_0001);
+        assert_eq!(LittleEndian::read_u32(&data[8..12]), 0x0000_0001);
+        assert_eq!(
+            LittleEndian::read_u32(&data[12..16]),
+            GameEventOpcode::PlayerDescription as u32
+        );
+    }
+
+    #[test]
+    fn test_player_description_tui_2026_02_07_fixture_unpack() {
+        use crate::protocol::messages::test_helpers::get_fixture;
+        use crate::protocol::messages::{GameEventData, GameMessage, MessageUnpack};
+
+        let data = get_fixture("player_description_tui_2026_02_07.bin");
+        let mut offset = 0;
+        let msg = <GameMessage as MessageUnpack>::unpack(&data, &mut offset).expect("Unpack failed");
+        assert_eq!(offset, data.len(), "Parser did not consume full message");
+
+        match msg {
+            GameMessage::GameEvent(ev) => match ev.event {
+                GameEventData::PlayerDescription(pd) => {
+                    // This fixture's GameplayOptions were extracted separately as
+                    // gameplay_options_tui_2026_02_07.bin (876 bytes). Keeping this assertion
+                    // here ensures our boundary detection stays correct.
+                    assert_eq!(pd.gameplay_options.len(), 876);
+                }
+                other => panic!("Expected PlayerDescription event, got: {other:?}"),
+            },
+            other => panic!("Expected GameEvent message, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_gameplay_options_fixture_basic_shape() {
+        use crate::protocol::messages::test_helpers::get_fixture;
+        use byteorder::{ByteOrder, LittleEndian};
+
+        let data = get_fixture("gameplay_options_tui_2026_02_07.bin");
+        assert_eq!(data.len(), 876);
+        assert_eq!(data.len() % 4, 0, "expected 4-byte alignment");
+
+        let version = LittleEndian::read_u32(&data[0..4]);
+        assert_eq!(version, 2);
+
+        // Hypothesis: u32 version + list of u32 pairs.
+        let remainder = data.len() - 4;
+        assert_eq!(remainder % 8, 0, "expected remainder to be u32 pairs");
     }
 }

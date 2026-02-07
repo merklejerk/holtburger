@@ -1,21 +1,18 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{read_string16, write_string16};
+use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEntry {
-    pub guid: u32,
+    pub guid: Guid,
     pub name: String,
     pub delete_time: u32,
 }
 
 impl MessageUnpack for CharacterEntry {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         let name = read_string16(data, offset)?;
 
         if *offset + 4 > data.len() {
@@ -34,7 +31,7 @@ impl MessageUnpack for CharacterEntry {
 
 impl MessagePack for CharacterEntry {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        self.guid.pack(buf);
         write_string16(buf, &self.name);
         buf.write_u32::<LittleEndian>(self.delete_time).unwrap();
     }
@@ -119,39 +116,33 @@ impl MessagePack for CharacterListData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEnterWorldRequestData {
-    pub guid: u32,
+    pub guid: Guid,
 }
 
 impl MessageUnpack for CharacterEnterWorldRequestData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         Some(CharacterEnterWorldRequestData { guid })
     }
 }
 
 impl MessagePack for CharacterEnterWorldRequestData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        self.guid.pack(buf);
     }
 }
 
+// removed duplicate import
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEnterWorldData {
-    pub guid: u32,
+    pub guid: Guid,
     pub account: String,
 }
 
 impl MessageUnpack for CharacterEnterWorldData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         let account = read_string16(data, offset)?;
         Some(CharacterEnterWorldData { guid, account })
     }
@@ -159,7 +150,7 @@ impl MessageUnpack for CharacterEnterWorldData {
 
 impl MessagePack for CharacterEnterWorldData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        self.guid.pack(buf);
         write_string16(buf, &self.account);
     }
 }
@@ -204,7 +195,9 @@ mod tests {
 
     #[test]
     fn test_character_enter_world_request_fixture() {
-        let expected = CharacterEnterWorldRequestData { guid: 0x12345678 };
+        let expected = CharacterEnterWorldRequestData {
+            guid: Guid(0x12345678),
+        };
         // Skip opcode (4 bytes)
         assert_pack_unpack_parity(&fixtures::CHARACTER_ENTER_WORLD_REQUEST[4..], &expected);
     }
@@ -212,7 +205,7 @@ mod tests {
     #[test]
     fn test_character_enter_world_fixture() {
         let expected = CharacterEnterWorldData {
-            guid: 0x12345678,
+            guid: Guid(0x12345678),
             account: "Alice".to_string(),
         };
         // Skip opcode (4 bytes)
@@ -223,7 +216,7 @@ mod tests {
     fn test_character_list_fixture() {
         let expected = CharacterListData {
             characters: vec![CharacterEntry {
-                guid: 0x12345678,
+                guid: Guid(0x12345678),
                 name: "Alice".to_string(),
                 delete_time: 0,
             }],

@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use holtburger_core::protocol::messages::{CharacterEntry, Enchantment};
 use holtburger_core::world::entity::Entity;
+use holtburger_core::world::guid::Guid;
 use holtburger_core::world::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use holtburger_core::{ClientState, RetryState};
@@ -17,7 +18,7 @@ use crate::ui::widgets::effects::get_enchantment_name;
 pub struct AppState {
     pub account_name: String,
     pub character_name: Option<String>,
-    pub player_guid: Option<u32>,
+    pub player_guid: Option<Guid>,
     pub attributes: HashMap<AttributeType, Attribute>,
     pub vitals: HashMap<VitalType, Vital>,
     pub skills: HashMap<SkillType, Skill>,
@@ -48,8 +49,8 @@ pub struct AppState {
     pub core_state: ClientState,
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
-    pub entities: HashMap<u32, Entity>,
-    pub inventory_entities: HashMap<u32, Entity>,
+    pub entities: HashMap<Guid, Entity>,
+    pub inventory_entities: HashMap<Guid, Entity>,
     pub server_time: Option<(f64, Instant)>,
     pub chat_log: Option<Mutex<File>>,
     pub use_emojis: bool,
@@ -158,10 +159,10 @@ impl AppState {
         }
 
         // Build parent-child mapping for the subset
-        let mut children_map: HashMap<u32, Vec<u32>> = HashMap::new();
+        let mut children_map: HashMap<Guid, Vec<Guid>> = HashMap::new();
         let mut roots = Vec::new();
 
-        let candidate_guids: HashSet<u32> = candidates.iter().map(|e| e.guid).collect();
+        let candidate_guids: HashSet<Guid> = candidates.iter().map(|e| e.guid).collect();
 
         for e in &candidates {
             let parent_id = if filter_inventory {
@@ -198,12 +199,12 @@ impl AppState {
                 let da = if let Some(p) = &self.player_pos {
                     ea.position.distance_to(p)
                 } else {
-                    0.0
+                    999.0
                 };
                 let db = if let Some(p) = &self.player_pos {
                     eb.position.distance_to(p)
                 } else {
-                    0.0
+                    999.0
                 };
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             } else {
@@ -213,7 +214,7 @@ impl AppState {
 
         // Flatten with depth using DFS
         let mut result = Vec::new();
-        let mut stack: Vec<(u32, usize)> = roots.into_iter().rev().map(|id| (id, 0)).collect();
+        let mut stack: Vec<(Guid, usize)> = roots.into_iter().rev().map(|id| (id, 0)).collect();
 
         while let Some((guid, depth)) = stack.pop() {
             let e = &self.entities[&guid];

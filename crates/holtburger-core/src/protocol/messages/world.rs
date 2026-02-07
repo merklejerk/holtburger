@@ -2,6 +2,7 @@ use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{
     read_hashtable_header, read_string16, write_hashtable_header, write_string16,
 };
+use crate::world::Guid;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
@@ -351,7 +352,7 @@ impl MessagePack for ArmorLevels {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IdentifyObjectResponseData {
-    pub object_guid: u32,
+    pub object_guid: Guid,
     pub flags: IdentifyResponseFlags,
     pub success: bool,
     pub int_stats: BTreeMap<u32, i32>,
@@ -379,12 +380,12 @@ impl MessageUnpack for IdentifyObjectResponseData {
         if *offset + 12 > data.len() {
             return None;
         }
-        let object_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let object_guid = Guid::unpack(data, offset)?;
         let flags = IdentifyResponseFlags::from_bits_retain(LittleEndian::read_u32(
-            &data[*offset + 4..*offset + 8],
+            &data[*offset..*offset + 4],
         ));
-        let success = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]) != 0;
-        *offset += 12;
+        let success = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) != 0;
+        *offset += 8;
 
         let mut int_stats = BTreeMap::new();
         if flags.contains(IdentifyResponseFlags::INT_STATS_TABLE) {
@@ -571,7 +572,7 @@ where
 
 impl MessagePack for IdentifyObjectResponseData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.object_guid).unwrap();
+        self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.flags.bits()).unwrap();
         buf.write_u32::<LittleEndian>(if self.success { 1 } else { 0 })
             .unwrap();
@@ -742,6 +743,7 @@ mod tests {
     use super::*;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
     use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+    use crate::world::Guid;
 
     #[test]
     fn test_identify_object_response_parity() {
@@ -757,10 +759,10 @@ mod tests {
         string_stats.insert(1, "Sword of Awesome".to_string());
 
         let expected = GameMessage::GameEvent(Box::new(GameEvent {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sequence: 123,
             event: GameEventData::IdentifyObjectResponse(Box::new(IdentifyObjectResponseData {
-                object_guid: 0x50000002,
+                object_guid: Guid(0x50000002),
                 flags: IdentifyResponseFlags::INT_STATS_TABLE
                     | IdentifyResponseFlags::STRING_STATS_TABLE,
                 success: true,

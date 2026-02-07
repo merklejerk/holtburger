@@ -1,25 +1,30 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Shortcut {
     pub index: u32,
-    pub object_id: u32,
+    pub object_id: Guid,
     pub spell_id: u16,
     pub layer: u16,
 }
 
 impl MessageUnpack for Shortcut {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        if *offset + 4 > data.len() {
             return None;
         }
         let index = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let object_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let spell_id = LittleEndian::read_u16(&data[*offset + 8..*offset + 10]);
-        let layer = LittleEndian::read_u16(&data[*offset + 10..*offset + 12]);
-        *offset += 12;
+        *offset += 4;
+        let object_id = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        *offset += 4;
         Some(Shortcut {
             index,
             object_id,
@@ -32,7 +37,7 @@ impl MessageUnpack for Shortcut {
 impl MessagePack for Shortcut {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u32::<LittleEndian>(self.index).unwrap();
-        writer.write_u32::<LittleEndian>(self.object_id).unwrap();
+        self.object_id.pack(writer);
         writer.write_u16::<LittleEndian>(self.spell_id).unwrap();
         writer.write_u16::<LittleEndian>(self.layer).unwrap();
     }
@@ -47,7 +52,7 @@ pub struct Enchantment {
     pub power_level: u32,
     pub start_time: f64,
     pub duration: f64,
-    pub caster_guid: u32,
+    pub caster_guid: Guid,
     pub degrade_modifier: f32,
     pub degrade_limit: f32,
     pub last_time_degraded: f64,
@@ -59,7 +64,7 @@ pub struct Enchantment {
 
 impl MessageUnpack for Enchantment {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 60 > data.len() {
+        if *offset + 28 > data.len() {
             return None;
         }
         let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
@@ -69,14 +74,20 @@ impl MessageUnpack for Enchantment {
         let power_level = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
         let start_time = LittleEndian::read_f64(&data[*offset + 12..*offset + 20]);
         let duration = LittleEndian::read_f64(&data[*offset + 20..*offset + 28]);
-        let caster_guid = LittleEndian::read_u32(&data[*offset + 28..*offset + 32]);
-        let degrade_modifier = LittleEndian::read_f32(&data[*offset + 32..*offset + 36]);
-        let degrade_limit = LittleEndian::read_f32(&data[*offset + 36..*offset + 40]);
-        let last_time_degraded = LittleEndian::read_f64(&data[*offset + 40..*offset + 48]);
-        let stat_mod_type = LittleEndian::read_u32(&data[*offset + 48..*offset + 52]);
-        let stat_mod_key = LittleEndian::read_u32(&data[*offset + 52..*offset + 56]);
-        let stat_mod_value = LittleEndian::read_f32(&data[*offset + 56..*offset + 60]);
-        *offset += 60;
+        *offset += 28;
+
+        let caster_guid = Guid::unpack(data, offset)?;
+
+        if *offset + 28 > data.len() {
+            return None;
+        }
+        let degrade_modifier = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        let degrade_limit = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        let last_time_degraded = LittleEndian::read_f64(&data[*offset + 8..*offset + 16]);
+        let stat_mod_type = LittleEndian::read_u32(&data[*offset + 16..*offset + 20]);
+        let stat_mod_key = LittleEndian::read_u32(&data[*offset + 20..*offset + 24]);
+        let stat_mod_value = LittleEndian::read_f32(&data[*offset + 24..*offset + 28]);
+        *offset += 28;
 
         let spell_set_id = if has_spell_set_id != 0 {
             if *offset + 4 > data.len() {
@@ -122,7 +133,7 @@ impl MessagePack for Enchantment {
         writer.write_u32::<LittleEndian>(self.power_level).unwrap();
         writer.write_f64::<LittleEndian>(self.start_time).unwrap();
         writer.write_f64::<LittleEndian>(self.duration).unwrap();
-        writer.write_u32::<LittleEndian>(self.caster_guid).unwrap();
+        self.caster_guid.pack(writer);
         writer
             .write_f32::<LittleEndian>(self.degrade_modifier)
             .unwrap();
@@ -292,7 +303,7 @@ mod tests {
             power_level: 100,
             start_time: 0.0,
             duration: 3600.0,
-            caster_guid: 0,
+            caster_guid: Guid::NULL,
             degrade_modifier: 1.0,
             degrade_limit: 0.0,
             last_time_degraded: 0.0,
@@ -328,7 +339,7 @@ mod tests {
     fn test_shortcut_parity() {
         let sc = Shortcut {
             index: 1,
-            object_id: 0x100,
+            object_id: Guid(0x100),
             spell_id: 10,
             layer: 1,
         };

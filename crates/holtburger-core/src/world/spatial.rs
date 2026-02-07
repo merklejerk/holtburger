@@ -1,6 +1,7 @@
 use crate::dat::DatDatabase;
 use crate::dat::file_type::gfx_obj::GfxObj;
 use crate::dat::landblock::LandblockInfo;
+use crate::world::Guid;
 use crate::world::position::WorldPosition;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -10,7 +11,7 @@ use std::time::Instant;
 /// It tracks entity positions by landblock and handles spatial queries.
 pub struct SpatialScene {
     /// Entities indexed by LandblockID for fast local queries.
-    pub landblock_map: HashMap<u32, HashSet<u32>>,
+    pub landblock_map: HashMap<u32, HashSet<Guid>>,
 
     /// Cache of object-level geometry (GfxObj from portal.dat).
     pub object_geometry: HashMap<u32, Arc<GeometryCacheEntry>>,
@@ -87,7 +88,7 @@ impl SpatialScene {
         None
     }
 
-    pub fn update_entity(&mut self, guid: u32, old_lb: u32, new_lb: u32) {
+    pub fn update_entity(&mut self, guid: Guid, old_lb: u32, new_lb: u32) {
         if old_lb != new_lb
             && let Some(set) = self.landblock_map.get_mut(&old_lb)
         {
@@ -96,20 +97,20 @@ impl SpatialScene {
         self.landblock_map.entry(new_lb).or_default().insert(guid);
     }
 
-    pub fn remove_entity(&mut self, guid: u32, lb: u32) {
+    pub fn remove_entity(&mut self, guid: Guid, lb: u32) {
         if let Some(set) = self.landblock_map.get_mut(&lb) {
             set.remove(&guid);
         }
     }
 
     /// Find all entities in a given landblock.
-    pub fn get_in_landblock(&self, lb: u32) -> Option<&HashSet<u32>> {
+    pub fn get_in_landblock(&self, lb: u32) -> Option<&HashSet<Guid>> {
         self.landblock_map.get(&lb)
     }
 
     /// Get all entities in the landblock and its 8 immediate neighbors.
     /// Useful for coarse filtering before doing fine-grained distance checks.
-    pub fn get_nearby_entities(&self, lb: u32) -> HashSet<u32> {
+    pub fn get_nearby_entities(&self, lb: u32) -> HashSet<Guid> {
         let mut nearby = HashSet::new();
 
         let x = (lb >> 24) & 0xFF;
@@ -143,7 +144,7 @@ impl SpatialScene {
     }
 
     /// Query entities within a certain radius.
-    pub fn get_entities_in_range(&self, _pos: &WorldPosition, _radius: f32) -> Vec<u32> {
+    pub fn get_entities_in_range(&self, _pos: &WorldPosition, _radius: f32) -> Vec<Guid> {
         // TODO: Implement distance calculations once we have access to Entity positions
         Vec::new()
     }
@@ -156,8 +157,8 @@ mod tests {
     #[test]
     fn test_spatial_neighbors() {
         let mut scene = SpatialScene::new();
-        let guid_a = 0x11223344;
-        let guid_b = 0x55667788;
+        let guid_a = Guid(0x11223344);
+        let guid_b = Guid(0x55667788);
 
         // Landblock (10, 10)
         let lb_a = (10 << 24) | (10 << 16) | 0xFFFF;

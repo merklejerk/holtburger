@@ -408,8 +408,9 @@ mod tests {
     fn test_weenie_error_fixture() {
         use crate::protocol::fixtures;
         use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::world::Guid;
         let expected = GameMessage::GameEvent(Box::new(GameEvent {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEventData::WeenieError(Box::new(WeenieErrorData { error_id: 0x1234 })),
         }));
@@ -420,8 +421,9 @@ mod tests {
     fn test_weenie_error_with_string_fixture() {
         use crate::protocol::fixtures;
         use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::world::Guid;
         let expected = GameMessage::GameEvent(Box::new(GameEvent {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEventData::WeenieErrorWithString(Box::new(WeenieErrorWithStringData {
                 error_id: 0x1234,

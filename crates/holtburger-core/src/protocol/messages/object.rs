@@ -3,6 +3,7 @@ use crate::protocol::messages::utils::{
     align_to_4, read_packed_u32_with_known_type, read_string16, write_packed_u32_with_known_type,
     write_string16,
 };
+use crate::world::Guid;
 use crate::world::position::WorldPosition;
 use crate::world::properties::{
     ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
@@ -12,12 +13,12 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectDescriptionData {
-    pub guid: u32,
+    pub guid: Guid,
     pub model_data: ModelData,
     pub physics_flags: PhysicsDescriptionFlag,
     pub physics_state: PhysicsState,
     pub pos: Option<WorldPosition>,
-    pub parent_id: Option<u32>,
+    pub parent_id: Option<Guid>,
     pub parent_loc: Option<u32>,
     pub obj_scale: Option<f32>,
     pub sequences: [u16; 9],
@@ -28,8 +29,8 @@ pub struct ObjectDescriptionData {
     pub item_type: u32,
     pub obj_desc_flags: ObjectDescriptionFlag,
     pub weenie_flags2: WeenieHeaderFlag2,
-    pub container_id: Option<u32>,
-    pub wielder_id: Option<u32>,
+    pub container_id: Option<Guid>,
+    pub wielder_id: Option<Guid>,
     pub valid_locations: Option<u32>,
     pub currently_wielded_location: Option<u32>,
     pub priority: Option<u32>,
@@ -67,7 +68,7 @@ pub struct ModelChange {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjDescEventData {
-    pub guid: u32,
+    pub guid: Guid,
     pub model_data: ModelData,
     pub instance_sequence: u32,
     pub visual_desc_sequence: u32,
@@ -75,16 +76,12 @@ pub struct ObjDescEventData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ForceObjectDescSendData {
-    pub guid: u32,
+    pub guid: Guid,
 }
 
 impl MessageUnpack for ObjDescEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
 
         let model_data = ModelData::unpack(data, offset)?;
 
@@ -106,7 +103,7 @@ impl MessageUnpack for ObjDescEventData {
 
 impl MessagePack for ObjDescEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
         self.model_data.pack(buf);
         buf.write_u32::<LittleEndian>(self.instance_sequence)
             .unwrap();
@@ -117,18 +114,14 @@ impl MessagePack for ObjDescEventData {
 
 impl MessageUnpack for ForceObjectDescSendData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         Some(ForceObjectDescSendData { guid })
     }
 }
 
 impl MessagePack for ForceObjectDescSendData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
     }
 }
 
@@ -262,11 +255,7 @@ impl MessagePack for ModelData {
 
 impl MessageUnpack for ObjectDescriptionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
 
         let model_data = ModelData::unpack(data, offset)?;
 
@@ -334,11 +323,10 @@ impl MessageUnpack for ObjectDescriptionData {
         let mut parent_id = None;
         let mut parent_loc = None;
         if physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            if *offset + 8 > data.len() {
+            parent_id = Some(Guid::unpack(data, offset)?);
+            if *offset + 4 > data.len() {
                 return None;
             }
-            parent_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
             parent_loc = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
             *offset += 4;
         }
@@ -548,20 +536,12 @@ impl MessageUnpack for ObjectDescriptionData {
         // CONTAINER: uint (4)
         let mut container_id = None;
         if weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            container_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
+            container_id = Some(Guid::unpack(data, offset)?);
         }
         // WIELDER: uint (4)
         let mut wielder_id = None;
         if weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            wielder_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
+            wielder_id = Some(Guid::unpack(data, offset)?);
         }
         // VALID_LOCATIONS: uint (4)
         let mut valid_locations = None;
@@ -760,7 +740,7 @@ impl MessageUnpack for ObjectDescriptionData {
 
 impl MessagePack for ObjectDescriptionData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
 
         // ModelData
         self.model_data.pack(buf);
@@ -779,8 +759,7 @@ impl MessagePack for ObjectDescriptionData {
         }
 
         if self.physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            buf.write_u32::<LittleEndian>(self.parent_id.unwrap())
-                .unwrap();
+            self.parent_id.unwrap().pack(buf);
             buf.write_u32::<LittleEndian>(self.parent_loc.unwrap_or(0))
                 .unwrap();
         }
@@ -824,12 +803,10 @@ impl MessagePack for ObjectDescriptionData {
 
         // ---- Weenie header fields (ACE serialization order) ----
         if self.weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
-            buf.write_u32::<LittleEndian>(self.container_id.unwrap())
-                .unwrap();
+            self.container_id.unwrap().pack(buf);
         }
         if self.weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
-            buf.write_u32::<LittleEndian>(self.wielder_id.unwrap())
-                .unwrap();
+            self.wielder_id.unwrap().pack(buf);
         }
         if self
             .weenie_flags
@@ -861,30 +838,26 @@ impl MessagePack for ObjectDescriptionData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectDeleteData {
-    pub guid: u32,
+    pub guid: Guid,
 }
 
 impl MessageUnpack for ObjectDeleteData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         Some(ObjectDeleteData { guid })
     }
 }
 
 impl MessagePack for ObjectDeleteData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        buf.extend_from_slice(&self.guid.0.to_le_bytes());
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePropertyIntData {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub property: u32,
     pub value: i32,
     pub is_public: bool,
@@ -893,7 +866,7 @@ pub struct UpdatePropertyIntData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePropertyInt64Data {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub property: u32,
     pub value: i64,
     pub is_public: bool,
@@ -902,7 +875,7 @@ pub struct UpdatePropertyInt64Data {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePropertyBoolData {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub property: u32,
     pub value: bool,
     pub is_public: bool,
@@ -911,7 +884,7 @@ pub struct UpdatePropertyBoolData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePropertyFloatData {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub property: u32,
     pub value: f64,
     pub is_public: bool,
@@ -920,7 +893,7 @@ pub struct UpdatePropertyFloatData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePropertyStringData {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub property: u32,
     pub value: String,
     pub is_public: bool,
@@ -929,7 +902,7 @@ pub struct UpdatePropertyStringData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePropertyDataIdData {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub property: u32,
     pub value: u32,
     pub is_public: bool,
@@ -938,7 +911,7 @@ pub struct UpdatePropertyDataIdData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdatePropertyInstanceIdData {
     pub sequence: u8,
-    pub guid: u32,
+    pub guid: Guid,
     pub property: u32,
     pub value: u32,
     pub is_public: bool,
@@ -953,14 +926,9 @@ impl UpdatePropertyIntData {
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            g
+            Guid::unpack(data, offset)?
         } else {
-            0
+            Guid::NULL
         };
 
         if *offset + 8 > data.len() {
@@ -984,7 +952,7 @@ impl MessagePack for UpdatePropertyIntData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
         if self.is_public {
-            buf.write_u32::<LittleEndian>(self.guid).unwrap();
+            self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
         buf.write_i32::<LittleEndian>(self.value).unwrap();
@@ -1000,14 +968,9 @@ impl UpdatePropertyInt64Data {
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            g
+            Guid::unpack(data, offset)?
         } else {
-            0
+            Guid::NULL
         };
 
         if *offset + 12 > data.len() {
@@ -1031,7 +994,7 @@ impl MessagePack for UpdatePropertyInt64Data {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
         if self.is_public {
-            buf.write_u32::<LittleEndian>(self.guid).unwrap();
+            self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
         buf.write_i64::<LittleEndian>(self.value).unwrap();
@@ -1047,14 +1010,9 @@ impl UpdatePropertyBoolData {
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            g
+            Guid::unpack(data, offset)?
         } else {
-            0
+            Guid::NULL
         };
 
         if *offset + 8 > data.len() {
@@ -1078,7 +1036,7 @@ impl MessagePack for UpdatePropertyBoolData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
         if self.is_public {
-            buf.write_u32::<LittleEndian>(self.guid).unwrap();
+            self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
         buf.write_u32::<LittleEndian>(if self.value { 1 } else { 0 })
@@ -1095,14 +1053,9 @@ impl UpdatePropertyFloatData {
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            g
+            Guid::unpack(data, offset)?
         } else {
-            0
+            Guid::NULL
         };
 
         if *offset + 12 > data.len() {
@@ -1126,7 +1079,7 @@ impl MessagePack for UpdatePropertyFloatData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
         if self.is_public {
-            buf.write_u32::<LittleEndian>(self.guid).unwrap();
+            self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
         buf.write_f64::<LittleEndian>(self.value).unwrap();
@@ -1148,14 +1101,9 @@ impl UpdatePropertyStringData {
         *offset += 4;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            g
+            Guid::unpack(data, offset)?
         } else {
-            0
+            Guid::NULL
         };
 
         // Align before reading string
@@ -1179,7 +1127,7 @@ impl MessagePack for UpdatePropertyStringData {
         buf.push(self.sequence);
         buf.write_u32::<LittleEndian>(self.property).unwrap();
         if self.is_public {
-            buf.write_u32::<LittleEndian>(self.guid).unwrap();
+            self.guid.pack(buf);
         }
 
         // Align before string
@@ -1200,14 +1148,9 @@ impl UpdatePropertyDataIdData {
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            g
+            Guid::unpack(data, offset)?
         } else {
-            0
+            Guid::NULL
         };
 
         if *offset + 8 > data.len() {
@@ -1231,7 +1174,7 @@ impl MessagePack for UpdatePropertyDataIdData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
         if self.is_public {
-            buf.write_u32::<LittleEndian>(self.guid).unwrap();
+            self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
         buf.write_u32::<LittleEndian>(self.value).unwrap();
@@ -1247,14 +1190,9 @@ impl UpdatePropertyInstanceIdData {
         *offset += 1;
 
         let guid = if is_public {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let g = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            *offset += 4;
-            g
+            Guid::unpack(data, offset)?
         } else {
-            0
+            Guid::NULL
         };
 
         if *offset + 8 > data.len() {
@@ -1278,7 +1216,7 @@ impl MessagePack for UpdatePropertyInstanceIdData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.sequence);
         if self.is_public {
-            buf.write_u32::<LittleEndian>(self.guid).unwrap();
+            self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
         buf.write_u32::<LittleEndian>(self.value).unwrap();
@@ -1287,45 +1225,43 @@ impl MessagePack for UpdatePropertyInstanceIdData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateHealthData {
-    pub target: u32,
+    pub target: Guid,
     pub health: f32,
 }
 
 impl MessageUnpack for UpdateHealthData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() {
+        let target = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let health = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
-        *offset += 8;
+        let health = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        *offset += 4;
         Some(UpdateHealthData { target, health })
     }
 }
 
 impl MessagePack for UpdateHealthData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.target.to_le_bytes());
+        buf.extend_from_slice(&self.target.0.to_le_bytes());
         buf.extend_from_slice(&self.health.to_le_bytes());
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParentEventData {
-    pub child_guid: u32,
-    pub parent_guid: u32,
+    pub child_guid: Guid,
+    pub parent_guid: Guid,
     pub location: u32,
 }
 
 impl MessageUnpack for ParentEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        let child_guid = Guid::unpack(data, offset)?;
+        let parent_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let child_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        let parent_guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
         let location = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         Some(ParentEventData {
@@ -1338,25 +1274,24 @@ impl MessageUnpack for ParentEventData {
 
 impl MessagePack for ParentEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.child_guid.to_le_bytes());
-        buf.extend_from_slice(&self.parent_guid.to_le_bytes());
+        self.child_guid.pack(buf);
+        self.parent_guid.pack(buf);
         buf.extend_from_slice(&self.location.to_le_bytes());
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PickupEventData {
-    pub guid: u32,
+    pub guid: Guid,
     pub success: bool,
 }
 
 impl MessageUnpack for PickupEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 8 > data.len() {
+        let guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
             return None;
         }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
         let success = LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0;
         *offset += 4;
         Some(PickupEventData { guid, success })
@@ -1365,7 +1300,7 @@ impl MessageUnpack for PickupEventData {
 
 impl MessagePack for PickupEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.to_le_bytes());
+        buf.extend_from_slice(&self.guid.0.to_le_bytes());
         buf.write_u32::<LittleEndian>(if self.success { 1 } else { 0 })
             .unwrap();
     }
@@ -1373,7 +1308,7 @@ impl MessagePack for PickupEventData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetStateData {
-    pub guid: u32,
+    pub guid: Guid,
     pub physics_state: PhysicsState,
     pub instance_sequence: u16,
     pub state_sequence: u16,
@@ -1381,11 +1316,10 @@ pub struct SetStateData {
 
 impl MessageUnpack for SetStateData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        let guid = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
             return None;
         }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
         let physics_state =
             PhysicsState::from_bits_retain(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
@@ -1404,7 +1338,7 @@ impl MessageUnpack for SetStateData {
 
 impl MessagePack for SetStateData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.physics_state.bits())
             .unwrap();
         buf.write_u16::<LittleEndian>(self.instance_sequence)
@@ -1416,46 +1350,38 @@ impl MessagePack for SetStateData {
 /// Data for identifying an object.
 #[derive(Debug, Clone, PartialEq)]
 pub struct IdentifyObjectData {
-    pub guid: u32,
+    pub guid: Guid,
 }
 
 impl MessageUnpack for IdentifyObjectData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         Some(Self { guid })
     }
 }
 
 impl MessagePack for IdentifyObjectData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
     }
 }
 
 /// Data for using an object.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UseData {
-    pub guid: u32,
+    pub guid: Guid,
 }
 
 impl MessageUnpack for UseData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         Some(Self { guid })
     }
 }
 
 impl MessagePack for UseData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
     }
 }
 
@@ -1469,7 +1395,7 @@ mod tests {
     fn test_set_state_parity() {
         let hex = "010000500804400063010100";
         let expected = SetStateData {
-            guid: 0x50000001,
+            guid: Guid(0x50000001),
             physics_state: PhysicsState::REPORT_COLLISIONS
                 | PhysicsState::GRAVITY
                 | PhysicsState::EDGE_SLIDE,
@@ -1487,7 +1413,7 @@ mod tests {
         }
 
         let expected = ObjectDescriptionData {
-            guid: 0x50000001,
+            guid: Guid(0x50000001),
             model_data: ModelData {
                 header: 1,
                 ..Default::default()
@@ -1534,7 +1460,7 @@ mod tests {
         }
 
         let expected = ObjectDescriptionData {
-            guid: 0x50000002,
+            guid: Guid(0x50000002),
             model_data: ModelData {
                 header: 0x11,
                 ..Default::default()
@@ -1554,7 +1480,7 @@ mod tests {
                     z: 0.0,
                 },
             }),
-            parent_id: Some(0x50000001),
+            parent_id: Some(Guid(0x50000001)),
             parent_loc: Some(1),
             obj_scale: Some(1.5),
             sequences,
@@ -1565,8 +1491,8 @@ mod tests {
             item_type: 2,
             obj_desc_flags: ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
             weenie_flags2: WeenieHeaderFlag2::empty(),
-            container_id: Some(0x50001001),
-            wielder_id: Some(0x50001002),
+            container_id: Some(Guid(0x50001001)),
+            wielder_id: Some(Guid(0x50001002)),
             valid_locations: None,
             currently_wielded_location: None,
             priority: None,
@@ -1592,7 +1518,7 @@ mod tests {
         let hex = "0C1900000032000000";
         let msg = UpdatePropertyIntData {
             sequence: 0x0C,
-            guid: 0,
+            guid: Guid(0),
             property: 25,
             value: 50,
             is_public: false,
@@ -1609,7 +1535,7 @@ mod tests {
         let mut offset = 0;
         let msg = UpdatePropertyIntData::unpack(&data, &mut offset, true).unwrap();
         assert_eq!(msg.sequence, 0x42);
-        assert_eq!(msg.guid, 0x12345678);
+        assert_eq!(msg.guid, Guid(0x12345678));
         assert_eq!(msg.property, 25);
         assert_eq!(msg.value, 50);
         assert!(msg.is_public);
@@ -1620,7 +1546,7 @@ mod tests {
         let hex = "42785634121900000032000000";
         let msg = UpdatePropertyIntData {
             sequence: 0x42,
-            guid: 0x12345678,
+            guid: Guid(0x12345678),
             property: 25,
             value: 50,
             is_public: true,
@@ -1650,7 +1576,7 @@ mod tests {
         let hex = "0C190000000000000000005940"; // Payload only
         let msg = UpdatePropertyFloatData {
             sequence: 0x0C,
-            guid: 0,
+            guid: Guid(0),
             property: 25,
             value: 100.0,
             is_public: false,
@@ -1680,7 +1606,7 @@ mod tests {
         let hex = "01010000000000000500416C69636500";
         let msg = UpdatePropertyStringData {
             sequence: 1,
-            guid: 0,
+            guid: Guid(0),
             property: 1,
             value: "Alice".to_string(),
             is_public: false,
@@ -1699,7 +1625,7 @@ mod tests {
         let hex = "010000500000003f";
         let data = hex::decode(hex).unwrap();
         let expected = UpdateHealthData {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             health: 0.5,
         };
         assert_pack_unpack_parity(&data, &expected);
@@ -1709,7 +1635,9 @@ mod tests {
     fn test_object_delete_fixture() {
         let hex = "01000050";
         let data = hex::decode(hex).unwrap();
-        let expected = ObjectDeleteData { guid: 0x50000001 };
+        let expected = ObjectDeleteData {
+            guid: Guid(0x50000001),
+        };
         assert_pack_unpack_parity(&data, &expected);
     }
 
@@ -1720,7 +1648,7 @@ mod tests {
         let data = hex::decode(hex).unwrap();
         let msg = GameMessage::unpack(&data).unwrap();
         if let GameMessage::UpdatePropertyInt(prop) = msg {
-            assert_eq!(prop.guid, 0x15);
+            assert_eq!(prop.guid, Guid(0x15));
             assert_eq!(prop.property, 2);
             assert_eq!(prop.value, 1);
         } else {
@@ -1733,7 +1661,9 @@ mod tests {
         use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
         let action = GameMessage::GameAction(Box::new(GameAction {
             sequence: 6,
-            data: GameActionData::Use(Box::new(UseData { guid: 0x33333333 })),
+            data: GameActionData::Use(Box::new(UseData {
+                guid: Guid(0x33333333),
+            })),
         }));
         assert_pack_unpack_parity(fixtures::ACTION_USE, &action);
     }
@@ -1742,7 +1672,7 @@ mod tests {
     fn test_obj_desc_event_parity() {
         use crate::protocol::messages::GameMessage;
         let expected = GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
-            guid: 0x50000001,
+            guid: Guid(0x50000001),
             model_data: ModelData {
                 header: 0x11,
                 palette_id: Some(0x04000001),
@@ -1771,7 +1701,7 @@ mod tests {
     fn test_force_obj_desc_send_parity() {
         use crate::protocol::messages::GameMessage;
         let expected = GameMessage::ForceObjectDescSend(Box::new(ForceObjectDescSendData {
-            guid: 0x50000001,
+            guid: Guid(0x50000001),
         }));
         assert_pack_unpack_parity(fixtures::FORCE_OBJ_DESC_SEND, &expected);
     }

@@ -65,7 +65,7 @@ impl EntityClass {
 pub fn classify_entity(entity: &Entity) -> EntityClass {
     let guid = entity.guid;
 
-    if (0x50000001..=0x5FFFFFFF).contains(&guid) {
+    if (0x50000001..=0x5FFFFFFF).contains(&guid.0) {
         return EntityClass::Player;
     }
 

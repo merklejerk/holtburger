@@ -1,6 +1,7 @@
 use crate::protocol::messages::common::{CreatureSkill, Enchantment, Shortcut};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{read_string16, write_string16};
+use crate::world::Guid;
 use crate::world::position::WorldPosition;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -84,7 +85,7 @@ pub struct Attribute {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerDescriptionData {
-    pub guid: u32,
+    pub guid: Guid,
     pub sequence: u32,
     pub name: String,
     pub wee_type: u32,
@@ -109,12 +110,12 @@ pub struct PlayerDescriptionData {
     pub desired_comps: Vec<(u32, u32)>, // (component_id, count)
     pub spellbook_filters: u32,
     pub gameplay_options: Vec<u8>,
-    pub inventory: Vec<(u32, u32)>,             // (guid, type)
-    pub equipped_objects: Vec<(u32, u32, u32)>, // (guid, loc, prio)
+    pub inventory: Vec<(Guid, u32)>,             // (guid, type)
+    pub equipped_objects: Vec<(Guid, u32, u32)>, // (guid, loc, prio)
 }
 
 impl PlayerDescriptionData {
-    pub fn unpack(guid: u32, sequence: u32, data: &[u8], offset: &mut usize) -> Option<Self> {
+    pub fn unpack(guid: Guid, sequence: u32, data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
             return None;
         }
@@ -535,12 +536,12 @@ impl PlayerDescriptionData {
 
         let mut inventory = Vec::with_capacity(inv_count);
         for _ in 0..inv_count {
-            if *offset + 8 > data.len() {
-                break;
+            let guid = Guid::unpack(data, offset)?;
+            if *offset + 4 > data.len() {
+                return None;
             }
-            let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            let wtype = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-            *offset += 8;
+            let wtype = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+            *offset += 4;
             inventory.push((guid, wtype));
         }
 
@@ -554,13 +555,13 @@ impl PlayerDescriptionData {
 
         let mut equipped_objects = Vec::with_capacity(eq_count);
         for _ in 0..eq_count {
-            if *offset + 12 > data.len() {
-                break;
+            let guid = Guid::unpack(data, offset)?;
+            if *offset + 8 > data.len() {
+                return None;
             }
-            let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-            let loc = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-            let prio = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
-            *offset += 12;
+            let loc = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+            let prio = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+            *offset += 8;
             equipped_objects.push((guid, loc, prio));
         }
 
@@ -568,7 +569,7 @@ impl PlayerDescriptionData {
             .get(&1_u32)
             .cloned()
             .unwrap_or("Unknown".to_string());
-        let pos = positions.get(&14_u32).cloned();
+        let pos = positions.get(&1_u32).cloned();
 
         Some(PlayerDescriptionData {
             guid,
@@ -824,7 +825,7 @@ impl MessagePack for PlayerDescriptionData {
                 .unwrap();
             for s in &self.shortcuts {
                 buf.write_u32::<LittleEndian>(s.index).unwrap();
-                buf.write_u32::<LittleEndian>(s.object_id).unwrap();
+                s.object_id.pack(buf);
                 buf.write_u16::<LittleEndian>(s.spell_id).unwrap();
                 buf.write_u16::<LittleEndian>(s.layer).unwrap();
             }
@@ -874,14 +875,14 @@ impl MessagePack for PlayerDescriptionData {
         buf.write_u32::<LittleEndian>(self.inventory.len() as u32)
             .unwrap();
         for (guid, wtype) in &self.inventory {
-            buf.write_u32::<LittleEndian>(*guid).unwrap();
+            guid.pack(buf);
             buf.write_u32::<LittleEndian>(*wtype).unwrap();
         }
 
         buf.write_u32::<LittleEndian>(self.equipped_objects.len() as u32)
             .unwrap();
         for (guid, loc, prio) in &self.equipped_objects {
-            buf.write_u32::<LittleEndian>(*guid).unwrap();
+            guid.pack(buf);
             buf.write_u32::<LittleEndian>(*loc).unwrap();
             buf.write_u32::<LittleEndian>(*prio).unwrap();
         }
@@ -890,7 +891,7 @@ impl MessagePack for PlayerDescriptionData {
 
 impl MessageUnpack for PlayerDescriptionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        Self::unpack(0, 0, data, offset)
+        Self::unpack(Guid(0), 0, data, offset)
     }
 }
 
@@ -1263,23 +1264,19 @@ impl MessagePack for UpdateVitalCurrentData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerCreateData {
-    pub guid: u32,
+    pub guid: Guid,
 }
 
 impl MessageUnpack for PlayerCreateData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let guid = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let guid = Guid::unpack(data, offset)?;
         Some(PlayerCreateData { guid })
     }
 }
 
 impl MessagePack for PlayerCreateData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.guid).unwrap();
+        self.guid.pack(buf);
     }
 }
 
@@ -1370,7 +1367,9 @@ mod tests {
     #[test]
     fn test_player_create_fixture() {
         let hex = "01000050";
-        let expected = PlayerCreateData { guid: 0x50000001 };
+        let expected = PlayerCreateData {
+            guid: Guid(0x50000001),
+        };
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 

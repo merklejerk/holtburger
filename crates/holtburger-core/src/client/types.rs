@@ -1,6 +1,6 @@
 use crate::protocol::errors::CharacterError;
 use crate::protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
-use crate::world::WorldEvent;
+use crate::world::{Guid, WorldEvent};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq, Clone)]
@@ -16,7 +16,7 @@ pub enum ClientState {
 pub enum ClientEvent {
     CharacterList(Vec<CharacterEntry>),
     PlayerEntered {
-        guid: u32,
+        guid: Guid,
         name: String,
     },
     StatusUpdate {
@@ -41,7 +41,7 @@ pub enum ClientEvent {
     },
     PingResponse,
     ViewContents {
-        container: u32,
+        container: Guid,
         items: Vec<ViewContentsItem>,
     },
     RawMessage(Vec<u8>),
@@ -51,7 +51,7 @@ pub enum ClientEvent {
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
     Login(String),
-    SelectCharacter(u32),
+    SelectCharacter(Guid),
     SelectCharacterByIndex(usize),
     EnterWorld,
     Talk(String),
@@ -60,21 +60,21 @@ pub enum ClientCommand {
         message: String,
     },
     Ping,
-    Identify(u32),
-    Use(u32),
-    Drop(u32),
-    Get(u32),
+    Identify(Guid),
+    Use(Guid),
+    Drop(Guid),
+    Get(Guid),
     MoveItem {
-        item: u32,
-        container: u32,
+        item: Guid,
+        container: Guid,
         placement: u32,
     },
     GetAndWield {
-        item: u32,
+        item: Guid,
         equip_mask: u32,
     },
     SplitToWield {
-        item: u32,
+        item: Guid,
         equip_mask: u32,
         amount: u32,
     },
@@ -88,7 +88,7 @@ pub enum ClientCommand {
         heading: f32,
     },
     MoveTo {
-        target: u32,
+        target: Guid,
     },
     SyncPosition,
     Quit,

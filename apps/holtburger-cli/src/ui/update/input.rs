@@ -129,10 +129,17 @@ impl AppState {
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
+                        if input == "/info" {
+                            self.display_client_info();
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
                         if input == "/help" {
                             self.log_chat(
                                 ChatMessageKind::System,
-                                "Available commands: /quit, /exit, /clear, /help, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /autonomy <n>, /sync"
+                                "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /autonomy <n>, /sync"
                                     .to_string(),
                             );
                             self.log_chat(

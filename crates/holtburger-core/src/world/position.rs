@@ -447,6 +447,27 @@ mod tests {
     }
 
     #[test]
+    fn test_distance_between_adjacent_cells() {
+        let lb = (0xDAu32 << 24) | (0x55u32 << 16);
+        // Cell 0x1C (index 27): X=3, Y=3.
+        let pos1 = WorldPosition {
+            landblock_id: lb | 0x1C,
+            coords: Vector3::new(84.0, 84.0, 0.0), // Abs X = 218*192 + 84
+            rotation: Quaternion::identity(),
+        };
+        // Cell 0x1D (index 28): X=3, Y=4.
+        let pos2 = WorldPosition {
+            landblock_id: lb | 0x1D,
+            coords: Vector3::new(84.0, 108.0, 0.0), // Abs X = 218*192 + 84, Abs Y = 85*192 + 108
+            rotation: Quaternion::identity(),
+        };
+
+        // Distance should be exactly 24m (difference in Y coordinates)
+        let dist = pos1.distance_to(&pos2);
+        assert!((dist - 24.0).abs() < 1e-4, "Distance was {}", dist);
+    }
+
+    #[test]
     fn test_distance_same_and_adjacent() {
         let lb = (1u32 << 24) | (2u32 << 16);
         let p1 = WorldPosition {

@@ -278,13 +278,13 @@ mod tests {
     use super::*;
     use crate::protocol::fixtures;
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-    use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
+    use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
 
     #[test]
     fn test_talk_parity() {
-        let action = GameMessage::GameAction(Box::new(GameAction {
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 1,
-            data: GameActionData::Talk(Box::new(TalkData {
+            action: GameActionData::Talk(Box::new(TalkData {
                 text: "Hello World".to_string(),
             })),
         }));
@@ -293,9 +293,9 @@ mod tests {
 
     #[test]
     fn test_tell_parity() {
-        let action = GameMessage::GameAction(Box::new(GameAction {
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 2,
-            data: GameActionData::Tell(Box::new(TellActionData {
+            action: GameActionData::Tell(Box::new(TellActionData {
                 message: "Rizzler".to_string(),
                 target: "Bestie".to_string(),
             })),

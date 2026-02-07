@@ -13,8 +13,8 @@ pub enum GameMessage {
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),
     BootAccount(Box<BootAccountData>),
-    GameAction(Box<GameAction>),
-    GameEvent(Box<GameEvent>),
+    GameAction(Box<GameActionMessage>),
+    GameEvent(Box<GameEventMessage>),
 
     UpdateAttribute(Box<UpdateAttributeData>),
     UpdateSkill(Box<UpdateSkillData>),
@@ -113,12 +113,12 @@ impl MessageUnpack for GameMessage {
             GameOpcode::ServerMessage => Some(GameMessage::ServerMessage(Box::new(
                 ServerMessageData::unpack(data, offset)?,
             ))),
-            GameOpcode::GameAction => Some(GameMessage::GameAction(Box::new(GameAction::unpack(
-                data, offset,
-            )?))),
-            GameOpcode::GameEvent => Some(GameMessage::GameEvent(Box::new(GameEvent::unpack(
-                data, offset,
-            )?))),
+            GameOpcode::GameAction => Some(GameMessage::GameAction(Box::new(
+                GameActionMessage::unpack(data, offset)?,
+            ))),
+            GameOpcode::GameEvent => Some(GameMessage::GameEvent(Box::new(
+                GameEventMessage::unpack(data, offset)?,
+            ))),
             GameOpcode::HearSpeech => Some(GameMessage::HearSpeech(Box::new(
                 HearSpeechData::unpack(data, offset)?,
             ))),

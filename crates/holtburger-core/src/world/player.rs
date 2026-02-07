@@ -444,7 +444,7 @@ impl PlayerState {
                     self.instance_sequence = data.object_instance_sequence;
                     self.server_control_sequence = data.server_control_sequence;
                     self.movement_sequence = data.movement_sequence;
-                    
+
                     // We don't update position here as it's just a request/animation
                     // But we emit an event if it's a non-autonomous move (server request)
                     if !data.is_autonomous {

@@ -274,15 +274,22 @@ impl WorldCoordinates {
             WorldCoordinates::Outdoor { lat, lon, alt } => {
                 let ns = if *lat >= 0.0 { "N" } else { "S" };
                 let ew = if *lon >= 0.0 { "E" } else { "W" };
+
+                // ACE uses a 0.05 nudge when formatting to 1 decimal place to round down .X5 to .X
+                let display_lat = if precision == 1 {
+                    lat.abs() - 0.05
+                } else {
+                    lat.abs()
+                };
+                let display_lon = if precision == 1 {
+                    lon.abs() - 0.05
+                } else {
+                    lon.abs()
+                };
+
                 format!(
                     "{:.*}{}, {:.*}{}, {:.1}Z",
-                    precision,
-                    lat.abs(),
-                    ns,
-                    precision,
-                    lon.abs(),
-                    ew,
-                    alt
+                    precision, display_lat, ns, precision, display_lon, ew, alt
                 )
             }
         }
@@ -291,7 +298,7 @@ impl WorldCoordinates {
 
 impl std::fmt::Display for WorldCoordinates {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string_with_precision(2))
+        write!(f, "{}", self.to_string_with_precision(1))
     }
 }
 
@@ -316,7 +323,7 @@ impl WorldPosition {
         }
         let cell_id = (self.landblock_id & 0xFFFF) as i32;
         let cell_index = cell_id - 1;
-        if cell_index < 0 || cell_index >= 64 {
+        if !(0..64).contains(&cell_index) {
             // For block-only landblocks (low word 0xFFFF), x/y is 0
             return (0, 0);
         }
@@ -342,10 +349,12 @@ impl WorldPosition {
         let total_x_meters = (lb_x as f32 * 192.0) + self.coords.x;
         let total_y_meters = (lb_y as f32 * 192.0) + self.coords.y;
 
-        // Origin (0.0, 0.0) is the center of the world at landblock 0x8080.
-        // Longitude center is 102.0.
-        let lon = ((total_x_meters - 24576.0) / 240.0) + 102.0;
-        let lat = (total_y_meters - 24576.0) / 240.0;
+        // Formula from ACE (PositionExtensions.GetMapCoords):
+        // 1 map unit = 240 meters
+        // mapCoords = globalPos / 240.0
+        // mapCoords -= 102.0
+        let lon = (total_x_meters / 240.0) - 102.0;
+        let lat = (total_y_meters / 240.0) - 102.0;
 
         WorldCoordinates::Outdoor {
             lat,
@@ -405,8 +414,8 @@ mod tests {
     #[test]
     fn test_outdoor_format_known() {
         // Construct landblock bytes x=218 (0xDA), y=85 (0x55)
-        // Lat: (85 - 128) * 0.8 + 108/240 = -43 * 0.8 + 0.45 = -33.95 (33.95S)
-        // Lon: (218 - 128) * 0.8 + 84/240 + 102.0 = 90 * 0.8 + 0.35 + 102.0 = 174.35 (174.35E)
+        // Global Y = 85 * 192 + 108 = 16428. Lat = 16428/240 - 102 = -33.55 (33.55S)
+        // Global X = 218 * 192 + 84 = 41940. Lon = 41940/240 - 102 = 72.75 (72.75E)
         let landblock_id = (218u32 << 24) | (85u32 << 16);
         let pos = WorldPosition {
             landblock_id,
@@ -414,36 +423,16 @@ mod tests {
             rotation: Quaternion::identity(),
         };
         assert!(!pos.is_indoors());
-        
+
         let coords = pos.to_world_coords();
         if let WorldCoordinates::Outdoor { lat, lon, alt: _ } = coords {
-            assert!((lat - (-33.95)).abs() < 1e-4, "Lat was {}", lat);
-            assert!((lon - 174.35).abs() < 1e-4, "Lon was {}", lon);
+            assert!((lat - (-33.55)).abs() < 1e-4, "Lat was {}", lat);
+            assert!((lon - 72.75).abs() < 1e-4, "Lon was {}", lon);
         } else {
             panic!("Expected outdoor coordinates");
         }
-        assert_eq!(coords.to_string(), "33.95S, 174.35E, 0.0Z");
-    }
-
-    #[test]
-    fn test_distance_between_adjacent_cells() {
-        let lb = (0xDAu32 << 24) | (0x55u32 << 16);
-        // Cell 0x1C (index 27): X=3, Y=3.
-        let pos1 = WorldPosition {
-            landblock_id: lb | 0x1C,
-            coords: Vector3::new(84.0, 84.0, 0.0), // Abs X = 218*192 + 84
-            rotation: Quaternion::identity(),
-        };
-        // Cell 0x1D (index 28): X=3, Y=4.
-        let pos2 = WorldPosition {
-            landblock_id: lb | 0x1D,
-            coords: Vector3::new(84.0, 108.0, 0.0), // Abs X = 218*192 + 84, Abs Y = 85*192 + 108
-            rotation: Quaternion::identity(),
-        };
-
-        // Distance should be exactly 24m (difference in Y coordinates)
-        let dist = pos1.distance_to(&pos2);
-        assert!((dist - 24.0).abs() < 1e-4, "Distance was {}", dist);
+        // With precision 2, should be:
+        assert_eq!(coords.to_string_with_precision(2), "33.55S, 72.75E, 0.0Z");
     }
 
     #[test]

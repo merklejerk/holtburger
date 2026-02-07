@@ -407,9 +407,9 @@ mod tests {
     #[test]
     fn test_weenie_error_fixture() {
         use crate::protocol::fixtures;
-        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::protocol::messages::{GameEventData, GameEventMessage, GameMessage};
         use crate::world::Guid;
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEventData::WeenieError(Box::new(WeenieErrorData { error_id: 0x1234 })),
@@ -420,9 +420,9 @@ mod tests {
     #[test]
     fn test_weenie_error_with_string_fixture() {
         use crate::protocol::fixtures;
-        use crate::protocol::messages::{GameEvent, GameEventData, GameMessage};
+        use crate::protocol::messages::{GameEventData, GameEventMessage, GameMessage};
         use crate::world::Guid;
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEventData::WeenieErrorWithString(Box::new(WeenieErrorWithStringData {
@@ -436,10 +436,10 @@ mod tests {
     #[test]
     fn test_ping_request_parity() {
         use crate::protocol::fixtures;
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
-        let action = GameMessage::GameAction(Box::new(GameAction {
+        use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 3,
-            data: GameActionData::PingRequest(Box::new(PingRequestData)),
+            action: GameActionData::PingRequest(Box::new(PingRequestData)),
         }));
         assert_pack_unpack_parity(fixtures::ACTION_PING_REQUEST, &action);
     }
@@ -447,10 +447,10 @@ mod tests {
     #[test]
     fn test_login_complete_parity() {
         use crate::protocol::fixtures;
-        use crate::protocol::messages::{GameAction, GameActionData, GameMessage};
-        let action = GameMessage::GameAction(Box::new(GameAction {
+        use crate::protocol::messages::{GameActionData, GameActionMessage, GameMessage};
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 8,
-            data: GameActionData::LoginComplete(Box::new(LoginCompleteData)),
+            action: GameActionData::LoginComplete(Box::new(LoginCompleteData)),
         }));
         assert_pack_unpack_parity(fixtures::ACTION_LOGIN_COMPLETE, &action);
     }

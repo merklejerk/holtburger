@@ -11,7 +11,7 @@ use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GameEvent {
+pub struct GameEventMessage {
     pub target: Guid,
     pub sequence: u32,
     pub event: GameEventData,
@@ -42,7 +42,7 @@ pub enum GameEventData {
     Unknown(u32, Vec<u8>),
 }
 
-impl GameEvent {
+impl GameEventMessage {
     pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let target = Guid::unpack(data, offset)?;
         if *offset + 8 > data.len() {
@@ -150,7 +150,7 @@ impl GameEvent {
             }
         };
 
-        Some(GameEvent {
+        Some(GameEventMessage {
             target,
             sequence,
             event,
@@ -284,7 +284,7 @@ mod tests {
         // Opcode (0xF7B0), Target (0x50000001), Seq (0x0E), Event (0x0282)
         let hex_str = "B0F70000010000500E00000082020000";
         let data = hex::decode(hex_str).expect("Hex decode failed");
-        let expected = GameMessage::GameEvent(Box::new(GameEvent {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEventData::StartGame,

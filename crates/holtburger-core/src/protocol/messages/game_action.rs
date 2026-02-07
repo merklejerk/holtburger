@@ -6,9 +6,9 @@ use crate::protocol::messages::{
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct GameAction {
+pub struct GameActionMessage {
     pub sequence: u32,
-    pub data: GameActionData,
+    pub action: GameActionData,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,7 +28,7 @@ pub enum GameActionData {
     Unknown(u32, Vec<u8>),
 }
 
-impl MessageUnpack for GameAction {
+impl MessageUnpack for GameActionMessage {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
             return None;
@@ -85,18 +85,18 @@ impl MessageUnpack for GameAction {
             }
         };
 
-        Some(GameAction {
+        Some(GameActionMessage {
             sequence,
-            data: action_data,
+            action: action_data,
         })
     }
 }
 
-impl MessagePack for GameAction {
+impl MessagePack for GameActionMessage {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
-        match &self.data {
+        match &self.action {
             GameActionData::Jump(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Jump as u32)
                     .unwrap();

@@ -40,7 +40,7 @@ pub enum GameMessage {
     VectorUpdate(Box<VectorUpdateData>),
     UpdateMotion(Box<MovementEventData>),
     PlayerTeleport(Box<PlayerTeleportData>),
-    AutonomousPosition(Box<AutonomousPositionData>),
+    AutonomousPosition(Box<ServerAutonomousPositionData>),
     AutonomyLevel(Box<AutonomyLevelData>),
     UpdatePropertyInt(Box<UpdatePropertyIntData>),
     UpdatePropertyInt64(Box<UpdatePropertyInt64Data>),
@@ -180,7 +180,7 @@ impl MessageUnpack for GameMessage {
                 MovementEventData::unpack(data, offset)?,
             ))),
             GameOpcode::AutonomousPosition => Some(GameMessage::AutonomousPosition(Box::new(
-                AutonomousPositionData::unpack(data, offset)?,
+                ServerAutonomousPositionData::unpack(data, offset)?,
             ))),
             GameOpcode::AutonomyLevel => Some(GameMessage::AutonomyLevel(Box::new(
                 AutonomyLevelData::unpack(data, offset)?,

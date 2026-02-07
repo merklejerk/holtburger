@@ -166,6 +166,17 @@ pub struct AutonomousPositionData {
     pub last_contact: u8,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ServerAutonomousPositionData {
+    pub guid: Guid,
+    pub position: WorldPosition,
+    pub instance_sequence: u16,
+    pub server_control_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+    pub contact_flags: u32,
+}
+
 impl MessageUnpack for AutonomousPositionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let position = WorldPosition::unpack(data, offset)?;
@@ -190,6 +201,52 @@ impl MessageUnpack for AutonomousPositionData {
             force_position_sequence,
             last_contact,
         })
+    }
+}
+
+impl MessageUnpack for ServerAutonomousPositionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        let position = WorldPosition::unpack(data, offset)?;
+        if *offset + 12 > data.len() {
+            return None;
+        }
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let server_control_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        let teleport_sequence = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]);
+        let force_position_sequence = LittleEndian::read_u16(&data[*offset + 6..*offset + 8]);
+        let contact_flags = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
+        *offset += 12;
+
+        // Alignment
+        *offset = (*offset + 3) & !3;
+
+        Some(Self {
+            guid,
+            position,
+            instance_sequence,
+            server_control_sequence,
+            teleport_sequence,
+            force_position_sequence,
+            contact_flags,
+        })
+    }
+}
+
+impl MessagePack for ServerAutonomousPositionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.guid.pack(buf);
+        self.position.pack(buf);
+        buf.extend_from_slice(&self.instance_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.server_control_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.teleport_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.force_position_sequence.to_le_bytes());
+        buf.extend_from_slice(&self.contact_flags.to_le_bytes());
+
+        // Alignment
+        while !buf.len().is_multiple_of(4) {
+            buf.push(0);
+        }
     }
 }
 
@@ -1497,9 +1554,10 @@ mod tests {
 
     #[test]
     fn test_autonomous_position_fixture() {
-        // Opcode(4) + Position(32) + Sequences(8) + Contact(1) + Align(3) = 48 bytes
-        let hex = "53F7000078563412000020410000A0410000F0410000803F000000000000000000000000010002000300040001000000";
-        let expected = GameMessage::AutonomousPosition(Box::new(AutonomousPositionData {
+        // Opcode(4) + GUID(4) + Position(32) + Sequences(8) + Contact(4) = 52 bytes
+        let hex = "53F700000100000078563412000020410000A0410000F0410000803F000000000000000000000000010002000300040001000000";
+        let expected = GameMessage::AutonomousPosition(Box::new(ServerAutonomousPositionData {
+            guid: Guid(1),
             position: WorldPosition {
                 landblock_id: 0x12345678,
                 coords: crate::math::Vector3 {
@@ -1518,7 +1576,7 @@ mod tests {
             server_control_sequence: 2,
             teleport_sequence: 3,
             force_position_sequence: 4,
-            last_contact: 1,
+            contact_flags: 1,
         }));
         crate::protocol::messages::test_helpers::assert_pack_unpack_parity(
             &hex::decode(hex).unwrap(),

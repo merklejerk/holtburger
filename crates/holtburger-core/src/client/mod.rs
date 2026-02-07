@@ -405,16 +405,22 @@ impl Client {
             }
             ClientCommand::SyncPosition => {
                 log::debug!(">>> Syncing Position (Heartbeat)");
-                let data = AutonomousPositionData {
+                let pulse = AutonomousPositionData {
                     position: self.world.player.position,
-                    instance_sequence: 0,
-                    server_control_sequence: 0,
-                    teleport_sequence: 0,
-                    force_position_sequence: 0,
-                    last_contact: 0,
+                    instance_sequence: self.world.player.instance_sequence,
+                    server_control_sequence: self.world.player.server_control_sequence,
+                    teleport_sequence: self.world.player.teleport_sequence,
+                    force_position_sequence: self.world.player.force_position_sequence,
+                    last_contact: 1,
                 };
+
+                let action = GameActionMessage {
+                    sequence: 0,
+                    action: GameActionData::AutonomousPosition(Box::new(pulse)),
+                };
+
                 self.session
-                    .send_message(&GameMessage::AutonomousPosition(Box::new(data)))
+                    .send_message(&GameMessage::GameAction(Box::new(action)))
                     .await
             }
             ClientCommand::Quit => {
@@ -569,6 +575,24 @@ impl Client {
                 } else {
                     Ok(())
                 }
+            }
+            GameMessage::AutonomousPosition(data) => {
+                if data.guid == self.world.player.guid {
+                    log::info!(">>> Server-forced resync: {:?}", data.position);
+                    self.world.player.position = data.position;
+                    self.world.player.instance_sequence = data.instance_sequence;
+                    self.world.player.server_control_sequence = data.server_control_sequence;
+                    self.world.player.teleport_sequence = data.teleport_sequence;
+                    self.world.player.force_position_sequence = data.force_position_sequence;
+
+                    if let Some(tx) = &self.event_tx {
+                        let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::EntityMoved {
+                            guid: self.world.player.guid,
+                            pos: data.position,
+                        })));
+                    }
+                }
+                Ok(())
             }
             GameMessage::CharacterList(data) => self.handle_character_list(*data).await,
             GameMessage::CharacterEnterWorldServerReady => {
@@ -999,40 +1023,29 @@ impl Client {
             })));
         }
 
-        // Respond with MoveToState heartbeat to confirm arrival
-        let action = GameActionMessage {
-            sequence: 0,
-            action: GameActionData::MoveToState(Box::new(MoveToStateData {
-                sequence: 0,
-                raw_motion_state: RawMotionState {
-                    flags: RawMotionFlags::empty(),
-                    current_hold_key: None,
-                    current_style: None,
-                    forward_command: None,
-                    forward_hold_key: None,
-                    forward_speed: None,
-                    sidestep_command: None,
-                    sidestep_hold_key: None,
-                    sidestep_speed: None,
-                    turn_command: None,
-                    turn_hold_key: None,
-                    turn_speed: None,
-                    commands: Vec::new(),
-                },
-                position: next_pos,
-                instance_sequence: self.world.player.instance_sequence,
-                server_control_sequence: self.world.player.server_control_sequence,
-                teleport_sequence: self.world.player.teleport_sequence,
-                force_position_sequence: self.world.player.force_position_sequence,
-                contact_long_jump: 1, // Logged as 0x1 (Contact) in retail
-            })),
+        // Respond with AutonomousPosition heartbeat to confirm arrival
+        // We use AutonomousPosition instead of MoveToState because MoveToState
+        // cancels server-side movement chains (like pickups) on the ACE server.
+        let pulse = AutonomousPositionData {
+            position: next_pos,
+            instance_sequence: self.world.player.instance_sequence,
+            server_control_sequence: self.world.player.server_control_sequence,
+            teleport_sequence: self.world.player.teleport_sequence,
+            force_position_sequence: self.world.player.force_position_sequence,
+            last_contact: 1, // Logged as 0x1 (Contact) in retail
         };
 
         log::debug!(
-            ">>> Sending MoveToState heartbeat. ServerSeq: {}, Pos: {:?}",
+            ">>> Sending AutonomousPosition heartbeat. ServerSeq: {}, Pos: {:?}",
             self.world.player.server_control_sequence,
             next_pos
         );
+
+        let action = GameActionMessage {
+            sequence: 0, // Heartbeats usually use 0 or a separate counter
+            action: GameActionData::AutonomousPosition(Box::new(pulse)),
+        };
+
         self.session
             .send_message(&GameMessage::GameAction(Box::new(action)))
             .await?;

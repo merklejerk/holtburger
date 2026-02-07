@@ -71,7 +71,7 @@ pub enum GameOpcode {
     VectorUpdate = 0xF74E,
     /// S2C: Set the client's autonomy level (how much gravity/collision to trust client for).
     AutonomyLevel = 0xF752,
-    /// S2C: Sync player's own position (Client's autonomous view).
+    /// S2C: Sync player's own position (Server-forced resync).
     /// Used for resetting the player's position or confirming client-reported coordinates.
     AutonomousPosition = 0xF753,
     /// S2C: Force player to teleport.
@@ -351,6 +351,8 @@ pub enum GameActionOpcode {
     MoveToState = 0xF61C,
     /// C2S: Perform a jump.
     Jump = 0xF61B,
+    /// C2S: Periodic position pulse (Heartbeat).
+    AutonomousPosition = 0xF753,
     // --- Combat & Spells ---
     // /// C2S: Initiate a melee attack on a target.
     // TargetedMeleeAttack = 0x0008,

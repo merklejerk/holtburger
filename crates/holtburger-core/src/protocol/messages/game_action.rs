@@ -1,7 +1,8 @@
 use crate::protocol::messages::{
-    DropItemData, GameActionOpcode, GetAndWieldItemData, IdentifyObjectData, JumpData,
-    LoginCompleteData, MessagePack, MessageUnpack, MoveToStateData, PingRequestData,
-    PutItemInContainerData, StackableSplitToWieldData, TalkData, TellActionData, UseData,
+    AutonomousPositionData, DropItemData, GameActionOpcode, GetAndWieldItemData,
+    IdentifyObjectData, JumpData, LoginCompleteData, MessagePack, MessageUnpack, MoveToStateData,
+    PingRequestData, PutItemInContainerData, StackableSplitToWieldData, TalkData, TellActionData,
+    UseData,
 };
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -14,6 +15,7 @@ pub struct GameActionMessage {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameActionData {
     Jump(Box<JumpData>),
+    AutonomousPosition(Box<AutonomousPositionData>),
     MoveToState(Box<MoveToStateData>),
     GetAndWieldItem(Box<GetAndWieldItemData>),
     StackableSplitToWield(Box<StackableSplitToWieldData>),
@@ -44,6 +46,9 @@ impl MessageUnpack for GameActionMessage {
                 GameActionOpcode::Jump => {
                     GameActionData::Jump(Box::new(JumpData::unpack(data, offset, sequence)?))
                 }
+                GameActionOpcode::AutonomousPosition => GameActionData::AutonomousPosition(
+                    Box::new(AutonomousPositionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::MoveToState => GameActionData::MoveToState(Box::new(
                     MoveToStateData::unpack(data, offset, sequence)?,
                 )),
@@ -99,6 +104,11 @@ impl MessagePack for GameActionMessage {
         match &self.action {
             GameActionData::Jump(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Jump as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameActionData::AutonomousPosition(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AutonomousPosition as u32)
                     .unwrap();
                 data.pack(buf);
             }

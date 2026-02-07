@@ -29,6 +29,12 @@ pub struct PlayerState {
     /// Stores the raw ranks and init for skills so they can be recalculated
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
     pub position: WorldPosition,
+    pub instance_sequence: u16,
+    pub server_control_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+    pub position_sequence: u16,
+    pub movement_sequence: u16,
     pub enchantments: Vec<Enchantment>,
     pub spells: BTreeMap<u32, f32>,
     pub spell_lists: Vec<Vec<u32>>,
@@ -51,6 +57,12 @@ impl PlayerState {
             skills: HashMap::new(),
             skill_bases: HashMap::new(),
             position: WorldPosition::default(),
+            instance_sequence: 0,
+            server_control_sequence: 0,
+            teleport_sequence: 0,
+            force_position_sequence: 0,
+            position_sequence: 0,
+            movement_sequence: 0,
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
             spell_lists: vec![Vec::new(); 8],
@@ -371,9 +383,26 @@ impl PlayerState {
 
     pub fn handle_message(&mut self, msg: &GameMessage, events: &mut Vec<WorldEvent>) -> bool {
         match msg {
+            GameMessage::ObjectCreate(data) => {
+                if data.guid == self.guid && self.guid != Guid::NULL {
+                    if let Some(pos) = data.pos {
+                        self.position = pos;
+                        events.push(WorldEvent::EntityMoved {
+                            guid: self.guid,
+                            pos: self.position,
+                        });
+                    }
+                    return true;
+                }
+            }
             GameMessage::UpdatePosition(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
                     self.position = data.pos.pos;
+                    self.instance_sequence = data.pos.instance_sequence;
+                    self.position_sequence = data.pos.position_sequence;
+                    self.teleport_sequence = data.pos.teleport_sequence;
+                    self.force_position_sequence = data.pos.force_position_sequence;
+
                     events.push(WorldEvent::EntityMoved {
                         guid: self.guid,
                         pos: self.position,
@@ -401,11 +430,27 @@ impl PlayerState {
             }
             GameMessage::VectorUpdate(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
+                    self.instance_sequence = data.instance_sequence;
                     events.push(WorldEvent::EntityVectorUpdated {
                         guid: data.guid,
                         velocity: data.velocity,
                         omega: data.omega,
                     });
+                    return true;
+                }
+            }
+            GameMessage::UpdateMotion(data) => {
+                if data.guid == self.guid && self.guid != Guid::NULL {
+                    self.instance_sequence = data.object_instance_sequence;
+                    self.server_control_sequence = data.server_control_sequence;
+                    self.movement_sequence = data.movement_sequence;
+                    
+                    // We don't update position here as it's just a request/animation
+                    // But we emit an event if it's a non-autonomous move (server request)
+                    if !data.is_autonomous {
+                        // For MoveToObject/MoveToPosition, we might want a specific event
+                        // but for now, the TUI can see the GameMessage if it wants.
+                    }
                     return true;
                 }
             }

@@ -1,4 +1,5 @@
 pub mod entity;
+pub mod guid;
 pub mod physics_types;
 pub mod player;
 pub mod position;
@@ -11,25 +12,31 @@ use crate::protocol::messages::Enchantment;
 use crate::world::entity::Entity;
 use crate::world::position::WorldPosition;
 use crate::world::properties::PropertyValue;
+pub use guid::Guid;
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityMoved {
-        guid: u32,
+        guid: Guid,
         pos: WorldPosition,
     },
-    EntityDespawned(u32),
+    EntityVectorUpdated {
+        guid: Guid,
+        velocity: crate::math::Vector3,
+        omega: crate::math::Vector3,
+    },
+    EntityDespawned(Guid),
     VitalUpdated(stats::Vital),
     AttributeUpdated(stats::Attribute),
     SkillUpdated(stats::Skill),
     PropertyUpdated {
-        guid: u32,
+        guid: Guid,
         property_id: u32,
         value: PropertyValue,
     },
     PlayerInfo {
-        guid: u32,
+        guid: Guid,
         name: String,
         pos: Option<WorldPosition>,
         attributes: Vec<stats::Attribute>,
@@ -48,6 +55,17 @@ pub enum WorldEvent {
         attributes: Vec<stats::Attribute>,
         vitals: Vec<stats::Vital>,
         skills: Vec<stats::Skill>,
+    },
+    EntityStateUpdated {
+        guid: Guid,
+        physics_state: properties::PhysicsState,
+    },
+    WeenieError {
+        error_id: u32,
+    },
+    WeenieErrorWithString {
+        error_id: u32,
+        message: String,
     },
 }
 

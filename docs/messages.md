@@ -49,6 +49,13 @@ Data Download response from client. See [DDD Documentation](data_download.md).
 ### `0xF658` CharacterList
 Sent after login. Details in [handshake.md](handshake.md).
 
+### `0xF7DC` BootAccount
+Sent by the server to terminate the connection.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `String16L` | `Reason` | (Optional) The reason for the disconnect. This field may be omitted if the message ends immediately after the opcode. |
+
 ### `0xF745` ObjectCreate (S2C) / `0xF7DB` UpdateObject (S2C)
 Used to spawn objects or fully refresh their state in the client's view. These two opcodes are structurally identical.
 

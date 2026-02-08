@@ -14,5 +14,7 @@ caps/
 # OS
 .DS_Store
 
-# Keep agent instructions personal
+# Agent instructions
 .github/*.md
+# Agent skills
+.github/skills

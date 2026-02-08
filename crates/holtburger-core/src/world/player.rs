@@ -1,8 +1,9 @@
 use super::WorldEvent;
+use super::guid::Guid;
 use super::stats;
-use crate::protocol::messages::{Enchantment, GameMessage};
+use crate::protocol::messages::*;
 use crate::world::properties::EnchantmentTypeFlags;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SkillBase {
@@ -18,7 +19,7 @@ pub struct VitalBase {
 
 #[derive(Debug, Clone)]
 pub struct PlayerState {
-    pub guid: u32,
+    pub guid: Guid,
     pub name: String,
     pub attributes: HashMap<stats::AttributeType, u32>,
     pub vitals: HashMap<stats::VitalType, stats::Vital>,
@@ -27,7 +28,16 @@ pub struct PlayerState {
     pub skills: HashMap<stats::SkillType, stats::Skill>,
     /// Stores the raw ranks and init for skills so they can be recalculated
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
+    pub position: WorldPosition,
+    pub instance_sequence: u16,
+    pub server_control_sequence: u16,
+    pub teleport_sequence: u16,
+    pub force_position_sequence: u16,
+    pub position_sequence: u16,
+    pub movement_sequence: u16,
     pub enchantments: Vec<Enchantment>,
+    pub spells: BTreeMap<u32, f32>,
+    pub spell_lists: Vec<Vec<u32>>,
 }
 
 impl Default for PlayerState {
@@ -39,14 +49,23 @@ impl Default for PlayerState {
 impl PlayerState {
     pub fn new() -> Self {
         Self {
-            guid: 0,
+            guid: Guid::NULL,
             name: "Unknown".to_string(),
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             vital_bases: HashMap::new(),
             skills: HashMap::new(),
             skill_bases: HashMap::new(),
+            position: WorldPosition::default(),
+            instance_sequence: 0,
+            server_control_sequence: 0,
+            teleport_sequence: 0,
+            force_position_sequence: 0,
+            position_sequence: 0,
+            movement_sequence: 0,
             enchantments: Vec::new(),
+            spells: BTreeMap::new(),
+            spell_lists: vec![Vec::new(); 8],
         }
     }
 
@@ -364,12 +383,84 @@ impl PlayerState {
 
     pub fn handle_message(&mut self, msg: &GameMessage, events: &mut Vec<WorldEvent>) -> bool {
         match msg {
-            GameMessage::UpdateAttribute {
-                attribute,
-                ranks,
-                start,
-                xp: _,
-            } => {
+            GameMessage::ObjectCreate(data) => {
+                if data.guid == self.guid && self.guid != Guid::NULL {
+                    if let Some(pos) = data.pos {
+                        self.position = pos;
+                        events.push(WorldEvent::EntityMoved {
+                            guid: self.guid,
+                            pos: self.position,
+                        });
+                    }
+                    return true;
+                }
+            }
+            GameMessage::UpdatePosition(data) => {
+                if data.guid == self.guid && self.guid != Guid::NULL {
+                    self.position = data.pos.pos;
+                    self.instance_sequence = data.pos.instance_sequence;
+                    self.position_sequence = data.pos.position_sequence;
+                    self.teleport_sequence = data.pos.teleport_sequence;
+                    self.force_position_sequence = data.pos.force_position_sequence;
+
+                    events.push(WorldEvent::EntityMoved {
+                        guid: self.guid,
+                        pos: self.position,
+                    });
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdatePosition(data) => {
+                self.position = data.pos;
+                events.push(WorldEvent::EntityMoved {
+                    guid: self.guid,
+                    pos: self.position,
+                });
+                return true;
+            }
+            GameMessage::PublicUpdatePosition(data) => {
+                if data.guid == self.guid && self.guid != Guid::NULL {
+                    self.position = data.pos;
+                    events.push(WorldEvent::EntityMoved {
+                        guid: self.guid,
+                        pos: self.position,
+                    });
+                    return true;
+                }
+            }
+            GameMessage::VectorUpdate(data) => {
+                if data.guid == self.guid && self.guid != Guid::NULL {
+                    self.instance_sequence = data.instance_sequence;
+                    events.push(WorldEvent::EntityVectorUpdated {
+                        guid: data.guid,
+                        velocity: data.velocity,
+                        omega: data.omega,
+                    });
+                    return true;
+                }
+            }
+            GameMessage::UpdateMotion(data) => {
+                if data.guid == self.guid && self.guid != Guid::NULL {
+                    self.instance_sequence = data.object_instance_sequence;
+                    self.server_control_sequence = data.server_control_sequence;
+                    self.movement_sequence = data.movement_sequence;
+
+                    // We don't update position here as it's just a request/animation
+                    // But we emit an event if it's a non-autonomous move (server request)
+                    if !data.is_autonomous {
+                        // For MoveToObject/MoveToPosition, we might want a specific event
+                        // but for now, the TUI can see the GameMessage if it wants.
+                    }
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdateAttribute(data) => {
+                let UpdateAttribute {
+                    attribute,
+                    ranks,
+                    start,
+                    ..
+                } = &**data;
                 if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
                     let base = start + ranks;
                     self.attributes.insert(attr_type, base);
@@ -384,13 +475,35 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateSkill {
-                skill,
-                ranks,
-                status,
-                xp: _,
-                init,
-            } => {
+            GameMessage::PublicUpdateAttribute(data) => {
+                let UpdateAttribute {
+                    attribute,
+                    ranks,
+                    start,
+                    ..
+                } = &**data;
+                if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
+                    let base = start + ranks;
+                    self.attributes.insert(attr_type, base);
+
+                    events.push(WorldEvent::AttributeUpdated(stats::Attribute {
+                        attr_type,
+                        base,
+                        current: self.get_attribute_current(attr_type),
+                    }));
+
+                    self.emit_derived_stats(events);
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdateSkill(data) => {
+                let UpdateSkill {
+                    skill,
+                    ranks,
+                    status,
+                    init,
+                    ..
+                } = &**data;
                 if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
                     let training = match status {
                         1 => stats::TrainingLevel::Untrained,
@@ -424,13 +537,55 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateVital {
-                vital,
-                ranks,
-                start,
-                xp: _,
-                current,
-            } => {
+            GameMessage::PublicUpdateSkill(data) => {
+                let UpdateSkill {
+                    skill,
+                    ranks,
+                    status,
+                    init,
+                    ..
+                } = &**data;
+                if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
+                    let training = match status {
+                        1 => stats::TrainingLevel::Untrained,
+                        2 => stats::TrainingLevel::Trained,
+                        3 => stats::TrainingLevel::Specialized,
+                        _ => stats::TrainingLevel::Unusable,
+                    };
+
+                    self.skill_bases.insert(
+                        skill_type,
+                        SkillBase {
+                            ranks: *ranks,
+                            init: *init,
+                        },
+                    );
+
+                    let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
+                    let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
+
+                    let skill_obj = stats::Skill {
+                        skill_type,
+                        base: base_val,
+                        current: current_val,
+                        training,
+                    };
+                    self.skills.insert(skill_type, skill_obj.clone());
+
+                    events.push(WorldEvent::SkillUpdated(skill_obj));
+
+                    self.emit_derived_stats(events);
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdateVital(data) => {
+                let UpdateVital {
+                    vital,
+                    ranks,
+                    start,
+                    current,
+                    ..
+                } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
                     self.vital_bases.insert(
                         vital_type,
@@ -458,7 +613,43 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateVitalCurrent { vital, current } => {
+            GameMessage::PublicUpdateVital(data) => {
+                let UpdateVital {
+                    vital,
+                    ranks,
+                    start,
+                    current,
+                    ..
+                } = &**data;
+                if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
+                    self.vital_bases.insert(
+                        vital_type,
+                        VitalBase {
+                            ranks: *ranks,
+                            start: *start,
+                        },
+                    );
+
+                    let base = self.calculate_vital_base(vital_type);
+                    let buffed_max = self.calculate_vital_current(vital_type);
+                    let final_base = if base == 0 { *current } else { base };
+
+                    let vital_obj = stats::Vital {
+                        vital_type,
+                        base: final_base,
+                        buffed_max,
+                        current: *current,
+                    };
+                    self.vitals.insert(vital_type, vital_obj.clone());
+
+                    events.push(WorldEvent::VitalUpdated(vital_obj));
+
+                    self.emit_derived_stats(events);
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdateVitalCurrent(data) => {
+                let UpdateVitalCurrent { vital, current, .. } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital)
                     && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
                 {
@@ -467,133 +658,137 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::MagicUpdateEnchantment {
-                target,
-                enchantment,
-            } => {
-                if *target == self.guid as u64 {
-                    if let Some(existing) = self.enchantments.iter_mut().find(|e| {
-                        e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
-                    }) {
-                        *existing = enchantment.clone();
-                    } else {
-                        self.enchantments.push(enchantment.clone());
-                    }
-                    events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicUpdateMultipleEnchantments {
-                target,
-                enchantments,
-            } => {
-                if *target == self.guid as u64 {
-                    for enchantment in enchantments {
-                        if let Some(existing) = self.enchantments.iter_mut().find(|e| {
-                            e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
-                        }) {
-                            *existing = enchantment.clone();
+            GameMessage::GameEvent(ev) => {
+                return match &ev.event {
+                    GameEvent::MagicUpdateEnchantment(data) => {
+                        let MagicUpdateEnchantmentData {
+                            target,
+                            enchantment,
+                            ..
+                        } = &**data;
+                        if *target == self.guid {
+                            if let Some(existing) = self.enchantments.iter_mut().find(|e| {
+                                e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
+                            }) {
+                                *existing = enchantment.clone();
+                            } else {
+                                self.enchantments.push(enchantment.clone());
+                            }
+                            events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                            self.emit_derived_stats(events);
+                            true
                         } else {
-                            self.enchantments.push(enchantment.clone());
+                            false
                         }
-                        events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
                     }
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicRemoveEnchantment {
-                target,
-                spell_id,
-                layer,
-            } => {
-                if *target == self.guid as u64 {
-                    self.enchantments
-                        .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                    events.push(WorldEvent::EnchantmentRemoved {
-                        spell_id: *spell_id,
-                        layer: *layer,
-                    });
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicRemoveMultipleEnchantments { target, spells } => {
-                if *target == self.guid as u64 {
-                    for spell in spells {
-                        self.enchantments
-                            .retain(|e| e.spell_id != spell.spell_id || e.layer != spell.layer);
-                        events.push(WorldEvent::EnchantmentRemoved {
-                            spell_id: spell.spell_id,
-                            layer: spell.layer,
-                        });
+                    GameEvent::MagicUpdateMultipleEnchantments(data) => {
+                        let MagicUpdateMultipleEnchantmentsData {
+                            target,
+                            enchantments,
+                            ..
+                        } = &**data;
+                        if *target == self.guid {
+                            for enchantment in enchantments {
+                                if let Some(existing) = self.enchantments.iter_mut().find(|e| {
+                                    e.spell_id == enchantment.spell_id
+                                        && e.layer == enchantment.layer
+                                }) {
+                                    *existing = enchantment.clone();
+                                } else {
+                                    self.enchantments.push(enchantment.clone());
+                                }
+                                events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                            }
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
                     }
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicPurgeEnchantments { target } => {
-                if *target == self.guid as u64 {
-                    self.enchantments.clear();
-                    events.push(WorldEvent::EnchantmentsPurged);
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicPurgeBadEnchantments { target } => {
-                if *target == self.guid as u64 {
-                    self.enchantments.retain(|e| {
-                        (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
-                    });
-                    events.push(WorldEvent::EnchantmentsPurged);
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicDispelEnchantment {
-                target,
-                spell_id,
-                layer,
-            } => {
-                if *target == self.guid as u64 {
-                    self.enchantments
-                        .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                    events.push(WorldEvent::EnchantmentRemoved {
-                        spell_id: *spell_id,
-                        layer: *layer,
-                    });
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::MagicDispelMultipleEnchantments { target, spells } => {
-                if *target == self.guid as u64 {
-                    for spell in spells {
-                        self.enchantments
-                            .retain(|e| e.spell_id != spell.spell_id || e.layer != spell.layer);
-                        events.push(WorldEvent::EnchantmentRemoved {
-                            spell_id: spell.spell_id,
-                            layer: spell.layer,
-                        });
+                    GameEvent::MagicRemoveEnchantment(data) => {
+                        let MagicRemoveEnchantmentData {
+                            target,
+                            spell_id,
+                            layer,
+                            ..
+                        } = &**data;
+                        if *target == self.guid {
+                            self.enchantments
+                                .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
+                            events.push(WorldEvent::EnchantmentRemoved {
+                                spell_id: *spell_id,
+                                layer: *layer,
+                            });
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
                     }
-                    self.emit_derived_stats(events);
-                    return true;
-                }
-            }
-            GameMessage::UpdateHealth { target, health } => {
-                let target_guid = if *target == 0 { self.guid } else { *target };
+                    GameEvent::MagicRemoveMultipleEnchantments(data) => {
+                        let MagicRemoveMultipleEnchantmentsData { target, spells, .. } = &**data;
+                        if *target == self.guid {
+                            for (spell_id, layer) in spells {
+                                self.enchantments
+                                    .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
+                                events.push(WorldEvent::EnchantmentRemoved {
+                                    spell_id: *spell_id,
+                                    layer: *layer,
+                                });
+                            }
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    GameEvent::MagicPurgeEnchantments(data) => {
+                        let MagicPurgeEnchantmentsData { target, .. } = &**data;
+                        if *target == self.guid {
+                            self.enchantments.clear();
+                            events.push(WorldEvent::EnchantmentsPurged);
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    GameEvent::MagicPurgeBadEnchantments(data) => {
+                        let MagicPurgeBadEnchantmentsData { target, .. } = &**data;
+                        if *target == self.guid {
+                            self.enchantments.retain(|e| {
+                                (e.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
+                            });
+                            events.push(WorldEvent::EnchantmentsPurged);
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    GameEvent::UpdateHealth(data) => {
+                        let UpdateHealthData { target, health } = &**data;
+                        let target_guid = if *target == Guid::NULL {
+                            self.guid
+                        } else {
+                            *target
+                        };
 
-                if target_guid == self.guid
-                    && target_guid != 0
-                    && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health)
-                {
-                    // UpdateHealth is a percentage float (0.0 to 1.0)
-                    let new_current = (*health * vital_obj.buffed_max as f32) as u32;
-                    vital_obj.current = new_current;
-                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
-                    return true;
-                }
+                        if target_guid == self.guid
+                            && target_guid != Guid::NULL
+                            && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health)
+                        {
+                            // UpdateHealth is a percentage float (0.0 to 1.0)
+                            let new_current = (*health * vital_obj.buffed_max as f32) as u32;
+                            vital_obj.current = new_current;
+                            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
             }
             _ => {}
         }
@@ -787,5 +982,43 @@ mod tests {
             health_current, 156,
             "Current Health with 111 Endurance should be 156 (111/2=55.5 rounded to 56)"
         );
+    }
+
+    #[test]
+    fn test_vector_update_routing() {
+        use crate::math::Vector3;
+        use crate::protocol::messages::GameMessage;
+        use crate::protocol::messages::VectorUpdateData;
+        use crate::world::WorldEvent;
+
+        let mut player = PlayerState::new();
+        player.guid = Guid(0x50000001);
+
+        let data = VectorUpdateData {
+            guid: Guid(0x50000001),
+            velocity: Vector3::new(1.0, 2.0, 3.0),
+            omega: Vector3::new(0.1, 0.2, 0.3),
+            instance_sequence: 123,
+            vector_sequence: 456,
+        };
+
+        let msg = GameMessage::VectorUpdate(Box::new(data));
+        let mut events = Vec::new();
+        let handled = player.handle_message(&msg, &mut events);
+
+        assert!(handled);
+        assert_eq!(events.len(), 1);
+        if let WorldEvent::EntityVectorUpdated {
+            guid,
+            velocity,
+            omega,
+        } = &events[0]
+        {
+            assert_eq!(*guid, Guid(0x50000001));
+            assert_eq!(velocity.x, 1.0);
+            assert_eq!(omega.x, 0.1);
+        } else {
+            panic!("Expected EntityVectorUpdated event");
+        }
     }
 }

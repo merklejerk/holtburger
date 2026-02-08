@@ -1,7 +1,6 @@
-use super::super::state::AppState;
-use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, FocusedPane};
+use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, ChatMessageKind, FocusedPane};
 use super::super::utils::wrap_text;
-use holtburger_core::MessageKind;
+use crate::ui::AppState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
@@ -15,19 +14,23 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
 
     let window_size = CHAT_HISTORY_WINDOW_SIZE;
+
     let m_len = state.messages.len();
     let window_start = m_len.saturating_sub(window_size);
+    // For now, let's just optimize by only wrapping the window.
+    // Even at 10k messages, if we don't re-wrap, it should be fast.
 
     let mut all_lines = Vec::new();
     for m in &state.messages[window_start..] {
         let color = match m.kind {
-            MessageKind::Chat => Color::White,
-            MessageKind::Tell => Color::Magenta,
-            MessageKind::Emote => Color::Green,
-            MessageKind::Info => Color::Cyan,
-            MessageKind::System => Color::DarkGray,
-            MessageKind::Error => Color::Red,
-            MessageKind::Warning => Color::Yellow,
+            ChatMessageKind::Chat => Color::White,
+            ChatMessageKind::Tell => Color::Magenta,
+            ChatMessageKind::Emote => Color::Green,
+            ChatMessageKind::Info => Color::Cyan,
+            ChatMessageKind::System => Color::DarkGray,
+            ChatMessageKind::Error => Color::Red,
+            ChatMessageKind::Warning => Color::Yellow,
+            ChatMessageKind::Debug => Color::Indexed(242), // Greyish
         };
 
         let wrapped = wrap_text(&m.text, width);
@@ -37,15 +40,9 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 
     let total_lines = all_lines.len();
-    if state.chat_total_lines > 0 && total_lines > state.chat_total_lines && state.scroll_offset > 0
-    {
-        state.scroll_offset += total_lines - state.chat_total_lines;
-    }
-    state.chat_total_lines = total_lines;
-    let max_scroll = total_lines.saturating_sub(height);
-    state.scroll_offset = state.scroll_offset.min(max_scroll);
-    let effective_scroll = state.scroll_offset;
+    state.maintain_scroll(false, total_lines, height);
 
+    let effective_scroll = state.scroll_offset;
     let end = total_lines.saturating_sub(effective_scroll);
     let start = end.saturating_sub(height);
 
@@ -82,15 +79,17 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Render Scrollbar
     if total_lines > height {
-        let mut scrollbar_state = ScrollbarState::new(total_lines)
-            .viewport_content_length(height)
-            .position(start);
+        let mut scrollbar_state =
+            ScrollbarState::new(total_lines.saturating_sub(height)).position(start);
         f.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("▲"))
                 .end_symbol(Some("▼")),
-            area,
+            area.inner(&ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut scrollbar_state,
         );
     }
@@ -100,14 +99,13 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
     let total_ctx = state.context_buffer.len();
 
-    let max_ctx_scroll = total_ctx.saturating_sub(height);
-    state.context_scroll_offset = state.context_scroll_offset.min(max_ctx_scroll);
-    let effective_ctx_scroll = state.context_scroll_offset;
+    state.maintain_scroll(true, total_ctx, height);
 
+    let effective_ctx_scroll = state.context_scroll_offset;
     let ctx_end = total_ctx.saturating_sub(effective_ctx_scroll);
     let ctx_start = ctx_end.saturating_sub(height);
 
-    let mut ctx_items: Vec<ListItem> = state.context_buffer[ctx_start..ctx_end]
+    let mut ctx_items: Vec<ListItem<'static>> = state.context_buffer[ctx_start..ctx_end]
         .iter()
         .map(|s| ListItem::new(s.clone()))
         .collect();
@@ -128,22 +126,24 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let ctx_list = List::new(ctx_items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title("Context Information")
+            .title(" Context Information ")
             .border_style(ctx_style),
     );
     f.render_widget(ctx_list, area);
 
     // Render Scrollbar
     if total_ctx > height {
-        let mut scrollbar_state = ScrollbarState::new(total_ctx)
-            .viewport_content_length(height)
-            .position(ctx_start);
+        let mut scrollbar_state =
+            ScrollbarState::new(total_ctx.saturating_sub(height)).position(ctx_start);
         f.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("▲"))
                 .end_symbol(Some("▼")),
-            area,
+            area.inner(&ratatui::layout::Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
             &mut scrollbar_state,
         );
     }

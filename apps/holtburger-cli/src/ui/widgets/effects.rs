@@ -1,4 +1,4 @@
-use super::super::state::AppState;
+use crate::ui::AppState;
 use holtburger_core::protocol::properties::{PropertyFloat, PropertyInt as ProtoPropertyInt};
 use holtburger_core::world::properties::EnchantmentTypeFlags;
 use holtburger_core::world::stats::{AttributeType, SkillType};
@@ -68,13 +68,13 @@ pub fn get_effects_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
             let mod_desc = get_enchantment_name(enchant);
 
-            let style = if i == state.selected_nearby_index {
+            let style = if i == state.selected_dashboard_index {
                 Style::default().bg(Color::DarkGray)
             } else {
                 Style::default()
             };
 
-            let duration_color = if i == state.selected_nearby_index {
+            let duration_color = if i == state.selected_dashboard_index {
                 Color::White
             } else {
                 Color::DarkGray

@@ -1,4 +1,4 @@
-use super::super::state::AppState;
+use crate::ui::AppState;
 use holtburger_core::ClientState;
 use holtburger_core::world::stats::VitalType;
 use ratatui::Frame;
@@ -16,15 +16,15 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     // 1. Render Vitals (Left Half)
     let health = state
         .vitals
-        .iter()
+        .values()
         .find(|v| v.vital_type == VitalType::Health);
     let stamina = state
         .vitals
-        .iter()
+        .values()
         .find(|v| v.vital_type == VitalType::Stamina);
     let mana = state
         .vitals
-        .iter()
+        .values()
         .find(|v| v.vital_type == VitalType::Mana);
 
     let health_str = if let Some(h) = health {
@@ -62,17 +62,27 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
 
     let mut retry_info = String::new();
     let now = std::time::Instant::now();
-    if let Some((current, max, next_time)) = state.logon_retry {
-        let secs = next_time
+    if state.logon_retry.active {
+        let secs = state
+            .logon_retry
+            .next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
-        retry_info.push_str(&format!("[Logon:{}/{} {}s] ", current, max, secs));
+        retry_info.push_str(&format!(
+            "[Logon:{}/{} {}s] ",
+            state.logon_retry.attempts, state.logon_retry.max_attempts, secs
+        ));
     }
-    if let Some((current, max, next_time)) = state.enter_retry {
-        let secs = next_time
+    if state.enter_retry.active {
+        let secs = state
+            .enter_retry
+            .next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
-        retry_info.push_str(&format!("[Enter:{}/{} {}s] ", current, max, secs));
+        retry_info.push_str(&format!(
+            "[Enter:{}/{} {}s] ",
+            state.enter_retry.attempts, state.enter_retry.max_attempts, secs
+        ));
     }
 
     let status_emoji = match state.core_state {
@@ -80,6 +90,7 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         ClientState::CharacterSelection(_) => "👥",
         ClientState::EnteringWorld => "🚪",
         ClientState::InWorld => "🌍",
+        ClientState::Disconnected => "💀",
     };
 
     let current_char = state.character_name.as_deref().unwrap_or("Selecting...");

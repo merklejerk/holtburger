@@ -2,6 +2,7 @@ pub mod capture;
 
 use crate::protocol::crypto::Isaac;
 use crate::protocol::messages::*;
+use crate::protocol::messages::utils::align_offset;
 use crate::session::capture::{CaptureWriter, Direction};
 use anyhow::{Result, anyhow};
 pub use async_trait::async_trait;
@@ -218,8 +219,7 @@ impl Session {
                     offset += frag_data_size;
                 }
 
-                let aligned_offset = (offset + 3) & !3;
-                offset = aligned_offset;
+                align_offset(&mut offset, 4);
             }
         }
 
@@ -580,7 +580,7 @@ impl Session {
                 offset += frag_data_size;
 
                 // Fragments are 4-byte aligned in AC
-                offset = (offset + 3) & !3;
+                align_offset(&mut offset, 4);
             }
         }
 

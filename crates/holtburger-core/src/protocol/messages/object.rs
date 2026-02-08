@@ -1,7 +1,7 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::protocol::messages::utils::{
-    align_to_4, read_packed_u32_with_known_type, read_string16, write_packed_u32_with_known_type,
-    write_string16,
+    align_offset, align_to_4, pad_to_4, read_packed_u32_with_known_type, read_string16,
+    write_packed_u32_with_known_type, write_string16,
 };
 use crate::world::Guid;
 use crate::world::position::WorldPosition;
@@ -241,9 +241,7 @@ impl MessagePack for ModelData {
                 write_packed_u32_with_known_type(buf, m.animation_id, 0x01000000);
             }
 
-            while !buf.len().is_multiple_of(4) {
-                buf.push(0);
-            }
+            pad_to_4(buf);
         } else {
             // Minimal 4-byte version
             buf.push(0);
@@ -776,9 +774,7 @@ impl MessagePack for ObjectDescriptionData {
         for val in self.sequences {
             buf.write_u16::<LittleEndian>(val).unwrap();
         }
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
 
         // WeenieHeader
         buf.write_u32::<LittleEndian>(self.weenie_flags.bits())
@@ -789,9 +785,7 @@ impl MessagePack for ObjectDescriptionData {
         buf.write_u32::<LittleEndian>(self.item_type).unwrap();
         buf.write_u32::<LittleEndian>(self.obj_desc_flags.bits())
             .unwrap();
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
 
         if self
             .obj_desc_flags
@@ -830,9 +824,7 @@ impl MessagePack for ObjectDescriptionData {
             buf.write_u16::<LittleEndian>(self.burden.unwrap_or(0))
                 .unwrap();
         }
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
     }
 }
 
@@ -1107,9 +1099,7 @@ impl UpdatePropertyStringData {
         };
 
         // Align before reading string
-        if !(*offset).is_multiple_of(4) {
-            *offset = (*offset + 4) & !3;
-        }
+        align_offset(offset, 4);
 
         let value = read_string16(data, offset)?;
         Some(UpdatePropertyStringData {
@@ -1131,9 +1121,7 @@ impl MessagePack for UpdatePropertyStringData {
         }
 
         // Align before string
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
 
         write_string16(buf, &self.value);
     }

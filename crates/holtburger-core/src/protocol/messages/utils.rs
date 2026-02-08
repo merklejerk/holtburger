@@ -4,6 +4,24 @@ pub fn align_to_4(len: usize) -> usize {
     (len + 3) & !3
 }
 
+/// Return number of padding bytes needed to align `len` to `align` boundary
+pub fn pad_len(len: usize, align: usize) -> usize {
+    (align - (len % align)) % align
+}
+
+/// Pad `buf` with zeroes until its length is a multiple of 4
+pub fn pad_to_4(buf: &mut Vec<u8>) {
+    let pad = pad_len(buf.len(), 4);
+    if pad > 0 {
+        buf.extend(std::iter::repeat(0).take(pad));
+    }
+}
+
+/// Align an offset (in-place) to the specified alignment boundary.
+pub fn align_offset(offset: &mut usize, align: usize) {
+    *offset = (*offset + (align - 1)) & !(align - 1);
+}
+
 pub fn write_string16(buf: &mut Vec<u8>, s: &str) {
     let bytes = s.as_bytes();
     let len = bytes.len();
@@ -162,6 +180,27 @@ mod tests {
         assert_eq!(align_to_4(3), 4);
         assert_eq!(align_to_4(4), 4);
         assert_eq!(align_to_4(5), 8);
+    }
+
+    #[test]
+    fn test_pad_to_4_and_align_offset() {
+        let mut buf = vec![1u8];
+        pad_to_4(&mut buf);
+        assert_eq!(buf.len() % 4, 0);
+        assert_eq!(buf, vec![1u8, 0, 0, 0]);
+
+        let mut buf = vec![];
+        pad_to_4(&mut buf);
+        assert_eq!(buf.len(), 0);
+
+        let mut off = 5usize;
+        align_offset(&mut off, 4);
+        assert_eq!(off % 4, 0);
+        assert_eq!(off, 8);
+
+        let mut off = 8usize;
+        align_offset(&mut off, 4);
+        assert_eq!(off, 8);
     }
 
     #[test]

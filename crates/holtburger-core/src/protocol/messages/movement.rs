@@ -1,4 +1,5 @@
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::utils::{align_offset, pad_to_4};
 use crate::world::Guid;
 pub use crate::world::position::{PositionPack, WorldPosition};
 use byteorder::{ByteOrder, LittleEndian};
@@ -191,7 +192,7 @@ impl MessageUnpack for AutonomousPositionData {
         *offset += 9;
 
         // Alignment
-        *offset = (*offset + 3) & !3;
+        align_offset(offset, 4);
 
         Some(Self {
             position,
@@ -219,7 +220,7 @@ impl MessageUnpack for ServerAutonomousPositionData {
         *offset += 12;
 
         // Alignment
-        *offset = (*offset + 3) & !3;
+        align_offset(offset, 4);
 
         Some(Self {
             guid,
@@ -244,9 +245,7 @@ impl MessagePack for ServerAutonomousPositionData {
         buf.extend_from_slice(&self.contact_flags.to_le_bytes());
 
         // Alignment
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
     }
 }
 
@@ -259,9 +258,7 @@ impl MessagePack for AutonomousPositionData {
         buf.extend_from_slice(&self.force_position_sequence.to_le_bytes());
         buf.push(self.last_contact);
         // Align
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
     }
 }
 
@@ -381,7 +378,7 @@ impl MessageUnpack for PlayerTeleportData {
         *offset += 2;
 
         // Alignment (Writer.Align() in ACE)
-        *offset = (*offset + 3) & !3;
+        align_offset(offset, 4);
 
         Some(PlayerTeleportData { teleport_sequence })
     }
@@ -391,9 +388,7 @@ impl MessagePack for PlayerTeleportData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.teleport_sequence.to_le_bytes());
         // Align to 4 bytes
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
     }
 }
 
@@ -567,7 +562,7 @@ impl MessageUnpack for MovementEventData {
         *offset += 1;
 
         // Alignment (ACE uses Writer.Align() which aligns to 4 bytes)
-        *offset = (*offset + 3) & !3;
+        align_offset(offset, 4);
 
         if *offset + 1 > data.len() {
             return None;
@@ -635,9 +630,7 @@ impl MessagePack for MovementEventData {
         buf.push(self.is_autonomous as u8);
 
         // Alignment
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
 
         buf.push(self.movement_type as u8);
         buf.push(self.motion_flags);
@@ -941,7 +934,7 @@ impl MessageUnpack for InterpretedMotionState {
         }
 
         // Align
-        *offset = (*offset + 3) & !3;
+        align_offset(offset, 4);
 
         Some(InterpretedMotionState {
             flags,
@@ -997,9 +990,7 @@ impl MessagePack for InterpretedMotionState {
         }
 
         // Align
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
     }
 }
 
@@ -1240,9 +1231,7 @@ impl MoveToStateData {
         *offset += 1;
 
         // Align to 4 bytes
-        while !(*offset).is_multiple_of(4) {
-            *offset += 1;
-        }
+        align_offset(offset, 4);
 
         Some(MoveToStateData {
             sequence,
@@ -1266,9 +1255,7 @@ impl MoveToStateData {
         buf.push(self.contact_long_jump);
 
         // Align to 4 bytes
-        while !buf.len().is_multiple_of(4) {
-            buf.push(0);
-        }
+        pad_to_4(buf);
     }
 }
 

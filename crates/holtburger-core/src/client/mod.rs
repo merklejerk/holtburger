@@ -159,7 +159,7 @@ impl Client {
                         .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                             sequence: 0,
                             action: GameAction::Tell(Box::new(TellActionData {
-                                target_name: target,
+                                target,
                                 message,
                             })),
                         })))
@@ -242,7 +242,7 @@ impl Client {
                         action: GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
                             item_guid: guid,
                             container_guid: self.world.player.guid,
-                            slot: 0,
+                            placement: 0,
                         })),
                     })))
                     .await
@@ -264,7 +264,7 @@ impl Client {
                         action: GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
                             item_guid: item,
                             container_guid: container,
-                            slot: placement,
+                            placement,
                         })),
                     })))
                     .await

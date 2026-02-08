@@ -163,3 +163,99 @@ impl ProtocolPack for InventoryServerSaveFailedData {
         buf.write_u32::<LittleEndian>(self.error as u32).unwrap();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::game_event::{GameEvent, GameEventMessage};
+    use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_view_contents_fixture() {
+        let expected = ViewContentsData {
+            container: Guid(0x11111111),
+            items: vec![
+                ViewContentsItem {
+                    guid: Guid(0x22222222),
+                    container_type: 1,
+                },
+                ViewContentsItem {
+                    guid: Guid(0x33333333),
+                    container_type: 0,
+                },
+            ],
+        };
+
+        // Skip Opcode(4), Target(4), Seq(4), IntOp(4) = 16 bytes
+        let data = &fixtures::VIEW_CONTENTS[16..];
+        assert_pack_unpack_parity(data, &expected);
+    }
+
+    #[test]
+    fn test_inventory_put_obj_in_container_fixture() {
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x10), Event (0x0022), Item (0x80000001), Cont (0x80000002), Slot (3), Type (1)
+        let hex = "B0F7000001000050100000002200000001000080020000800300000001000000";
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 0x10,
+            event: GameEvent::InventoryPutObjInContainer(Box::new(
+                InventoryPutObjInContainerData {
+                    item_guid: Guid(0x80000001),
+                    container_guid: Guid(0x80000002),
+                    slot: 3,
+                    container_type: 1,
+                },
+            )),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_inventory_put_object_in_3d_fixture() {
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x11), Event (0x019A), Obj (0x80000001)
+        let hex = "B0F7000001000050110000009A01000001000080";
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 0x11,
+            event: GameEvent::InventoryPutObjectIn3D(Box::new(InventoryPutObjectIn3DData {
+                object_guid: Guid(0x80000001),
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_wield_object_fixture() {
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x12), Event (0x0023), Obj (0x80000001), Mask (MELEE_WEAPON=0x00100000)
+        let hex = "B0F700000100005012000000230000000100008000001000";
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 0x12,
+            event: GameEvent::WieldObject(Box::new(WieldObjectData {
+                object_guid: Guid(0x80000001),
+                equip_mask: EquipMask::MELEE_WEAPON,
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_inventory_server_save_failed_fixture() {
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x12), Event (0x00A0), Obj (0x80000001), Error (0x03EE)
+        let hex = "B0F700000100005012000000A000000001000080EE030000";
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 0x12,
+            event: GameEvent::InventoryServerSaveFailed(Box::new(
+                InventoryServerSaveFailedData {
+                    item_guid: Guid(0x80000001),
+                    error: WeenieError::TheContainerIsClosed,
+                },
+            )),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+}
+

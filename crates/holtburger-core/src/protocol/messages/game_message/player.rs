@@ -267,3 +267,107 @@ impl<const PUBLIC: bool> ProtocolPack for UpdateSkillLevel<PUBLIC> {
 
 pub type PrivateUpdateSkillLevelData = UpdateSkillLevel<false>;
 pub type PublicUpdateSkillLevelData = UpdateSkillLevel<true>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::messages::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::world::Guid;
+
+    #[test]
+    fn test_update_skill_fixture() {
+        let hex = "010a0000003200010003000000e80300000a000000000000000000000000000000";
+        let data = hex::decode(hex).unwrap();
+        let expected = PrivateUpdateSkillData {
+            sequence: 1,
+            object_guid: None,
+            skill: 10,
+            ranks: 50,
+            adjust_pp: 1,
+            status: 3,
+            xp: 1000,
+            init: 10,
+            resistance: 0,
+            last_used: 0.0,
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_update_vital_fixture() {
+        let hex = "0c0200000064000000393000003209010064000000";
+        let data = hex::decode(hex).unwrap();
+        let expected = PrivateUpdateVitalData {
+            sequence: 12,
+            object_guid: None,
+            vital: 2,
+            ranks: 100,
+            start: 12345,
+            xp: 67890,
+            current: 100,
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_update_attribute_fixture() {
+        let hex = "0c01000000640000000a000000f4010000";
+        let data = hex::decode(hex).unwrap();
+        let expected = PrivateUpdateAttributeData {
+            sequence: 12,
+            object_guid: None,
+            attribute: 1,
+            ranks: 100,
+            start: 10,
+            xp: 500,
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_player_create_fixture() {
+        let hex = "01000050";
+        let data = hex::decode(hex).unwrap();
+        let expected = PlayerCreateData {
+            guid: Guid(0x50000001),
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_update_vital_current_fixture() {
+        let hex = "0c0200000064000000";
+        let expected = PrivateUpdateVitalCurrentData {
+            sequence: 12,
+            object_guid: None,
+            vital: 2,
+            current: 100,
+        };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_update_skill_level_private_parity() {
+        use crate::protocol::fixtures;
+        let expected = GameMessage::PrivateUpdateSkillLevel(Box::new(PrivateUpdateSkillLevelData {
+            sequence: 12,
+            guid: None,
+            skill: 10,
+            ranks: 50,
+        }));
+        assert_pack_unpack_parity(fixtures::UPDATE_SKILL_LEVEL_PRIVATE, &expected);
+    }
+
+    #[test]
+    fn test_update_skill_level_public_parity() {
+        use crate::protocol::fixtures;
+        let expected = GameMessage::PublicUpdateSkillLevel(Box::new(PublicUpdateSkillLevelData {
+            sequence: 12,
+            guid: Some(0x50000001),
+            skill: 10,
+            ranks: 50,
+        }));
+        assert_pack_unpack_parity(fixtures::UPDATE_SKILL_LEVEL_PUBLIC, &expected);
+    }
+}

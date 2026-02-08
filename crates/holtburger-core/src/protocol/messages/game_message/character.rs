@@ -184,3 +184,59 @@ impl ProtocolPack for ServerNameData {
         write_string16(buf, &self.name);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_character_enter_world_request_fixture() {
+        let expected = CharacterEnterWorldRequestData {
+            guid: Guid(0x12345678),
+        };
+        // Skip opcode (4 bytes)
+        assert_pack_unpack_parity(&fixtures::CHARACTER_ENTER_WORLD_REQUEST[4..], &expected);
+    }
+
+    #[test]
+    fn test_character_enter_world_fixture() {
+        let expected = CharacterEnterWorldData {
+            guid: Guid(0x12345678),
+            account: "Alice".to_string(),
+        };
+        // Skip opcode (4 bytes)
+        assert_pack_unpack_parity(&fixtures::CHARACTER_ENTER_WORLD[4..], &expected);
+    }
+
+    #[test]
+    fn test_character_list_fixture() {
+        let expected = CharacterListData {
+            characters: vec![CharacterEntry {
+                guid: Guid(0x12345678),
+                name: "Alice".to_string(),
+                delete_time: 0,
+            }],
+            max_slots: 3,
+            account_name: "AliceAccount".to_string(),
+            use_turbine_chat: true,
+            has_tod_expansion: true,
+        };
+        // Skip opcode (4 bytes)
+        assert_pack_unpack_parity(&fixtures::CHARACTER_LIST[4..], &expected);
+    }
+
+    #[test]
+    fn test_gamemessage_routing_character_request() {
+        let packed = vec![0xC8, 0xF7, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78];
+        let mut offset = 0;
+        let unpacked = GameMessage::unpack(&packed, &mut offset).expect("Routing failed");
+        assert!(matches!(
+            unpacked,
+            GameMessage::CharacterEnterWorldRequest(_)
+        ));
+    }
+}
+

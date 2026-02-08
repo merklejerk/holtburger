@@ -12,7 +12,7 @@ use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, 
 use holtburger_core::{ClientState, RetryState};
 
 use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
-use crate::classification;
+use crate::entities::classification;
 use crate::ui::widgets::effects::get_enchantment_name;
 
 pub struct AppState {

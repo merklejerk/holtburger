@@ -1,5 +1,5 @@
 use super::super::types::{DashboardTab, FocusedPane};
-use crate::classification;
+use crate::entities::classification;
 use crate::ui::AppState;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::properties::{PropertyInt, RadarColor};

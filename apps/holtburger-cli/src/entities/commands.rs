@@ -1,4 +1,4 @@
-use crate::classification::{self, EntityClass};
+use crate::entities::classification::{self, EntityClass};
 use holtburger_core::ClientCommand;
 use holtburger_core::protocol::messages::Enchantment;
 use holtburger_core::protocol::properties::{
@@ -10,7 +10,7 @@ use holtburger_core::world::properties::ObjectDescriptionFlag;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Action {
+pub enum EntityCommand {
     Assess,
     Use,
     Drop,
@@ -19,38 +19,38 @@ pub enum Action {
     Debug,
 }
 
-pub enum ActionTarget<'a> {
+pub enum CommandTarget<'a> {
     Entity(&'a Entity),
     Enchantment(&'a Enchantment),
     None,
 }
 
 #[derive(Debug)]
-pub enum ActionHandler {
+pub enum CommandHandler {
     Command(ClientCommand),
     ToggleDebug,
 }
 
-impl Action {
+impl EntityCommand {
     pub fn label(&self) -> &'static str {
         match self {
-            Action::Assess => "Assess",
-            Action::Use => "Use",
-            Action::Drop => "Drop",
-            Action::PickUp => "Pick up",
-            Action::MoveToSlot(_) => "Secure",
-            Action::Debug => "Debug",
+            EntityCommand::Assess => "Assess",
+            EntityCommand::Use => "Use",
+            EntityCommand::Drop => "Drop",
+            EntityCommand::PickUp => "Pick up",
+            EntityCommand::MoveToSlot(_) => "Secure",
+            EntityCommand::Debug => "Debug",
         }
     }
 
     pub fn shortcut_char(&self) -> char {
         match self {
-            Action::Assess => 'a',
-            Action::Use => 'u',
-            Action::Drop => 'd',
-            Action::PickUp => 'p',
-            Action::MoveToSlot(_) => 's',
-            Action::Debug => 'b',
+            EntityCommand::Assess => 'a',
+            EntityCommand::Use => 'u',
+            EntityCommand::Drop => 'd',
+            EntityCommand::PickUp => 'p',
+            EntityCommand::MoveToSlot(_) => 's',
+            EntityCommand::Debug => 'b',
         }
     }
 
@@ -73,41 +73,41 @@ impl Action {
 
     pub fn handler(
         &self,
-        target: &ActionTarget,
+        target: &CommandTarget,
         player_guid: Option<Guid>,
-    ) -> Option<ActionHandler> {
+    ) -> Option<CommandHandler> {
         match (self, target) {
-            (Action::Assess, ActionTarget::Entity(e)) => {
-                Some(ActionHandler::Command(ClientCommand::Identify(e.guid)))
+            (EntityCommand::Assess, CommandTarget::Entity(e)) => {
+                Some(CommandHandler::Command(ClientCommand::Identify(e.guid)))
             }
-            (Action::Use, ActionTarget::Entity(e)) => {
-                Some(ActionHandler::Command(ClientCommand::Use(e.guid)))
+            (EntityCommand::Use, CommandTarget::Entity(e)) => {
+                Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
             }
-            (Action::Drop, ActionTarget::Entity(e)) => {
-                Some(ActionHandler::Command(ClientCommand::Drop(e.guid)))
+            (EntityCommand::Drop, CommandTarget::Entity(e)) => {
+                Some(CommandHandler::Command(ClientCommand::Drop(e.guid)))
             }
-            (Action::PickUp, ActionTarget::Entity(e)) => {
+            (EntityCommand::PickUp, CommandTarget::Entity(e)) => {
                 if let (Some(pguid), EntityClass::Container) =
                     (player_guid, classification::classify_entity(e))
                 {
                     // Force the "MoveItem" variant for containers explicitly
-                    Some(ActionHandler::Command(ClientCommand::MoveItem {
+                    Some(CommandHandler::Command(ClientCommand::MoveItem {
                         item: e.guid,
                         container: pguid,
                         placement: 0,
                     }))
                 } else {
-                    Some(ActionHandler::Command(ClientCommand::Get(e.guid)))
+                    Some(CommandHandler::Command(ClientCommand::Get(e.guid)))
                 }
             }
-            (Action::MoveToSlot(slot_guid), ActionTarget::Entity(e)) => {
-                Some(ActionHandler::Command(ClientCommand::MoveItem {
+            (EntityCommand::MoveToSlot(slot_guid), CommandTarget::Entity(e)) => {
+                Some(CommandHandler::Command(ClientCommand::MoveItem {
                     item: e.guid,
                     container: *slot_guid,
                     placement: 0,
                 }))
             }
-            (Action::Debug, _) => Some(ActionHandler::ToggleDebug),
+            (EntityCommand::Debug, _) => Some(CommandHandler::ToggleDebug),
             _ => None,
         }
     }
@@ -143,16 +143,16 @@ pub fn is_owned_by_player(
     false
 }
 
-pub fn get_actions_for_target(
-    target: &ActionTarget,
+pub fn get_commands_for_target(
+    target: &CommandTarget,
     entities: &HashMap<Guid, Entity>,
     player_guid: Option<Guid>,
-) -> Vec<Action> {
-    let mut actions = match target {
-        ActionTarget::Entity(e) => {
+) -> Vec<EntityCommand> {
+    let mut commands = match target {
+        CommandTarget::Entity(e) => {
             let class = classification::classify_entity(e);
             let flags = e.flags;
-            let mut ent_actions = vec![Action::Assess];
+            let mut ent_commands = vec![EntityCommand::Assess];
 
             let is_inventory = if let Some(pguid) = player_guid {
                 is_owned_by_player(e, entities, pguid)
@@ -166,7 +166,7 @@ pub fn get_actions_for_target(
                 | EntityClass::Door
                 | EntityClass::LifeStone
                 | EntityClass::Chest => {
-                    ent_actions.push(Action::Use);
+                    ent_commands.push(EntityCommand::Use);
                 }
                 EntityClass::Weapon
                 | EntityClass::Apparel
@@ -174,59 +174,56 @@ pub fn get_actions_for_target(
                 | EntityClass::Wand
                 | EntityClass::Tool => {
                     if is_inventory {
-                        ent_actions.push(Action::Use);
-                        ent_actions.push(Action::Drop);
+                        ent_commands.push(EntityCommand::Use);
+                        ent_commands.push(EntityCommand::Drop);
                     } else if !flags.intersects(ObjectDescriptionFlag::STUCK) {
-                        ent_actions.push(Action::PickUp);
+                        ent_commands.push(EntityCommand::PickUp);
                     }
                 }
                 EntityClass::Container => {
                     if is_inventory {
-                        ent_actions.push(Action::Use);
-                        ent_actions.push(Action::Drop);
+                        ent_commands.push(EntityCommand::Use);
+                        ent_commands.push(EntityCommand::Drop);
                     } else if !flags.intersects(ObjectDescriptionFlag::STUCK) {
-                        ent_actions.push(Action::PickUp);
+                        ent_commands.push(EntityCommand::PickUp);
                         if let Some(pguid) = player_guid {
-                            ent_actions.push(Action::MoveToSlot(pguid));
+                            ent_commands.push(EntityCommand::MoveToSlot(pguid));
                         }
-                        ent_actions.push(Action::Use);
+                        ent_commands.push(EntityCommand::Use);
                     }
                 }
                 _ => {}
             }
-            ent_actions
+            ent_commands
         }
-        ActionTarget::Enchantment(_) => Vec::new(),
-        ActionTarget::None => Vec::new(),
+        CommandTarget::Enchantment(_) => Vec::new(),
+        CommandTarget::None => Vec::new(),
     };
 
-    // --- The "Pattern Appreciation" Moment ---
-    // We can now add cross-cutting concerns like "Debug" based on global state,
-    // item properties, or even user permissions, all in one spot.
     if should_show_debug(target) {
-        actions.push(Action::Debug);
+        commands.push(EntityCommand::Debug);
     }
 
-    actions
+    commands
 }
 
-/// Determines if the [D]ebug action should be available.
-fn should_show_debug(target: &ActionTarget) -> bool {
+/// Determines if the [D]ebug command should be available.
+fn should_show_debug(target: &CommandTarget) -> bool {
     match target {
-        ActionTarget::Entity(_) | ActionTarget::Enchantment(_) => true,
-        ActionTarget::None => false,
+        CommandTarget::Entity(_) | CommandTarget::Enchantment(_) => true,
+        CommandTarget::None => false,
     }
 }
 
 /// Generates a list of strings representing the debug information for a target.
 pub fn get_debug_info(
-    target: &ActionTarget,
+    target: &CommandTarget,
     name_lookup: impl Fn(Guid) -> Option<String>,
 ) -> Vec<String> {
     let mut lines = Vec::new();
 
     match target {
-        ActionTarget::Entity(e) => {
+        CommandTarget::Entity(e) => {
             lines.push(format!("DEBUG INFO: {}", e.name));
             lines.push(format!("GUID:   {:08X}", e.guid));
             let class = classification::classify_entity(e);
@@ -344,7 +341,7 @@ pub fn get_debug_info(
                 }
             }
         }
-        ActionTarget::Enchantment(enchant) => {
+        CommandTarget::Enchantment(enchant) => {
             lines.push(format!("DEBUG ENCHANTMENT: Spell #{}", enchant.spell_id));
             lines.push(format!("Layer:          {}", enchant.layer));
             lines.push(format!("Category:       {}", enchant.spell_category));
@@ -357,7 +354,7 @@ pub fn get_debug_info(
             lines.push(format!("Degrade Limit:  {:.2}", enchant.degrade_limit));
             lines.push(format!("Last Degraded:  {:.1}", enchant.last_time_degraded));
         }
-        ActionTarget::None => {}
+        CommandTarget::None => {}
     }
 
     lines

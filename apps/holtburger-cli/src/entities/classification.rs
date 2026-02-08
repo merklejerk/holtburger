@@ -63,6 +63,9 @@ impl EntityClass {
 }
 
 pub fn classify_entity(entity: &Entity) -> EntityClass {
+    if entity.flags.intersects(ObjectDescriptionFlag::PLAYER) {
+        return EntityClass::Player;
+    }
     let is_stuck = entity.flags.intersects(ObjectDescriptionFlag::STUCK);
     let is_attackable = entity.flags.intersects(ObjectDescriptionFlag::ATTACKABLE);
     let is_container = if let Some(it) = entity.item_type {

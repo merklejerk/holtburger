@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKin
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
-use crate::actions::{self, ActionHandler, ActionTarget};
+use crate::entities::commands::{self, CommandHandler, CommandTarget};
 use crate::ui;
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
@@ -324,37 +324,37 @@ impl AppState {
                                             let entities = self.get_filtered_nearby_tab();
                                             entities
                                                 .get(self.selected_dashboard_index)
-                                                .map(|(e, _, _)| ActionTarget::Entity(e))
-                                                .unwrap_or(ActionTarget::None)
+                                                .map(|(e, _, _)| CommandTarget::Entity(e))
+                                                .unwrap_or(CommandTarget::None)
                                         }
                                         DashboardTab::Effects => {
                                             let enchants = self.get_effects_list_enchantments();
                                             enchants
                                                 .get(self.selected_dashboard_index)
-                                                .map(|(e, _)| ActionTarget::Enchantment(e))
-                                                .unwrap_or(ActionTarget::None)
+                                                .map(|(e, _)| CommandTarget::Enchantment(e))
+                                                .unwrap_or(CommandTarget::None)
                                         }
-                                        DashboardTab::Character => ActionTarget::None,
+                                        DashboardTab::Character => CommandTarget::None,
                                     };
 
                                     let player_guid = self.player_guid;
-                                    let actions = actions::get_actions_for_target(
+                                    let entity_commands = commands::get_commands_for_target(
                                         &target,
                                         &self.entities,
                                         player_guid,
                                     );
-                                    if let Some(handler) = actions
+                                    if let Some(handler) = entity_commands
                                         .iter()
-                                        .find(|a| a.shortcut_char() == c.to_ascii_lowercase())
-                                        .and_then(|action| action.handler(&target, player_guid))
+                                        .find(|cmd| cmd.shortcut_char() == c.to_ascii_lowercase())
+                                        .and_then(|command| command.handler(&target, player_guid))
                                     {
                                         match handler {
-                                            ActionHandler::Command(cmd) => {
+                                            CommandHandler::Command(cmd) => {
                                                 commands.push(cmd);
                                             }
-                                            ActionHandler::ToggleDebug => {
+                                            CommandHandler::ToggleDebug => {
                                                 let lines =
-                                                    actions::get_debug_info(&target, |id| {
+                                                    commands::get_debug_info(&target, |id| {
                                                         self.entities
                                                             .get(&id)
                                                             .map(|e| e.name.clone())

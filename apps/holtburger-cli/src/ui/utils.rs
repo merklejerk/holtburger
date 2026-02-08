@@ -1,5 +1,5 @@
 use super::types::DashboardTab;
-use crate::actions::ActionTarget;
+use crate::entities::commands::CommandTarget;
 use crate::ui::AppState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -59,31 +59,34 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
             let entities = state.get_filtered_nearby_tab();
             entities
                 .get(state.selected_dashboard_index)
-                .map(|(e, _, _)| ActionTarget::Entity(e))
-                .unwrap_or(ActionTarget::None)
+                .map(|(e, _, _)| CommandTarget::Entity(e))
+                .unwrap_or(CommandTarget::None)
         }
         DashboardTab::Effects => {
             let enchants = state.get_effects_list_enchantments();
             enchants
                 .get(state.selected_dashboard_index)
-                .map(|(e, _)| ActionTarget::Enchantment(e))
-                .unwrap_or(ActionTarget::None)
+                .map(|(e, _)| CommandTarget::Enchantment(e))
+                .unwrap_or(CommandTarget::None)
         }
-        _ => ActionTarget::None,
+        _ => CommandTarget::None,
     };
 
-    let actions =
-        crate::actions::get_actions_for_target(&target, &state.entities, state.player_guid);
-    if actions.is_empty() {
+    let commands = crate::entities::commands::get_commands_for_target(
+        &target,
+        &state.entities,
+        state.player_guid,
+    );
+    if commands.is_empty() {
         return None;
     }
 
     let mut spans = Vec::new();
-    for (i, action) in actions.iter().enumerate() {
+    for (i, command) in commands.iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw(" "));
         }
-        spans.push(Span::raw(action.display_label()));
+        spans.push(Span::raw(command.display_label()));
     }
 
     Some(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::TOP)))

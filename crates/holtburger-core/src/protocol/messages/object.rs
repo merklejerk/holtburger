@@ -842,7 +842,7 @@ impl MessageUnpack for ObjectDeleteData {
 
 impl MessagePack for ObjectDeleteData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.0.to_le_bytes());
+        buf.extend_from_slice(&<Guid as Into<u32>>::into(self.guid).to_le_bytes());
     }
 }
 
@@ -1146,7 +1146,7 @@ impl UpdatePropertyDataIdData {
         }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let value = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        let value = LittleEndian::read_u32(&data[*offset..*offset + 4]).into();
         *offset += 4;
         Some(UpdatePropertyDataIdData {
             sequence,
@@ -1165,7 +1165,7 @@ impl MessagePack for UpdatePropertyDataIdData {
             self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
-        buf.write_u32::<LittleEndian>(self.value.0).unwrap();
+        buf.write_u32::<LittleEndian>(self.value.into()).unwrap();
     }
 }
 
@@ -1188,7 +1188,7 @@ impl UpdatePropertyInstanceIdData {
         }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let value = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        let value = LittleEndian::read_u32(&data[*offset..*offset + 4]).into();
         *offset += 4;
         Some(UpdatePropertyInstanceIdData {
             sequence,
@@ -1207,7 +1207,7 @@ impl MessagePack for UpdatePropertyInstanceIdData {
             self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
-        buf.write_u32::<LittleEndian>(self.value.0).unwrap();
+        buf.write_u32::<LittleEndian>(self.value.into()).unwrap();
     }
 }
 
@@ -1231,7 +1231,7 @@ impl MessageUnpack for UpdateHealthData {
 
 impl MessagePack for UpdateHealthData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.target.0.to_le_bytes());
+        buf.extend_from_slice(&<Guid as Into<u32>>::into(self.target).to_le_bytes());
         buf.extend_from_slice(&self.health.to_le_bytes());
     }
 }
@@ -1288,7 +1288,7 @@ impl MessageUnpack for PickupEventData {
 
 impl MessagePack for PickupEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.guid.0.to_le_bytes());
+        buf.extend_from_slice(&<Guid as Into<u32>>::into(self.guid).to_le_bytes());
         buf.write_u32::<LittleEndian>(if self.success { 1 } else { 0 })
             .unwrap();
     }

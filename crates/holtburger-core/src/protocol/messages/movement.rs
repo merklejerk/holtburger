@@ -651,7 +651,7 @@ impl MessageUnpack for Origin {
         if *offset + 16 > data.len() {
             return None;
         }
-        let cell_id = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        let cell_id = LittleEndian::read_u32(&data[*offset..*offset + 4]).into();
         *offset += 4;
         let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
         let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
@@ -666,7 +666,7 @@ impl MessageUnpack for Origin {
 
 impl MessagePack for Origin {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.cell_id.0.to_le_bytes());
+        buf.extend_from_slice(&<Guid as Into<u32>>::into(self.cell_id).to_le_bytes());
         buf.extend_from_slice(&self.position.x.to_le_bytes());
         buf.extend_from_slice(&self.position.y.to_le_bytes());
         buf.extend_from_slice(&self.position.z.to_le_bytes());

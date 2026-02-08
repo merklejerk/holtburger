@@ -278,7 +278,7 @@ impl WorldState {
                     });
                 }
             }
-            GameMessage::UpdatePropertyInt(data) => {
+            GameMessage::PrivateUpdatePropertyInt(data) => {
                 let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
@@ -293,7 +293,22 @@ impl WorldState {
                     value: PropertyValue::Int(data.value),
                 });
             }
-            GameMessage::UpdatePropertyInt64(data) => {
+            GameMessage::PublicUpdatePropertyInt(data) => {
+                let target_guid = if data.guid == Guid::NULL {
+                    self.player.guid
+                } else {
+                    data.guid
+                };
+                if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity.int_properties.insert(data.property, data.value);
+                }
+                events.push(WorldEvent::PropertyUpdated {
+                    guid: data.guid,
+                    property_id: data.property,
+                    value: PropertyValue::Int(data.value),
+                });
+            }
+            GameMessage::PrivateUpdatePropertyInt64(data) => {
                 let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
@@ -310,7 +325,24 @@ impl WorldState {
                     value: PropertyValue::Int64(data.value),
                 });
             }
-            GameMessage::UpdatePropertyBool(data) => {
+            GameMessage::PublicUpdatePropertyInt64(data) => {
+                let target_guid = if data.guid == Guid::NULL {
+                    self.player.guid
+                } else {
+                    data.guid
+                };
+                if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity
+                        .int_properties
+                        .insert(data.property, data.value as i32);
+                }
+                events.push(WorldEvent::PropertyUpdated {
+                    guid: data.guid,
+                    property_id: data.property,
+                    value: PropertyValue::Int64(data.value),
+                });
+            }
+            GameMessage::PrivateUpdatePropertyBool(data) => {
                 let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
@@ -325,7 +357,22 @@ impl WorldState {
                     value: PropertyValue::Bool(data.value),
                 });
             }
-            GameMessage::UpdatePropertyFloat(data) => {
+            GameMessage::PublicUpdatePropertyBool(data) => {
+                let target_guid = if data.guid == Guid::NULL {
+                    self.player.guid
+                } else {
+                    data.guid
+                };
+                if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity.bool_properties.insert(data.property, data.value);
+                }
+                events.push(WorldEvent::PropertyUpdated {
+                    guid: data.guid,
+                    property_id: data.property,
+                    value: PropertyValue::Bool(data.value),
+                });
+            }
+            GameMessage::PrivateUpdatePropertyFloat(data) => {
                 let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
@@ -340,7 +387,22 @@ impl WorldState {
                     value: PropertyValue::Float(data.value),
                 });
             }
-            GameMessage::UpdatePropertyString(data) => {
+            GameMessage::PublicUpdatePropertyFloat(data) => {
+                let target_guid = if data.guid == Guid::NULL {
+                    self.player.guid
+                } else {
+                    data.guid
+                };
+                if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity.float_properties.insert(data.property, data.value);
+                }
+                events.push(WorldEvent::PropertyUpdated {
+                    guid: data.guid,
+                    property_id: data.property,
+                    value: PropertyValue::Float(data.value),
+                });
+            }
+            GameMessage::PrivateUpdatePropertyString(data) => {
                 let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
@@ -357,7 +419,24 @@ impl WorldState {
                     value: PropertyValue::String(data.value.clone()),
                 });
             }
-            GameMessage::UpdatePropertyDataId(data) => {
+            GameMessage::PublicUpdatePropertyString(data) => {
+                let target_guid = if data.guid == Guid::NULL {
+                    self.player.guid
+                } else {
+                    data.guid
+                };
+                if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity
+                        .string_properties
+                        .insert(data.property, data.value.clone());
+                }
+                events.push(WorldEvent::PropertyUpdated {
+                    guid: data.guid,
+                    property_id: data.property,
+                    value: PropertyValue::String(data.value.clone()),
+                });
+            }
+            GameMessage::PrivateUpdatePropertyDataId(data) => {
                 let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {
@@ -372,7 +451,52 @@ impl WorldState {
                     value: PropertyValue::DID(data.value),
                 });
             }
-            GameMessage::UpdatePropertyInstanceId(data) => {
+            GameMessage::PublicUpdatePropertyDataId(data) => {
+                let target_guid = if data.guid == Guid::NULL {
+                    self.player.guid
+                } else {
+                    data.guid
+                };
+                if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity.did_properties.insert(data.property, data.value);
+                }
+                events.push(WorldEvent::PropertyUpdated {
+                    guid: data.guid,
+                    property_id: data.property,
+                    value: PropertyValue::DID(data.value),
+                });
+            }
+            GameMessage::PrivateUpdatePropertyInstanceId(data) => {
+                let target_guid = if data.guid == Guid::NULL {
+                    self.player.guid
+                } else {
+                    data.guid
+                };
+                if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity.iid_properties.insert(data.property, data.value);
+
+                    if data.property == PropertyInstanceId::Container as u32 {
+                        entity.container_id = if data.value == Guid::NULL {
+                            None
+                        } else {
+                            Some(data.value)
+                        };
+                    }
+                    if data.property == PropertyInstanceId::Wielder as u32 {
+                        entity.wielder_id = if data.value == Guid::NULL {
+                            None
+                        } else {
+                            Some(data.value)
+                        };
+                    }
+                }
+                events.push(WorldEvent::PropertyUpdated {
+                    guid: data.guid,
+                    property_id: data.property,
+                    value: PropertyValue::IID(data.value),
+                });
+            }
+            GameMessage::PublicUpdatePropertyInstanceId(data) => {
                 let target_guid = if data.guid == Guid::NULL {
                     self.player.guid
                 } else {

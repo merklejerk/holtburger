@@ -29,7 +29,10 @@ impl ProtocolUnpack for TellActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let target_name = read_string16(data, offset)?;
         let message = read_string16(data, offset)?;
-        Some(TellActionData { target_name, message })
+        Some(TellActionData {
+            target_name,
+            message,
+        })
     }
 }
 

@@ -14,8 +14,8 @@ pub use net::*;
 pub use object::*;
 pub use player::*;
 
-use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::protocol::messages::opcodes::GameEventOpcode;
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -86,9 +86,7 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::WieldObject => {
                     GameEvent::WieldObject(Box::new(WieldObjectData::unpack(data, offset)?))
                 }
-                GameEventOpcode::Tell => {
-                    GameEvent::Tell(Box::new(TellData::unpack(data, offset)?))
-                }
+                GameEventOpcode::Tell => GameEvent::Tell(Box::new(TellData::unpack(data, offset)?)),
                 GameEventOpcode::ChannelBroadcast => GameEvent::ChannelBroadcast(Box::new(
                     ChannelBroadcastData::unpack(data, offset)?,
                 )),
@@ -141,11 +139,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::IdentifyObjectResponse => GameEvent::IdentifyObjectResponse(
                     Box::new(IdentifyObjectResponseData::unpack(data, offset)?),
                 ),
-                GameEventOpcode::InventoryServerSaveFailed => {
-                    GameEvent::InventoryServerSaveFailed(Box::new(
-                        InventoryServerSaveFailedData::unpack(data, offset)?,
-                    ))
-                }
+                GameEventOpcode::InventoryServerSaveFailed => GameEvent::InventoryServerSaveFailed(
+                    Box::new(InventoryServerSaveFailedData::unpack(data, offset)?),
+                ),
                 GameEventOpcode::UpdateHealth => {
                     GameEvent::UpdateHealth(Box::new(UpdateHealthData::unpack(data, offset)?))
                 }

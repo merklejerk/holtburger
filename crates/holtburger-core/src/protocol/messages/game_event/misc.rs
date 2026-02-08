@@ -16,7 +16,9 @@ impl WeenieErrorData {
 
 impl ProtocolUnpack for WeenieErrorData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         Some(WeenieErrorData { error_id })
@@ -43,7 +45,9 @@ impl WeenieErrorWithStringData {
 
 impl ProtocolUnpack for WeenieErrorWithStringData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let message = read_string16(data, offset)?;
@@ -65,7 +69,9 @@ pub struct UseDoneData {
 
 impl ProtocolUnpack for UseDoneData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         Some(UseDoneData { error_id })

@@ -396,7 +396,7 @@ impl ProtocolUnpack for MovementEventData {
             | MovementType::StopRawCommand
             | MovementType::StopInterpretedCommand
             | MovementType::StopCompletely => {
-                MovementTypeData::Invalid(MovementInvalid::unpack(data, offset, motion_flags)?)
+                MovementTypeData::Invalid(MovementInvalid::unpack_ext(data, offset, motion_flags)?)
             }
         };
 
@@ -455,7 +455,7 @@ pub struct MovementInvalid {
 }
 
 impl MovementInvalid {
-    fn unpack(data: &[u8], offset: &mut usize, flags: u8) -> Option<Self> {
+    pub fn unpack_ext(data: &[u8], offset: &mut usize, flags: u8) -> Option<Self> {
         let state = InterpretedMotionState::unpack(data, offset)?;
         let sticky_object = if (flags & 0x01) != 0 {
             Guid::unpack(data, offset)
@@ -466,6 +466,12 @@ impl MovementInvalid {
             state,
             sticky_object,
         })
+    }
+}
+
+impl ProtocolUnpack for MovementInvalid {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        Self::unpack_ext(data, offset, 0)
     }
 }
 

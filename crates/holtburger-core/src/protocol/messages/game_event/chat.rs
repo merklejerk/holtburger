@@ -15,12 +15,20 @@ impl ProtocolUnpack for TellData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
         let sender_name = read_string16(data, offset)?;
-        if *offset + 16 > data.len() { return None; }
+        if *offset + 16 > data.len() {
+            return None;
+        }
         let sender_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let target_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         let chat_type = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
         *offset += 16;
-        Some(TellData { message, sender_name, sender_id, target_id, chat_type })
+        Some(TellData {
+            message,
+            sender_name,
+            sender_id,
+            target_id,
+            chat_type,
+        })
     }
 }
 
@@ -44,12 +52,18 @@ pub struct ChannelBroadcastData {
 
 impl ProtocolUnpack for ChannelBroadcastData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let channel_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let sender_name = read_string16(data, offset)?;
         let message = read_string16(data, offset)?;
-        Some(ChannelBroadcastData { channel_id, sender_name, message })
+        Some(ChannelBroadcastData {
+            channel_id,
+            sender_name,
+            message,
+        })
     }
 }
 

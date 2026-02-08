@@ -13,7 +13,7 @@ pub fn pad_len(len: usize, align: usize) -> usize {
 pub fn pad_to_4(buf: &mut Vec<u8>) {
     let pad = pad_len(buf.len(), 4);
     if pad > 0 {
-        buf.extend(std::iter::repeat(0).take(pad));
+        buf.extend(std::iter::repeat_n(0, pad));
     }
 }
 

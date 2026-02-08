@@ -1,8 +1,8 @@
+use crate::protocol::messages::game_message::movement::RawMotionState;
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::protocol::messages::utils::{align_offset, pad_to_4};
-use crate::world::position::WorldPosition;
 use crate::world::Guid;
-use crate::protocol::messages::game_message::movement::RawMotionState;
+use crate::world::position::WorldPosition;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
@@ -21,13 +21,17 @@ impl ProtocolUnpack for MoveToStateData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let raw_motion_state = RawMotionState::unpack(data, offset)?;
         let position = WorldPosition::unpack(data, offset)?;
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         let server_control_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         let teleport_sequence = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]);
         let force_position_sequence = LittleEndian::read_u16(&data[*offset + 6..*offset + 8]);
         *offset += 8;
-        if *offset >= data.len() { return None; }
+        if *offset >= data.len() {
+            return None;
+        }
         let contact_long_jump = data[*offset];
         *offset += 1;
 
@@ -50,10 +54,14 @@ impl ProtocolPack for MoveToStateData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.raw_motion_state.pack(buf);
         self.position.pack(buf);
-        buf.write_u16::<LittleEndian>(self.instance_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.server_control_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.teleport_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.force_position_sequence).unwrap();
+        buf.write_u16::<LittleEndian>(self.instance_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.server_control_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.teleport_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.force_position_sequence)
+            .unwrap();
         buf.push(self.contact_long_jump);
 
         // Align to 4 bytes
@@ -113,10 +121,14 @@ impl ProtocolPack for JumpData {
         buf.write_f32::<LittleEndian>(self.velocity.x).unwrap();
         buf.write_f32::<LittleEndian>(self.velocity.y).unwrap();
         buf.write_f32::<LittleEndian>(self.velocity.z).unwrap();
-        buf.write_u16::<LittleEndian>(self.instance_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.server_control_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.teleport_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.force_position_sequence).unwrap();
+        buf.write_u16::<LittleEndian>(self.instance_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.server_control_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.teleport_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.force_position_sequence)
+            .unwrap();
         self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.spell_id).unwrap();
     }
@@ -135,7 +147,9 @@ pub struct AutonomousPositionActionData {
 impl ProtocolUnpack for AutonomousPositionActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let position = WorldPosition::unpack(data, offset)?;
-        if *offset + 9 > data.len() { return None; }
+        if *offset + 9 > data.len() {
+            return None;
+        }
         let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         let server_control_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         let teleport_sequence = LittleEndian::read_u16(&data[*offset + 4..*offset + 6]);
@@ -143,17 +157,28 @@ impl ProtocolUnpack for AutonomousPositionActionData {
         let last_contact = data[*offset + 8];
         *offset += 9;
         align_offset(offset, 4);
-        Some(Self { position, instance_sequence, server_control_sequence, teleport_sequence, force_position_sequence, last_contact })
+        Some(Self {
+            position,
+            instance_sequence,
+            server_control_sequence,
+            teleport_sequence,
+            force_position_sequence,
+            last_contact,
+        })
     }
 }
 
 impl ProtocolPack for AutonomousPositionActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.position.pack(buf);
-        buf.write_u16::<LittleEndian>(self.instance_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.server_control_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.teleport_sequence).unwrap();
-        buf.write_u16::<LittleEndian>(self.force_position_sequence).unwrap();
+        buf.write_u16::<LittleEndian>(self.instance_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.server_control_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.teleport_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.force_position_sequence)
+            .unwrap();
         buf.push(self.last_contact);
         pad_to_4(buf);
     }

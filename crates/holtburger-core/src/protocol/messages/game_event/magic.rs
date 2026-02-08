@@ -1,5 +1,5 @@
-use crate::protocol::messages::types::common::Enchantment;
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
+use crate::protocol::messages::types::common::Enchantment;
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian};
 
@@ -13,7 +13,11 @@ pub struct MagicUpdateEnchantmentData {
 impl ProtocolUnpack for MagicUpdateEnchantmentData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let enchantment = Enchantment::unpack(data, offset)?;
-        Some(MagicUpdateEnchantmentData { target: Guid::NULL, sequence: 0, enchantment })
+        Some(MagicUpdateEnchantmentData {
+            target: Guid::NULL,
+            sequence: 0,
+            enchantment,
+        })
     }
 }
 
@@ -32,19 +36,29 @@ pub struct MagicUpdateMultipleEnchantmentsData {
 
 impl ProtocolUnpack for MagicUpdateMultipleEnchantmentsData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
         *offset += 4;
         let mut enchantments = Vec::new();
-        for _ in 0..count { enchantments.push(Enchantment::unpack(data, offset)?); }
-        Some(MagicUpdateMultipleEnchantmentsData { target: Guid::NULL, sequence: 0, enchantments })
+        for _ in 0..count {
+            enchantments.push(Enchantment::unpack(data, offset)?);
+        }
+        Some(MagicUpdateMultipleEnchantmentsData {
+            target: Guid::NULL,
+            sequence: 0,
+            enchantments,
+        })
     }
 }
 
 impl ProtocolPack for MagicUpdateMultipleEnchantmentsData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&(self.enchantments.len() as u32).to_le_bytes());
-        for enchantment in &self.enchantments { enchantment.pack(buf); }
+        for enchantment in &self.enchantments {
+            enchantment.pack(buf);
+        }
     }
 }
 
@@ -58,11 +72,18 @@ pub struct MagicRemoveEnchantmentData {
 
 impl ProtocolUnpack for MagicRemoveEnchantmentData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         *offset += 4;
-        Some(MagicRemoveEnchantmentData { target: Guid::NULL, sequence: 0, spell_id, layer })
+        Some(MagicRemoveEnchantmentData {
+            target: Guid::NULL,
+            sequence: 0,
+            spell_id,
+            layer,
+        })
     }
 }
 
@@ -82,18 +103,26 @@ pub struct MagicRemoveMultipleEnchantmentsData {
 
 impl ProtocolUnpack for MagicRemoveMultipleEnchantmentsData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
         *offset += 4;
         let mut spells = Vec::new();
         for _ in 0..count {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
             let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
             *offset += 4;
             spells.push((spell_id, layer));
         }
-        Some(MagicRemoveMultipleEnchantmentsData { target: Guid::NULL, sequence: 0, spells })
+        Some(MagicRemoveMultipleEnchantmentsData {
+            target: Guid::NULL,
+            sequence: 0,
+            spells,
+        })
     }
 }
 
@@ -115,7 +144,10 @@ pub struct MagicPurgeEnchantmentsData {
 
 impl ProtocolUnpack for MagicPurgeEnchantmentsData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(MagicPurgeEnchantmentsData { target: Guid::NULL, sequence: 0 })
+        Some(MagicPurgeEnchantmentsData {
+            target: Guid::NULL,
+            sequence: 0,
+        })
     }
 }
 
@@ -131,7 +163,10 @@ pub struct MagicPurgeBadEnchantmentsData {
 
 impl ProtocolUnpack for MagicPurgeBadEnchantmentsData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(MagicPurgeBadEnchantmentsData { target: Guid::NULL, sequence: 0 })
+        Some(MagicPurgeBadEnchantmentsData {
+            target: Guid::NULL,
+            sequence: 0,
+        })
     }
 }
 

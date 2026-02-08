@@ -20,16 +20,23 @@ pub struct ViewContentsData {
 impl ProtocolUnpack for ViewContentsData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let container = Guid::unpack(data, offset)?;
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
         *offset += 4;
         let mut items = Vec::with_capacity(count);
         for _ in 0..count {
             let guid = Guid::unpack(data, offset)?;
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let container_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
-            items.push(ViewContentsItem { guid, container_type });
+            items.push(ViewContentsItem {
+                guid,
+                container_type,
+            });
         }
         Some(ViewContentsData { container, items })
     }
@@ -38,7 +45,8 @@ impl ProtocolUnpack for ViewContentsData {
 impl ProtocolPack for ViewContentsData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.container.pack(buf);
-        buf.write_u32::<LittleEndian>(self.items.len() as u32).unwrap();
+        buf.write_u32::<LittleEndian>(self.items.len() as u32)
+            .unwrap();
         for item in &self.items {
             item.guid.pack(buf);
             buf.write_u32::<LittleEndian>(item.container_type).unwrap();
@@ -58,11 +66,18 @@ impl ProtocolUnpack for InventoryPutObjInContainerData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
         let container_guid = Guid::unpack(data, offset)?;
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let slot = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let container_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
-        Some(InventoryPutObjInContainerData { item_guid, container_guid, slot, container_type })
+        Some(InventoryPutObjInContainerData {
+            item_guid,
+            container_guid,
+            slot,
+            container_type,
+        })
     }
 }
 
@@ -102,17 +117,24 @@ pub struct WieldObjectData {
 impl ProtocolUnpack for WieldObjectData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let object_guid = Guid::unpack(data, offset)?;
-        if *offset + 4 > data.len() { return None; }
-        let equip_mask = EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let equip_mask =
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
-        Some(WieldObjectData { object_guid, equip_mask })
+        Some(WieldObjectData {
+            object_guid,
+            equip_mask,
+        })
     }
 }
 
 impl ProtocolPack for WieldObjectData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.object_guid.pack(buf);
-        buf.write_u32::<LittleEndian>(self.equip_mask.bits()).unwrap();
+        buf.write_u32::<LittleEndian>(self.equip_mask.bits())
+            .unwrap();
     }
 }
 
@@ -125,7 +147,9 @@ pub struct InventoryServerSaveFailedData {
 impl ProtocolUnpack for InventoryServerSaveFailedData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let error_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let error = WeenieError::from_repr(error_raw).unwrap_or(WeenieError::None);

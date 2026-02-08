@@ -359,15 +359,24 @@ pub struct SetStackSizeData {
 
 impl ProtocolUnpack for SetStackSizeData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() { return None; }
-        let sequence = LittleEndian::read_u32(&data[*offset..*offset+4]);
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let object_guid = Guid::unpack(data, offset)?;
-        if *offset + 8 > data.len() { return None; }
-        let stack_size = LittleEndian::read_u32(&data[*offset..*offset+4]);
-        let value = LittleEndian::read_u32(&data[*offset+4..*offset+8]);
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let stack_size = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let value = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
-        Some(SetStackSizeData { sequence, object_guid, stack_size, value })
+        Some(SetStackSizeData {
+            sequence,
+            object_guid,
+            stack_size,
+            value,
+        })
     }
 }
 

@@ -2,7 +2,7 @@ use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::{BitAnd, BitOr, Shr, Shl};
+use std::ops::{BitAnd, BitOr, Shl, Shr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
 pub struct Guid(pub u32);

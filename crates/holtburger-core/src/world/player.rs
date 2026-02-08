@@ -454,8 +454,8 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateAttribute(data) => {
-                let UpdateAttributeData {
+            GameMessage::PrivateUpdateAttribute(data) => {
+                let UpdateAttribute {
                     attribute,
                     ranks,
                     start,
@@ -475,8 +475,29 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateSkill(data) => {
-                let UpdateSkillData {
+            GameMessage::PublicUpdateAttribute(data) => {
+                let UpdateAttribute {
+                    attribute,
+                    ranks,
+                    start,
+                    ..
+                } = &**data;
+                if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
+                    let base = start + ranks;
+                    self.attributes.insert(attr_type, base);
+
+                    events.push(WorldEvent::AttributeUpdated(stats::Attribute {
+                        attr_type,
+                        base,
+                        current: self.get_attribute_current(attr_type),
+                    }));
+
+                    self.emit_derived_stats(events);
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdateSkill(data) => {
+                let UpdateSkill {
                     skill,
                     ranks,
                     status,
@@ -516,8 +537,49 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateVital(data) => {
-                let UpdateVitalData {
+            GameMessage::PublicUpdateSkill(data) => {
+                let UpdateSkill {
+                    skill,
+                    ranks,
+                    status,
+                    init,
+                    ..
+                } = &**data;
+                if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
+                    let training = match status {
+                        1 => stats::TrainingLevel::Untrained,
+                        2 => stats::TrainingLevel::Trained,
+                        3 => stats::TrainingLevel::Specialized,
+                        _ => stats::TrainingLevel::Unusable,
+                    };
+
+                    self.skill_bases.insert(
+                        skill_type,
+                        SkillBase {
+                            ranks: *ranks,
+                            init: *init,
+                        },
+                    );
+
+                    let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
+                    let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
+
+                    let skill_obj = stats::Skill {
+                        skill_type,
+                        base: base_val,
+                        current: current_val,
+                        training,
+                    };
+                    self.skills.insert(skill_type, skill_obj.clone());
+
+                    events.push(WorldEvent::SkillUpdated(skill_obj));
+
+                    self.emit_derived_stats(events);
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdateVital(data) => {
+                let UpdateVital {
                     vital,
                     ranks,
                     start,
@@ -551,8 +613,43 @@ impl PlayerState {
                     return true;
                 }
             }
-            GameMessage::UpdateAttribute2ndLevel(data) => {
-                let UpdateVitalCurrentData { vital, current, .. } = &**data;
+            GameMessage::PublicUpdateVital(data) => {
+                let UpdateVital {
+                    vital,
+                    ranks,
+                    start,
+                    current,
+                    ..
+                } = &**data;
+                if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
+                    self.vital_bases.insert(
+                        vital_type,
+                        VitalBase {
+                            ranks: *ranks,
+                            start: *start,
+                        },
+                    );
+
+                    let base = self.calculate_vital_base(vital_type);
+                    let buffed_max = self.calculate_vital_current(vital_type);
+                    let final_base = if base == 0 { *current } else { base };
+
+                    let vital_obj = stats::Vital {
+                        vital_type,
+                        base: final_base,
+                        buffed_max,
+                        current: *current,
+                    };
+                    self.vitals.insert(vital_type, vital_obj.clone());
+
+                    events.push(WorldEvent::VitalUpdated(vital_obj));
+
+                    self.emit_derived_stats(events);
+                    return true;
+                }
+            }
+            GameMessage::PrivateUpdateVitalCurrent(data) => {
+                let UpdateVitalCurrent { vital, current, .. } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_repr(*vital)
                     && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
                 {

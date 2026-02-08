@@ -1,5 +1,7 @@
-use crate::protocol::messages::types::common::{CreatureSkill, Enchantment, Shortcut, ac_hash_sort};
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
+use crate::protocol::messages::types::common::{
+    CreatureSkill, Enchantment, Shortcut, ac_hash_sort,
+};
 use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::world::Guid;
 use crate::world::position::WorldPosition;
@@ -181,11 +183,10 @@ fn find_inventory_start_after_gameplay_options(
     let last_candidate = data.len().saturating_sub(8);
     while candidate <= last_candidate {
         let mut tmp = candidate;
-        if let Some((inv, eq)) = unpack_inventory_and_equipped_strict(data, &mut tmp) {
-            if tmp == data.len() {
+        if let Some((inv, eq)) = unpack_inventory_and_equipped_strict(data, &mut tmp)
+            && tmp == data.len() {
                 return Some((candidate, tmp, inv, eq));
             }
-        }
         candidate += 4;
     }
     None
@@ -213,11 +214,15 @@ impl PlayerDescriptionData {
         let mut positions = BTreeMap::new();
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT32) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 8 > data.len() { return None; }
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -225,11 +230,15 @@ impl PlayerDescriptionData {
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT64) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 12 > data.len() { return None; }
+                if *offset + 12 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_i64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
@@ -237,11 +246,15 @@ impl PlayerDescriptionData {
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_BOOL) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 8 > data.len() { return None; }
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) != 0;
                 *offset += 8;
@@ -249,11 +262,15 @@ impl PlayerDescriptionData {
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DOUBLE) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 12 > data.len() { return None; }
+                if *offset + 12 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_f64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
@@ -261,11 +278,15 @@ impl PlayerDescriptionData {
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_STRING) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let val = read_string16(data, offset)?;
@@ -273,11 +294,15 @@ impl PlayerDescriptionData {
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DID) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 8 > data.len() { return None; }
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -285,11 +310,15 @@ impl PlayerDescriptionData {
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_IID) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 8 > data.len() { return None; }
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -297,11 +326,15 @@ impl PlayerDescriptionData {
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::POSITION) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let pos = WorldPosition::unpack(data, offset)?;
@@ -309,7 +342,9 @@ impl PlayerDescriptionData {
             }
         }
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let vector_flags = DescriptionVectorFlag::from_bits_retain(LittleEndian::read_u32(
             &data[*offset..*offset + 4],
         ));
@@ -319,7 +354,9 @@ impl PlayerDescriptionData {
 
         let mut attributes = BTreeMap::new();
         if vector_flags.contains(DescriptionVectorFlag::ATTRIBUTE) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let attribute_flags = AttributeCache::from_bits_retain(LittleEndian::read_u32(
                 &data[*offset..*offset + 4],
             ));
@@ -327,31 +364,53 @@ impl PlayerDescriptionData {
             for i in 1..=6 {
                 let bit = 1 << (i - 1);
                 if (attribute_flags.bits() & bit) != 0 {
-                    if *offset + 12 > data.len() { return None; }
+                    if *offset + 12 > data.len() {
+                        return None;
+                    }
                     let ranks = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                     let start = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                     let xp = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
                     *offset += 12;
-                    attributes.insert(i, Attribute { ranks, start, xp, current: None });
+                    attributes.insert(
+                        i,
+                        Attribute {
+                            ranks,
+                            start,
+                            xp,
+                            current: None,
+                        },
+                    );
                 }
             }
             for i in 7..=9 {
                 let bit = 1 << (i - 1);
                 if (attribute_flags.bits() & bit) != 0 {
-                    if *offset + 16 > data.len() { return None; }
+                    if *offset + 16 > data.len() {
+                        return None;
+                    }
                     let ranks = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                     let start = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                     let xp = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
                     let current = LittleEndian::read_u32(&data[*offset + 12..*offset + 16]);
                     *offset += 16;
-                    attributes.insert(i, Attribute { ranks, start, xp, current: Some(current) });
+                    attributes.insert(
+                        i,
+                        Attribute {
+                            ranks,
+                            start,
+                            xp,
+                            current: Some(current),
+                        },
+                    );
                 }
             }
         }
 
         let mut skills = BTreeMap::new();
         if vector_flags.contains(DescriptionVectorFlag::SKILL) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
@@ -362,11 +421,15 @@ impl PlayerDescriptionData {
 
         let mut spells = BTreeMap::new();
         if vector_flags.contains(DescriptionVectorFlag::SPELL) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 8 > data.len() { return None; }
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -376,35 +439,51 @@ impl PlayerDescriptionData {
 
         let mut enchantments = Vec::new();
         if vector_flags.contains(DescriptionVectorFlag::ENCHANTMENT) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let mask = EnchantmentMask::from_bits_retain(LittleEndian::read_u32(
                 &data[*offset..*offset + 4],
             ));
             *offset += 4;
             if mask.contains(EnchantmentMask::MULTIPLICATIVE) {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
-                for _ in 0..count { enchantments.push(Enchantment::unpack(data, offset)?); }
+                for _ in 0..count {
+                    enchantments.push(Enchantment::unpack(data, offset)?);
+                }
             }
             if mask.contains(EnchantmentMask::ADDITIVE) {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
-                for _ in 0..count { enchantments.push(Enchantment::unpack(data, offset)?); }
+                for _ in 0..count {
+                    enchantments.push(Enchantment::unpack(data, offset)?);
+                }
             }
             if mask.contains(EnchantmentMask::COOLDOWN) {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
-                for _ in 0..count { enchantments.push(Enchantment::unpack(data, offset)?); }
+                for _ in 0..count {
+                    enchantments.push(Enchantment::unpack(data, offset)?);
+                }
             }
             if mask.contains(EnchantmentMask::VITAE) {
                 enchantments.extend(Enchantment::unpack(data, offset));
             }
         }
 
-        if *offset + 8 > data.len() { return None; }
+        if *offset + 8 > data.len() {
+            return None;
+        }
         let option_flags = CharacterOptionDataFlag::from_bits_retain(LittleEndian::read_u32(
             &data[*offset..*offset + 4],
         ));
@@ -413,21 +492,29 @@ impl PlayerDescriptionData {
 
         let mut shortcuts = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::SHORTCUT) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
             *offset += 4;
-            for _ in 0..count { shortcuts.push(Shortcut::unpack(data, offset)?); }
+            for _ in 0..count {
+                shortcuts.push(Shortcut::unpack(data, offset)?);
+            }
         }
 
         let mut spell_lists = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::SPELL_LISTS8) {
             for _ in 0..8 {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
                 *offset += 4;
                 let mut list = Vec::with_capacity(count);
                 for _ in 0..count {
-                    if *offset + 4 > data.len() { return None; }
+                    if *offset + 4 > data.len() {
+                        return None;
+                    }
                     list.push(LittleEndian::read_u32(&data[*offset..*offset + 4]));
                     *offset += 4;
                 }
@@ -438,7 +525,9 @@ impl PlayerDescriptionData {
             *offset += 4;
             let mut list = Vec::with_capacity(count);
             for _ in 0..count {
-                if *offset + 4 > data.len() { return None; }
+                if *offset + 4 > data.len() {
+                    return None;
+                }
                 list.push(LittleEndian::read_u32(&data[*offset..*offset + 4]));
                 *offset += 4;
             }
@@ -447,11 +536,15 @@ impl PlayerDescriptionData {
 
         let mut desired_comps = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::DESIRED_COMPS) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             let count = LittleEndian::read_u16(&data[*offset..*offset + 2]) as usize;
             *offset += 4;
             for _ in 0..count {
-                if *offset + 8 > data.len() { return None; }
+                if *offset + 8 > data.len() {
+                    return None;
+                }
                 let id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let amt = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
@@ -469,31 +562,61 @@ impl PlayerDescriptionData {
 
         let mut options2 = 0;
         if option_flags.contains(CharacterOptionDataFlag::CHARACTER_OPTIONS2) {
-            if *offset + 4 > data.len() { return None; }
+            if *offset + 4 > data.len() {
+                return None;
+            }
             options2 = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
         }
 
         let gameplay_options_start = *offset;
         let mut gameplay_options = Vec::new();
-        let (inventory, equipped_objects) = if option_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
-            let (inv_start, end, inv, eq) = find_inventory_start_after_gameplay_options(data, gameplay_options_start)?;
-            gameplay_options.extend_from_slice(&data[gameplay_options_start..inv_start]);
-            *offset = end;
-            (inv, eq)
-        } else {
-            let (inv, eq) = unpack_inventory_and_equipped_strict(data, offset)?;
-            (inv, eq)
-        };
+        let (inventory, equipped_objects) =
+            if option_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
+                let (inv_start, end, inv, eq) =
+                    find_inventory_start_after_gameplay_options(data, gameplay_options_start)?;
+                gameplay_options.extend_from_slice(&data[gameplay_options_start..inv_start]);
+                *offset = end;
+                (inv, eq)
+            } else {
+                let (inv, eq) = unpack_inventory_and_equipped_strict(data, offset)?;
+                (inv, eq)
+            };
 
-        let name = properties_string.get(&1_u32).cloned().unwrap_or("Unknown".to_string());
+        let name = properties_string
+            .get(&1_u32)
+            .cloned()
+            .unwrap_or("Unknown".to_string());
         let pos = positions.get(&1_u32).cloned();
 
         Some(PlayerDescriptionData {
-            guid, sequence, name, wee_type, pos, properties_int, properties_int64, properties_bool,
-            properties_float, properties_string, properties_did, properties_iid, positions,
-            attributes, skills, enchantments, spells, has_health, options1, options2, shortcuts,
-            spell_lists, desired_comps, spellbook_filters, gameplay_options, inventory, equipped_objects,
+            guid,
+            sequence,
+            name,
+            wee_type,
+            pos,
+            properties_int,
+            properties_int64,
+            properties_bool,
+            properties_float,
+            properties_string,
+            properties_did,
+            properties_iid,
+            positions,
+            attributes,
+            skills,
+            enchantments,
+            spells,
+            has_health,
+            options1,
+            options2,
+            shortcuts,
+            spell_lists,
+            desired_comps,
+            spellbook_filters,
+            gameplay_options,
+            inventory,
+            equipped_objects,
         })
     }
 }
@@ -501,20 +624,37 @@ impl PlayerDescriptionData {
 impl ProtocolPack for PlayerDescriptionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         let mut p_flags = DescriptionPropertyFlag::empty();
-        if !self.properties_int.is_empty() { p_flags.insert(DescriptionPropertyFlag::PROPERTY_INT32); }
-        if !self.properties_bool.is_empty() { p_flags.insert(DescriptionPropertyFlag::PROPERTY_BOOL); }
-        if !self.properties_float.is_empty() { p_flags.insert(DescriptionPropertyFlag::PROPERTY_DOUBLE); }
-        if !self.properties_did.is_empty() { p_flags.insert(DescriptionPropertyFlag::PROPERTY_DID); }
-        if !self.properties_string.is_empty() { p_flags.insert(DescriptionPropertyFlag::PROPERTY_STRING); }
-        if !self.positions.is_empty() { p_flags.insert(DescriptionPropertyFlag::POSITION); }
-        if !self.properties_iid.is_empty() { p_flags.insert(DescriptionPropertyFlag::PROPERTY_IID); }
-        if !self.properties_int64.is_empty() { p_flags.insert(DescriptionPropertyFlag::PROPERTY_INT64); }
+        if !self.properties_int.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::PROPERTY_INT32);
+        }
+        if !self.properties_bool.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::PROPERTY_BOOL);
+        }
+        if !self.properties_float.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::PROPERTY_DOUBLE);
+        }
+        if !self.properties_did.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::PROPERTY_DID);
+        }
+        if !self.properties_string.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::PROPERTY_STRING);
+        }
+        if !self.positions.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::POSITION);
+        }
+        if !self.properties_iid.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::PROPERTY_IID);
+        }
+        if !self.properties_int64.is_empty() {
+            p_flags.insert(DescriptionPropertyFlag::PROPERTY_INT64);
+        }
 
         buf.write_u32::<LittleEndian>(p_flags.bits()).unwrap();
         buf.write_u32::<LittleEndian>(self.wee_type).unwrap();
 
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_INT32) {
-            buf.write_u16::<LittleEndian>(self.properties_int.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.properties_int.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(64).unwrap();
             let mut items: Vec<_> = self.properties_int.iter().collect();
             ac_hash_sort(&mut items, 64, |k| *k);
@@ -524,7 +664,8 @@ impl ProtocolPack for PlayerDescriptionData {
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_INT64) {
-            buf.write_u16::<LittleEndian>(self.properties_int64.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.properties_int64.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(64).unwrap();
             let mut items: Vec<_> = self.properties_int64.iter().collect();
             ac_hash_sort(&mut items, 64, |k| *k);
@@ -534,17 +675,20 @@ impl ProtocolPack for PlayerDescriptionData {
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_BOOL) {
-            buf.write_u16::<LittleEndian>(self.properties_bool.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.properties_bool.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
             let mut items: Vec<_> = self.properties_bool.iter().collect();
             ac_hash_sort(&mut items, 32, |k| *k);
             for (k, v) in items {
                 buf.write_u32::<LittleEndian>(*k).unwrap();
-                buf.write_u32::<LittleEndian>(if *v { 1 } else { 0 }).unwrap();
+                buf.write_u32::<LittleEndian>(if *v { 1 } else { 0 })
+                    .unwrap();
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_DOUBLE) {
-            buf.write_u16::<LittleEndian>(self.properties_float.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.properties_float.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
             let mut items: Vec<_> = self.properties_float.iter().collect();
             ac_hash_sort(&mut items, 32, |k| *k);
@@ -554,7 +698,8 @@ impl ProtocolPack for PlayerDescriptionData {
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_STRING) {
-            buf.write_u16::<LittleEndian>(self.properties_string.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.properties_string.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
             let mut items: Vec<_> = self.properties_string.iter().collect();
             ac_hash_sort(&mut items, 32, |k| *k);
@@ -564,7 +709,8 @@ impl ProtocolPack for PlayerDescriptionData {
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_DID) {
-            buf.write_u16::<LittleEndian>(self.properties_did.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.properties_did.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
             let mut items: Vec<_> = self.properties_did.iter().collect();
             ac_hash_sort(&mut items, 32, |k| *k);
@@ -574,7 +720,8 @@ impl ProtocolPack for PlayerDescriptionData {
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_IID) {
-            buf.write_u16::<LittleEndian>(self.properties_iid.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.properties_iid.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
             let mut items: Vec<_> = self.properties_iid.iter().collect();
             ac_hash_sort(&mut items, 32, |k| *k);
@@ -584,7 +731,8 @@ impl ProtocolPack for PlayerDescriptionData {
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::POSITION) {
-            buf.write_u16::<LittleEndian>(self.positions.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.positions.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(16).unwrap();
             let mut items: Vec<_> = self.positions.iter().collect();
             ac_hash_sort(&mut items, 16, |k| *k);
@@ -595,17 +743,30 @@ impl ProtocolPack for PlayerDescriptionData {
         }
 
         let mut v_flags = DescriptionVectorFlag::empty();
-        if !self.attributes.is_empty() { v_flags.insert(DescriptionVectorFlag::ATTRIBUTE); }
-        if !self.skills.is_empty() { v_flags.insert(DescriptionVectorFlag::SKILL); }
-        if !self.spells.is_empty() { v_flags.insert(DescriptionVectorFlag::SPELL); }
-        if !self.enchantments.is_empty() { v_flags.insert(DescriptionVectorFlag::ENCHANTMENT); }
+        if !self.attributes.is_empty() {
+            v_flags.insert(DescriptionVectorFlag::ATTRIBUTE);
+        }
+        if !self.skills.is_empty() {
+            v_flags.insert(DescriptionVectorFlag::SKILL);
+        }
+        if !self.spells.is_empty() {
+            v_flags.insert(DescriptionVectorFlag::SPELL);
+        }
+        if !self.enchantments.is_empty() {
+            v_flags.insert(DescriptionVectorFlag::ENCHANTMENT);
+        }
 
         buf.write_u32::<LittleEndian>(v_flags.bits()).unwrap();
-        buf.write_u32::<LittleEndian>(if self.has_health { 1 } else { 0 }).unwrap();
+        buf.write_u32::<LittleEndian>(if self.has_health { 1 } else { 0 })
+            .unwrap();
 
         if v_flags.contains(DescriptionVectorFlag::ATTRIBUTE) {
             let mut attr_cache = 0u32;
-            for &id in self.attributes.keys() { if (1..=9).contains(&id) { attr_cache |= 1 << (id - 1); } }
+            for &id in self.attributes.keys() {
+                if (1..=9).contains(&id) {
+                    attr_cache |= 1 << (id - 1);
+                }
+            }
             buf.write_u32::<LittleEndian>(attr_cache).unwrap();
             let mut sorted_attrs: Vec<_> = self.attributes.iter().collect();
             sorted_attrs.sort_by_key(|a| a.0);
@@ -613,18 +774,25 @@ impl ProtocolPack for PlayerDescriptionData {
                 buf.write_u32::<LittleEndian>(attr.ranks).unwrap();
                 buf.write_u32::<LittleEndian>(attr.start).unwrap();
                 buf.write_u32::<LittleEndian>(attr.xp).unwrap();
-                if (7..=9).contains(&id) { buf.write_u32::<LittleEndian>(attr.current.unwrap_or(0)).unwrap(); }
+                if (7..=9).contains(&id) {
+                    buf.write_u32::<LittleEndian>(attr.current.unwrap_or(0))
+                        .unwrap();
+                }
             }
         }
         if v_flags.contains(DescriptionVectorFlag::SKILL) {
-            buf.write_u16::<LittleEndian>(self.skills.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.skills.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
             let mut items: Vec<_> = self.skills.iter().collect();
             ac_hash_sort(&mut items, 32, |k| *k);
-            for (_, skill) in items { skill.pack(buf); }
+            for (_, skill) in items {
+                skill.pack(buf);
+            }
         }
         if v_flags.contains(DescriptionVectorFlag::SPELL) {
-            buf.write_u16::<LittleEndian>(self.spells.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.spells.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(64).unwrap();
             let mut items: Vec<_> = self.spells.iter().collect();
             ac_hash_sort(&mut items, 64, |k| *k);
@@ -633,21 +801,33 @@ impl ProtocolPack for PlayerDescriptionData {
                 buf.write_f32::<LittleEndian>(*prob).unwrap();
             }
         }
-        if v_flags.contains(DescriptionVectorFlag::ENCHANTMENT) { buf.write_u32::<LittleEndian>(0).unwrap(); }
+        if v_flags.contains(DescriptionVectorFlag::ENCHANTMENT) {
+            buf.write_u32::<LittleEndian>(0).unwrap();
+        }
 
         let mut o_flags = CharacterOptionDataFlag::empty();
-        if !self.shortcuts.is_empty() { o_flags.insert(CharacterOptionDataFlag::SHORTCUT); }
-        if self.spell_lists.len() == 8 { o_flags.insert(CharacterOptionDataFlag::SPELL_LISTS8); }
-        else if !self.spell_lists.is_empty() { o_flags.insert(CharacterOptionDataFlag::MULTI_SPELL_LIST); }
-        if !self.desired_comps.is_empty() { o_flags.insert(CharacterOptionDataFlag::DESIRED_COMPS); }
+        if !self.shortcuts.is_empty() {
+            o_flags.insert(CharacterOptionDataFlag::SHORTCUT);
+        }
+        if self.spell_lists.len() == 8 {
+            o_flags.insert(CharacterOptionDataFlag::SPELL_LISTS8);
+        } else if !self.spell_lists.is_empty() {
+            o_flags.insert(CharacterOptionDataFlag::MULTI_SPELL_LIST);
+        }
+        if !self.desired_comps.is_empty() {
+            o_flags.insert(CharacterOptionDataFlag::DESIRED_COMPS);
+        }
         o_flags.insert(CharacterOptionDataFlag::CHARACTER_OPTIONS2);
-        if !self.gameplay_options.is_empty() { o_flags.insert(CharacterOptionDataFlag::GAMEPLAY_OPTIONS); }
+        if !self.gameplay_options.is_empty() {
+            o_flags.insert(CharacterOptionDataFlag::GAMEPLAY_OPTIONS);
+        }
 
         buf.write_u32::<LittleEndian>(o_flags.bits()).unwrap();
         buf.write_u32::<LittleEndian>(self.options1).unwrap();
 
         if o_flags.contains(CharacterOptionDataFlag::SHORTCUT) {
-            buf.write_u32::<LittleEndian>(self.shortcuts.len() as u32).unwrap();
+            buf.write_u32::<LittleEndian>(self.shortcuts.len() as u32)
+                .unwrap();
             for s in &self.shortcuts {
                 buf.write_u32::<LittleEndian>(s.index).unwrap();
                 s.object_id.pack(buf);
@@ -658,33 +838,47 @@ impl ProtocolPack for PlayerDescriptionData {
         if o_flags.contains(CharacterOptionDataFlag::SPELL_LISTS8) {
             for list in &self.spell_lists {
                 buf.write_u32::<LittleEndian>(list.len() as u32).unwrap();
-                for &sid in list { buf.write_u32::<LittleEndian>(sid).unwrap(); }
+                for &sid in list {
+                    buf.write_u32::<LittleEndian>(sid).unwrap();
+                }
             }
         } else if o_flags.contains(CharacterOptionDataFlag::MULTI_SPELL_LIST) {
             if let Some(list) = self.spell_lists.first() {
                 buf.write_u32::<LittleEndian>(list.len() as u32).unwrap();
-                for &sid in list { buf.write_u32::<LittleEndian>(sid).unwrap(); }
-            } else { buf.write_u32::<LittleEndian>(0).unwrap(); }
-        } else { buf.write_u32::<LittleEndian>(0).unwrap(); }
+                for &sid in list {
+                    buf.write_u32::<LittleEndian>(sid).unwrap();
+                }
+            } else {
+                buf.write_u32::<LittleEndian>(0).unwrap();
+            }
+        } else {
+            buf.write_u32::<LittleEndian>(0).unwrap();
+        }
 
         if o_flags.contains(CharacterOptionDataFlag::DESIRED_COMPS) {
-            buf.write_u16::<LittleEndian>(self.desired_comps.len() as u16).unwrap();
+            buf.write_u16::<LittleEndian>(self.desired_comps.len() as u16)
+                .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
             for (id, amt) in &self.desired_comps {
                 buf.write_u32::<LittleEndian>(*id).unwrap();
                 buf.write_u32::<LittleEndian>(*amt).unwrap();
             }
         }
-        buf.write_u32::<LittleEndian>(self.spellbook_filters).unwrap();
+        buf.write_u32::<LittleEndian>(self.spellbook_filters)
+            .unwrap();
         buf.write_u32::<LittleEndian>(self.options2).unwrap();
-        if o_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) { buf.extend_from_slice(&self.gameplay_options); }
+        if o_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
+            buf.extend_from_slice(&self.gameplay_options);
+        }
 
-        buf.write_u32::<LittleEndian>(self.inventory.len() as u32).unwrap();
+        buf.write_u32::<LittleEndian>(self.inventory.len() as u32)
+            .unwrap();
         for (guid, wtype) in &self.inventory {
             guid.pack(buf);
             buf.write_u32::<LittleEndian>(*wtype).unwrap();
         }
-        buf.write_u32::<LittleEndian>(self.equipped_objects.len() as u32).unwrap();
+        buf.write_u32::<LittleEndian>(self.equipped_objects.len() as u32)
+            .unwrap();
         for (guid, loc, prio) in &self.equipped_objects {
             guid.pack(buf);
             buf.write_u32::<LittleEndian>(*loc).unwrap();

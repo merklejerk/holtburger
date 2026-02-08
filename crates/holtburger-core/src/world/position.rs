@@ -1,7 +1,7 @@
 use crate::math::{Quaternion, Vector3};
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
-use crate::world::properties::UpdatePositionFlag;
 use crate::world::Guid;
+use crate::world::properties::UpdatePositionFlag;
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 
@@ -245,7 +245,9 @@ impl ProtocolPack for PositionPack {
 impl WorldPosition {
     pub fn write_raw(&self, writer: &mut Vec<u8>) {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.landblock_id.into()).unwrap();
+        writer
+            .write_u32::<LittleEndian>(self.landblock_id.into())
+            .unwrap();
         writer.write_f32::<LittleEndian>(self.coords.x).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.y).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.z).unwrap();

@@ -1,6 +1,5 @@
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::world::Guid;
-use byteorder::{LittleEndian, WriteBytesExt, ByteOrder};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerCreateData {
@@ -21,60 +20,56 @@ impl ProtocolPack for PlayerCreateData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct UpdateAttributeData {
+pub struct UpdateAttribute<const PUBLIC: bool> {
     pub sequence: u8,
     pub object_guid: Option<u32>,
     pub attribute: u32,
     pub ranks: u32,
     pub start: u32,
     pub xp: u32,
-    pub is_public: bool,
 }
 
-impl UpdateAttributeData {
-    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 17 > data.len() { return None; }
-        let sequence = data[*offset];
-        let attribute = LittleEndian::read_u32(&data[*offset + 1..*offset + 5]);
-        let ranks = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
-        let start = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
-        let xp = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
-        *offset += 17;
-        Some(UpdateAttributeData { sequence, object_guid: None, attribute, ranks, start, xp, is_public: false })
-    }
-
-    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 21 > data.len() { return None; }
-        let sequence = data[*offset];
-        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
-        let attribute = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
-        let ranks = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
-        let start = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
-        let xp = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
-        *offset += 21;
-        Some(UpdateAttributeData { sequence, object_guid, attribute, ranks, start, xp, is_public: true })
-    }
-}
-
-impl ProtocolUnpack for UpdateAttributeData {
+impl<const PUBLIC: bool> ProtocolUnpack for UpdateAttribute<PUBLIC> {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        Self::unpack_private(data, offset)
+        let sequence = u8::unpack(data, offset)?;
+        let object_guid = if PUBLIC {
+            Some(u32::unpack(data, offset)?)
+        } else {
+            None
+        };
+        let attribute = u32::unpack(data, offset)?;
+        let ranks = u32::unpack(data, offset)?;
+        let start = u32::unpack(data, offset)?;
+        let xp = u32::unpack(data, offset)?;
+        Some(UpdateAttribute {
+            sequence,
+            object_guid,
+            attribute,
+            ranks,
+            start,
+            xp,
+        })
     }
 }
 
-impl ProtocolPack for UpdateAttributeData {
+impl<const PUBLIC: bool> ProtocolPack for UpdateAttribute<PUBLIC> {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.push(self.sequence);
-        if let Some(guid) = self.object_guid { buf.write_u32::<LittleEndian>(guid).unwrap(); }
-        buf.write_u32::<LittleEndian>(self.attribute).unwrap();
-        buf.write_u32::<LittleEndian>(self.ranks).unwrap();
-        buf.write_u32::<LittleEndian>(self.start).unwrap();
-        buf.write_u32::<LittleEndian>(self.xp).unwrap();
+        self.sequence.pack(buf);
+        if PUBLIC {
+            self.object_guid.unwrap().pack(buf);
+        }
+        self.attribute.pack(buf);
+        self.ranks.pack(buf);
+        self.start.pack(buf);
+        self.xp.pack(buf);
     }
 }
+
+pub type PrivateUpdateAttributeData = UpdateAttribute<false>;
+pub type PublicUpdateAttributeData = UpdateAttribute<true>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct UpdateSkillData {
+pub struct UpdateSkill<const PUBLIC: bool> {
     pub sequence: u8,
     pub object_guid: Option<u32>,
     pub skill: u32,
@@ -85,65 +80,61 @@ pub struct UpdateSkillData {
     pub init: u32,
     pub resistance: u32,
     pub last_used: f64,
-    pub is_public: bool,
 }
 
-impl UpdateSkillData {
-    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 33 > data.len() { return None; }
-        let sequence = data[*offset];
-        let skill = LittleEndian::read_u32(&data[*offset + 1..*offset + 5]);
-        let ranks = LittleEndian::read_u16(&data[*offset + 5..*offset + 7]) as u32;
-        let adjust_pp = LittleEndian::read_u16(&data[*offset + 7..*offset + 9]) as u32;
-        let status = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
-        let xp = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
-        let init = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
-        let resistance = LittleEndian::read_u32(&data[*offset + 21..*offset + 25]);
-        let last_used = LittleEndian::read_f64(&data[*offset + 25..*offset + 33]);
-        *offset += 33;
-        Some(UpdateSkillData { sequence, object_guid: None, skill, ranks, adjust_pp, status, xp, init, resistance, last_used, is_public: false })
-    }
-
-    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 37 > data.len() { return None; }
-        let sequence = data[*offset];
-        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
-        let skill = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
-        let ranks = LittleEndian::read_u16(&data[*offset + 9..*offset + 11]) as u32;
-        let adjust_pp = LittleEndian::read_u16(&data[*offset + 11..*offset + 13]) as u32;
-        let status = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
-        let xp = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
-        let init = LittleEndian::read_u32(&data[*offset + 21..*offset + 25]);
-        let resistance = LittleEndian::read_u32(&data[*offset + 25..*offset + 29]);
-        let last_used = LittleEndian::read_f64(&data[*offset + 29..*offset + 37]);
-        *offset += 37;
-        Some(UpdateSkillData { sequence, object_guid, skill, ranks, adjust_pp, status, xp, init, resistance, last_used, is_public: true })
-    }
-}
-
-impl ProtocolUnpack for UpdateSkillData {
+impl<const PUBLIC: bool> ProtocolUnpack for UpdateSkill<PUBLIC> {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        Self::unpack_private(data, offset)
+        let sequence = u8::unpack(data, offset)?;
+        let object_guid = if PUBLIC {
+            Some(u32::unpack(data, offset)?)
+        } else {
+            None
+        };
+        let skill = u32::unpack(data, offset)?;
+        let ranks = u16::unpack(data, offset)? as u32;
+        let adjust_pp = u16::unpack(data, offset)? as u32;
+        let status = u32::unpack(data, offset)?;
+        let xp = u32::unpack(data, offset)?;
+        let init = u32::unpack(data, offset)?;
+        let resistance = u32::unpack(data, offset)?;
+        let last_used = f64::unpack(data, offset)?;
+        Some(UpdateSkill {
+            sequence,
+            object_guid,
+            skill,
+            ranks,
+            adjust_pp,
+            status,
+            xp,
+            init,
+            resistance,
+            last_used,
+        })
     }
 }
 
-impl ProtocolPack for UpdateSkillData {
+impl<const PUBLIC: bool> ProtocolPack for UpdateSkill<PUBLIC> {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.push(self.sequence);
-        if let Some(guid) = self.object_guid { buf.write_u32::<LittleEndian>(guid).unwrap(); }
-        buf.write_u32::<LittleEndian>(self.skill).unwrap();
-        buf.write_u16::<LittleEndian>(self.ranks as u16).unwrap();
-        buf.write_u16::<LittleEndian>(self.adjust_pp as u16).unwrap();
-        buf.write_u32::<LittleEndian>(self.status).unwrap();
-        buf.write_u32::<LittleEndian>(self.xp).unwrap();
-        buf.write_u32::<LittleEndian>(self.init).unwrap();
-        buf.write_u32::<LittleEndian>(self.resistance).unwrap();
-        buf.write_f64::<LittleEndian>(self.last_used).unwrap();
+        self.sequence.pack(buf);
+        if PUBLIC {
+            self.object_guid.unwrap().pack(buf);
+        }
+        self.skill.pack(buf);
+        (self.ranks as u16).pack(buf);
+        (self.adjust_pp as u16).pack(buf);
+        self.status.pack(buf);
+        self.xp.pack(buf);
+        self.init.pack(buf);
+        self.resistance.pack(buf);
+        self.last_used.pack(buf);
     }
 }
+
+pub type PrivateUpdateSkillData = UpdateSkill<false>;
+pub type PublicUpdateSkillData = UpdateSkill<true>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct UpdateVitalData {
+pub struct UpdateVital<const PUBLIC: bool> {
     pub sequence: u8,
     pub object_guid: Option<u32>,
     pub vital: u32,
@@ -151,131 +142,128 @@ pub struct UpdateVitalData {
     pub start: u32,
     pub xp: u32,
     pub current: u32,
-    pub is_public: bool,
 }
 
-impl UpdateVitalData {
-    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 21 > data.len() { return None; }
-        let sequence = data[*offset];
-        let vital = LittleEndian::read_u32(&data[*offset + 1..*offset + 5]);
-        let ranks = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
-        let start = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
-        let xp = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
-        let current = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
-        *offset += 21;
-        Some(UpdateVitalData { sequence, object_guid: None, vital, ranks, start, xp, current, is_public: false })
-    }
-
-    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 25 > data.len() { return None; }
-        let sequence = data[*offset];
-        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
-        let vital = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
-        let ranks = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
-        let start = LittleEndian::read_u32(&data[*offset + 13..*offset + 17]);
-        let xp = LittleEndian::read_u32(&data[*offset + 17..*offset + 21]);
-        let current = LittleEndian::read_u32(&data[*offset + 21..*offset + 25]);
-        *offset += 25;
-        Some(UpdateVitalData { sequence, object_guid, vital, ranks, start, xp, current, is_public: true })
-    }
-}
-
-impl ProtocolUnpack for UpdateVitalData {
+impl<const PUBLIC: bool> ProtocolUnpack for UpdateVital<PUBLIC> {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        Self::unpack_private(data, offset)
+        let sequence = u8::unpack(data, offset)?;
+        let object_guid = if PUBLIC {
+            Some(u32::unpack(data, offset)?)
+        } else {
+            None
+        };
+        let vital = u32::unpack(data, offset)?;
+        let ranks = u32::unpack(data, offset)?;
+        let start = u32::unpack(data, offset)?;
+        let xp = u32::unpack(data, offset)?;
+        let current = u32::unpack(data, offset)?;
+        Some(UpdateVital {
+            sequence,
+            object_guid,
+            vital,
+            ranks,
+            start,
+            xp,
+            current,
+        })
     }
 }
 
-impl ProtocolPack for UpdateVitalData {
+impl<const PUBLIC: bool> ProtocolPack for UpdateVital<PUBLIC> {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.push(self.sequence);
-        if let Some(guid) = self.object_guid { buf.write_u32::<LittleEndian>(guid).unwrap(); }
-        buf.write_u32::<LittleEndian>(self.vital).unwrap();
-        buf.write_u32::<LittleEndian>(self.ranks).unwrap();
-        buf.write_u32::<LittleEndian>(self.start).unwrap();
-        buf.write_u32::<LittleEndian>(self.xp).unwrap();
-        buf.write_u32::<LittleEndian>(self.current).unwrap();
+        self.sequence.pack(buf);
+        if PUBLIC {
+            self.object_guid.unwrap().pack(buf);
+        }
+        self.vital.pack(buf);
+        self.ranks.pack(buf);
+        self.start.pack(buf);
+        self.xp.pack(buf);
+        self.current.pack(buf);
     }
 }
+
+pub type PrivateUpdateVitalData = UpdateVital<false>;
+pub type PublicUpdateVitalData = UpdateVital<true>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct UpdateVitalCurrentData {
+pub struct UpdateVitalCurrent<const PUBLIC: bool> {
     pub sequence: u8,
     pub object_guid: Option<u32>,
     pub vital: u32,
     pub current: u32,
 }
 
-impl UpdateVitalCurrentData {
-    pub fn unpack_private(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 9 > data.len() { return None; }
-        let sequence = data[*offset];
-        let vital = LittleEndian::read_u32(&data[*offset + 1..*offset + 5]);
-        let current = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
-        *offset += 9;
-        Some(UpdateVitalCurrentData { sequence, object_guid: None, vital, current })
-    }
-
-    pub fn unpack_public(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 13 > data.len() { return None; }
-        let sequence = data[*offset];
-        let object_guid = Some(LittleEndian::read_u32(&data[*offset + 1..*offset + 5]));
-        let vital = LittleEndian::read_u32(&data[*offset + 5..*offset + 9]);
-        let current = LittleEndian::read_u32(&data[*offset + 9..*offset + 13]);
-        *offset += 13;
-        Some(UpdateVitalCurrentData { sequence, object_guid, vital, current })
-    }
-}
-
-impl ProtocolUnpack for UpdateVitalCurrentData {
+impl<const PUBLIC: bool> ProtocolUnpack for UpdateVitalCurrent<PUBLIC> {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        Self::unpack_private(data, offset)
+        let sequence = u8::unpack(data, offset)?;
+        let object_guid = if PUBLIC {
+            Some(u32::unpack(data, offset)?)
+        } else {
+            None
+        };
+        let vital = u32::unpack(data, offset)?;
+        let current = u32::unpack(data, offset)?;
+        Some(UpdateVitalCurrent {
+            sequence,
+            object_guid,
+            vital,
+            current,
+        })
     }
 }
 
-impl ProtocolPack for UpdateVitalCurrentData {
+impl<const PUBLIC: bool> ProtocolPack for UpdateVitalCurrent<PUBLIC> {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.push(self.sequence);
-        if let Some(guid) = self.object_guid { buf.write_u32::<LittleEndian>(guid).unwrap(); }
-        buf.write_u32::<LittleEndian>(self.vital).unwrap();
-        buf.write_u32::<LittleEndian>(self.current).unwrap();
+        self.sequence.pack(buf);
+        if PUBLIC {
+            self.object_guid.unwrap().pack(buf);
+        }
+        self.vital.pack(buf);
+        self.current.pack(buf);
     }
 }
+
+pub type PrivateUpdateVitalCurrentData = UpdateVitalCurrent<false>;
+pub type PublicUpdateVitalCurrentData = UpdateVitalCurrent<true>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct UpdateSkillLevelData {
+pub struct UpdateSkillLevel<const PUBLIC: bool> {
     pub sequence: u8,
     pub guid: Option<u32>,
     pub skill: u32,
     pub ranks: u32,
-    pub is_public: bool,
 }
 
-impl UpdateSkillLevelData {
-    pub fn unpack(data: &[u8], offset: &mut usize, is_public: bool) -> Option<Self> {
-        if *offset >= data.len() { return None; }
-        let sequence = data[*offset];
-        *offset += 1;
-        let mut guid = None;
-        if is_public {
-            if *offset + 4 > data.len() { return None; }
-            guid = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-        if *offset + 8 > data.len() { return None; }
-        let skill = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let ranks = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        *offset += 8;
-        Some(UpdateSkillLevelData { sequence, guid, skill, ranks, is_public })
+impl<const PUBLIC: bool> ProtocolUnpack for UpdateSkillLevel<PUBLIC> {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let sequence = u8::unpack(data, offset)?;
+        let guid = if PUBLIC {
+            Some(u32::unpack(data, offset)?)
+        } else {
+            None
+        };
+        let skill = u32::unpack(data, offset)?;
+        let ranks = u32::unpack(data, offset)?;
+        Some(UpdateSkillLevel {
+            sequence,
+            guid,
+            skill,
+            ranks,
+        })
     }
 }
 
-impl ProtocolPack for UpdateSkillLevelData {
+impl<const PUBLIC: bool> ProtocolPack for UpdateSkillLevel<PUBLIC> {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.push(self.sequence);
-        if let Some(guid) = self.guid { buf.write_u32::<LittleEndian>(guid).unwrap(); }
-        buf.write_u32::<LittleEndian>(self.skill).unwrap();
-        buf.write_u32::<LittleEndian>(self.ranks).unwrap();
+        self.sequence.pack(buf);
+        if PUBLIC {
+            self.guid.unwrap().pack(buf);
+        }
+        self.skill.pack(buf);
+        self.ranks.pack(buf);
     }
 }
+
+pub type PrivateUpdateSkillLevelData = UpdateSkillLevel<false>;
+pub type PublicUpdateSkillLevelData = UpdateSkillLevel<true>;

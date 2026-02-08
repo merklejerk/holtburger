@@ -36,11 +36,15 @@ pub enum GameMessage {
     GameAction(Box<GameActionMessage>),
     GameEvent(Box<GameEventMessage>),
 
-    UpdateAttribute(Box<UpdateAttributeData>),
-    UpdateSkill(Box<UpdateSkillData>),
-    UpdateSkillLevel(Box<UpdateSkillLevelData>),
-    UpdateVital(Box<UpdateVitalData>),
-    UpdateAttribute2ndLevel(Box<UpdateVitalCurrentData>),
+    PrivateUpdateAttribute(Box<PrivateUpdateAttributeData>),
+    PublicUpdateAttribute(Box<PublicUpdateAttributeData>),
+    PrivateUpdateSkill(Box<PrivateUpdateSkillData>),
+    PublicUpdateSkill(Box<PublicUpdateSkillData>),
+    PrivateUpdateSkillLevel(Box<PrivateUpdateSkillLevelData>),
+    PublicUpdateSkillLevel(Box<PublicUpdateSkillLevelData>),
+    PrivateUpdateVital(Box<PrivateUpdateVitalData>),
+    PublicUpdateVital(Box<PublicUpdateVitalData>),
+    PrivateUpdateVitalCurrent(Box<PrivateUpdateVitalCurrentData>),
 
     HearSpeech(Box<HearSpeechData>),
     HearRangedSpeech(Box<HearRangedSpeechData>),
@@ -62,13 +66,21 @@ pub enum GameMessage {
     PlayerTeleport(Box<PlayerTeleportData>),
     AutonomousPosition(Box<ServerAutonomousPositionData>),
     AutonomyLevel(Box<AutonomyLevelData>),
-    UpdatePropertyInt(Box<UpdatePropertyIntData>),
-    UpdatePropertyInt64(Box<UpdatePropertyInt64Data>),
-    UpdatePropertyBool(Box<UpdatePropertyBoolData>),
-    UpdatePropertyFloat(Box<UpdatePropertyFloatData>),
-    UpdatePropertyString(Box<UpdatePropertyStringData>),
-    UpdatePropertyDataId(Box<UpdatePropertyDataIdData>),
-    UpdatePropertyInstanceId(Box<UpdatePropertyInstanceIdData>),
+
+    PrivateUpdatePropertyInt(Box<PrivateUpdatePropertyIntData>),
+    PublicUpdatePropertyInt(Box<PublicUpdatePropertyIntData>),
+    PrivateUpdatePropertyInt64(Box<PrivateUpdatePropertyInt64Data>),
+    PublicUpdatePropertyInt64(Box<PublicUpdatePropertyInt64Data>),
+    PrivateUpdatePropertyBool(Box<PrivateUpdatePropertyBoolData>),
+    PublicUpdatePropertyBool(Box<PublicUpdatePropertyBoolData>),
+    PrivateUpdatePropertyFloat(Box<PrivateUpdatePropertyFloatData>),
+    PublicUpdatePropertyFloat(Box<PublicUpdatePropertyFloatData>),
+    PrivateUpdatePropertyString(Box<PrivateUpdatePropertyStringData>),
+    PublicUpdatePropertyString(Box<PublicUpdatePropertyStringData>),
+    PrivateUpdatePropertyDataId(Box<PrivateUpdatePropertyDataIdData>),
+    PublicUpdatePropertyDataId(Box<PublicUpdatePropertyDataIdData>),
+    PrivateUpdatePropertyInstanceId(Box<PrivateUpdatePropertyInstanceIdData>),
+    PublicUpdatePropertyInstanceId(Box<PublicUpdatePropertyInstanceIdData>),
 
     ParentEvent(Box<ParentEventData>),
     PickupEvent(Box<PickupEventData>),
@@ -150,26 +162,26 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::SoulEmote => Some(GameMessage::SoulEmote(Box::new(SoulEmoteData::unpack(
                 data, offset,
             )?))),
-            GameOpcode::PrivateUpdateAttribute => Some(GameMessage::UpdateAttribute(Box::new(
-                UpdateAttributeData::unpack_private(data, offset)?,
+            GameOpcode::PrivateUpdateAttribute => Some(GameMessage::PrivateUpdateAttribute(
+                Box::new(PrivateUpdateAttributeData::unpack(data, offset)?),
+            )),
+            GameOpcode::PublicUpdateAttribute => Some(GameMessage::PublicUpdateAttribute(
+                Box::new(PublicUpdateAttributeData::unpack(data, offset)?),
+            )),
+            GameOpcode::PrivateUpdateSkill => Some(GameMessage::PrivateUpdateSkill(Box::new(
+                PrivateUpdateSkillData::unpack(data, offset)?,
             ))),
-            GameOpcode::PublicUpdateAttribute => Some(GameMessage::UpdateAttribute(Box::new(
-                UpdateAttributeData::unpack_public(data, offset)?,
+            GameOpcode::PublicUpdateSkill => Some(GameMessage::PublicUpdateSkill(Box::new(
+                PublicUpdateSkillData::unpack(data, offset)?,
             ))),
-            GameOpcode::PrivateUpdateSkill => Some(GameMessage::UpdateSkill(Box::new(
-                UpdateSkillData::unpack_private(data, offset)?,
+            GameOpcode::PrivateUpdateVital => Some(GameMessage::PrivateUpdateVital(Box::new(
+                PrivateUpdateVitalData::unpack(data, offset)?,
             ))),
-            GameOpcode::PublicUpdateSkill => Some(GameMessage::UpdateSkill(Box::new(
-                UpdateSkillData::unpack_public(data, offset)?,
+            GameOpcode::PublicUpdateVital => Some(GameMessage::PublicUpdateVital(Box::new(
+                PublicUpdateVitalData::unpack(data, offset)?,
             ))),
-            GameOpcode::PrivateUpdateVital => Some(GameMessage::UpdateVital(Box::new(
-                UpdateVitalData::unpack_private(data, offset)?,
-            ))),
-            GameOpcode::PublicUpdateVital => Some(GameMessage::UpdateVital(Box::new(
-                UpdateVitalData::unpack_public(data, offset)?,
-            ))),
-            GameOpcode::PrivateUpdateVitalCurrent => Some(GameMessage::UpdateAttribute2ndLevel(
-                Box::new(UpdateVitalCurrentData::unpack_private(data, offset)?),
+            GameOpcode::PrivateUpdateVitalCurrent => Some(GameMessage::PrivateUpdateVitalCurrent(
+                Box::new(PrivateUpdateVitalCurrentData::unpack(data, offset)?),
             )),
             GameOpcode::ObjectCreate => Some(GameMessage::ObjectCreate(Box::new(
                 ObjectDescriptionData::unpack(data, offset)?,
@@ -228,48 +240,60 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::PlayEffect => Some(GameMessage::PlayEffect(Box::new(
                 PlayEffectData::unpack(data, offset)?,
             ))),
-            GameOpcode::PrivateUpdatePropertyInt => Some(GameMessage::UpdatePropertyInt(Box::new(
-                UpdatePropertyIntData::unpack(data, offset, false)?,
-            ))),
-            GameOpcode::PublicUpdatePropertyInt => Some(GameMessage::UpdatePropertyInt(Box::new(
-                UpdatePropertyIntData::unpack(data, offset, true)?,
-            ))),
-            GameOpcode::PrivateUpdatePropertyInt64 => Some(GameMessage::UpdatePropertyInt64(
-                Box::new(UpdatePropertyInt64Data::unpack(data, offset, false)?),
+            GameOpcode::PrivateUpdatePropertyInt => Some(GameMessage::PrivateUpdatePropertyInt(
+                Box::new(PrivateUpdatePropertyIntData::unpack(data, offset)?),
             )),
-            GameOpcode::PublicUpdatePropertyInt64 => Some(GameMessage::UpdatePropertyInt64(
-                Box::new(UpdatePropertyInt64Data::unpack(data, offset, true)?),
+            GameOpcode::PublicUpdatePropertyInt => Some(GameMessage::PublicUpdatePropertyInt(
+                Box::new(PublicUpdatePropertyIntData::unpack(data, offset)?),
             )),
-            GameOpcode::PrivateUpdatePropertyBool => Some(GameMessage::UpdatePropertyBool(
-                Box::new(UpdatePropertyBoolData::unpack(data, offset, false)?),
+            GameOpcode::PrivateUpdatePropertyInt64 => {
+                Some(GameMessage::PrivateUpdatePropertyInt64(Box::new(
+                    PrivateUpdatePropertyInt64Data::unpack(data, offset)?,
+                )))
+            }
+            GameOpcode::PublicUpdatePropertyInt64 => Some(GameMessage::PublicUpdatePropertyInt64(
+                Box::new(PublicUpdatePropertyInt64Data::unpack(data, offset)?),
             )),
-            GameOpcode::PublicUpdatePropertyBool => Some(GameMessage::UpdatePropertyBool(
-                Box::new(UpdatePropertyBoolData::unpack(data, offset, true)?),
+            GameOpcode::PrivateUpdatePropertyBool => Some(GameMessage::PrivateUpdatePropertyBool(
+                Box::new(PrivateUpdatePropertyBoolData::unpack(data, offset)?),
             )),
-            GameOpcode::PrivateUpdatePropertyFloat => Some(GameMessage::UpdatePropertyFloat(
-                Box::new(UpdatePropertyFloatData::unpack(data, offset, false)?),
+            GameOpcode::PublicUpdatePropertyBool => Some(GameMessage::PublicUpdatePropertyBool(
+                Box::new(PublicUpdatePropertyBoolData::unpack(data, offset)?),
             )),
-            GameOpcode::PublicUpdatePropertyFloat => Some(GameMessage::UpdatePropertyFloat(
-                Box::new(UpdatePropertyFloatData::unpack(data, offset, true)?),
+            GameOpcode::PrivateUpdatePropertyFloat => {
+                Some(GameMessage::PrivateUpdatePropertyFloat(Box::new(
+                    PrivateUpdatePropertyFloatData::unpack(data, offset)?,
+                )))
+            }
+            GameOpcode::PublicUpdatePropertyFloat => Some(GameMessage::PublicUpdatePropertyFloat(
+                Box::new(PublicUpdatePropertyFloatData::unpack(data, offset)?),
             )),
-            GameOpcode::PrivateUpdatePropertyString => Some(GameMessage::UpdatePropertyString(
-                Box::new(UpdatePropertyStringData::unpack(data, offset, false)?),
+            GameOpcode::PrivateUpdatePropertyString => {
+                Some(GameMessage::PrivateUpdatePropertyString(Box::new(
+                    PrivateUpdatePropertyStringData::unpack(data, offset)?,
+                )))
+            }
+            GameOpcode::PublicUpdatePropertyString => {
+                Some(GameMessage::PublicUpdatePropertyString(Box::new(
+                    PublicUpdatePropertyStringData::unpack(data, offset)?,
+                )))
+            }
+            GameOpcode::PrivateUpdatePropertyDid => Some(GameMessage::PrivateUpdatePropertyDataId(
+                Box::new(PrivateUpdatePropertyDataIdData::unpack(data, offset)?),
             )),
-            GameOpcode::PublicUpdatePropertyString => Some(GameMessage::UpdatePropertyString(
-                Box::new(UpdatePropertyStringData::unpack(data, offset, true)?),
+            GameOpcode::PublicUpdatePropertyDid => Some(GameMessage::PublicUpdatePropertyDataId(
+                Box::new(PublicUpdatePropertyDataIdData::unpack(data, offset)?),
             )),
-            GameOpcode::PrivateUpdatePropertyDid => Some(GameMessage::UpdatePropertyDataId(
-                Box::new(UpdatePropertyDataIdData::unpack(data, offset, false)?),
-            )),
-            GameOpcode::PublicUpdatePropertyDid => Some(GameMessage::UpdatePropertyDataId(
-                Box::new(UpdatePropertyDataIdData::unpack(data, offset, true)?),
-            )),
-            GameOpcode::PrivateUpdatePropertyIid => Some(GameMessage::UpdatePropertyInstanceId(
-                Box::new(UpdatePropertyInstanceIdData::unpack(data, offset, false)?),
-            )),
-            GameOpcode::PublicUpdatePropertyIid => Some(GameMessage::UpdatePropertyInstanceId(
-                Box::new(UpdatePropertyInstanceIdData::unpack(data, offset, true)?),
-            )),
+            GameOpcode::PrivateUpdatePropertyIid => {
+                Some(GameMessage::PrivateUpdatePropertyInstanceId(Box::new(
+                    PrivateUpdatePropertyInstanceIdData::unpack(data, offset)?,
+                )))
+            }
+            GameOpcode::PublicUpdatePropertyIid => {
+                Some(GameMessage::PublicUpdatePropertyInstanceId(Box::new(
+                    PublicUpdatePropertyInstanceIdData::unpack(data, offset)?,
+                )))
+            }
 
             GameOpcode::ObjDescEvent => Some(GameMessage::ObjDescEvent(Box::new(
                 ObjDescEventData::unpack(data, offset)?,
@@ -277,12 +301,12 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::ForceObjectDescSend => Some(GameMessage::ForceObjectDescSend(Box::new(
                 ForceObjectDescSendData::unpack(data, offset)?,
             ))),
-            GameOpcode::PrivateUpdateSkillLevel => Some(GameMessage::UpdateSkillLevel(Box::new(
-                UpdateSkillLevelData::unpack(data, offset, false)?,
-            ))),
-            GameOpcode::PublicUpdateSkillLevel => Some(GameMessage::UpdateSkillLevel(Box::new(
-                UpdateSkillLevelData::unpack(data, offset, true)?,
-            ))),
+            GameOpcode::PrivateUpdateSkillLevel => Some(GameMessage::PrivateUpdateSkillLevel(
+                Box::new(PrivateUpdateSkillLevelData::unpack(data, offset)?),
+            )),
+            GameOpcode::PublicUpdateSkillLevel => Some(GameMessage::PublicUpdateSkillLevel(
+                Box::new(PublicUpdateSkillLevelData::unpack(data, offset)?),
+            )),
         }
     }
 }
@@ -364,37 +388,37 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdateAttribute(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateAttribute as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateAttribute as u32)
-                        .unwrap();
-                }
+            GameMessage::PrivateUpdateAttribute(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateAttribute as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdateSkill(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateSkill as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateSkill as u32)
-                        .unwrap();
-                }
+            GameMessage::PublicUpdateAttribute(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateAttribute as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdateVital(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateVital as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateVital as u32)
-                        .unwrap();
-                }
+            GameMessage::PrivateUpdateSkill(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateSkill as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdateAttribute2ndLevel(data) => {
+            GameMessage::PublicUpdateSkill(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateSkill as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PrivateUpdateVital(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateVital as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PublicUpdateVital(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateVital as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PrivateUpdateVitalCurrent(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateVitalCurrent as u32)
                     .unwrap();
                 data.pack(buf);
@@ -494,74 +518,74 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyInt(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyInt as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyInt as u32)
-                        .unwrap();
-                }
+            GameMessage::PrivateUpdatePropertyInt(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyInt as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyInt64(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyInt64 as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyInt64 as u32)
-                        .unwrap();
-                }
+            GameMessage::PublicUpdatePropertyInt(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyInt as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyBool(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyBool as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyBool as u32)
-                        .unwrap();
-                }
+            GameMessage::PrivateUpdatePropertyInt64(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyInt64 as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyFloat(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyFloat as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyFloat as u32)
-                        .unwrap();
-                }
+            GameMessage::PublicUpdatePropertyInt64(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyInt64 as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyString(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyString as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyString as u32)
-                        .unwrap();
-                }
+            GameMessage::PrivateUpdatePropertyBool(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyBool as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyDataId(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyDid as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyDid as u32)
-                        .unwrap();
-                }
+            GameMessage::PublicUpdatePropertyBool(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyBool as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyInstanceId(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyIid as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyIid as u32)
-                        .unwrap();
-                }
+            GameMessage::PrivateUpdatePropertyFloat(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyFloat as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PublicUpdatePropertyFloat(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyFloat as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PrivateUpdatePropertyString(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyString as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PublicUpdatePropertyString(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyString as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PrivateUpdatePropertyDataId(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyDid as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PublicUpdatePropertyDataId(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyDid as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PrivateUpdatePropertyInstanceId(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyIid as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PublicUpdatePropertyInstanceId(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyIid as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::ObjDescEvent(data) => {
@@ -574,14 +598,14 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdateSkillLevel(data) => {
-                if data.is_public {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateSkillLevel as u32)
-                        .unwrap();
-                } else {
-                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateSkillLevel as u32)
-                        .unwrap();
-                }
+            GameMessage::PrivateUpdateSkillLevel(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateSkillLevel as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PublicUpdateSkillLevel(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateSkillLevel as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameMessage::DddInterrogation => {

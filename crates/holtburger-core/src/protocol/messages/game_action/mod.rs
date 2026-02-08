@@ -4,8 +4,8 @@ pub(crate) mod misc;
 pub(crate) mod movement;
 pub(crate) mod object;
 
-use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::protocol::messages::opcodes::GameActionOpcode;
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 // Re-export payloads from children modules
@@ -55,12 +55,12 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Jump => {
                     GameAction::Jump(Box::new(JumpData::unpack(data, offset)?))
                 }
-                GameActionOpcode::AutonomousPosition => GameAction::AutonomousPosition(
-                    Box::new(AutonomousPositionActionData::unpack(data, offset)?),
-                ),
-                GameActionOpcode::MoveToState => GameAction::MoveToState(Box::new(
-                    MoveToStateData::unpack(data, offset)?,
+                GameActionOpcode::AutonomousPosition => GameAction::AutonomousPosition(Box::new(
+                    AutonomousPositionActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::MoveToState => {
+                    GameAction::MoveToState(Box::new(MoveToStateData::unpack(data, offset)?))
+                }
                 GameActionOpcode::GetAndWieldItem => GameAction::GetAndWieldItem(Box::new(
                     GetAndWieldItemData::unpack(data, offset)?,
                 )),
@@ -79,18 +79,16 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::DropItem => {
                     GameAction::DropItem(Box::new(DropItemData::unpack(data, offset)?))
                 }
-                GameActionOpcode::PutItemInContainer => GameAction::PutItemInContainer(
-                    Box::new(PutItemInContainerData::unpack(data, offset)?),
-                ),
-                GameActionOpcode::Use => {
-                    GameAction::Use(Box::new(UseData::unpack(data, offset)?))
+                GameActionOpcode::PutItemInContainer => GameAction::PutItemInContainer(Box::new(
+                    PutItemInContainerData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::Use => GameAction::Use(Box::new(UseData::unpack(data, offset)?)),
+                GameActionOpcode::IdentifyObject => {
+                    GameAction::IdentifyObject(Box::new(IdentifyObjectData::unpack(data, offset)?))
                 }
-                GameActionOpcode::IdentifyObject => GameAction::IdentifyObject(Box::new(
-                    IdentifyObjectData::unpack(data, offset)?,
-                )),
-                GameActionOpcode::LoginComplete => GameAction::LoginComplete(Box::new(
-                    LoginCompleteData::unpack(data, offset)?,
-                )),
+                GameActionOpcode::LoginComplete => {
+                    GameAction::LoginComplete(Box::new(LoginCompleteData::unpack(data, offset)?))
+                }
             },
             None => {
                 let remaining = data[*offset..].to_vec();

@@ -163,7 +163,8 @@ impl ProtocolUnpack for DddInterrogationResponseData {
 impl ProtocolPack for DddInterrogationResponseData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.language).unwrap();
-        buf.write_u32::<LittleEndian>(self.lists.len() as u32).unwrap();
+        buf.write_u32::<LittleEndian>(self.lists.len() as u32)
+            .unwrap();
         for list in &self.lists {
             list.pack(buf);
         }

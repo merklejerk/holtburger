@@ -121,7 +121,9 @@ impl AppState {
             DashboardTab::Entities => self
                 .entities
                 .values()
-                .filter(|e| classification::is_targetable(e) && e.position.landblock_id != Guid::NULL)
+                .filter(|e| {
+                    classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
+                })
                 .count(),
             DashboardTab::Inventory => self
                 .entities

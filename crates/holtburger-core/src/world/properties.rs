@@ -1,6 +1,6 @@
+use crate::world::Guid;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
-use crate::world::Guid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PropertyInt {

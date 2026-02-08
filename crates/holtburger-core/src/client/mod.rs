@@ -181,9 +181,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameAction::IdentifyObject(Box::new(IdentifyObjectData {
-                            guid,
-                        })),
+                        action: GameAction::IdentifyObject(Box::new(IdentifyObjectData { guid })),
                     })))
                     .await
             }
@@ -241,13 +239,11 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameAction::PutItemInContainer(Box::new(
-                            PutItemInContainerData {
-                                item_guid: guid,
-                                container_guid: self.world.player.guid,
-                                slot: 0,
-                            },
-                        )),
+                        action: GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
+                            item_guid: guid,
+                            container_guid: self.world.player.guid,
+                            slot: 0,
+                        })),
                     })))
                     .await
             }
@@ -265,13 +261,11 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameAction::PutItemInContainer(Box::new(
-                            PutItemInContainerData {
-                                item_guid: item,
-                                container_guid: container,
-                                slot: placement,
-                            },
-                        )),
+                        action: GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
+                            item_guid: item,
+                            container_guid: container,
+                            slot: placement,
+                        })),
                     })))
                     .await
             }
@@ -533,7 +527,7 @@ impl Client {
         }
 
         let mut offset = 0;
-        let message = GameMessage::unpack(data, &mut offset);
+        let message = <GameMessage as ProtocolUnpack>::unpack(data, &mut offset);
         if message.is_none() {
             let opcode_str = if data.len() >= 4 {
                 let opcode = u32::from_le_bytes(data[0..4].try_into().unwrap_or([0; 4]));
@@ -703,7 +697,9 @@ impl Client {
                 self.send_status_event();
                 Ok(())
             }
-            GameMessage::UpdatePropertyInt(_) => Ok(()),
+            GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
+                Ok(())
+            }
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
                 if let Some(tx) = &self.event_tx {

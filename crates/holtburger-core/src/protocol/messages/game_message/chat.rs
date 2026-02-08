@@ -151,7 +151,9 @@ pub struct ServerMessageData {
 impl ProtocolUnpack for ServerMessageData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
-        if *offset + 4 > data.len() { return None; }
+        if *offset + 4 > data.len() {
+            return None;
+        }
         let chat_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         Some(ServerMessageData { message, chat_type })

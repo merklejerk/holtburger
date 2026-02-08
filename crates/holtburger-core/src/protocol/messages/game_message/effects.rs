@@ -88,7 +88,9 @@ mod tests {
 
         // Verify top-level dispatch
         let mut offset = 0;
-        let GameMessage::PlaySound(msg) = GameMessage::unpack(fixtures::SOUND, &mut offset).unwrap() else {
+        let GameMessage::PlaySound(msg) =
+            GameMessage::unpack(fixtures::SOUND, &mut offset).unwrap()
+        else {
             panic!("Expected PlaySound");
         };
         assert_eq!(*msg, expected);
@@ -108,7 +110,8 @@ mod tests {
 
         // Verify top-level dispatch
         let mut offset = 0;
-        let GameMessage::PlayEffect(msg) = GameMessage::unpack(fixtures::PLAY_EFFECT, &mut offset).unwrap()
+        let GameMessage::PlayEffect(msg) =
+            GameMessage::unpack(fixtures::PLAY_EFFECT, &mut offset).unwrap()
         else {
             panic!("Expected PlayEffect");
         };

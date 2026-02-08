@@ -1,8 +1,8 @@
 pub mod capture;
 
 use crate::protocol::crypto::Isaac;
-use crate::protocol::messages::*;
 use crate::protocol::messages::utils::align_offset;
+use crate::protocol::messages::*;
 use crate::session::capture::{CaptureWriter, Direction};
 use anyhow::{Result, anyhow};
 pub use async_trait::async_trait;
@@ -294,9 +294,8 @@ impl Session {
             );
         }
 
-        let mut packet = vec![0u8; HEADER_SIZE];
-        let mut pack_offset = 0;
-        header.pack(&mut packet, &mut pack_offset);
+        let mut packet = Vec::with_capacity(HEADER_SIZE + full_payload.len());
+        header.pack(&mut packet);
         packet.extend_from_slice(&full_payload);
 
         log::trace!("RAW OUTBOUND: {:02X?}", packet);
@@ -367,7 +366,7 @@ impl Session {
     pub async fn send_message(&mut self, message: &GameMessage) -> Result<()> {
         log::debug!(">>> Outgoing Message: {:?}", message);
         let mut payload = Vec::new();
-        message.pack(&mut payload);
+        ProtocolPack::pack(message, &mut payload);
 
         let frag_header = FragmentHeader {
             sequence: self.fragment_sequence,
@@ -380,9 +379,8 @@ impl Session {
         self.fragment_sequence += 1;
         self.fragment_id += 1;
 
-        let mut body = vec![0u8; FRAGMENT_HEADER_SIZE];
-        let mut pack_offset = 0;
-        frag_header.pack(&mut body, &mut pack_offset);
+        let mut body = Vec::with_capacity(FRAGMENT_HEADER_SIZE + payload.len());
+        frag_header.pack(&mut body);
         body.extend_from_slice(&payload);
 
         let header = PacketHeader {

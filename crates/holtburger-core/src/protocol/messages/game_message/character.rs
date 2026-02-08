@@ -155,8 +155,8 @@ impl ProtocolPack for CharacterEnterWorldData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerNameData {
-    pub online_count: u32,
-    pub online_cap: u32,
+    pub current_connections: u32,
+    pub max_connections: i32,
     pub name: String,
 }
 
@@ -165,22 +165,22 @@ impl ProtocolUnpack for ServerNameData {
         if *offset + 8 > data.len() {
             return None;
         }
-        let online_count = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let online_cap = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let current_connections = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let max_connections = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
         let name = read_string16(data, offset)?;
         Some(ServerNameData {
             name,
-            online_count,
-            online_cap,
+            current_connections,
+            max_connections,
         })
     }
 }
 
 impl ProtocolPack for ServerNameData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.online_count).unwrap();
-        buf.write_u32::<LittleEndian>(self.online_cap).unwrap();
+        buf.write_u32::<LittleEndian>(self.current_connections).unwrap();
+        buf.write_i32::<LittleEndian>(self.max_connections).unwrap();
         write_string16(buf, &self.name);
     }
 }
@@ -237,6 +237,32 @@ mod tests {
             unpacked,
             GameMessage::CharacterEnterWorldRequest(_)
         ));
+    }
+
+    #[test]
+    fn test_server_name_fixture() {
+        let expected = ServerNameData {
+            current_connections: 123,
+            max_connections: 1000,
+            name: "Frostfell".to_string(),
+        };
+        let mut buf = Vec::new();
+        expected.pack(&mut buf);
+        // 4 (count) + 4 (cap) + 2 (string len) + 9 ("Frostfell") + 1 (pad) = 20
+        assert_eq!(buf.len(), 20);
+
+        assert_pack_unpack_parity(&buf, &expected);
+
+        // Also verify dispatcher integration (0xF7E1)
+        let mut msg_buf = vec![0xE1, 0xF7, 0x00, 0x00];
+        expected.pack(&mut msg_buf);
+        let mut offset = 0;
+        let msg = GameMessage::unpack(&msg_buf, &mut offset).unwrap();
+        if let GameMessage::ServerName(data) = msg {
+            assert_eq!(*data, expected);
+        } else {
+            panic!("Expected ServerName");
+        }
     }
 }
 

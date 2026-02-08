@@ -147,7 +147,7 @@ impl WorldState {
                 });
             }
             GameMessage::GameEvent(ev) => {
-                if let GameEventData::PlayerDescription(data) = &ev.event {
+                if let GameEvent::PlayerDescription(data) = &ev.event {
                     let guid: Guid = data.guid;
                     let name = &data.name;
                     let pos = &data.pos;
@@ -255,12 +255,12 @@ impl WorldState {
                     self.player.emit_derived_stats(&mut events);
                 }
                 match &ev.event {
-                    GameEventData::WeenieError(data) => {
+                    GameEvent::WeenieError(data) => {
                         events.push(WorldEvent::WeenieError {
                             error_id: data.error_id,
                         });
                     }
-                    GameEventData::WeenieErrorWithString(data) => {
+                    GameEvent::WeenieErrorWithString(data) => {
                         events.push(WorldEvent::WeenieErrorWithString {
                             error_id: data.error_id,
                             message: data.message.clone(),

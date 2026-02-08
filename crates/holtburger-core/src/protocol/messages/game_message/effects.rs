@@ -1,22 +1,24 @@
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
+use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlaySoundData {
-    pub target: u32,
+    pub target: Guid,
     pub sound_id: u32,
     pub volume: f32,
 }
 
-impl MessageUnpack for PlaySoundData {
+impl ProtocolUnpack for PlaySoundData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        let target = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
             return None;
         }
-        let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let sound_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let volume = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
+        let sound_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let volume = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
         Some(PlaySoundData {
             target,
             sound_id,
@@ -25,30 +27,30 @@ impl MessageUnpack for PlaySoundData {
     }
 }
 
-impl MessagePack for PlaySoundData {
+impl ProtocolPack for PlaySoundData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.target).unwrap();
+        self.target.pack(buf);
         buf.write_u32::<LittleEndian>(self.sound_id).unwrap();
         buf.write_f32::<LittleEndian>(self.volume).unwrap();
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayEffectData {
-    pub target: u32,
+    pub target: Guid,
     pub script_id: u32,
     pub speed: f32,
 }
 
-impl MessageUnpack for PlayEffectData {
+impl ProtocolUnpack for PlayEffectData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 12 > data.len() {
+        let target = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
             return None;
         }
-        let target = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let script_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let speed = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
-        *offset += 12;
+        let script_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let speed = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
         Some(PlayEffectData {
             target,
             script_id,
@@ -57,9 +59,9 @@ impl MessageUnpack for PlayEffectData {
     }
 }
 
-impl MessagePack for PlayEffectData {
+impl ProtocolPack for PlayEffectData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.target).unwrap();
+        self.target.pack(buf);
         buf.write_u32::<LittleEndian>(self.script_id).unwrap();
         buf.write_f32::<LittleEndian>(self.speed).unwrap();
     }
@@ -75,7 +77,7 @@ mod tests {
     #[test]
     fn test_play_sound_fixture() {
         let expected = PlaySoundData {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             sound_id: 100,
             volume: 0.8,
         };
@@ -85,7 +87,8 @@ mod tests {
         assert_pack_unpack_parity::<PlaySoundData>(data, &expected);
 
         // Verify top-level dispatch
-        let GameMessage::PlaySound(msg) = GameMessage::unpack(fixtures::SOUND).unwrap() else {
+        let mut offset = 0;
+        let GameMessage::PlaySound(msg) = GameMessage::unpack(fixtures::SOUND, &mut offset).unwrap() else {
             panic!("Expected PlaySound");
         };
         assert_eq!(*msg, expected);
@@ -94,7 +97,7 @@ mod tests {
     #[test]
     fn test_play_effect_fixture() {
         let expected = PlayEffectData {
-            target: 0x50000001,
+            target: Guid(0x50000001),
             script_id: 200,
             speed: 1.5,
         };
@@ -104,7 +107,8 @@ mod tests {
         assert_pack_unpack_parity::<PlayEffectData>(data, &expected);
 
         // Verify top-level dispatch
-        let GameMessage::PlayEffect(msg) = GameMessage::unpack(fixtures::PLAY_EFFECT).unwrap()
+        let mut offset = 0;
+        let GameMessage::PlayEffect(msg) = GameMessage::unpack(fixtures::PLAY_EFFECT, &mut offset).unwrap()
         else {
             panic!("Expected PlayEffect");
         };

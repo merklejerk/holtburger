@@ -1,4 +1,4 @@
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -10,7 +10,7 @@ pub struct CharacterEntry {
     pub delete_time: u32,
 }
 
-impl MessageUnpack for CharacterEntry {
+impl ProtocolUnpack for CharacterEntry {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let guid = Guid::unpack(data, offset)?;
         let name = read_string16(data, offset)?;
@@ -29,7 +29,7 @@ impl MessageUnpack for CharacterEntry {
     }
 }
 
-impl MessagePack for CharacterEntry {
+impl ProtocolPack for CharacterEntry {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.guid.pack(buf);
         write_string16(buf, &self.name);
@@ -46,7 +46,7 @@ pub struct CharacterListData {
     pub has_tod_expansion: bool,
 }
 
-impl MessageUnpack for CharacterListData {
+impl ProtocolUnpack for CharacterListData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         // Skip leading padding (always 0)
         if *offset + 4 > data.len() {
@@ -97,7 +97,7 @@ impl MessageUnpack for CharacterListData {
     }
 }
 
-impl MessagePack for CharacterListData {
+impl ProtocolPack for CharacterListData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(0).unwrap(); // Leading padding
         buf.extend_from_slice(&(self.characters.len() as u32).to_le_bytes());
@@ -119,20 +119,18 @@ pub struct CharacterEnterWorldRequestData {
     pub guid: Guid,
 }
 
-impl MessageUnpack for CharacterEnterWorldRequestData {
+impl ProtocolUnpack for CharacterEnterWorldRequestData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let guid = Guid::unpack(data, offset)?;
         Some(CharacterEnterWorldRequestData { guid })
     }
 }
 
-impl MessagePack for CharacterEnterWorldRequestData {
+impl ProtocolPack for CharacterEnterWorldRequestData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.guid.pack(buf);
     }
 }
-
-// removed duplicate import
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEnterWorldData {
@@ -140,7 +138,7 @@ pub struct CharacterEnterWorldData {
     pub account: String,
 }
 
-impl MessageUnpack for CharacterEnterWorldData {
+impl ProtocolUnpack for CharacterEnterWorldData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let guid = Guid::unpack(data, offset)?;
         let account = read_string16(data, offset)?;
@@ -148,7 +146,7 @@ impl MessageUnpack for CharacterEnterWorldData {
     }
 }
 
-impl MessagePack for CharacterEnterWorldData {
+impl ProtocolPack for CharacterEnterWorldData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.guid.pack(buf);
         write_string16(buf, &self.account);
@@ -162,7 +160,7 @@ pub struct ServerNameData {
     pub name: String,
 }
 
-impl MessageUnpack for ServerNameData {
+impl ProtocolUnpack for ServerNameData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
             return None;
@@ -179,64 +177,10 @@ impl MessageUnpack for ServerNameData {
     }
 }
 
-impl MessagePack for ServerNameData {
+impl ProtocolPack for ServerNameData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.online_count).unwrap();
         buf.write_u32::<LittleEndian>(self.online_cap).unwrap();
         write_string16(buf, &self.name);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::protocol::fixtures;
-    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-
-    #[test]
-    fn test_character_enter_world_request_fixture() {
-        let expected = CharacterEnterWorldRequestData {
-            guid: Guid(0x12345678),
-        };
-        // Skip opcode (4 bytes)
-        assert_pack_unpack_parity(&fixtures::CHARACTER_ENTER_WORLD_REQUEST[4..], &expected);
-    }
-
-    #[test]
-    fn test_character_enter_world_fixture() {
-        let expected = CharacterEnterWorldData {
-            guid: Guid(0x12345678),
-            account: "Alice".to_string(),
-        };
-        // Skip opcode (4 bytes)
-        assert_pack_unpack_parity(&fixtures::CHARACTER_ENTER_WORLD[4..], &expected);
-    }
-
-    #[test]
-    fn test_character_list_fixture() {
-        let expected = CharacterListData {
-            characters: vec![CharacterEntry {
-                guid: Guid(0x12345678),
-                name: "Alice".to_string(),
-                delete_time: 0,
-            }],
-            max_slots: 3,
-            account_name: "AliceAccount".to_string(),
-            use_turbine_chat: true,
-            has_tod_expansion: true,
-        };
-        // Skip opcode (4 bytes)
-        assert_pack_unpack_parity(&fixtures::CHARACTER_LIST[4..], &expected);
-    }
-
-    #[test]
-    fn test_gamemessage_routing_character_request() {
-        use crate::protocol::messages::GameMessage;
-        let packed = vec![0xC8, 0xF7, 0x00, 0x00, 0x12, 0x34, 0x56, 0x78];
-        let unpacked = GameMessage::unpack(&packed).expect("Routing failed");
-        assert!(matches!(
-            unpacked,
-            GameMessage::CharacterEnterWorldRequest(_)
-        ));
     }
 }

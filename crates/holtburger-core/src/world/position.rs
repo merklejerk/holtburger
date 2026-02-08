@@ -1,5 +1,5 @@
 use crate::math::{Quaternion, Vector3};
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::world::properties::UpdatePositionFlag;
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian};
@@ -12,13 +12,13 @@ pub struct WorldPosition {
     pub rotation: Quaternion,
 }
 
-impl MessagePack for WorldPosition {
+impl ProtocolPack for WorldPosition {
     fn pack(&self, writer: &mut Vec<u8>) {
         self.write_raw(writer);
     }
 }
 
-impl MessageUnpack for WorldPosition {
+impl ProtocolUnpack for WorldPosition {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if data.len() < *offset + 32 {
             return None;
@@ -61,7 +61,7 @@ pub struct PositionPack {
     pub force_position_sequence: u16,
 }
 
-impl MessageUnpack for PositionPack {
+impl ProtocolUnpack for PositionPack {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if data.len() < *offset + 8 {
             return None;
@@ -171,7 +171,7 @@ impl MessageUnpack for PositionPack {
     }
 }
 
-impl MessagePack for PositionPack {
+impl ProtocolPack for PositionPack {
     fn pack(&self, writer: &mut Vec<u8>) {
         // For now, we always write a full orientation (no flags set)
         // or we use the flags we already have.

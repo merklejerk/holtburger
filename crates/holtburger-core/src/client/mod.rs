@@ -158,8 +158,8 @@ impl Client {
                         .session
                         .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                             sequence: 0,
-                            action: GameActionData::Tell(Box::new(TellActionData {
-                                target,
+                            action: GameAction::Tell(Box::new(TellActionData {
+                                target_name: target,
                                 message,
                             })),
                         })))
@@ -172,7 +172,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameActionData::PingRequest(Box::new(PingRequestData)),
+                        action: GameAction::PingRequest(Box::new(PingRequestData)),
                     })))
                     .await
             }
@@ -181,7 +181,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameActionData::IdentifyObject(Box::new(IdentifyObjectData {
+                        action: GameAction::IdentifyObject(Box::new(IdentifyObjectData {
                             guid,
                         })),
                     })))
@@ -197,8 +197,7 @@ impl Client {
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence,
 
-                        action: GameActionData::Jump(Box::new(JumpData {
-                            sequence,
+                        action: GameAction::Jump(Box::new(JumpData {
                             extent,
                             velocity: Default::default(),
                             instance_sequence: 0,
@@ -224,7 +223,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameActionData::Use(Box::new(UseData { guid })),
+                        action: GameAction::Use(Box::new(UseData { guid })),
                     })))
                     .await
             }
@@ -233,7 +232,7 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameActionData::DropItem(Box::new(DropItemData { guid })),
+                        action: GameAction::DropItem(Box::new(DropItemData { item_guid: guid })),
                     })))
                     .await
             }
@@ -242,11 +241,11 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameActionData::PutItemInContainer(Box::new(
+                        action: GameAction::PutItemInContainer(Box::new(
                             PutItemInContainerData {
-                                item: guid,
-                                container: self.world.player.guid,
-                                placement: 0,
+                                item_guid: guid,
+                                container_guid: self.world.player.guid,
+                                slot: 0,
                             },
                         )),
                     })))
@@ -266,11 +265,11 @@ impl Client {
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence: 0,
-                        action: GameActionData::PutItemInContainer(Box::new(
+                        action: GameAction::PutItemInContainer(Box::new(
                             PutItemInContainerData {
-                                item,
-                                container,
-                                placement,
+                                item_guid: item,
+                                container_guid: container,
+                                slot: placement,
                             },
                         )),
                     })))
@@ -287,8 +286,7 @@ impl Client {
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence,
 
-                        action: GameActionData::GetAndWieldItem(Box::new(GetAndWieldItemData {
-                            sequence,
+                        action: GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
                             item_guid: item,
                             equip_mask: EquipMask::from_bits_truncate(equip_mask),
                         })),
@@ -311,9 +309,8 @@ impl Client {
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence,
 
-                        action: GameActionData::StackableSplitToWield(Box::new(
+                        action: GameAction::StackableSplitToWield(Box::new(
                             StackableSplitToWieldData {
-                                sequence,
                                 stack_guid: item,
                                 amount: amount as i32,
                                 equip_mask: EquipMask::from_bits_truncate(equip_mask),
@@ -329,8 +326,7 @@ impl Client {
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                         sequence,
 
-                        action: GameActionData::MoveToState(Box::new(MoveToStateData {
-                            sequence,
+                        action: GameAction::MoveToState(Box::new(MoveToStateData {
                             raw_motion_state: RawMotionState {
                                 flags: RawMotionFlags::CURRENT_STYLE,
                                 current_style: Some(state_opcode),
@@ -405,7 +401,7 @@ impl Client {
             }
             ClientCommand::SyncPosition => {
                 log::debug!(">>> Syncing Position (Heartbeat)");
-                let pulse = AutonomousPositionData {
+                let pulse = AutonomousPositionActionData {
                     position: self.world.player.position,
                     instance_sequence: self.world.player.instance_sequence,
                     server_control_sequence: self.world.player.server_control_sequence,
@@ -416,7 +412,7 @@ impl Client {
 
                 let action = GameActionMessage {
                     sequence: 0,
-                    action: GameActionData::AutonomousPosition(Box::new(pulse)),
+                    action: GameAction::AutonomousPosition(Box::new(pulse)),
                 };
 
                 self.session
@@ -536,7 +532,8 @@ impl Client {
             self.message_counter += 1;
         }
 
-        let message = GameMessage::unpack(data);
+        let mut offset = 0;
+        let message = GameMessage::unpack(data, &mut offset);
         if message.is_none() {
             let opcode_str = if data.len() >= 4 {
                 let opcode = u32::from_le_bytes(data[0..4].try_into().unwrap_or([0; 4]));
@@ -603,20 +600,20 @@ impl Client {
                 }
             }
             GameMessage::GameEvent(ev) => match &ev.event {
-                GameEventData::PlayerDescription(_) | GameEventData::StartGame => {
+                GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
                         self.send_status_event();
                     }
                     Ok(())
                 }
-                GameEventData::PingResponse(_) => {
+                GameEvent::PingResponse(_) => {
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::PingResponse);
                     }
                     Ok(())
                 }
-                GameEventData::ViewContents(data) => {
+                GameEvent::ViewContents(data) => {
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::ViewContents {
                             container: data.container,
@@ -625,7 +622,7 @@ impl Client {
                     }
                     Ok(())
                 }
-                GameEventData::Tell(data) => {
+                GameEvent::Tell(data) => {
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::Chat {
                             sender: data.sender_name.clone(),
@@ -634,7 +631,7 @@ impl Client {
                     }
                     Ok(())
                 }
-                GameEventData::ChannelBroadcast(data) => {
+                GameEvent::ChannelBroadcast(data) => {
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::Chat {
                             sender: data.sender_name.clone(),
@@ -643,7 +640,7 @@ impl Client {
                     }
                     Ok(())
                 }
-                GameEventData::WeenieError(data) => {
+                GameEvent::WeenieError(data) => {
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::WeenieError {
                             error_id: data.error_id,
@@ -652,7 +649,7 @@ impl Client {
                     }
                     Ok(())
                 }
-                GameEventData::WeenieErrorWithString(data) => {
+                GameEvent::WeenieErrorWithString(data) => {
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::WeenieError {
                             error_id: data.error_id,
@@ -661,7 +658,7 @@ impl Client {
                     }
                     Ok(())
                 }
-                GameEventData::InventoryServerSaveFailed(data) => {
+                GameEvent::InventoryServerSaveFailed(data) => {
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::InventoryServerSaveFailed {
                             item_guid: data.item_guid,
@@ -803,8 +800,8 @@ impl Client {
         Ok(())
     }
 
-    async fn handle_game_action(&mut self, data: &GameActionData) -> Result<()> {
-        if let GameActionData::LoginComplete(_) = data {
+    async fn handle_game_action(&mut self, data: &GameAction) -> Result<()> {
+        if let GameAction::LoginComplete(_) = data {
             self.state = ClientState::InWorld;
             self.send_status_event();
         }
@@ -864,7 +861,7 @@ impl Client {
     async fn send_login_complete(&mut self) -> Result<()> {
         let msg = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0,
-            action: GameActionData::LoginComplete(Box::new(LoginCompleteData)),
+            action: GameAction::LoginComplete(Box::new(LoginCompleteData)),
         }));
         self.session.send_message(&msg).await?;
         Ok(())
@@ -873,8 +870,8 @@ impl Client {
     async fn send_talk(&mut self, text: &str) -> Result<()> {
         let msg = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0,
-            action: GameActionData::Talk(Box::new(TalkData {
-                text: text.to_string(),
+            action: GameAction::Talk(Box::new(TalkData {
+                message: text.to_string(),
             })),
         }));
         self.session.send_message(&msg).await?;
@@ -1026,7 +1023,7 @@ impl Client {
         // Respond with AutonomousPosition heartbeat to confirm arrival
         // We use AutonomousPosition instead of MoveToState because MoveToState
         // cancels server-side movement chains (like pickups) on the ACE server.
-        let pulse = AutonomousPositionData {
+        let pulse = AutonomousPositionActionData {
             position: next_pos,
             instance_sequence: self.world.player.instance_sequence,
             server_control_sequence: self.world.player.server_control_sequence,
@@ -1043,7 +1040,7 @@ impl Client {
 
         let action = GameActionMessage {
             sequence: 0, // Heartbeats usually use 0 or a separate counter
-            action: GameActionData::AutonomousPosition(Box::new(pulse)),
+            action: GameAction::AutonomousPosition(Box::new(pulse)),
         };
 
         self.session

@@ -1,4 +1,24 @@
-use super::*;
+pub(crate) mod character;
+pub(crate) mod chat;
+pub(crate) mod effects;
+pub(crate) mod inventory;
+pub(crate) mod misc;
+pub(crate) mod movement;
+pub(crate) mod object;
+pub(crate) mod player;
+
+pub use character::*;
+pub use chat::*;
+pub use effects::*;
+pub use inventory::*;
+pub use misc::*;
+pub use movement::*;
+pub use object::*;
+pub use player::*;
+
+use crate::protocol::messages::{
+    game_action::GameActionMessage, game_event::GameEventMessage, opcodes::*, traits::*,
+};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +70,6 @@ pub enum GameMessage {
     UpdatePropertyDataId(Box<UpdatePropertyDataIdData>),
     UpdatePropertyInstanceId(Box<UpdatePropertyInstanceIdData>),
 
-    UpdateHealth(Box<UpdateHealthData>),
     ParentEvent(Box<ParentEventData>),
     PickupEvent(Box<PickupEventData>),
     InventoryRemoveObject(Box<InventoryRemoveObjectData>),
@@ -62,7 +81,7 @@ pub enum GameMessage {
     Unknown(u32, Vec<u8>),
 }
 
-impl MessageUnpack for GameMessage {
+impl ProtocolUnpack for GameMessage {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -268,7 +287,7 @@ impl MessageUnpack for GameMessage {
     }
 }
 
-impl MessagePack for GameMessage {
+impl ProtocolPack for GameMessage {
     fn pack(&self, buf: &mut Vec<u8>) {
         match self {
             GameMessage::CharacterList(data) => {
@@ -299,10 +318,6 @@ impl MessagePack for GameMessage {
                 buf.write_u32::<LittleEndian>(GameOpcode::DddInterrogationResponse as u32)
                     .unwrap();
                 data.pack(buf);
-            }
-            GameMessage::DddInterrogation => {
-                buf.write_u32::<LittleEndian>(GameOpcode::DddInterrogation as u32)
-                    .unwrap();
             }
             GameMessage::CharacterError(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::CharacterError as u32)
@@ -349,43 +364,63 @@ impl MessagePack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::PlaySound(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::Sound as u32)
+            GameMessage::UpdateAttribute(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateAttribute as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateAttribute as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdateSkill(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateSkill as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateSkill as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdateVital(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateVital as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateVital as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdateAttribute2ndLevel(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateVitalCurrent as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::PlayEffect(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::PlayEffect as u32)
+            GameMessage::ObjectCreate(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::ObjectCreate as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::SetState(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::SetState as u32)
+            GameMessage::PlayerCreate(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayerCreate as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::InventoryRemoveObject(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::InventoryRemoveObject as u32)
+            GameMessage::UpdateObject(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::UpdateObject as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::SetStackSize(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::SetStackSize as u32)
+            GameMessage::ObjectDelete(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::ObjectDelete as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::PlayerTeleport(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::PlayerTeleport as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameMessage::AutonomousPosition(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::AutonomousPosition as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameMessage::AutonomyLevel(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::AutonomyLevel as u32)
+            GameMessage::UpdatePosition(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::UpdatePosition as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -404,142 +439,18 @@ impl MessagePack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePosition(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::UpdatePosition as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdateObject(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::UpdateObject as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameMessage::ObjectCreate(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::ObjectCreate as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameMessage::PlayerCreate(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::PlayerCreate as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameMessage::ObjectDelete(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::ObjectDelete as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdateAttribute(data) => {
-                let opcode = if data.object_guid.is_some() {
-                    GameOpcode::PublicUpdateAttribute
-                } else {
-                    GameOpcode::PrivateUpdateAttribute
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdateSkill(data) => {
-                let opcode = if data.object_guid.is_some() {
-                    GameOpcode::PublicUpdateSkill
-                } else {
-                    GameOpcode::PrivateUpdateSkill
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdateSkillLevel(data) => {
-                let opcode = if data.guid.is_some() {
-                    GameOpcode::PublicUpdateSkillLevel
-                } else {
-                    GameOpcode::PrivateUpdateSkillLevel
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdateVital(data) => {
-                let opcode = if data.object_guid.is_some() {
-                    GameOpcode::PublicUpdateVital
-                } else {
-                    GameOpcode::PrivateUpdateVital
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdateAttribute2ndLevel(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateVitalCurrent as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
             GameMessage::UpdateMotion(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::UpdateMotion as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyInt(data) => {
-                let opcode = if data.is_public {
-                    GameOpcode::PublicUpdatePropertyInt
-                } else {
-                    GameOpcode::PrivateUpdatePropertyInt
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
+            GameMessage::AutonomousPosition(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::AutonomousPosition as u32)
+                    .unwrap();
                 data.pack(buf);
             }
-            GameMessage::UpdatePropertyInt64(data) => {
-                let opcode = if data.is_public {
-                    GameOpcode::PublicUpdatePropertyInt64
-                } else {
-                    GameOpcode::PrivateUpdatePropertyInt64
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdatePropertyBool(data) => {
-                let opcode = if data.is_public {
-                    GameOpcode::PublicUpdatePropertyBool
-                } else {
-                    GameOpcode::PrivateUpdatePropertyBool
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdatePropertyFloat(data) => {
-                let opcode = if data.is_public {
-                    GameOpcode::PublicUpdatePropertyFloat
-                } else {
-                    GameOpcode::PrivateUpdatePropertyFloat
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdatePropertyString(data) => {
-                let opcode = if data.is_public {
-                    GameOpcode::PublicUpdatePropertyString
-                } else {
-                    GameOpcode::PrivateUpdatePropertyString
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdatePropertyDataId(data) => {
-                let opcode = if data.is_public {
-                    GameOpcode::PublicUpdatePropertyDid
-                } else {
-                    GameOpcode::PrivateUpdatePropertyDid
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdatePropertyInstanceId(data) => {
-                let opcode = if data.is_public {
-                    GameOpcode::PublicUpdatePropertyIid
-                } else {
-                    GameOpcode::PrivateUpdatePropertyIid
-                };
-                buf.write_u32::<LittleEndian>(opcode as u32).unwrap();
-                data.pack(buf);
-            }
-            GameMessage::UpdateHealth(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::GameEvent as u32)
+            GameMessage::AutonomyLevel(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::AutonomyLevel as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -553,6 +464,106 @@ impl MessagePack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameMessage::InventoryRemoveObject(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::InventoryRemoveObject as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::SetStackSize(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::SetStackSize as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::SetState(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::SetState as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PlayerTeleport(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayerTeleport as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PlaySound(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::Sound as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::PlayEffect(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::PlayEffect as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameMessage::UpdatePropertyInt(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyInt as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyInt as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdatePropertyInt64(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyInt64 as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyInt64 as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdatePropertyBool(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyBool as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyBool as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdatePropertyFloat(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyFloat as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyFloat as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdatePropertyString(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyString as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyString as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdatePropertyDataId(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyDid as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyDid as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::UpdatePropertyInstanceId(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdatePropertyIid as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdatePropertyIid as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
             GameMessage::ObjDescEvent(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::ObjDescEvent as u32)
                     .unwrap();
@@ -563,23 +574,24 @@ impl MessagePack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameMessage::UpdateSkillLevel(data) => {
+                if data.is_public {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PublicUpdateSkillLevel as u32)
+                        .unwrap();
+                } else {
+                    buf.write_u32::<LittleEndian>(GameOpcode::PrivateUpdateSkillLevel as u32)
+                        .unwrap();
+                }
+                data.pack(buf);
+            }
+            GameMessage::DddInterrogation => {
+                buf.write_u32::<LittleEndian>(GameOpcode::DddInterrogation as u32)
+                    .unwrap();
+            }
             GameMessage::Unknown(opcode, data) => {
                 buf.write_u32::<LittleEndian>(*opcode).unwrap();
                 buf.extend_from_slice(data);
             }
         }
-    }
-}
-
-impl GameMessage {
-    pub fn unpack(data: &[u8]) -> Option<Self> {
-        let mut offset = 0;
-        <Self as MessageUnpack>::unpack(data, &mut offset)
-    }
-
-    pub fn pack(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        <Self as MessagePack>::pack(self, &mut buf);
-        buf
     }
 }

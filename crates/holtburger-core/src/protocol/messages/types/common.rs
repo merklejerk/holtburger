@@ -1,4 +1,4 @@
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ pub struct Shortcut {
     pub layer: u16,
 }
 
-impl MessageUnpack for Shortcut {
+impl ProtocolUnpack for Shortcut {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -34,7 +34,7 @@ impl MessageUnpack for Shortcut {
     }
 }
 
-impl MessagePack for Shortcut {
+impl ProtocolPack for Shortcut {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u32::<LittleEndian>(self.index).unwrap();
         self.object_id.pack(writer);
@@ -62,7 +62,7 @@ pub struct Enchantment {
     pub spell_set_id: Option<u32>,
 }
 
-impl MessageUnpack for Enchantment {
+impl ProtocolUnpack for Enchantment {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 28 > data.len() {
             return None;
@@ -120,7 +120,7 @@ impl MessageUnpack for Enchantment {
     }
 }
 
-impl MessagePack for Enchantment {
+impl ProtocolPack for Enchantment {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u16::<LittleEndian>(self.spell_id).unwrap();
         writer.write_u16::<LittleEndian>(self.layer).unwrap();
@@ -182,7 +182,7 @@ pub struct CreatureSkill {
     pub last_used: f64,
 }
 
-impl MessageUnpack for CreatureSkill {
+impl ProtocolUnpack for CreatureSkill {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 32 > data.len() {
             return None;
@@ -208,7 +208,7 @@ impl MessageUnpack for CreatureSkill {
     }
 }
 
-impl MessagePack for CreatureSkill {
+impl ProtocolPack for CreatureSkill {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u32::<LittleEndian>(self.sk_type).unwrap();
         writer.write_u16::<LittleEndian>(self.ranks as u16).unwrap();
@@ -227,7 +227,7 @@ pub struct LayeredSpell {
     pub layer: u16,
 }
 
-impl MessageUnpack for LayeredSpell {
+impl ProtocolUnpack for LayeredSpell {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -239,7 +239,7 @@ impl MessageUnpack for LayeredSpell {
     }
 }
 
-impl MessagePack for LayeredSpell {
+impl ProtocolPack for LayeredSpell {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u16::<LittleEndian>(self.spell_id).unwrap();
         writer.write_u16::<LittleEndian>(self.layer).unwrap();
@@ -346,5 +346,72 @@ mod tests {
         let mut buf = Vec::new();
         sc.pack(&mut buf);
         assert_pack_unpack_parity(&buf, &sc);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SetStackSizeData {
+    pub sequence: u32,
+    pub object_guid: Guid,
+    pub stack_size: u32,
+    pub value: u32,
+}
+
+impl ProtocolUnpack for SetStackSizeData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() { return None; }
+        let sequence = LittleEndian::read_u32(&data[*offset..*offset+4]);
+        *offset += 4;
+        let object_guid = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() { return None; }
+        let stack_size = LittleEndian::read_u32(&data[*offset..*offset+4]);
+        let value = LittleEndian::read_u32(&data[*offset+4..*offset+8]);
+        *offset += 8;
+        Some(SetStackSizeData { sequence, object_guid, stack_size, value })
+    }
+}
+
+impl ProtocolPack for SetStackSizeData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.sequence).unwrap();
+        self.object_guid.pack(buf);
+        buf.write_u32::<LittleEndian>(self.stack_size).unwrap();
+        buf.write_u32::<LittleEndian>(self.value).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IdentifyObjectData {
+    pub guid: Guid,
+}
+
+impl ProtocolUnpack for IdentifyObjectData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        Some(IdentifyObjectData { guid })
+    }
+}
+
+impl ProtocolPack for IdentifyObjectData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.guid.pack(buf);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UseData {
+    pub guid: Guid,
+}
+
+impl ProtocolUnpack for UseData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        Some(UseData { guid })
+    }
+}
+
+impl ProtocolPack for UseData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.guid.pack(buf);
     }
 }

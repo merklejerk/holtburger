@@ -1,12 +1,21 @@
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
-pub use crate::protocol::messages::{
-    ChannelBroadcastData, GameEventOpcode, IdentifyObjectResponseData,
-    InventoryPutObjInContainerData, InventoryPutObjectIn3DData, InventoryServerSaveFailedData,
-    MagicPurgeBadEnchantmentsData, MagicPurgeEnchantmentsData, MagicRemoveEnchantmentData,
-    MagicRemoveMultipleEnchantmentsData, MagicUpdateEnchantmentData,
-    MagicUpdateMultipleEnchantmentsData, PingResponseData, PlayerDescriptionData, TellData,
-    UseDoneData, ViewContentsData, WeenieErrorData, WeenieErrorWithStringData, WieldObjectData,
-};
+pub(crate) mod chat;
+pub(crate) mod inventory;
+pub(crate) mod magic;
+pub(crate) mod misc;
+pub(crate) mod net;
+pub(crate) mod object;
+pub(crate) mod player;
+
+pub use chat::*;
+pub use inventory::*;
+pub use magic::*;
+pub use misc::*;
+pub use net::*;
+pub use object::*;
+pub use player::*;
+
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
+use crate::protocol::messages::opcodes::GameEventOpcode;
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 
@@ -14,11 +23,11 @@ use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 pub struct GameEventMessage {
     pub target: Guid,
     pub sequence: u32,
-    pub event: GameEventData,
+    pub event: GameEvent,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum GameEventData {
+pub enum GameEvent {
     PlayerDescription(Box<PlayerDescriptionData>),
     PingResponse(Box<PingResponseData>),
     ViewContents(Box<ViewContentsData>),
@@ -39,11 +48,12 @@ pub enum GameEventData {
     UseDone(Box<UseDoneData>),
     IdentifyObjectResponse(Box<IdentifyObjectResponseData>),
     InventoryServerSaveFailed(Box<InventoryServerSaveFailedData>),
+    UpdateHealth(Box<UpdateHealthData>),
     Unknown(u32, Vec<u8>),
 }
 
-impl GameEventMessage {
-    pub fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+impl ProtocolUnpack for GameEventMessage {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let target = Guid::unpack(data, offset)?;
         if *offset + 8 > data.len() {
             return None;
@@ -56,85 +66,88 @@ impl GameEventMessage {
 
         let event = match event_op {
             Some(op) => match op {
-                GameEventOpcode::PlayerDescription => GameEventData::PlayerDescription(Box::new(
+                GameEventOpcode::PlayerDescription => GameEvent::PlayerDescription(Box::new(
                     PlayerDescriptionData::unpack(target, sequence, data, offset)?,
                 )),
                 GameEventOpcode::PingResponse => {
-                    GameEventData::PingResponse(Box::new(PingResponseData::unpack(data, offset)?))
+                    GameEvent::PingResponse(Box::new(PingResponseData::unpack(data, offset)?))
                 }
                 GameEventOpcode::ViewContents => {
-                    GameEventData::ViewContents(Box::new(ViewContentsData::unpack(data, offset)?))
+                    GameEvent::ViewContents(Box::new(ViewContentsData::unpack(data, offset)?))
                 }
                 GameEventOpcode::InventoryPutObjInContainer => {
-                    GameEventData::InventoryPutObjInContainer(Box::new(
+                    GameEvent::InventoryPutObjInContainer(Box::new(
                         InventoryPutObjInContainerData::unpack(data, offset)?,
                     ))
                 }
-                GameEventOpcode::InventoryPutObjectIn3D => GameEventData::InventoryPutObjectIn3D(
+                GameEventOpcode::InventoryPutObjectIn3D => GameEvent::InventoryPutObjectIn3D(
                     Box::new(InventoryPutObjectIn3DData::unpack(data, offset)?),
                 ),
                 GameEventOpcode::WieldObject => {
-                    GameEventData::WieldObject(Box::new(WieldObjectData::unpack(data, offset)?))
+                    GameEvent::WieldObject(Box::new(WieldObjectData::unpack(data, offset)?))
                 }
                 GameEventOpcode::Tell => {
-                    GameEventData::Tell(Box::new(TellData::unpack(data, offset)?))
+                    GameEvent::Tell(Box::new(TellData::unpack(data, offset)?))
                 }
-                GameEventOpcode::ChannelBroadcast => GameEventData::ChannelBroadcast(Box::new(
+                GameEventOpcode::ChannelBroadcast => GameEvent::ChannelBroadcast(Box::new(
                     ChannelBroadcastData::unpack(data, offset)?,
                 )),
-                GameEventOpcode::StartGame => GameEventData::StartGame,
+                GameEventOpcode::StartGame => GameEvent::StartGame,
                 GameEventOpcode::MagicUpdateEnchantment => {
                     let mut d = MagicUpdateEnchantmentData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
-                    GameEventData::MagicUpdateEnchantment(Box::new(d))
+                    GameEvent::MagicUpdateEnchantment(Box::new(d))
                 }
                 GameEventOpcode::MagicUpdateMultipleEnchantments => {
                     let mut d = MagicUpdateMultipleEnchantmentsData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
-                    GameEventData::MagicUpdateMultipleEnchantments(Box::new(d))
+                    GameEvent::MagicUpdateMultipleEnchantments(Box::new(d))
                 }
                 GameEventOpcode::MagicRemoveEnchantment => {
                     let mut d = MagicRemoveEnchantmentData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
-                    GameEventData::MagicRemoveEnchantment(Box::new(d))
+                    GameEvent::MagicRemoveEnchantment(Box::new(d))
                 }
                 GameEventOpcode::MagicRemoveMultipleEnchantments => {
                     let mut d = MagicRemoveMultipleEnchantmentsData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
-                    GameEventData::MagicRemoveMultipleEnchantments(Box::new(d))
+                    GameEvent::MagicRemoveMultipleEnchantments(Box::new(d))
                 }
                 GameEventOpcode::MagicPurgeEnchantments => {
                     let mut d = MagicPurgeEnchantmentsData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
-                    GameEventData::MagicPurgeEnchantments(Box::new(d))
+                    GameEvent::MagicPurgeEnchantments(Box::new(d))
                 }
                 GameEventOpcode::MagicPurgeBadEnchantments => {
                     let mut d = MagicPurgeBadEnchantmentsData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
-                    GameEventData::MagicPurgeBadEnchantments(Box::new(d))
+                    GameEvent::MagicPurgeBadEnchantments(Box::new(d))
                 }
                 GameEventOpcode::WeenieError => {
-                    GameEventData::WeenieError(Box::new(WeenieErrorData::unpack(data, offset)?))
+                    GameEvent::WeenieError(Box::new(WeenieErrorData::unpack(data, offset)?))
                 }
-                GameEventOpcode::WeenieErrorWithString => GameEventData::WeenieErrorWithString(
+                GameEventOpcode::WeenieErrorWithString => GameEvent::WeenieErrorWithString(
                     Box::new(WeenieErrorWithStringData::unpack(data, offset)?),
                 ),
                 GameEventOpcode::UseDone => {
-                    GameEventData::UseDone(Box::new(UseDoneData::unpack(data, offset)?))
+                    GameEvent::UseDone(Box::new(UseDoneData::unpack(data, offset)?))
                 }
-                GameEventOpcode::IdentifyObjectResponse => GameEventData::IdentifyObjectResponse(
+                GameEventOpcode::IdentifyObjectResponse => GameEvent::IdentifyObjectResponse(
                     Box::new(IdentifyObjectResponseData::unpack(data, offset)?),
                 ),
                 GameEventOpcode::InventoryServerSaveFailed => {
-                    GameEventData::InventoryServerSaveFailed(Box::new(
+                    GameEvent::InventoryServerSaveFailed(Box::new(
                         InventoryServerSaveFailedData::unpack(data, offset)?,
                     ))
+                }
+                GameEventOpcode::UpdateHealth => {
+                    GameEvent::UpdateHealth(Box::new(UpdateHealthData::unpack(data, offset)?))
                 }
             },
             None => {
@@ -146,7 +159,7 @@ impl GameEventMessage {
                 );
                 let remaining = data[*offset..].to_vec();
                 *offset = data.len();
-                GameEventData::Unknown(event_type_raw, remaining)
+                GameEvent::Unknown(event_type_raw, remaining)
             }
         };
 
@@ -156,161 +169,126 @@ impl GameEventMessage {
             event,
         })
     }
+}
 
-    pub fn pack(&self, buf: &mut Vec<u8>) {
+impl ProtocolPack for GameEventMessage {
+    fn pack(&self, buf: &mut Vec<u8>) {
         self.target.pack(buf);
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.event {
-            GameEventData::PlayerDescription(data) => {
+            GameEvent::PlayerDescription(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::PlayerDescription as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::PingResponse(data) => {
+            GameEvent::PingResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::PingResponse as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::ViewContents(data) => {
+            GameEvent::ViewContents(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ViewContents as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::InventoryPutObjInContainer(data) => {
+            GameEvent::InventoryPutObjInContainer(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::InventoryPutObjInContainer as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::InventoryPutObjectIn3D(data) => {
+            GameEvent::InventoryPutObjectIn3D(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::InventoryPutObjectIn3D as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::WieldObject(data) => {
+            GameEvent::WieldObject(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::WieldObject as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::Tell(data) => {
+            GameEvent::Tell(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::Tell as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::ChannelBroadcast(data) => {
+            GameEvent::ChannelBroadcast(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ChannelBroadcast as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::StartGame => {
+            GameEvent::StartGame => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::StartGame as u32)
                     .unwrap();
             }
-            GameEventData::MagicUpdateEnchantment(data) => {
+            GameEvent::MagicUpdateEnchantment(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::MagicUpdateEnchantment as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::MagicUpdateMultipleEnchantments(data) => {
+            GameEvent::MagicUpdateMultipleEnchantments(data) => {
                 buf.write_u32::<LittleEndian>(
                     GameEventOpcode::MagicUpdateMultipleEnchantments as u32,
                 )
                 .unwrap();
                 data.pack(buf);
             }
-            GameEventData::MagicRemoveEnchantment(data) => {
+            GameEvent::MagicRemoveEnchantment(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::MagicRemoveEnchantment as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::MagicRemoveMultipleEnchantments(data) => {
+            GameEvent::MagicRemoveMultipleEnchantments(data) => {
                 buf.write_u32::<LittleEndian>(
                     GameEventOpcode::MagicRemoveMultipleEnchantments as u32,
                 )
                 .unwrap();
                 data.pack(buf);
             }
-            GameEventData::MagicPurgeEnchantments(data) => {
+            GameEvent::MagicPurgeEnchantments(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::MagicPurgeEnchantments as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::MagicPurgeBadEnchantments(data) => {
+            GameEvent::MagicPurgeBadEnchantments(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::MagicPurgeBadEnchantments as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::WeenieError(data) => {
+            GameEvent::WeenieError(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::WeenieError as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::WeenieErrorWithString(data) => {
+            GameEvent::WeenieErrorWithString(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::WeenieErrorWithString as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::UseDone(data) => {
+            GameEvent::UseDone(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::UseDone as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::IdentifyObjectResponse(data) => {
+            GameEvent::IdentifyObjectResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::IdentifyObjectResponse as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::InventoryServerSaveFailed(data) => {
+            GameEvent::InventoryServerSaveFailed(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::InventoryServerSaveFailed as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameEventData::Unknown(opcode, data) => {
+            GameEvent::UpdateHealth(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::UpdateHealth as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::Unknown(opcode, data) => {
                 buf.write_u32::<LittleEndian>(*opcode).unwrap();
                 buf.extend_from_slice(data);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::protocol::messages::GameMessage;
-    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-
-    #[test]
-    fn test_gamemessage_routing_game_event_start() {
-        // Opcode (0xF7B0), Target (0x50000001), Seq (0x0E), Event (0x0282)
-        let hex_str = "B0F70000010000500E00000082020000";
-        let data = hex::decode(hex_str).expect("Hex decode failed");
-        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
-            target: Guid(0x50000001),
-            sequence: 0x0E,
-            event: GameEventData::StartGame,
-        }));
-        assert_pack_unpack_parity(&data, &expected);
-    }
-
-    #[test]
-    fn test_channel_broadcast_unpack_failure() {
-        // Hex from user report: B0F7...00
-        // Corrected with padded empty string: 00000000 for sender_name
-        let hex_str = "B0F70000010000500D00000047010000040000000000000079002B4275646479206861732063726561746564205368697274202830783830303035443235292061742030784441353530303144205B38352E363730333837203130372E3938343732362031392E3939353030315D20302E34373432303020302E30303030303020302E30303030303020302E3838303431372E00";
-        let data = hex::decode(hex_str).expect("Hex decode failed");
-        let result = GameMessage::unpack(&data);
-        assert!(result.is_some(), "Should unpack successfully now");
-
-        let Some(GameMessage::GameEvent(ev)) = result else {
-            panic!("Expected GameEvent");
-        };
-        assert_eq!(ev.target, Guid(0x50000001));
-        assert_eq!(ev.sequence, 13);
-        let GameEventData::ChannelBroadcast(data) = &ev.event else {
-            panic!("Expected ChannelBroadcast");
-        };
-        assert_eq!(data.channel_id, 4);
-        assert_eq!(data.sender_name, "");
-        assert!(data.message.starts_with("+Buddy has created Shirt"));
     }
 }

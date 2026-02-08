@@ -1,42 +1,25 @@
-pub mod character;
-pub mod chat;
-pub mod common;
-pub mod effects;
 pub mod game_action;
 pub mod game_event;
 pub mod game_message;
-pub mod inventory;
-pub mod magic;
-pub mod misc;
-pub mod movement;
-pub mod net;
-pub mod object;
 pub mod opcodes;
-pub mod player;
 pub mod traits;
 pub mod transport;
 pub mod utils;
-pub mod world;
+pub mod types;
 
 #[cfg(test)]
 pub mod test_helpers;
 
-pub use character::*;
-pub use chat::*;
-pub use common::*;
-pub use effects::*;
-pub use game_action::*;
-pub use game_event::*;
-pub use game_message::*;
-pub use inventory::*;
-pub use magic::*;
-pub use misc::*;
-pub use movement::*;
-pub use net::*;
-pub use object::*;
+// Re-export core enums
+pub use game_action::{GameAction, GameActionMessage, *};
+pub use game_event::{GameEvent, GameEventMessage, *};
+pub use game_message::{GameMessage, *};
+
 pub use opcodes::*;
-pub use player::*;
 pub use traits::*;
 pub use transport::*;
 pub use utils::*;
-pub use world::*;
+pub use types::common::*;
+pub use types::inventory::*;
+pub use types::movement::*;
+pub use types::object::*;

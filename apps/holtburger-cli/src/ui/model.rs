@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
@@ -12,7 +12,7 @@ use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, 
 use holtburger_core::{ClientState, RetryState};
 
 use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
-use crate::entities::classification;
+use crate::entities::filter::{EntityFilter, filter_entities};
 use crate::ui::widgets::effects::get_enchantment_name;
 
 pub struct AppState {
@@ -118,18 +118,20 @@ impl AppState {
 
     pub fn dashboard_item_count(&self) -> usize {
         match self.dashboard_tab {
-            DashboardTab::Entities => self
-                .entities
-                .values()
-                .filter(|e| {
-                    classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
-                })
-                .count(),
-            DashboardTab::Inventory => self
-                .entities
-                .values()
-                .filter(|e| e.position.landblock_id == Guid::NULL && !e.name.is_empty())
-                .count(),
+            DashboardTab::Entities => filter_entities(
+                &self.entities,
+                self.player_guid,
+                self.player_pos.as_ref(),
+                EntityFilter::World,
+            )
+            .len(),
+            DashboardTab::Inventory => filter_entities(
+                &self.entities,
+                self.player_guid,
+                self.player_pos.as_ref(),
+                EntityFilter::Inventory,
+            )
+            .len(),
             DashboardTab::Effects => self.get_effects_list_enchantments().len(),
             DashboardTab::Character => {
                 let attr_count = self.attributes.len();
@@ -143,107 +145,22 @@ impl AppState {
         }
     }
 
-    fn get_filtered_entities(&self, filter_inventory: bool) -> Vec<(&Entity, f32, usize)> {
-        let candidates: Vec<_> = self
-            .entities
-            .values()
-            .filter(|e| {
-                if !filter_inventory {
-                    classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
-                } else {
-                    e.position.landblock_id == Guid::NULL && !e.name.is_empty()
-                }
-            })
-            .collect();
-
-        if candidates.is_empty() {
-            return Vec::new();
-        }
-
-        // Build parent-child mapping for the subset
-        let mut children_map: HashMap<Guid, Vec<Guid>> = HashMap::new();
-        let mut roots = Vec::new();
-
-        let candidate_guids: HashSet<Guid> = candidates.iter().map(|e| e.guid).collect();
-
-        for e in &candidates {
-            let parent_id = if filter_inventory {
-                e.container_id
-            } else {
-                e.container_id.or(e.wielder_id).or(e.physics_parent_id)
-            };
-
-            let is_root = if let Some(pid) = parent_id {
-                if Some(pid) == self.player_guid {
-                    true
-                } else {
-                    !candidate_guids.contains(&pid)
-                }
-            } else {
-                true
-            };
-
-            if is_root {
-                roots.push(e.guid);
-            } else {
-                children_map
-                    .entry(parent_id.unwrap())
-                    .or_default()
-                    .push(e.guid);
-            }
-        }
-
-        // Sort roots (by distance for Entities, by name for Inventory)
-        roots.sort_by(|&a, &b| {
-            let ea = &self.entities[&a];
-            let eb = &self.entities[&b];
-            if !filter_inventory {
-                let da = if let Some(p) = &self.player_pos {
-                    ea.position.distance_to(p)
-                } else {
-                    999.0
-                };
-                let db = if let Some(p) = &self.player_pos {
-                    eb.position.distance_to(p)
-                } else {
-                    999.0
-                };
-                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-            } else {
-                ea.name.cmp(&eb.name)
-            }
-        });
-
-        // Flatten with depth using DFS
-        let mut result = Vec::new();
-        let mut stack: Vec<(Guid, usize)> = roots.into_iter().rev().map(|id| (id, 0)).collect();
-
-        while let Some((guid, depth)) = stack.pop() {
-            let e = &self.entities[&guid];
-            let dist = if let Some(p) = &self.player_pos {
-                e.position.distance_to(p)
-            } else {
-                0.0
-            };
-            result.push((e, dist, depth));
-
-            if let Some(mut children) = children_map.remove(&guid) {
-                children.sort_by(|&a, &b| self.entities[&a].name.cmp(&self.entities[&b].name));
-                for child_guid in children.into_iter().rev() {
-                    stack.push((child_guid, depth + 1));
-                }
-            }
-        }
-
-        result
-    }
-
     pub fn get_filtered_nearby_tab(&self) -> Vec<(&Entity, f32, usize)> {
-        self.get_filtered_entities(false)
+        filter_entities(
+            &self.entities,
+            self.player_guid,
+            self.player_pos.as_ref(),
+            EntityFilter::World,
+        )
     }
 
     pub fn get_filtered_inventory_tab(&self) -> Vec<(&Entity, f32, usize)> {
-        self.get_filtered_entities(true)
+        filter_entities(
+            &self.entities,
+            self.player_guid,
+            self.player_pos.as_ref(),
+            EntityFilter::Inventory,
+        )
     }
 
     pub fn get_effects_list_enchantments(&self) -> Vec<(&Enchantment, bool)> {

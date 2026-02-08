@@ -145,24 +145,114 @@ impl ProtocolPack for EmoteTextData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerMessageData {
     pub message: String,
-    pub chat_type: u32,
 }
 
 impl ProtocolUnpack for ServerMessageData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let chat_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        Some(ServerMessageData { message, chat_type })
+        Some(ServerMessageData { message })
     }
 }
 
 impl ProtocolPack for ServerMessageData {
     fn pack(&self, buf: &mut Vec<u8>) {
         write_string16(buf, &self.message);
-        buf.extend_from_slice(&self.chat_type.to_le_bytes());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::protocol::messages::game_message::GameMessage;
+
+    #[test]
+    fn test_server_message_fixture() {
+        let expected = ServerMessageData {
+            message: "Welcome to Asheron's Call!".to_string(),
+        };
+        let mut buf = Vec::new();
+        expected.pack(&mut buf);
+        // String16 length (2) + "Welcome to Asheron's Call!" (26) + pads (0) = 28
+        assert_eq!(buf.len(), 28);
+
+        assert_pack_unpack_parity(&buf, &expected);
+    }
+
+    #[test]
+    fn test_hear_speech_fixture() {
+        let expected = HearSpeechData {
+            message: "Hello world".to_string(),
+            sender_name: "Alice".to_string(),
+            sender: 0x50000001,
+            chat_type: 2,
+        };
+        let data = &fixtures::HEAR_SPEECH[4..];
+        assert_pack_unpack_parity::<HearSpeechData>(data, &expected);
+
+        let GameMessage::HearSpeech(msg) =
+            GameMessage::unpack(fixtures::HEAR_SPEECH, &mut 0).unwrap()
+        else {
+            panic!("Expected HearSpeech");
+        };
+        assert_eq!(*msg, expected);
+    }
+
+    #[test]
+    fn test_hear_ranged_speech_fixture() {
+        let expected = HearRangedSpeechData {
+            message: "I'm within range".to_string(),
+            sender_name: "Bob".to_string(),
+            sender: 0x50000002,
+            range: 10.0,
+            chat_type: 2,
+        };
+        let data = &fixtures::HEAR_RANGED_SPEECH[4..];
+        assert_pack_unpack_parity::<HearRangedSpeechData>(data, &expected);
+
+        let GameMessage::HearRangedSpeech(msg) =
+            GameMessage::unpack(fixtures::HEAR_RANGED_SPEECH, &mut 0).unwrap()
+        else {
+            panic!("Expected HearRangedSpeech");
+        };
+        assert_eq!(*msg, expected);
+    }
+
+    #[test]
+    fn test_emote_text_fixture() {
+        let expected = EmoteTextData {
+            sender: 0x50000001,
+            sender_name: "Alice".to_string(),
+            text: "Alice waves at you.".to_string(),
+        };
+        let data = &fixtures::EMOTE_TEXT[4..];
+        assert_pack_unpack_parity::<EmoteTextData>(data, &expected);
+
+        let GameMessage::EmoteText(msg) =
+            GameMessage::unpack(fixtures::EMOTE_TEXT, &mut 0).unwrap()
+        else {
+            panic!("Expected EmoteText");
+        };
+        assert_eq!(*msg, expected);
+    }
+
+    #[test]
+    fn test_soul_emote_fixture() {
+        let expected = SoulEmoteData {
+            sender: 0x50000001,
+            sender_name: "Alice".to_string(),
+            text: "Alice waves at you.".to_string(),
+        };
+        let data = &fixtures::SOUL_EMOTE[4..];
+        assert_pack_unpack_parity::<SoulEmoteData>(data, &expected);
+
+        let GameMessage::SoulEmote(msg) =
+            GameMessage::unpack(fixtures::SOUL_EMOTE, &mut 0).unwrap()
+        else {
+            panic!("Expected SoulEmote");
+        };
+        assert_eq!(*msg, expected);
+    }
+}
+

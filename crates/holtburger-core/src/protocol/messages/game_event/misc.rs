@@ -83,3 +83,36 @@ impl ProtocolPack for UseDoneData {
         buf.extend_from_slice(&self.error_id.to_le_bytes());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::game_event::{GameEvent, GameEventMessage};
+    use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::world::Guid;
+
+    #[test]
+    fn test_weenie_error_fixture() {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 0x0E,
+            event: GameEvent::WeenieError(Box::new(WeenieErrorData { error_id: 0x1234 })),
+        }));
+        assert_pack_unpack_parity(fixtures::WEENIE_ERROR, &expected);
+    }
+
+    #[test]
+    fn test_weenie_error_with_string_fixture() {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 0x0E,
+            event: GameEvent::WeenieErrorWithString(Box::new(WeenieErrorWithStringData {
+                error_id: 0x1234,
+                message: "Test error".to_string(),
+            })),
+        }));
+        assert_pack_unpack_parity(fixtures::WEENIE_ERROR_WITH_STRING, &expected);
+    }
+}

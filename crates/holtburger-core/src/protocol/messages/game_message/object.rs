@@ -835,3 +835,206 @@ impl ProtocolPack for ForceObjectDescSendData {
         self.guid.pack(buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::{Quaternion, Vector3};
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::world::Guid;
+
+    #[test]
+    fn test_set_state_parity() {
+        let hex = "010000500804400063010100";
+        let data = hex::decode(hex).unwrap();
+        let expected = SetStateData {
+            guid: Guid(0x50000001),
+            physics_state: PhysicsState::REPORT_COLLISIONS | PhysicsState::GRAVITY | PhysicsState::EDGE_SLIDE,
+            instance_sequence: 355,
+            state_sequence: 1,
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_object_create_minimal_fixture() {
+        let expected = ObjectDescriptionData {
+            guid: Guid(0x50000001),
+            model_data: ModelData {
+                header: 1,
+                ..Default::default()
+            },
+            physics_flags: PhysicsDescriptionFlag::POSITION | PhysicsDescriptionFlag::TIMESTAMPS,
+            physics_state: PhysicsState::empty(),
+            pos: Some(WorldPosition {
+                landblock_id: Guid(0x12340001),
+                coords: Vector3 {
+                    x: 100.0,
+                    y: 200.0,
+                    z: 300.0,
+                },
+                rotation: Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            }),
+            parent_id: None,
+            parent_loc: None,
+            obj_scale: None,
+            sequences: [0, 1, 2, 3, 4, 5, 6, 7, 8],
+            weenie_flags: WeenieHeaderFlag::empty(),
+            name: Some("Buddy".to_string()),
+            wcid: 123,
+            icon_id: 0x06000000,
+            item_type: 1,
+            obj_desc_flags: ObjectDescriptionFlag::empty(),
+            weenie_flags2: WeenieHeaderFlag2::empty(),
+            container_id: None,
+            wielder_id: None,
+            valid_locations: None,
+            currently_wielded_location: None,
+            priority: None,
+            burden: None,
+        };
+
+        assert_pack_unpack_parity(fixtures::OBJECT_CREATE_MINIMAL, &expected);
+    }
+
+    #[test]
+    fn test_object_create_complex_fixture() {
+        let expected = ObjectDescriptionData {
+            guid: Guid(0x50000002),
+            model_data: ModelData {
+                header: 0x11,
+                ..Default::default()
+            },
+            physics_flags: PhysicsDescriptionFlag::POSITION
+                | PhysicsDescriptionFlag::PARENT
+                | PhysicsDescriptionFlag::OBJSCALE
+                | PhysicsDescriptionFlag::TIMESTAMPS,
+            physics_state: PhysicsState::empty(),
+            pos: Some(WorldPosition {
+                landblock_id: Guid(0x12340001),
+                coords: Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            }),
+            parent_id: Some(Guid(0x50000001)),
+            parent_loc: Some(1),
+            obj_scale: Some(1.5),
+            sequences: [100, 101, 102, 103, 104, 105, 106, 107, 108],
+            weenie_flags: WeenieHeaderFlag::CONTAINER | WeenieHeaderFlag::WIELDER,
+            name: Some("Fancy Buddy".to_string()),
+            wcid: 456,
+            icon_id: 0x0600000A,
+            item_type: 2,
+            obj_desc_flags: ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
+            weenie_flags2: WeenieHeaderFlag2::empty(),
+            container_id: Some(Guid(0x50001001)),
+            wielder_id: Some(Guid(0x50001002)),
+            valid_locations: None,
+            currently_wielded_location: None,
+            priority: None,
+            burden: None,
+        };
+
+        assert_pack_unpack_parity(fixtures::OBJECT_CREATE_COMPLEX, &expected);
+    }
+
+    #[test]
+    fn test_update_property_int_fixture() {
+        let hex = "0C1900000032000000";
+        let data = hex::decode(hex).unwrap();
+        let expected = PrivateUpdatePropertyIntData {
+            sequence: 0x0C,
+            guid: Guid::NULL,
+            property: 25,
+            value: 50,
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_object_delete_fixture() {
+        let hex = "01000050";
+        let data = hex::decode(hex).unwrap();
+        let expected = ObjectDeleteData {
+            guid: Guid(0x50000001),
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_obj_desc_event_parity() {
+        let expected = GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
+            guid: Guid(0x50000001),
+            model_data: ModelData {
+                header: 0x11,
+                palette_id: Some(0x04000001),
+                sub_palettes: vec![SubPalette {
+                    id: 0x04000002,
+                    offset: 0,
+                    length: 32,
+                }],
+                texture_changes: vec![TextureChange {
+                    part_index: 0,
+                    old_id: 0x05000001,
+                    new_id: 0x05000002,
+                }],
+                model_changes: vec![ModelChange {
+                    index: 0,
+                    animation_id: 0x01000001,
+                }],
+            },
+            instance_sequence: 1234,
+            visual_desc_sequence: 5678,
+        }));
+        assert_pack_unpack_parity(fixtures::OBJ_DESC_EVENT, &expected);
+    }
+
+    #[test]
+    fn test_force_obj_desc_send_parity() {
+        let expected = GameMessage::ForceObjectDescSend(Box::new(ForceObjectDescSendData {
+            guid: Guid(0x50000001),
+        }));
+        assert_pack_unpack_parity(fixtures::FORCE_OBJ_DESC_SEND, &expected);
+    }
+
+    #[test]
+    fn test_update_property_float_fixture() {
+        let hex = "0C190000000000000000005940";
+        let data = hex::decode(hex).unwrap();
+        let expected = PrivateUpdatePropertyFloatData {
+            sequence: 0x0C,
+            guid: Guid::NULL,
+            property: 25,
+            value: 100.0,
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_update_property_string_fixture() {
+        let hex = "01010000000000000500416C69636500";
+        let data = hex::decode(hex).unwrap();
+        let expected = PrivateUpdatePropertyStringData {
+            sequence: 1,
+            guid: Guid::NULL,
+            property: 1,
+            value: "Alice".to_string(),
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+}

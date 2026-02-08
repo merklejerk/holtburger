@@ -363,3 +363,58 @@ impl ProtocolPack for UpdateHealthData {
         buf.write_f32::<LittleEndian>(self.health).unwrap();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::messages::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::world::Guid;
+
+    #[test]
+    fn test_update_health_fixture() {
+        let hex = "010000500000003f";
+        let data = hex::decode(hex).unwrap();
+        let expected = UpdateHealthData {
+            target: Guid(0x50000001),
+            health: 0.5,
+        };
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_identify_creature_parity() {
+        let hex = "B0F70000010000507E000000C90000000500005012010000010000000100080013000000010000000300000065000000CA0000002F01000009000000F4010000E80300000A000000140000001E00000028000000320000003C00000046000000500000005A00000064000000BBAADDCC";
+        let bytes = hex::decode(hex).expect("Hex decode failed");
+
+        let mut offset = 0;
+        let unpacked = GameMessage::unpack(&bytes, &mut offset).expect("Should unpack");
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(hex::encode(packed).to_uppercase(), hex.to_uppercase());
+    }
+
+    #[test]
+    fn test_identify_sword_full_parity() {
+        let hex = "B0F70000010000507B000000C9000000020000502500000001000000010010001B000000000000000100080064000000000000000000000001000000140000000F00000005000000000000000000E03F000000000000F83F333333333333F33F0000000000005940000000000000244032000000";
+        let bytes = hex::decode(hex).expect("Hex decode failed");
+
+        let mut offset = 0;
+        let unpacked = GameMessage::unpack(&bytes, &mut offset).expect("Should unpack IdentifyObjectResponse");
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(hex::encode(packed).to_uppercase(), hex.to_uppercase());
+    }
+
+    #[test]
+    fn test_identify_armor_parity() {
+        let hex = "B0F70000010000507C000000C9000000030000508140000001000000010010001C000000640000000000803F0000004000004040000080400000A0400000C0400000E040000000410A000000140000001E00000028000000320000003C00000046000000500000005A000000";
+        let bytes = hex::decode(hex).expect("Hex decode failed");
+
+        let mut offset = 0;
+        let unpacked = GameMessage::unpack(&bytes, &mut offset).expect("Should unpack");
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(hex::encode(packed).to_uppercase(), hex.to_uppercase());
+    }
+}

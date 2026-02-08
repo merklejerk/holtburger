@@ -87,24 +87,28 @@ impl ProtocolUnpack for JumpData {
             return None;
         }
         let extent = LittleEndian::read_f32(&data[*offset..*offset + 4]);
-        let velocity_x = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
-        let velocity_y = LittleEndian::read_f32(&data[*offset + 8..*offset + 12]);
-        let velocity_z = LittleEndian::read_f32(&data[*offset + 12..*offset + 16]);
-        let instance_sequence = LittleEndian::read_u16(&data[*offset + 16..*offset + 18]);
-        let server_control_sequence = LittleEndian::read_u16(&data[*offset + 18..*offset + 20]);
-        let teleport_sequence = LittleEndian::read_u16(&data[*offset + 20..*offset + 22]);
-        let force_position_sequence = LittleEndian::read_u16(&data[*offset + 22..*offset + 24]);
-        let object_guid = Guid::unpack(data, &mut (*offset + 24))?;
-        let spell_id = LittleEndian::read_u32(&data[*offset + 28..*offset + 32]);
-        *offset += 32;
+        *offset += 4;
+        let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let y = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let z = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let server_control_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let teleport_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let force_position_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let object_guid = Guid::unpack(data, offset)?;
+        let spell_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
 
         Some(JumpData {
             extent,
-            velocity: crate::math::Vector3 {
-                x: velocity_x,
-                y: velocity_y,
-                z: velocity_z,
-            },
+            velocity: crate::math::Vector3 { x, y, z },
             instance_sequence,
             server_control_sequence,
             teleport_sequence,
@@ -181,5 +185,76 @@ impl ProtocolPack for AutonomousPositionActionData {
             .unwrap();
         buf.push(self.last_contact);
         pad_to_4(buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::game_action::{GameAction, GameActionMessage};
+    use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::game_message::movement::{MotionItem, RawMotionState};
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+    use crate::protocol::messages::types::movement::RawMotionFlags;
+
+    #[test]
+    fn test_jump_data_fixture() {
+        let hex = "B1F700002A0000001BF60000000020410000803F000000400000404001000200030004007856341200000000";
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 0x2A,
+            action: GameAction::Jump(Box::new(JumpData {
+                extent: 10.0,
+                velocity: crate::math::Vector3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                instance_sequence: 1,
+                server_control_sequence: 2,
+                teleport_sequence: 3,
+                force_position_sequence: 4,
+                object_guid: Guid(0x12345678),
+                spell_id: 0,
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_move_to_state_fixture() {
+        let fixture = fixtures::MOVE_TO_STATE;
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 0x5678,
+            action: GameAction::MoveToState(Box::new(MoveToStateData {
+                raw_motion_state: RawMotionState {
+                    flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                    current_hold_key: Some(2),
+                    forward_speed: Some(5.0),
+                    commands: vec![MotionItem::new(1, 5, true, 1.0)],
+                    ..Default::default()
+                },
+                position: WorldPosition {
+                    landblock_id: Guid(0x12345678),
+                    coords: crate::math::Vector3 {
+                        x: 10.0,
+                        y: 20.0,
+                        z: 30.0,
+                    },
+                    rotation: crate::math::Quaternion {
+                        w: 1.0,
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                },
+                instance_sequence: 0xFF01,
+                server_control_sequence: 0xFF02,
+                teleport_sequence: 0xFF03,
+                force_position_sequence: 0xFF04,
+                contact_long_jump: 0x03,
+            })),
+        }));
+        assert_pack_unpack_parity(fixture, &expected);
     }
 }

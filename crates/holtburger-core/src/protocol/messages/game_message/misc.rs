@@ -170,3 +170,69 @@ impl ProtocolPack for DddInterrogationResponseData {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_character_error_fixture() {
+        let expected = CharacterErrorData {
+            error_id: 0x80000001,
+        };
+        let mut buf = Vec::new();
+        expected.pack(&mut buf);
+        assert_eq!(buf.len(), 4);
+
+        assert_pack_unpack_parity(&buf, &expected);
+    }
+
+    #[test]
+    fn test_boot_account_fixture() {
+        let expected = BootAccountData {
+            reason: Some(" because you're mid".to_string()),
+        };
+        let mut buf = Vec::new();
+        expected.pack(&mut buf);
+        assert_pack_unpack_parity(&buf, &expected);
+
+        let empty = BootAccountData { reason: None };
+        let mut buf2 = Vec::new();
+        empty.pack(&mut buf2);
+        assert_pack_unpack_parity(&buf2, &empty);
+    }
+
+    #[test]
+    fn test_ddd_interrogation_response_fixture() {
+        let expected = DddInterrogationResponseData {
+            language: 1,
+            lists: vec![TaggedIterationList {
+                dat_file_type: 1,
+                dat_file_id: 1,
+                list: MostlyConsecutiveIntSet {
+                    iterations: 2,
+                    values: vec![100, 101],
+                },
+            }],
+        };
+        // DDD interrogation response fixture has common game message header (4 bytes opcode)
+        let data = &fixtures::DDD_INTERROGATION_RESPONSE[4..];
+        assert_pack_unpack_parity(data, &expected);
+    }
+
+    #[test]
+    fn test_mostly_consecutive_int_set_fixture() {
+        let expected = MostlyConsecutiveIntSet {
+            iterations: 5,
+            values: vec![1000, -5],
+        };
+        let data = vec![
+            0x05, 0x00, 0x00, 0x00, // count
+            0xE8, 0x03, 0x00, 0x00, // 1000
+            0xFB, 0xFF, 0xFF, 0xFF, // -5
+        ];
+        assert_pack_unpack_parity(&data, &expected);
+    }
+}

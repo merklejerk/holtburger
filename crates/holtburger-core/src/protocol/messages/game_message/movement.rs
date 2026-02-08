@@ -103,6 +103,147 @@ impl ProtocolPack for UpdatePositionData {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::fixtures;
+    use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_public_update_position_fixture() {
+        let expected = GameMessage::PublicUpdatePosition(Box::new(PublicUpdatePositionData {
+            sequence: 12,
+            guid: Guid(0x50000001),
+            position_type: PositionType::Location,
+            pos: WorldPosition {
+                landblock_id: Guid(0x12345678),
+                coords: crate::math::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+        }));
+        assert_pack_unpack_parity(fixtures::PUBLIC_UPDATE_POSITION, &expected);
+    }
+
+    #[test]
+    fn test_private_update_position_fixture() {
+        let expected = GameMessage::PrivateUpdatePosition(Box::new(PrivateUpdatePositionData {
+            sequence: 12,
+            position_type: PositionType::Location,
+            pos: WorldPosition {
+                landblock_id: Guid(0x12345678),
+                coords: crate::math::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+        }));
+        assert_pack_unpack_parity(fixtures::PRIVATE_UPDATE_POSITION, &expected);
+    }
+
+    #[test]
+    fn test_vector_update_fixture() {
+        let hex = "4EF70000010000500000803F0000004000004040CDCCCC3DCDCC4C3E9A99993E7B00C801";
+        let expected = GameMessage::VectorUpdate(Box::new(VectorUpdateData {
+            guid: Guid(0x50000001),
+            velocity: crate::math::Vector3 {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            omega: crate::math::Vector3 {
+                x: 0.1,
+                y: 0.2,
+                z: 0.3,
+            },
+            instance_sequence: 123,
+            vector_sequence: 456,
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_autonomy_level_fixture() {
+        let hex = "52F7000002000000";
+        let expected = GameMessage::AutonomyLevel(Box::new(AutonomyLevelData { level: 2 }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_autonomous_position_fixture() {
+        let hex = "53F700000100000078563412000020410000A0410000F0410000803F000000000000000000000000010002000300040001000000";
+        let expected = GameMessage::AutonomousPosition(Box::new(ServerAutonomousPositionData {
+            guid: Guid(1),
+            position: WorldPosition {
+                landblock_id: Guid(0x12345678),
+                coords: crate::math::Vector3 {
+                    x: 10.0,
+                    y: 20.0,
+                    z: 30.0,
+                },
+                rotation: crate::math::Quaternion {
+                    w: 1.0,
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            },
+            instance_sequence: 1,
+            server_control_sequence: 2,
+            teleport_sequence: 3,
+            force_position_sequence: 4,
+            contact_flags: 1,
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_player_teleport_fixture() {
+        let expected = GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+            teleport_sequence: 0,
+        }));
+        let hex = "51F7000000000000";
+        let data = hex::decode(hex).unwrap();
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_movement_event_turn_to_obj_fixture() {
+        let fixture = fixtures::MOVEMENT_TURN_TO_OBJ;
+        let mut offset = 0;
+        let unpacked = GameMessage::unpack(fixture, &mut offset).expect("Should unpack TurnToObj");
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(packed, fixture);
+    }
+
+    #[test]
+    fn test_movement_event_move_to_pos_fixture() {
+        let fixture = fixtures::MOVEMENT_MOVE_TO_POS;
+        let mut offset = 0;
+        let unpacked = GameMessage::unpack(fixture, &mut offset).expect("Should unpack MoveToPos");
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(packed, fixture);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VectorUpdateData {
     pub guid: Guid,

@@ -1,7 +1,5 @@
+use crate::protocol::messages::common::{CreatureSkill, Enchantment, Shortcut, ac_hash_sort};
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
-use crate::protocol::messages::types::common::{
-    CreatureSkill, Enchantment, Shortcut, ac_hash_sort,
-};
 use crate::protocol::messages::utils::{read_string16, write_string16};
 use crate::world::Guid;
 use crate::world::position::WorldPosition;
@@ -116,10 +114,13 @@ pub struct PlayerDescriptionData {
     pub equipped_objects: Vec<(Guid, u32, u32)>, // (guid, loc, prio)
 }
 
+type InventoryVec = Vec<(Guid, u32)>;
+type EquippedVec = Vec<(Guid, u32, u32)>;
+
 fn unpack_inventory_and_equipped_strict(
     data: &[u8],
     offset: &mut usize,
-) -> Option<(Vec<(Guid, u32)>, Vec<(Guid, u32, u32)>)> {
+) -> Option<(InventoryVec, EquippedVec)> {
     if *offset + 4 > data.len() {
         return None;
     }
@@ -171,7 +172,7 @@ fn unpack_inventory_and_equipped_strict(
 fn find_inventory_start_after_gameplay_options(
     data: &[u8],
     gameplay_options_start: usize,
-) -> Option<(usize, usize, Vec<(Guid, u32)>, Vec<(Guid, u32, u32)>)> {
+) -> Option<(usize, usize, InventoryVec, EquippedVec)> {
     if gameplay_options_start + 8 > data.len() {
         return None;
     }
@@ -184,9 +185,10 @@ fn find_inventory_start_after_gameplay_options(
     while candidate <= last_candidate {
         let mut tmp = candidate;
         if let Some((inv, eq)) = unpack_inventory_and_equipped_strict(data, &mut tmp)
-            && tmp == data.len() {
-                return Some((candidate, tmp, inv, eq));
-            }
+            && tmp == data.len()
+        {
+            return Some((candidate, tmp, inv, eq));
+        }
         candidate += 4;
     }
     None
@@ -896,8 +898,8 @@ impl ProtocolUnpack for PlayerDescriptionData {
 #[cfg(test)]
 mod tests {
     use crate::protocol::messages::game_message::GameMessage;
-    use crate::protocol::messages::traits::ProtocolUnpack;
     use crate::protocol::messages::test_helpers::get_fixture;
+    use crate::protocol::messages::traits::ProtocolUnpack;
 
     #[test]
     fn test_player_description_tui_2026_02_07_fixture_sanity() {
@@ -908,7 +910,10 @@ mod tests {
         assert_eq!(data.len(), 6784);
 
         // GameMessage opcode (0xF7B0 = GameEvent)
-        assert_eq!(LittleEndian::read_u32(&data[0..4]), GameOpcode::GameEvent as u32);
+        assert_eq!(
+            LittleEndian::read_u32(&data[0..4]),
+            GameOpcode::GameEvent as u32
+        );
 
         // GameEvent header: target (0x50000001), sequence (0x00000001), event type (0x0013)
         assert_eq!(LittleEndian::read_u32(&data[4..8]), 0x5000_0001);

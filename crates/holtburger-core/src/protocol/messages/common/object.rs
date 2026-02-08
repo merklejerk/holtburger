@@ -2,6 +2,7 @@ use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::protocol::messages::utils::{
     align_to_4, pad_to_4, read_packed_u32_with_known_type, write_packed_u32_with_known_type,
 };
+use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 
@@ -474,5 +475,41 @@ impl ProtocolPack for ModelData {
             buf.push(0);
             buf.push(0);
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IdentifyObjectData {
+    pub guid: Guid,
+}
+
+impl ProtocolUnpack for IdentifyObjectData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        Some(IdentifyObjectData { guid })
+    }
+}
+
+impl ProtocolPack for IdentifyObjectData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.guid.pack(buf);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UseData {
+    pub guid: Guid,
+}
+
+impl ProtocolUnpack for UseData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        Some(UseData { guid })
+    }
+}
+
+impl ProtocolPack for UseData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.guid.pack(buf);
     }
 }

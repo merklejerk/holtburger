@@ -1,5 +1,5 @@
+use crate::protocol::messages::common::inventory::EquipMask;
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
-use crate::protocol::messages::types::inventory::EquipMask;
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
@@ -177,4 +177,3 @@ mod tests {
         assert_pack_unpack_parity(fixtures::ACTION_PUT_ITEM, &action);
     }
 }
-

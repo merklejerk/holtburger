@@ -4,12 +4,12 @@ pub fn align_to_4(len: usize) -> usize {
     (len + 3) & !3
 }
 
-/// Return number of padding bytes needed to align `len` to `align` boundary
+/// Return number of padding bytes needed to align len to align boundary
 pub fn pad_len(len: usize, align: usize) -> usize {
     (align - (len % align)) % align
 }
 
-/// Pad `buf` with zeroes until its length is a multiple of 4
+/// Pad buf with zeroes until its length is a multiple of 4
 pub fn pad_to_4(buf: &mut Vec<u8>) {
     let pad = pad_len(buf.len(), 4);
     if pad > 0 {
@@ -168,6 +168,29 @@ pub fn write_packed_u32_with_known_type(buf: &mut Vec<u8>, value: u32, known_typ
     }
 }
 
+pub fn build_login_payload(account: &str, password: &str, sequence: u32, version: &str) -> Vec<u8> {
+    let mut payload = Vec::new();
+    write_string16(&mut payload, version); // ClientVersion
+
+    // Placeholder for data_len
+    let len_pos = payload.len();
+    payload.extend_from_slice(&[0u8; 4]);
+
+    let start_of_data = payload.len();
+
+    payload.extend_from_slice(&0x02u32.to_le_bytes()); // NetAuthType: AccountPassword
+    payload.extend_from_slice(&0x01u32.to_le_bytes()); // AuthFlags: EnableCrypto
+    payload.extend_from_slice(&sequence.to_le_bytes()); // Timestamp
+    write_string16(&mut payload, account);
+    write_string16(&mut payload, ""); // AdminOverride
+    write_string32(&mut payload, password);
+
+    let data_len = (payload.len() - start_of_data) as u32;
+    LittleEndian::write_u32(&mut payload[len_pos..len_pos + 4], data_len);
+
+    payload
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,27 +298,4 @@ mod tests {
         assert_eq!(buf.len(), 8);
         assert_eq!(LittleEndian::read_u32(&buf[0..4]), 2); // 1 byte prefix + 1 byte string = 2
     }
-}
-
-pub fn build_login_payload(account: &str, password: &str, sequence: u32, version: &str) -> Vec<u8> {
-    let mut payload = Vec::new();
-    write_string16(&mut payload, version); // ClientVersion
-
-    // Placeholder for data_len
-    let len_pos = payload.len();
-    payload.extend_from_slice(&[0u8; 4]);
-
-    let start_of_data = payload.len();
-
-    payload.extend_from_slice(&0x02u32.to_le_bytes()); // NetAuthType: AccountPassword
-    payload.extend_from_slice(&0x01u32.to_le_bytes()); // AuthFlags: EnableCrypto
-    payload.extend_from_slice(&sequence.to_le_bytes()); // Timestamp
-    write_string16(&mut payload, account);
-    write_string16(&mut payload, ""); // AdminOverride
-    write_string32(&mut payload, password);
-
-    let data_len = (payload.len() - start_of_data) as u32;
-    LittleEndian::write_u32(&mut payload[len_pos..len_pos + 4], data_len);
-
-    payload
 }

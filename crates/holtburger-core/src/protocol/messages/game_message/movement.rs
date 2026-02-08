@@ -5,7 +5,7 @@ pub use crate::world::position::{PositionPack, WorldPosition};
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 
-use crate::protocol::messages::types::movement::*;
+use crate::protocol::messages::common::movement::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrivateUpdatePositionData {

@@ -1,5 +1,5 @@
+use crate::protocol::messages::common::Enchantment;
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
-use crate::protocol::messages::types::common::Enchantment;
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian};
 

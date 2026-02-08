@@ -1,6 +1,6 @@
 use crate::protocol::errors::WeenieError;
+use crate::protocol::messages::common::inventory::EquipMask;
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
-use crate::protocol::messages::types::inventory::EquipMask;
 use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use serde::{Deserialize, Serialize};
@@ -248,14 +248,11 @@ mod tests {
         let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x12,
-            event: GameEvent::InventoryServerSaveFailed(Box::new(
-                InventoryServerSaveFailedData {
-                    item_guid: Guid(0x80000001),
-                    error: WeenieError::TheContainerIsClosed,
-                },
-            )),
+            event: GameEvent::InventoryServerSaveFailed(Box::new(InventoryServerSaveFailedData {
+                item_guid: Guid(0x80000001),
+                error: WeenieError::TheContainerIsClosed,
+            })),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 }
-

@@ -1,7 +1,7 @@
-use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
-use crate::protocol::messages::types::object::{
+use crate::protocol::messages::common::object::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use crate::protocol::messages::utils::{
     read_hashtable_header, read_string16, write_hashtable_header, write_string16,
 };
@@ -400,7 +400,8 @@ mod tests {
         let bytes = hex::decode(hex).expect("Hex decode failed");
 
         let mut offset = 0;
-        let unpacked = GameMessage::unpack(&bytes, &mut offset).expect("Should unpack IdentifyObjectResponse");
+        let unpacked =
+            GameMessage::unpack(&bytes, &mut offset).expect("Should unpack IdentifyObjectResponse");
         let mut packed = Vec::new();
         unpacked.pack(&mut packed);
         assert_eq!(hex::encode(packed).to_uppercase(), hex.to_uppercase());
@@ -420,8 +421,8 @@ mod tests {
 
     #[test]
     fn test_identify_object_response_parity() {
-        use std::collections::BTreeMap;
         use crate::protocol::messages::game_event::GameEvent;
+        use std::collections::BTreeMap;
         // Hex generated via ACE for a simple "Sword of Awesome"
         let hex_str = "B0F70000010000507B000000C900000002000050090000000100000002001000010000000100000019000000320000000100080001000000100053776F7264206F6620417765736F6D650000";
         let data = hex::decode(hex_str).expect("Hex decode failed");
@@ -433,34 +434,36 @@ mod tests {
         let mut string_stats = BTreeMap::new();
         string_stats.insert(1, "Sword of Awesome".to_string());
 
-        let expected = GameMessage::GameEvent(Box::new(crate::protocol::messages::game_event::GameEventMessage {
-            target: Guid(0x50000001),
-            sequence: 123,
-            event: GameEvent::IdentifyObjectResponse(Box::new(IdentifyObjectResponseData {
-                object_guid: Guid(0x50000002),
-                flags: IdentifyResponseFlags::INT_STATS_TABLE
-                    | IdentifyResponseFlags::STRING_STATS_TABLE,
-                success: true,
-                int_stats,
-                int64_stats: BTreeMap::new(),
-                bool_stats: BTreeMap::new(),
-                float_stats: BTreeMap::new(),
-                string_stats,
-                did_stats: BTreeMap::new(),
-                spell_book: Vec::new(),
-                armor_profile: None,
-                creature_profile: None,
-                weapon_profile: None,
-                hook_profile: None,
-                armor_highlight: None,
-                armor_color: None,
-                weapon_highlight: None,
-                weapon_color: None,
-                resist_highlight: None,
-                resist_color: None,
-                armor_levels: None,
-            })),
-        }));
+        let expected = GameMessage::GameEvent(Box::new(
+            crate::protocol::messages::game_event::GameEventMessage {
+                target: Guid(0x50000001),
+                sequence: 123,
+                event: GameEvent::IdentifyObjectResponse(Box::new(IdentifyObjectResponseData {
+                    object_guid: Guid(0x50000002),
+                    flags: IdentifyResponseFlags::INT_STATS_TABLE
+                        | IdentifyResponseFlags::STRING_STATS_TABLE,
+                    success: true,
+                    int_stats,
+                    int64_stats: BTreeMap::new(),
+                    bool_stats: BTreeMap::new(),
+                    float_stats: BTreeMap::new(),
+                    string_stats,
+                    did_stats: BTreeMap::new(),
+                    spell_book: Vec::new(),
+                    armor_profile: None,
+                    creature_profile: None,
+                    weapon_profile: None,
+                    hook_profile: None,
+                    armor_highlight: None,
+                    armor_color: None,
+                    weapon_highlight: None,
+                    weapon_color: None,
+                    resist_highlight: None,
+                    resist_color: None,
+                    armor_levels: None,
+                })),
+            },
+        ));
 
         assert_pack_unpack_parity(&data, &expected);
     }

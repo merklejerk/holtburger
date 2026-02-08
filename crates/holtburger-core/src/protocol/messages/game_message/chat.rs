@@ -145,18 +145,25 @@ impl ProtocolPack for EmoteTextData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServerMessageData {
     pub message: String,
+    pub chat_type: u32,
 }
 
 impl ProtocolUnpack for ServerMessageData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
-        Some(ServerMessageData { message })
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let chat_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(ServerMessageData { message, chat_type })
     }
 }
 
 impl ProtocolPack for ServerMessageData {
     fn pack(&self, buf: &mut Vec<u8>) {
         write_string16(buf, &self.message);
+        buf.extend_from_slice(&self.chat_type.to_le_bytes());
     }
 }
 
@@ -171,11 +178,12 @@ mod tests {
     fn test_server_message_fixture() {
         let expected = ServerMessageData {
             message: "Welcome to Asheron's Call!".to_string(),
+            chat_type: 0x05, // ChatMessageType.System
         };
         let mut buf = Vec::new();
         expected.pack(&mut buf);
-        // String16 length (2) + "Welcome to Asheron's Call!" (26) + pads (0) = 28
-        assert_eq!(buf.len(), 28);
+        // String16 length (2) + "Welcome to Asheron's Call!" (26) + pads (0) + chat_type (4) = 32
+        assert_eq!(buf.len(), 32);
 
         assert_pack_unpack_parity(&buf, &expected);
     }

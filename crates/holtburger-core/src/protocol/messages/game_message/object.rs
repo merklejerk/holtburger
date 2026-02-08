@@ -954,6 +954,62 @@ mod tests {
     }
 
     #[test]
+    fn test_update_property_int_unpack_private() {
+        let hex = "0C1900000032000000";
+        let data = hex::decode(hex).unwrap();
+        let mut offset = 0;
+        let msg = PrivateUpdatePropertyIntData::unpack(&data, &mut offset).unwrap();
+        assert_eq!(msg.sequence, 0x0C);
+        assert_eq!(msg.guid, Guid::NULL);
+        assert_eq!(msg.property, 25);
+        assert_eq!(msg.value, 50);
+    }
+
+    #[test]
+    fn test_update_property_int_pack_private() {
+        let hex = "0c1900000032000000";
+        let msg = PrivateUpdatePropertyIntData {
+            sequence: 0x0C,
+            guid: Guid::NULL,
+            property: 25,
+            value: 50,
+        };
+        let mut packed = Vec::new();
+        msg.pack(&mut packed);
+        assert_eq!(hex::encode(&packed), hex);
+    }
+
+    #[test]
+    fn test_update_property_int_unpack_public() {
+        let hex = "42785634121900000032000000";
+        let data = hex::decode(hex).unwrap();
+        let mut offset = 0;
+        let msg = PublicUpdatePropertyIntData::unpack(&data, &mut offset).unwrap();
+        assert_eq!(msg.sequence, 0x42);
+        assert_eq!(msg.guid, Guid(0x12345678));
+        assert_eq!(msg.property, 25);
+        assert_eq!(msg.value, 50);
+    }
+
+    #[test]
+    fn test_update_property_int_pack_public() {
+        let hex = "42785634121900000032000000";
+        let msg = PublicUpdatePropertyIntData {
+            sequence: 0x42,
+            guid: Guid(0x12345678),
+            property: 25,
+            value: 50,
+        };
+        let mut packed = Vec::new();
+        msg.pack(&mut packed);
+        assert_eq!(hex::encode(&packed), hex);
+
+        let mut offset = 0;
+        let unpacked = PublicUpdatePropertyIntData::unpack(&packed, &mut offset).unwrap();
+        assert_eq!(unpacked, msg);
+    }
+
+    #[test]
     fn test_update_property_int_fixture() {
         let hex = "0C1900000032000000";
         let data = hex::decode(hex).unwrap();
@@ -1013,6 +1069,31 @@ mod tests {
     }
 
     #[test]
+    fn test_update_property_float_unpack() {
+        let hex = "0C190000000000000000005940";
+        let data = hex::decode(hex).unwrap();
+        let mut offset = 0;
+        let msg = PrivateUpdatePropertyFloatData::unpack(&data, &mut offset).unwrap();
+        assert_eq!(msg.sequence, 0x0C);
+        assert_eq!(msg.property, 25);
+        assert_eq!(msg.value, 100.0);
+    }
+
+    #[test]
+    fn test_update_property_float_pack() {
+        let hex = "0c190000000000000000005940";
+        let msg = PrivateUpdatePropertyFloatData {
+            sequence: 0x0C,
+            guid: Guid::NULL,
+            property: 25,
+            value: 100.0,
+        };
+        let mut packed = Vec::new();
+        msg.pack(&mut packed);
+        assert_eq!(hex::encode(&packed), hex);
+    }
+
+    #[test]
     fn test_update_property_float_fixture() {
         let hex = "0C190000000000000000005940";
         let data = hex::decode(hex).unwrap();
@@ -1023,6 +1104,31 @@ mod tests {
             value: 100.0,
         };
         assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_update_property_string_unpack() {
+        let hex = "01010000000000000500416C69636500";
+        let data = hex::decode(hex).unwrap();
+        let mut offset = 0;
+        let msg = PrivateUpdatePropertyStringData::unpack(&data, &mut offset).unwrap();
+        assert_eq!(msg.sequence, 1);
+        assert_eq!(msg.property, 1);
+        assert_eq!(msg.value, "Alice");
+    }
+
+    #[test]
+    fn test_update_property_string_pack() {
+        let hex = "01010000000000000500416c69636500";
+        let msg = PrivateUpdatePropertyStringData {
+            sequence: 1,
+            guid: Guid::NULL,
+            property: 1,
+            value: "Alice".to_string(),
+        };
+        let mut packed = Vec::new();
+        msg.pack(&mut packed);
+        assert_eq!(hex::encode(&packed), hex);
     }
 
     #[test]

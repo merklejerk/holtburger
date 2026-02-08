@@ -407,6 +407,65 @@ mod tests {
     }
 
     #[test]
+    fn test_identify_weapon_parity() {
+        let hex = "B0F70000010000507D000000C900000004000050210800000100000001001000300000000A00000001000000140000000F00000005000000000000000000E03F000000000000F83F333333333333F33F000000000000594000000000000024403200000002000300";
+        let bytes = hex::decode(hex).expect("Hex decode failed");
+
+        let mut offset = 0;
+        let unpacked = GameMessage::unpack(&bytes, &mut offset).expect("Should unpack");
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(hex::encode(packed).to_uppercase(), hex.to_uppercase());
+    }
+
+    #[test]
+    fn test_identify_object_response_parity() {
+        use std::collections::BTreeMap;
+        use crate::protocol::messages::game_event::GameEvent;
+        // Hex generated via ACE for a simple "Sword of Awesome"
+        let hex_str = "B0F70000010000507B000000C900000002000050090000000100000002001000010000000100000019000000320000000100080001000000100053776F7264206F6620417765736F6D650000";
+        let data = hex::decode(hex_str).expect("Hex decode failed");
+
+        let mut int_stats = BTreeMap::new();
+        int_stats.insert(1, 1);
+        int_stats.insert(25, 50);
+
+        let mut string_stats = BTreeMap::new();
+        string_stats.insert(1, "Sword of Awesome".to_string());
+
+        let expected = GameMessage::GameEvent(Box::new(crate::protocol::messages::game_event::GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 123,
+            event: GameEvent::IdentifyObjectResponse(Box::new(IdentifyObjectResponseData {
+                object_guid: Guid(0x50000002),
+                flags: IdentifyResponseFlags::INT_STATS_TABLE
+                    | IdentifyResponseFlags::STRING_STATS_TABLE,
+                success: true,
+                int_stats,
+                int64_stats: BTreeMap::new(),
+                bool_stats: BTreeMap::new(),
+                float_stats: BTreeMap::new(),
+                string_stats,
+                did_stats: BTreeMap::new(),
+                spell_book: Vec::new(),
+                armor_profile: None,
+                creature_profile: None,
+                weapon_profile: None,
+                hook_profile: None,
+                armor_highlight: None,
+                armor_color: None,
+                weapon_highlight: None,
+                weapon_color: None,
+                resist_highlight: None,
+                resist_color: None,
+                armor_levels: None,
+            })),
+        }));
+
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
     fn test_identify_armor_parity() {
         let hex = "B0F70000010000507C000000C9000000030000508140000001000000010010001C000000640000000000803F0000004000004040000080400000A0400000C0400000E040000000410A000000140000001E00000028000000320000003C00000046000000500000005A000000";
         let bytes = hex::decode(hex).expect("Hex decode failed");

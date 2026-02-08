@@ -214,6 +214,19 @@ mod tests {
     }
 
     #[test]
+    fn test_player_teleport_parity() {
+        let expected = PlayerTeleportData {
+            teleport_sequence: 0x1234,
+        };
+        // Skip opcode (4 bytes)
+        assert_pack_unpack_parity(&fixtures::PLAYER_TELEPORT[4..], &expected);
+
+        // Also verify dispatcher integration
+        let msg = GameMessage::unpack(fixtures::PLAYER_TELEPORT, &mut 0).unwrap();
+        assert!(matches!(msg, GameMessage::PlayerTeleport(_)));
+    }
+
+    #[test]
     fn test_player_teleport_fixture() {
         let expected = GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
             teleport_sequence: 0,
@@ -241,6 +254,36 @@ mod tests {
         let mut packed = Vec::new();
         unpacked.pack(&mut packed);
         assert_eq!(packed, fixture);
+    }
+
+    #[test]
+    fn test_gamemessage_routing_update_position() {
+        // UPDATE_POSITION (0xF748)
+        let pos_hex = "48F7000015000000000000005C8F1E120000000000000000000000000000803F0000000000000000000000000100020003000400";
+        let pos_data = hex::decode(pos_hex).unwrap();
+        let mut offset = 0;
+        let pos_msg = GameMessage::unpack(&pos_data, &mut offset).unwrap();
+        assert!(matches!(pos_msg, GameMessage::UpdatePosition(_)));
+    }
+
+    #[test]
+    fn test_move_to_parameters_default_size() {
+        let params = MoveToParameters::default();
+        let mut buf = Vec::new();
+        params.pack(&mut buf);
+        assert_eq!(buf.len(), 28);
+    }
+
+    #[test]
+    fn test_turn_to_parameters_default_size() {
+        let params = TurnToParameters {
+            movement_parameters: 0,
+            speed: 0.0,
+            desired_heading: 0.0,
+        };
+        let mut buf = Vec::new();
+        params.pack(&mut buf);
+        assert_eq!(buf.len(), 12);
     }
 }
 

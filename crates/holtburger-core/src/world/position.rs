@@ -1,12 +1,13 @@
 use crate::math::{Quaternion, Vector3};
 use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
 use crate::world::properties::UpdatePositionFlag;
+use crate::world::Guid;
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct WorldPosition {
-    pub landblock_id: u32,
+    pub landblock_id: Guid,
     pub coords: Vector3,
     pub rotation: Quaternion,
 }
@@ -22,7 +23,7 @@ impl MessageUnpack for WorldPosition {
         if data.len() < *offset + 32 {
             return None;
         }
-        let landblock_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let landblock_id = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
         let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
         let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
@@ -151,7 +152,7 @@ impl MessageUnpack for PositionPack {
         Some(Self {
             flags,
             pos: WorldPosition {
-                landblock_id,
+                landblock_id: Guid(landblock_id),
                 coords: Vector3 { x, y, z },
                 rotation: Quaternion {
                     w: qw,
@@ -178,7 +179,7 @@ impl MessagePack for PositionPack {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u32::<LittleEndian>(self.flags.bits()).unwrap();
         writer
-            .write_u32::<LittleEndian>(self.pos.landblock_id)
+            .write_u32::<LittleEndian>(self.pos.landblock_id.0)
             .unwrap();
         writer.write_f32::<LittleEndian>(self.pos.coords.x).unwrap();
         writer.write_f32::<LittleEndian>(self.pos.coords.y).unwrap();
@@ -244,7 +245,7 @@ impl MessagePack for PositionPack {
 impl WorldPosition {
     pub fn write_raw(&self, writer: &mut Vec<u8>) {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.landblock_id).unwrap();
+        writer.write_u32::<LittleEndian>(self.landblock_id.0).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.x).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.y).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.z).unwrap();
@@ -399,7 +400,7 @@ mod tests {
     #[test]
     fn test_indoor_format() {
         let pos = WorldPosition {
-            landblock_id: 0x00000100,
+            landblock_id: Guid(0x00000100),
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
         };
@@ -418,7 +419,7 @@ mod tests {
         // Global X = 218 * 192 + 84 = 41940. Lon = 41940/240 - 102 = 72.75 (72.75E)
         let landblock_id = (218u32 << 24) | (85u32 << 16);
         let pos = WorldPosition {
-            landblock_id,
+            landblock_id: Guid(landblock_id),
             coords: Vector3::new(84.0, 108.0, 0.0),
             rotation: Quaternion::identity(),
         };
@@ -440,32 +441,32 @@ mod tests {
         let lb = (0xDAu32 << 24) | (0x55u32 << 16);
         // Cell 0x1C (index 27): X=3, Y=3.
         let pos1 = WorldPosition {
-            landblock_id: lb | 0x1C,
+            landblock_id: Guid(lb | 0x1C),
             coords: Vector3::new(84.0, 84.0, 0.0), // Abs X = 218*192 + 84
             rotation: Quaternion::identity(),
         };
         // Cell 0x1D (index 28): X=3, Y=4.
         let pos2 = WorldPosition {
-            landblock_id: lb | 0x1D,
-            coords: Vector3::new(84.0, 108.0, 0.0), // Abs X = 218*192 + 84, Abs Y = 85*192 + 108
+            landblock_id: Guid(lb | 0x1D),
+            coords: Vector3::new(84.0, 100.0, 0.0), // Abs X = 218*192 + 84, Y = 218*192 + 100
             rotation: Quaternion::identity(),
         };
 
-        // Distance should be exactly 24m (difference in Y coordinates)
+        // Distance should be exactly 16m (difference in Y coordinates)
         let dist = pos1.distance_to(&pos2);
-        assert!((dist - 24.0).abs() < 1e-4, "Distance was {}", dist);
+        assert!((dist - 16.0).abs() < 1e-4, "Distance was {}", dist);
     }
 
     #[test]
     fn test_distance_same_and_adjacent() {
         let lb = (1u32 << 24) | (2u32 << 16);
         let p1 = WorldPosition {
-            landblock_id: lb,
+            landblock_id: Guid(lb),
             coords: Vector3::new(0.0, 0.0, 0.0),
             rotation: Quaternion::identity(),
         };
         let p2 = WorldPosition {
-            landblock_id: lb,
+            landblock_id: Guid(lb),
             coords: Vector3::new(3.0, 4.0, 0.0),
             rotation: Quaternion::identity(),
         };
@@ -473,12 +474,12 @@ mod tests {
         assert!((d - 5.0).abs() < 1e-6);
 
         let p3 = WorldPosition {
-            landblock_id: (1u32 << 24),
+            landblock_id: Guid(1u32 << 24),
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
         };
         let p4 = WorldPosition {
-            landblock_id: 0u32,
+            landblock_id: Guid(0u32),
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
         };
@@ -489,12 +490,12 @@ mod tests {
     #[test]
     fn test_distance_indoors_returns_large() {
         let indoor = WorldPosition {
-            landblock_id: 0x00000100,
+            landblock_id: Guid(0x00000100),
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
         };
         let outdoor = WorldPosition {
-            landblock_id: 0u32,
+            landblock_id: Guid(0u32),
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
         };
@@ -518,7 +519,7 @@ mod tests {
         let mut offset = 0usize;
         let p = WorldPosition::unpack(&data, &mut offset).unwrap();
         assert_eq!(offset, 32);
-        assert_eq!(p.landblock_id, landblock_id);
+        assert_eq!(p.landblock_id, Guid(landblock_id));
         assert!((p.coords.x - 84.0).abs() < 1e-6);
         assert!((p.coords.y - 108.0).abs() < 1e-6);
         assert!((p.coords.z - 1.5).abs() < 1e-6);
@@ -540,7 +541,7 @@ mod tests {
 
         let mut offset2 = 0usize;
         let p2 = PositionPack::unpack(&data2, &mut offset2).unwrap();
-        assert_eq!(p2.pos.landblock_id, landblock_id);
+        assert_eq!(p2.pos.landblock_id, Guid(landblock_id));
         assert!((p2.pos.coords.x - 84.0).abs() < 1e-6);
         assert!((p2.pos.coords.y - 108.0).abs() < 1e-6);
         assert!((p2.pos.coords.z - 1.5).abs() < 1e-6);

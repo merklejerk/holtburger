@@ -436,7 +436,7 @@ pub struct TurnToHeading {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Origin {
-    pub cell_id: u32,
+    pub cell_id: Guid,
     pub position: crate::math::Vector3,
 }
 
@@ -651,7 +651,7 @@ impl MessageUnpack for Origin {
         if *offset + 16 > data.len() {
             return None;
         }
-        let cell_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let cell_id = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
         let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
         let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
@@ -666,7 +666,7 @@ impl MessageUnpack for Origin {
 
 impl MessagePack for Origin {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.cell_id.to_le_bytes());
+        buf.extend_from_slice(&self.cell_id.0.to_le_bytes());
         buf.extend_from_slice(&self.position.x.to_le_bytes());
         buf.extend_from_slice(&self.position.y.to_le_bytes());
         buf.extend_from_slice(&self.position.z.to_le_bytes());
@@ -1273,7 +1273,7 @@ mod tests {
             guid: Guid(0x50000001),
             position_type: PositionType::Location,
             pos: WorldPosition {
-                landblock_id: 0x12345678,
+                landblock_id: Guid(0x12345678),
                 coords: crate::math::Vector3 {
                     x: 10.0,
                     y: 20.0,
@@ -1296,7 +1296,7 @@ mod tests {
             sequence: 12,
             position_type: PositionType::Location,
             pos: WorldPosition {
-                landblock_id: 0x12345678,
+                landblock_id: Guid(0x12345678),
                 coords: crate::math::Vector3 {
                     x: 10.0,
                     y: 20.0,
@@ -1352,7 +1352,7 @@ mod tests {
             current_style: 74,
             data: MovementTypeData::MoveToPosition(MoveToPosition {
                 origin: Origin {
-                    cell_id: 0x12345678,
+                    cell_id: Guid(0x12345678),
                     position: crate::math::Vector3 {
                         x: 100.0,
                         y: 200.0,
@@ -1416,7 +1416,7 @@ mod tests {
                     ..Default::default()
                 },
                 position: WorldPosition {
-                    landblock_id: 0x12345678,
+                    landblock_id: Guid(0x12345678),
                     coords: crate::math::Vector3 {
                         x: 10.0,
                         y: 20.0,
@@ -1546,7 +1546,7 @@ mod tests {
         let expected = GameMessage::AutonomousPosition(Box::new(ServerAutonomousPositionData {
             guid: Guid(1),
             position: WorldPosition {
-                landblock_id: 0x12345678,
+                landblock_id: Guid(0x12345678),
                 coords: crate::math::Vector3 {
                     x: 10.0,
                     y: 20.0,

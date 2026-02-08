@@ -81,9 +81,9 @@ async fn main() -> Result<()> {
     client.set_event_tx(event_tx);
     client.set_command_rx(command_rx);
 
-    let password = args.password.clone();
+    let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
     let client_handle = tokio::spawn(async move {
-        match client.run(&password).await {
+        match client.run().await {
             Err(e) if !e.to_string().contains("Graceful disconnect") => {
                 log::error!("Client error: {}", e);
             }
@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
                 Some(event) = event_rx.recv() => {
                     if let ClientEvent::CharacterList(chars) = event {
                         println!("Characters for account {}:", args.account);
-                        for (id, name) in chars { println!("  - {} (ID: {:08X})", name, id); }
+                        for character in chars { println!("  - {} (ID: {:08X})", character.name, character.guid); }
                         let _ = command_tx.send(ClientCommand::Quit);
                         let _ = client_handle.await;
                         return Ok(());
@@ -120,9 +120,12 @@ async fn main() -> Result<()> {
                 tokio::select! {
                     Some(event) = event_rx.recv() => {
                         match event {
-                            ClientEvent::Message(msg) => { println!("{}", msg.text); }
+                            ClientEvent::LogMessage(msg) => { println!("{}", msg); }
+                            ClientEvent::ServerMessage(msg) => { println!("{}", msg); }
+                            ClientEvent::Chat { sender, message } => { println!("{}: {}", sender, message); }
+                            ClientEvent::Emote { sender, text } => { println!("{} {}", sender, text); }
                             ClientEvent::CharacterList(chars) => {
-                                println!("Available characters: {:?}", chars.iter().map(|c| &c.1).collect::<Vec<_>>());
+                                println!("Available characters: {:?}", chars.iter().map(|c| &c.name).collect::<Vec<_>>());
                                 if character_pref.is_none() {
                                     println!("Selecting first character...");
                                     let _ = command_tx.send(ClientCommand::SelectCharacterByIndex(1));

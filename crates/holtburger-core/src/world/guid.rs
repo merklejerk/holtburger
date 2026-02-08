@@ -1,4 +1,4 @@
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -25,7 +25,7 @@ impl Guid {
     }
 }
 
-impl MessageUnpack for Guid {
+impl ProtocolUnpack for Guid {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -36,7 +36,7 @@ impl MessageUnpack for Guid {
     }
 }
 
-impl MessagePack for Guid {
+impl ProtocolPack for Guid {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&<Guid as Into<u32>>::into(*self).to_le_bytes());
     }

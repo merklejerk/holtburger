@@ -1,7 +1,7 @@
-use crate::protocol::messages::traits::{MessagePack, MessageUnpack};
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
 use std::fmt::Debug;
 
-pub fn assert_pack_unpack_parity<T: MessagePack + MessageUnpack + Debug + PartialEq>(
+pub fn assert_pack_unpack_parity<T: ProtocolPack + ProtocolUnpack + Debug + PartialEq>(
     data: &[u8],
     expected: &T,
 ) {

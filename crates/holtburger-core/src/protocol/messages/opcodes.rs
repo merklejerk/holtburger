@@ -604,6 +604,8 @@ pub enum GameEventOpcode {
     WeenieError = 0x028A,
     /// S2C: Error from the game engine with an extra description.
     WeenieErrorWithString = 0x028B,
+    /// S2C: Update the health of an entity.
+    UpdateHealth = 0x01C0,
 
     // --- Fellowship ---
     // /// S2C: Complete fellowship update.
@@ -702,8 +704,6 @@ pub enum GameEventOpcode {
     // EvasionDefenderNotification = 0x01B4,
     // /// S2C: Signals the start of an attack sequence.
     // CombatCommenceAttack = 0x01B8,
-    // /// S2C: Updates the health (Stamina) of an object.
-    // UpdateHealth = 0x01C0,
     // /// S2C: Sent to the victim when they die.
     // VictimNotification = 0x01AC,
     // /// S2C: Sent to the killer when they defeat a target.

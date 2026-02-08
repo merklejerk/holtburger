@@ -563,7 +563,7 @@ impl PlayerState {
             }
             GameMessage::GameEvent(ev) => {
                 return match &ev.event {
-                    GameEventData::MagicUpdateEnchantment(data) => {
+                    GameEvent::MagicUpdateEnchantment(data) => {
                         let MagicUpdateEnchantmentData {
                             target,
                             enchantment,
@@ -584,7 +584,7 @@ impl PlayerState {
                             false
                         }
                     }
-                    GameEventData::MagicUpdateMultipleEnchantments(data) => {
+                    GameEvent::MagicUpdateMultipleEnchantments(data) => {
                         let MagicUpdateMultipleEnchantmentsData {
                             target,
                             enchantments,
@@ -608,7 +608,7 @@ impl PlayerState {
                             false
                         }
                     }
-                    GameEventData::MagicRemoveEnchantment(data) => {
+                    GameEvent::MagicRemoveEnchantment(data) => {
                         let MagicRemoveEnchantmentData {
                             target,
                             spell_id,
@@ -628,7 +628,7 @@ impl PlayerState {
                             false
                         }
                     }
-                    GameEventData::MagicRemoveMultipleEnchantments(data) => {
+                    GameEvent::MagicRemoveMultipleEnchantments(data) => {
                         let MagicRemoveMultipleEnchantmentsData { target, spells, .. } = &**data;
                         if *target == self.guid {
                             for (spell_id, layer) in spells {
@@ -645,7 +645,7 @@ impl PlayerState {
                             false
                         }
                     }
-                    GameEventData::MagicPurgeEnchantments(data) => {
+                    GameEvent::MagicPurgeEnchantments(data) => {
                         let MagicPurgeEnchantmentsData { target, .. } = &**data;
                         if *target == self.guid {
                             self.enchantments.clear();
@@ -656,7 +656,7 @@ impl PlayerState {
                             false
                         }
                     }
-                    GameEventData::MagicPurgeBadEnchantments(data) => {
+                    GameEvent::MagicPurgeBadEnchantments(data) => {
                         let MagicPurgeBadEnchantmentsData { target, .. } = &**data;
                         if *target == self.guid {
                             self.enchantments.retain(|e| {
@@ -669,28 +669,29 @@ impl PlayerState {
                             false
                         }
                     }
+                    GameEvent::UpdateHealth(data) => {
+                        let UpdateHealthData { target, health } = &**data;
+                        let target_guid = if *target == Guid::NULL {
+                            self.guid
+                        } else {
+                            *target
+                        };
+
+                        if target_guid == self.guid
+                            && target_guid != Guid::NULL
+                            && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health)
+                        {
+                            // UpdateHealth is a percentage float (0.0 to 1.0)
+                            let new_current = (*health * vital_obj.buffed_max as f32) as u32;
+                            vital_obj.current = new_current;
+                            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                            true
+                        } else {
+                            false
+                        }
+                    }
                     _ => false,
                 };
-            }
-            GameMessage::UpdateHealth(data) => {
-                let target = data.target;
-                let health = data.health;
-                let target_guid = if target == Guid::NULL {
-                    self.guid
-                } else {
-                    target
-                };
-
-                if target_guid == self.guid
-                    && target_guid != Guid::NULL
-                    && let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health)
-                {
-                    // UpdateHealth is a percentage float (0.0 to 1.0)
-                    let new_current = (health * vital_obj.buffed_max as f32) as u32;
-                    vital_obj.current = new_current;
-                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
-                    return true;
-                }
             }
             _ => {}
         }
@@ -890,7 +891,7 @@ mod tests {
     fn test_vector_update_routing() {
         use crate::math::Vector3;
         use crate::protocol::messages::GameMessage;
-        use crate::protocol::messages::movement::VectorUpdateData;
+        use crate::protocol::messages::VectorUpdateData;
         use crate::world::WorldEvent;
 
         let mut player = PlayerState::new();

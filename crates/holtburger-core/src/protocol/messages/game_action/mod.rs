@@ -1,21 +1,30 @@
-use crate::protocol::messages::{
-    AutonomousPositionData, DropItemData, GameActionOpcode, GetAndWieldItemData,
-    IdentifyObjectData, JumpData, LoginCompleteData, MessagePack, MessageUnpack, MoveToStateData,
-    PingRequestData, PutItemInContainerData, StackableSplitToWieldData, TalkData, TellActionData,
-    UseData,
-};
+pub(crate) mod chat;
+pub(crate) mod inventory;
+pub(crate) mod misc;
+pub(crate) mod movement;
+pub(crate) mod object;
+
+use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
+use crate::protocol::messages::opcodes::GameActionOpcode;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+
+// Re-export payloads from children modules
+pub use chat::*;
+pub use inventory::*;
+pub use misc::*;
+pub use movement::*;
+pub use object::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameActionMessage {
     pub sequence: u32,
-    pub action: GameActionData,
+    pub action: GameAction,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum GameActionData {
+pub enum GameAction {
     Jump(Box<JumpData>),
-    AutonomousPosition(Box<AutonomousPositionData>),
+    AutonomousPosition(Box<AutonomousPositionActionData>),
     MoveToState(Box<MoveToStateData>),
     GetAndWieldItem(Box<GetAndWieldItemData>),
     StackableSplitToWield(Box<StackableSplitToWieldData>),
@@ -30,7 +39,7 @@ pub enum GameActionData {
     Unknown(u32, Vec<u8>),
 }
 
-impl MessageUnpack for GameActionMessage {
+impl ProtocolUnpack for GameActionMessage {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
             return None;
@@ -44,49 +53,49 @@ impl MessageUnpack for GameActionMessage {
         let action_data = match action_op {
             Some(op) => match op {
                 GameActionOpcode::Jump => {
-                    GameActionData::Jump(Box::new(JumpData::unpack(data, offset, sequence)?))
+                    GameAction::Jump(Box::new(JumpData::unpack(data, offset)?))
                 }
-                GameActionOpcode::AutonomousPosition => GameActionData::AutonomousPosition(
-                    Box::new(AutonomousPositionData::unpack(data, offset)?),
+                GameActionOpcode::AutonomousPosition => GameAction::AutonomousPosition(
+                    Box::new(AutonomousPositionActionData::unpack(data, offset)?),
                 ),
-                GameActionOpcode::MoveToState => GameActionData::MoveToState(Box::new(
-                    MoveToStateData::unpack(data, offset, sequence)?,
+                GameActionOpcode::MoveToState => GameAction::MoveToState(Box::new(
+                    MoveToStateData::unpack(data, offset)?,
                 )),
-                GameActionOpcode::GetAndWieldItem => GameActionData::GetAndWieldItem(Box::new(
-                    GetAndWieldItemData::unpack(data, offset, sequence)?,
+                GameActionOpcode::GetAndWieldItem => GameAction::GetAndWieldItem(Box::new(
+                    GetAndWieldItemData::unpack(data, offset)?,
                 )),
-                GameActionOpcode::StackableSplitToWield => GameActionData::StackableSplitToWield(
-                    Box::new(StackableSplitToWieldData::unpack(data, offset, sequence)?),
+                GameActionOpcode::StackableSplitToWield => GameAction::StackableSplitToWield(
+                    Box::new(StackableSplitToWieldData::unpack(data, offset)?),
                 ),
                 GameActionOpcode::Talk => {
-                    GameActionData::Talk(Box::new(TalkData::unpack(data, offset)?))
+                    GameAction::Talk(Box::new(TalkData::unpack(data, offset)?))
                 }
                 GameActionOpcode::Tell => {
-                    GameActionData::Tell(Box::new(TellActionData::unpack(data, offset)?))
+                    GameAction::Tell(Box::new(TellActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::PingRequest => {
-                    GameActionData::PingRequest(Box::new(PingRequestData::unpack(data, offset)?))
+                    GameAction::PingRequest(Box::new(PingRequestData::unpack(data, offset)?))
                 }
                 GameActionOpcode::DropItem => {
-                    GameActionData::DropItem(Box::new(DropItemData::unpack(data, offset)?))
+                    GameAction::DropItem(Box::new(DropItemData::unpack(data, offset)?))
                 }
-                GameActionOpcode::PutItemInContainer => GameActionData::PutItemInContainer(
+                GameActionOpcode::PutItemInContainer => GameAction::PutItemInContainer(
                     Box::new(PutItemInContainerData::unpack(data, offset)?),
                 ),
                 GameActionOpcode::Use => {
-                    GameActionData::Use(Box::new(UseData::unpack(data, offset)?))
+                    GameAction::Use(Box::new(UseData::unpack(data, offset)?))
                 }
-                GameActionOpcode::IdentifyObject => GameActionData::IdentifyObject(Box::new(
+                GameActionOpcode::IdentifyObject => GameAction::IdentifyObject(Box::new(
                     IdentifyObjectData::unpack(data, offset)?,
                 )),
-                GameActionOpcode::LoginComplete => GameActionData::LoginComplete(Box::new(
+                GameActionOpcode::LoginComplete => GameAction::LoginComplete(Box::new(
                     LoginCompleteData::unpack(data, offset)?,
                 )),
             },
             None => {
                 let remaining = data[*offset..].to_vec();
                 *offset = data.len();
-                GameActionData::Unknown(action_type_raw, remaining)
+                GameAction::Unknown(action_type_raw, remaining)
             }
         };
 
@@ -97,77 +106,77 @@ impl MessageUnpack for GameActionMessage {
     }
 }
 
-impl MessagePack for GameActionMessage {
+impl ProtocolPack for GameActionMessage {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.action {
-            GameActionData::Jump(data) => {
+            GameAction::Jump(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Jump as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::AutonomousPosition(data) => {
+            GameAction::AutonomousPosition(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::AutonomousPosition as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::MoveToState(data) => {
+            GameAction::MoveToState(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::MoveToState as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::GetAndWieldItem(data) => {
+            GameAction::GetAndWieldItem(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::GetAndWieldItem as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::StackableSplitToWield(data) => {
+            GameAction::StackableSplitToWield(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::StackableSplitToWield as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::Talk(data) => {
+            GameAction::Talk(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Talk as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::Tell(data) => {
+            GameAction::Tell(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Tell as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::PingRequest(data) => {
+            GameAction::PingRequest(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::PingRequest as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::DropItem(data) => {
+            GameAction::DropItem(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::DropItem as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::PutItemInContainer(data) => {
+            GameAction::PutItemInContainer(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::PutItemInContainer as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::Use(data) => {
+            GameAction::Use(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Use as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::IdentifyObject(data) => {
+            GameAction::IdentifyObject(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::IdentifyObject as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::LoginComplete(data) => {
+            GameAction::LoginComplete(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::LoginComplete as u32)
                     .unwrap();
                 data.pack(buf);
             }
-            GameActionData::Unknown(opcode, data) => {
+            GameAction::Unknown(opcode, data) => {
                 buf.write_u32::<LittleEndian>(*opcode).unwrap();
                 buf.extend_from_slice(data);
             }

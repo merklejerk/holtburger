@@ -366,7 +366,8 @@ impl Session {
 
     pub async fn send_message(&mut self, message: &GameMessage) -> Result<()> {
         log::debug!(">>> Outgoing Message: {:?}", message);
-        let payload = message.pack();
+        let mut payload = Vec::new();
+        message.pack(&mut payload);
 
         let frag_header = FragmentHeader {
             sequence: self.fragment_sequence,

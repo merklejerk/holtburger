@@ -276,3 +276,26 @@ mod tests {
         assert_eq!(LittleEndian::read_u32(&buf[0..4]), 2); // 1 byte prefix + 1 byte string = 2
     }
 }
+
+pub fn build_login_payload(account: &str, password: &str, sequence: u32, version: &str) -> Vec<u8> {
+    let mut payload = Vec::new();
+    write_string16(&mut payload, version); // ClientVersion
+
+    // Placeholder for data_len
+    let len_pos = payload.len();
+    payload.extend_from_slice(&[0u8; 4]);
+
+    let start_of_data = payload.len();
+
+    payload.extend_from_slice(&0x02u32.to_le_bytes()); // NetAuthType: AccountPassword
+    payload.extend_from_slice(&0x01u32.to_le_bytes()); // AuthFlags: EnableCrypto
+    payload.extend_from_slice(&sequence.to_le_bytes()); // Timestamp
+    write_string16(&mut payload, account);
+    write_string16(&mut payload, ""); // AdminOverride
+    write_string32(&mut payload, password);
+
+    let data_len = (payload.len() - start_of_data) as u32;
+    LittleEndian::write_u32(&mut payload[len_pos..len_pos + 4], data_len);
+
+    payload
+}

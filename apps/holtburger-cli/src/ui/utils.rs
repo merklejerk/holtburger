@@ -55,8 +55,15 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
     let target = match state.dashboard_tab {
-        DashboardTab::Entities | DashboardTab::Inventory => {
+        DashboardTab::Entities => {
             let entities = state.get_filtered_nearby_tab();
+            entities
+                .get(state.selected_dashboard_index)
+                .map(|(e, _, _)| CommandTarget::Entity(e))
+                .unwrap_or(CommandTarget::None)
+        }
+        DashboardTab::Inventory => {
+            let entities = state.get_filtered_inventory_tab();
             entities
                 .get(state.selected_dashboard_index)
                 .map(|(e, _, _)| CommandTarget::Entity(e))

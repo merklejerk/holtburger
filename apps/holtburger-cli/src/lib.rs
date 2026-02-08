@@ -1,3 +1,2 @@
-pub mod actions;
-pub mod classification;
+pub mod entities;
 pub mod ui;

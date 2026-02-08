@@ -151,13 +151,8 @@ pub fn write_packed_u32(buf: &mut Vec<u8>, value: u32) {
 }
 
 pub fn read_packed_u32_with_known_type(data: &[u8], offset: &mut usize, known_type: u32) -> u32 {
-    let start = *offset;
     let raw = read_packed_u32(data, offset);
-    if (*offset - start) == 2 {
-        raw | known_type
-    } else {
-        raw
-    }
+    raw | known_type
 }
 
 pub fn write_packed_u32_with_known_type(buf: &mut Vec<u8>, value: u32, known_type: u32) {
@@ -270,6 +265,20 @@ mod tests {
         let read = read_packed_u32_with_known_type(&buf, &mut offset, 0x06000000);
         assert_eq!(read, val);
         assert_eq!(offset, 2);
+    }
+
+    #[test]
+    fn test_packed_u32_known_type_large() {
+        let val = 0x06008000;
+        let mut buf = Vec::new();
+        write_packed_u32_with_known_type(&mut buf, val, 0x06000000);
+        // 0x8000 packed is 4 bytes: 00 80 00 80
+        assert_eq!(buf, vec![0x00, 0x80, 0x00, 0x80]);
+
+        let mut offset = 0;
+        let read = read_packed_u32_with_known_type(&buf, &mut offset, 0x06000000);
+        assert_eq!(read, val);
+        assert_eq!(offset, 4);
     }
 
     #[test]

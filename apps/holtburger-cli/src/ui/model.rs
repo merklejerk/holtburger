@@ -50,7 +50,6 @@ pub struct AppState {
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
     pub entities: HashMap<Guid, Entity>,
-    pub inventory_entities: HashMap<Guid, Entity>,
     pub server_time: Option<(f64, Instant)>,
     pub chat_log: Option<Mutex<File>>,
     pub use_emojis: bool,

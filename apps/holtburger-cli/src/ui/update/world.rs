@@ -1,7 +1,7 @@
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, UIState};
 use holtburger_core::ClientEvent;
-use holtburger_core::world::WorldEvent;
+use holtburger_core::world::{Guid, WorldEvent};
 
 impl AppState {
     pub(super) fn handle_received_event(&mut self, event: ClientEvent) {
@@ -52,6 +52,59 @@ impl AppState {
                         self.skills = skills.into_iter().map(|s| (s.skill_type, s)).collect();
                         self.player_enchantments = enchantments;
                         self.refresh_context_buffer();
+                    }
+                    WorldEvent::PropertyUpdated {
+                        guid,
+                        property_id,
+                        value,
+                    } => {
+                        use holtburger_core::protocol::properties::PropertyInstanceId;
+                        use holtburger_core::world::properties::PropertyValue;
+
+                        if let Some(entity) = self.entities.get_mut(&guid) {
+                            match value {
+                                PropertyValue::Int(v) => {
+                                    entity.int_properties.insert(property_id, v);
+                                }
+                                PropertyValue::Int64(v) => {
+                                    entity.int_properties.insert(property_id, v as i32);
+                                }
+                                PropertyValue::Bool(v) => {
+                                    entity.bool_properties.insert(property_id, v);
+                                }
+                                PropertyValue::Float(v) => {
+                                    entity.float_properties.insert(property_id, v);
+                                }
+                                PropertyValue::String(v) => {
+                                    entity.string_properties.insert(property_id, v);
+                                }
+                                PropertyValue::DID(v) => {
+                                    entity.did_properties.insert(property_id, v);
+                                }
+                                PropertyValue::IID(v) => {
+                                    entity.iid_properties.insert(property_id, v);
+                                    if let Some(prop) = PropertyInstanceId::from_repr(property_id) {
+                                        match prop {
+                                            PropertyInstanceId::Container => {
+                                                entity.container_id =
+                                                    if v == Guid::NULL { None } else { Some(v) };
+                                                if v != Guid::NULL {
+                                                    entity.position.landblock_id = Guid::NULL;
+                                                }
+                                            }
+                                            PropertyInstanceId::Wielder => {
+                                                entity.wielder_id =
+                                                    if v == Guid::NULL { None } else { Some(v) };
+                                                if v != Guid::NULL {
+                                                    entity.position.landblock_id = Guid::NULL;
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     WorldEvent::AttributeUpdated(attr) => {
                         self.attributes.insert(attr.attr_type, attr);

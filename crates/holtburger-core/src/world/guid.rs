@@ -32,25 +32,25 @@ impl MessageUnpack for Guid {
         }
         let val = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(Guid(val))
+        Some(val.into())
     }
 }
 
 impl MessagePack for Guid {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.0.to_le_bytes());
+        buf.extend_from_slice(&<Guid as Into<u32>>::into(*self).to_le_bytes());
     }
 }
 
 impl fmt::Display for Guid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:08X}", self.0)
+        write!(f, "{:08X}", <Guid as Into<u32>>::into(*self))
     }
 }
 
 impl fmt::Debug for Guid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "0x{:08X}", self.0)
+        write!(f, "0x{:08X}", <Guid as Into<u32>>::into(*self))
     }
 }
 

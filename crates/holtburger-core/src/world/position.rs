@@ -23,7 +23,7 @@ impl MessageUnpack for WorldPosition {
         if data.len() < *offset + 32 {
             return None;
         }
-        let landblock_id = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        let landblock_id = LittleEndian::read_u32(&data[*offset..*offset + 4]).into();
         *offset += 4;
         let x = LittleEndian::read_f32(&data[*offset..*offset + 4]);
         let y = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
@@ -179,7 +179,7 @@ impl MessagePack for PositionPack {
         use byteorder::{LittleEndian, WriteBytesExt};
         writer.write_u32::<LittleEndian>(self.flags.bits()).unwrap();
         writer
-            .write_u32::<LittleEndian>(self.pos.landblock_id.0)
+            .write_u32::<LittleEndian>(self.pos.landblock_id.into())
             .unwrap();
         writer.write_f32::<LittleEndian>(self.pos.coords.x).unwrap();
         writer.write_f32::<LittleEndian>(self.pos.coords.y).unwrap();
@@ -245,7 +245,7 @@ impl MessagePack for PositionPack {
 impl WorldPosition {
     pub fn write_raw(&self, writer: &mut Vec<u8>) {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u32::<LittleEndian>(self.landblock_id.0).unwrap();
+        writer.write_u32::<LittleEndian>(self.landblock_id.into()).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.x).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.y).unwrap();
         writer.write_f32::<LittleEndian>(self.coords.z).unwrap();

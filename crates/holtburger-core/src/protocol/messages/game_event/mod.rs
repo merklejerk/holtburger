@@ -288,3 +288,42 @@ impl ProtocolPack for GameEventMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_gamemessage_routing_game_event_start() {
+        // Opcode (0xF7B0), Target (0x50000001), Seq (0x0E), Event (0x0282)
+        let hex_str = "B0F70000010000500E00000082020000";
+        let data = hex::decode(hex_str).expect("Hex decode failed");
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 0x0E,
+            event: GameEvent::StartGame,
+        }));
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_channel_broadcast_unpack_failure() {
+        // Hex from user report: B0F7...00
+        // Corrected with padded empty string: 00000000 for sender_name
+        let hex_str = "B0F70000010000500D00000047010000040000000000000079002B4275646479206861732063726561746564205368697274202830783830303035443235292061742030784441353530303144205B38352E363730333837203130372E3938343732362031392E3939353030315D20302E34373432303020302E30303030303020302E30303030303020302E3838303431372E00";
+        let data = hex::decode(hex_str).expect("Hex decode failed");
+        let mut offset = 0;
+        let msg = GameMessage::unpack(&data, &mut offset).expect("Should unpack ChannelBroadcast");
+        if let GameMessage::GameEvent(ev) = msg {
+            if let GameEvent::ChannelBroadcast(_cb) = ev.event {
+                // Success
+            } else {
+                panic!("Expected ChannelBroadcast");
+            }
+        } else {
+            panic!("Expected GameEvent");
+        }
+    }
+}

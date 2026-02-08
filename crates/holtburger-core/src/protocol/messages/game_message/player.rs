@@ -348,6 +348,39 @@ mod tests {
     }
 
     #[test]
+    fn test_update_vital_current_public_fixture() {
+        let hex = "0c010000500200000064000000";
+        let expected = PublicUpdateVitalCurrentData {
+            sequence: 12,
+            object_guid: Some(0x50000001),
+            vital: 2,
+            current: 100,
+        };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_game_message_private_vital_tick() {
+        use crate::protocol::messages::GameOpcode;
+
+        let mut data = Vec::new();
+        data.extend_from_slice(&(GameOpcode::PrivateUpdateVitalCurrent as u32).to_le_bytes());
+        data.push(0x0C); // Sequence
+        data.extend_from_slice(&0x00000002u32.to_le_bytes()); // Vital (Health)
+        data.extend_from_slice(&0x00000064u32.to_le_bytes()); // Current (100)
+
+        let mut offset = 0;
+        let msg = GameMessage::unpack(&data, &mut offset).unwrap();
+        if let GameMessage::PrivateUpdateVitalCurrent(d) = msg {
+            assert_eq!(d.object_guid, None);
+            assert_eq!(d.vital, 2);
+            assert_eq!(d.current, 100);
+        } else {
+            panic!("Expected PrivateUpdateVitalCurrent, got {:?}", msg);
+        }
+    }
+
+    #[test]
     fn test_update_skill_level_private_parity() {
         use crate::protocol::fixtures;
         let expected = GameMessage::PrivateUpdateSkillLevel(Box::new(PrivateUpdateSkillLevelData {

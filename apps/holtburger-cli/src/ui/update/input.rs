@@ -320,8 +320,15 @@ impl AppState {
                                 _ => {
                                     // Action processing
                                     let target = match self.dashboard_tab {
-                                        DashboardTab::Entities | DashboardTab::Inventory => {
+                                        DashboardTab::Entities => {
                                             let entities = self.get_filtered_nearby_tab();
+                                            entities
+                                                .get(self.selected_dashboard_index)
+                                                .map(|(e, _, _)| CommandTarget::Entity(e))
+                                                .unwrap_or(CommandTarget::None)
+                                        }
+                                        DashboardTab::Inventory => {
+                                            let entities = self.get_filtered_inventory_tab();
                                             entities
                                                 .get(self.selected_dashboard_index)
                                                 .map(|(e, _, _)| CommandTarget::Entity(e))

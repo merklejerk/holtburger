@@ -192,7 +192,6 @@ async fn main() -> Result<()> {
         player_pos: None,
         player_enchantments: Vec::new(),
         entities: std::collections::HashMap::new(),
-        inventory_entities: std::collections::HashMap::new(),
         server_time: None,
         chat_log,
         use_emojis: !args.no_emojis,

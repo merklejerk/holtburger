@@ -171,8 +171,8 @@ impl ProtocolPack for ServerMessageData {
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
-    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
     use crate::protocol::messages::game_message::GameMessage;
+    use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
 
     #[test]
     fn test_server_message_fixture() {
@@ -263,4 +263,3 @@ mod tests {
         assert_eq!(*msg, expected);
     }
 }
-

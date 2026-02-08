@@ -192,11 +192,11 @@ impl ProtocolPack for AutonomousPositionActionData {
 mod tests {
     use super::*;
     use crate::protocol::fixtures;
+    use crate::protocol::messages::common::movement::RawMotionFlags;
     use crate::protocol::messages::game_action::{GameAction, GameActionMessage};
     use crate::protocol::messages::game_message::GameMessage;
     use crate::protocol::messages::game_message::movement::{MotionItem, RawMotionState};
     use crate::protocol::messages::test_helpers::assert_pack_unpack_parity;
-    use crate::protocol::messages::types::movement::RawMotionFlags;
 
     #[test]
     fn test_jump_data_fixture() {

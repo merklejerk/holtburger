@@ -71,4 +71,3 @@ mod tests {
         assert_pack_unpack_parity(fixtures::ACTION_TELL, &action);
     }
 }
-

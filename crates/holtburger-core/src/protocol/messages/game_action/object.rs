@@ -1,4 +1,4 @@
-pub use crate::protocol::messages::types::common::{IdentifyObjectData, UseData};
+pub use crate::protocol::messages::common::{IdentifyObjectData, UseData};
 
 #[cfg(test)]
 mod tests {

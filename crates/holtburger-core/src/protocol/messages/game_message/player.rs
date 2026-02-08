@@ -383,12 +383,13 @@ mod tests {
     #[test]
     fn test_update_skill_level_private_parity() {
         use crate::protocol::fixtures;
-        let expected = GameMessage::PrivateUpdateSkillLevel(Box::new(PrivateUpdateSkillLevelData {
-            sequence: 12,
-            guid: None,
-            skill: 10,
-            ranks: 50,
-        }));
+        let expected =
+            GameMessage::PrivateUpdateSkillLevel(Box::new(PrivateUpdateSkillLevelData {
+                sequence: 12,
+                guid: None,
+                skill: 10,
+                ranks: 50,
+            }));
         assert_pack_unpack_parity(fixtures::UPDATE_SKILL_LEVEL_PRIVATE, &expected);
     }
 

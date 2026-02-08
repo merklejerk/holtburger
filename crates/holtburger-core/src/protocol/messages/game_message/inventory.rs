@@ -20,7 +20,7 @@ impl ProtocolPack for InventoryRemoveObjectData {
     }
 }
 
-pub use crate::protocol::messages::types::common::SetStackSizeData;
+pub use crate::protocol::messages::common::SetStackSizeData;
 
 #[cfg(test)]
 mod tests {
@@ -51,4 +51,3 @@ mod tests {
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }
 }
-

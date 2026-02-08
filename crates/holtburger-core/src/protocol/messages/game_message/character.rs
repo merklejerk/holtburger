@@ -179,7 +179,8 @@ impl ProtocolUnpack for ServerNameData {
 
 impl ProtocolPack for ServerNameData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.current_connections).unwrap();
+        buf.write_u32::<LittleEndian>(self.current_connections)
+            .unwrap();
         buf.write_i32::<LittleEndian>(self.max_connections).unwrap();
         write_string16(buf, &self.name);
     }
@@ -265,4 +266,3 @@ mod tests {
         }
     }
 }
-

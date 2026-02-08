@@ -158,10 +158,7 @@ impl Client {
                         .session
                         .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
                             sequence: 0,
-                            action: GameAction::Tell(Box::new(TellActionData {
-                                target,
-                                message,
-                            })),
+                            action: GameAction::Tell(Box::new(TellActionData { target, message })),
                         })))
                         .await;
                 }

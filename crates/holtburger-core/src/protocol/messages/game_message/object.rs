@@ -1,5 +1,5 @@
+use crate::protocol::messages::common::object::*;
 use crate::protocol::messages::traits::{ProtocolPack, ProtocolUnpack};
-use crate::protocol::messages::types::object::*;
 use crate::protocol::messages::utils::{
     align_offset, align_to_4, pad_to_4, read_packed_u32_with_known_type, read_string16,
     write_packed_u32_with_known_type, write_string16,
@@ -718,7 +718,7 @@ impl ProtocolPack for SetStateData {
     }
 }
 
-pub use crate::protocol::messages::types::common::{IdentifyObjectData, UseData};
+pub use crate::protocol::messages::common::{IdentifyObjectData, UseData};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParentEventData {
@@ -851,7 +851,9 @@ mod tests {
         let data = hex::decode(hex).unwrap();
         let expected = SetStateData {
             guid: Guid(0x50000001),
-            physics_state: PhysicsState::REPORT_COLLISIONS | PhysicsState::GRAVITY | PhysicsState::EDGE_SLIDE,
+            physics_state: PhysicsState::REPORT_COLLISIONS
+                | PhysicsState::GRAVITY
+                | PhysicsState::EDGE_SLIDE,
             instance_sequence: 355,
             state_sequence: 1,
         };

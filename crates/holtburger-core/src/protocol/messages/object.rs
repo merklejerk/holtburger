@@ -896,7 +896,7 @@ pub struct UpdatePropertyDataIdData {
     pub sequence: u8,
     pub guid: Guid,
     pub property: u32,
-    pub value: u32,
+    pub value: Guid,
     pub is_public: bool,
 }
 
@@ -905,7 +905,7 @@ pub struct UpdatePropertyInstanceIdData {
     pub sequence: u8,
     pub guid: Guid,
     pub property: u32,
-    pub value: u32,
+    pub value: Guid,
     pub is_public: bool,
 }
 
@@ -1146,7 +1146,7 @@ impl UpdatePropertyDataIdData {
         }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let value = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let value = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
         Some(UpdatePropertyDataIdData {
             sequence,
@@ -1165,7 +1165,7 @@ impl MessagePack for UpdatePropertyDataIdData {
             self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
-        buf.write_u32::<LittleEndian>(self.value).unwrap();
+        buf.write_u32::<LittleEndian>(self.value.0).unwrap();
     }
 }
 
@@ -1188,7 +1188,7 @@ impl UpdatePropertyInstanceIdData {
         }
         let property = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let value = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let value = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
         Some(UpdatePropertyInstanceIdData {
             sequence,
@@ -1207,7 +1207,7 @@ impl MessagePack for UpdatePropertyInstanceIdData {
             self.guid.pack(buf);
         }
         buf.write_u32::<LittleEndian>(self.property).unwrap();
-        buf.write_u32::<LittleEndian>(self.value).unwrap();
+        buf.write_u32::<LittleEndian>(self.value.0).unwrap();
     }
 }
 
@@ -1409,7 +1409,7 @@ mod tests {
             physics_flags: PhysicsDescriptionFlag::POSITION | PhysicsDescriptionFlag::TIMESTAMPS,
             physics_state: PhysicsState::empty(),
             pos: Some(WorldPosition {
-                landblock_id: 0x12340001,
+                landblock_id: Guid(0x12340001),
                 coords: crate::math::Vector3::new(100.0, 200.0, 300.0),
                 rotation: crate::math::Quaternion {
                     w: 1.0,
@@ -1459,7 +1459,7 @@ mod tests {
                 | PhysicsDescriptionFlag::TIMESTAMPS,
             physics_state: PhysicsState::empty(),
             pos: Some(WorldPosition {
-                landblock_id: 0x12340001,
+                landblock_id: Guid(0x12340001),
                 coords: crate::math::Vector3::new(10.0, 20.0, 30.0),
                 rotation: crate::math::Quaternion {
                     w: 1.0,

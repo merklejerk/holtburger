@@ -11,13 +11,13 @@ use std::time::Instant;
 /// It tracks entity positions by landblock and handles spatial queries.
 pub struct SpatialScene {
     /// Entities indexed by LandblockID for fast local queries.
-    pub landblock_map: HashMap<u32, HashSet<Guid>>,
+    pub landblock_map: HashMap<Guid, HashSet<Guid>>,
 
     /// Cache of object-level geometry (GfxObj from portal.dat).
     pub object_geometry: HashMap<u32, Arc<GeometryCacheEntry>>,
 
     /// Cache of landblock-level physical info (Stabs, buildings from cell.dat).
-    pub landblock_info: HashMap<u32, Arc<LandblockInfo>>,
+    pub landblock_info: HashMap<Guid, Arc<LandblockInfo>>,
 }
 
 pub struct GeometryCacheEntry {
@@ -43,7 +43,7 @@ impl SpatialScene {
     pub fn get_landblock_info(
         &mut self,
         dat: &DatDatabase,
-        lb_id: u32,
+        lb_id: Guid,
     ) -> Option<Arc<LandblockInfo>> {
         if let Some(info) = self.landblock_info.get(&lb_id) {
             return Some(info.clone());
@@ -51,7 +51,7 @@ impl SpatialScene {
 
         // Outdoor landblock IDs end in 0xFFFF.
         // LandblockInfo is usually stored with the ID as its key in the cell.dat.
-        if let Ok(data) = dat.get_file(lb_id)
+        if let Ok(data) = dat.get_file(lb_id.into())
             && let Ok(info) = LandblockInfo::unpack(&data)
         {
             let arc = Arc::new(info);
@@ -88,7 +88,7 @@ impl SpatialScene {
         None
     }
 
-    pub fn update_entity(&mut self, guid: Guid, old_lb: u32, new_lb: u32) {
+    pub fn update_entity(&mut self, guid: Guid, old_lb: Guid, new_lb: Guid) {
         if old_lb != new_lb
             && let Some(set) = self.landblock_map.get_mut(&old_lb)
         {
@@ -97,20 +97,20 @@ impl SpatialScene {
         self.landblock_map.entry(new_lb).or_default().insert(guid);
     }
 
-    pub fn remove_entity(&mut self, guid: Guid, lb: u32) {
+    pub fn remove_entity(&mut self, guid: Guid, lb: Guid) {
         if let Some(set) = self.landblock_map.get_mut(&lb) {
             set.remove(&guid);
         }
     }
 
     /// Find all entities in a given landblock.
-    pub fn get_in_landblock(&self, lb: u32) -> Option<&HashSet<Guid>> {
+    pub fn get_in_landblock(&self, lb: Guid) -> Option<&HashSet<Guid>> {
         self.landblock_map.get(&lb)
     }
 
     /// Get all entities in the landblock and its 8 immediate neighbors.
     /// Useful for coarse filtering before doing fine-grained distance checks.
-    pub fn get_nearby_entities(&self, lb: u32) -> HashSet<Guid> {
+    pub fn get_nearby_entities(&self, lb: Guid) -> HashSet<Guid> {
         let mut nearby = HashSet::new();
 
         let x = (lb >> 24) & 0xFF;
@@ -124,7 +124,7 @@ impl SpatialScene {
                 if nx > 0 && nx < 255 && ny > 0 && ny < 255 {
                     // Try to add outdoor landblock (identifed by 0xFFFF)
                     let neighbor_lb = ((nx as u32) << 24) | ((ny as u32) << 16) | 0xFFFF;
-                    if let Some(set) = self.landblock_map.get(&neighbor_lb) {
+                    if let Some(set) = self.landblock_map.get(&Guid(neighbor_lb)) {
                         for &guid in set {
                             nearby.insert(guid);
                         }
@@ -165,10 +165,10 @@ mod tests {
         // Landblock (11, 10) - direct neighbor to the east
         let lb_b = (11 << 24) | (10 << 16) | 0xFFFF;
 
-        scene.update_entity(guid_a, lb_a, lb_a);
-        scene.update_entity(guid_b, lb_b, lb_b);
+        scene.update_entity(guid_a, Guid(lb_a), Guid(lb_a));
+        scene.update_entity(guid_b, Guid(lb_b), Guid(lb_b));
 
-        let nearby_a = scene.get_nearby_entities(lb_a);
+        let nearby_a = scene.get_nearby_entities(Guid(lb_a));
         assert!(nearby_a.contains(&guid_a));
         assert!(
             nearby_a.contains(&guid_b),
@@ -177,7 +177,7 @@ mod tests {
 
         // Random landblock (50, 50) - far away
         let lb_far = (50 << 24) | (50 << 16) | 0xFFFF;
-        let nearby_far = scene.get_nearby_entities(lb_far);
+        let nearby_far = scene.get_nearby_entities(Guid(lb_far));
         assert!(nearby_far.is_empty());
     }
 }

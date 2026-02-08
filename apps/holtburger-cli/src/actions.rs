@@ -157,7 +157,7 @@ pub fn get_actions_for_target(
             let is_inventory = if let Some(pguid) = player_guid {
                 is_owned_by_player(e, entities, pguid)
             } else {
-                e.position.landblock_id == 0
+                e.position.landblock_id == Guid::NULL
             };
 
             match class {

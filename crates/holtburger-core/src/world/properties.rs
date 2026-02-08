@@ -1,5 +1,6 @@
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
+use crate::world::Guid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PropertyInt {
@@ -315,6 +316,6 @@ pub enum PropertyValue {
     Bool(bool),
     Float(f64),
     String(String),
-    DID(u32),
-    IID(u32),
+    DID(Guid),
+    IID(Guid),
 }

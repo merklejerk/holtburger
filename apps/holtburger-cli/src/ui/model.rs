@@ -121,12 +121,12 @@ impl AppState {
             DashboardTab::Entities => self
                 .entities
                 .values()
-                .filter(|e| classification::is_targetable(e) && e.position.landblock_id != 0)
+                .filter(|e| classification::is_targetable(e) && e.position.landblock_id != Guid::NULL)
                 .count(),
             DashboardTab::Inventory => self
                 .entities
                 .values()
-                .filter(|e| e.position.landblock_id == 0 && !e.name.is_empty())
+                .filter(|e| e.position.landblock_id == Guid::NULL && !e.name.is_empty())
                 .count(),
             DashboardTab::Effects => self.get_effects_list_enchantments().len(),
             DashboardTab::Character => {
@@ -147,9 +147,9 @@ impl AppState {
             .values()
             .filter(|e| {
                 if !filter_inventory {
-                    classification::is_targetable(e) && e.position.landblock_id != 0
+                    classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
                 } else {
-                    e.position.landblock_id == 0 && !e.name.is_empty()
+                    e.position.landblock_id == Guid::NULL && !e.name.is_empty()
                 }
             })
             .collect();
@@ -356,12 +356,12 @@ impl AppState {
         let world_entities = self
             .entities
             .values()
-            .filter(|e| e.position.landblock_id != 0)
+            .filter(|e| e.position.landblock_id != Guid::NULL)
             .count();
         let inventory_items = self
             .entities
             .values()
-            .filter(|e| e.position.landblock_id == 0)
+            .filter(|e| e.position.landblock_id == Guid::NULL)
             .count();
         self.log_chat(
             ChatMessageKind::System,

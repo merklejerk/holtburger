@@ -382,17 +382,17 @@ impl WorldState {
                     entity.iid_properties.insert(data.property, data.value);
 
                     if data.property == PropertyInstanceId::Container as u32 {
-                        entity.container_id = if data.value == 0 {
+                        entity.container_id = if data.value == Guid::NULL {
                             None
                         } else {
-                            Some(Guid(data.value))
+                            Some(data.value)
                         };
                     }
                     if data.property == PropertyInstanceId::Wielder as u32 {
-                        entity.wielder_id = if data.value == 0 {
+                        entity.wielder_id = if data.value == Guid::NULL {
                             None
                         } else {
-                            Some(Guid(data.value))
+                            Some(data.value)
                         };
                     }
                 }
@@ -444,7 +444,7 @@ impl WorldState {
             .collect()
     }
 
-    pub fn is_colliding(&mut self, pos: &Vector3, lb: u32, radius: f32) -> bool {
+    pub fn is_colliding(&mut self, pos: &Vector3, lb: Guid, radius: f32) -> bool {
         let nearby = self.scene.get_nearby_entities(lb);
         for guid in nearby {
             if guid == self.player.guid {

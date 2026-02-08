@@ -992,7 +992,7 @@ impl Client {
 
         // Update local world state (Teleport)
         // Check distance safely - ignore check if we are uninitialized (landblock 0) or just logging in
-        let distance = if self.world.player.position.landblock_id == 0 {
+        let distance = if self.world.player.position.landblock_id == Guid::NULL {
             0.0
         } else {
             self.world.player.position.distance_to(&next_pos)

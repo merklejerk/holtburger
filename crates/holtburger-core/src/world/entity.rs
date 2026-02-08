@@ -24,8 +24,8 @@ pub struct Entity {
     pub bool_properties: HashMap<u32, bool>,
     pub float_properties: HashMap<u32, f64>,
     pub string_properties: HashMap<u32, String>,
-    pub did_properties: HashMap<u32, u32>,
-    pub iid_properties: HashMap<u32, u32>,
+    pub did_properties: HashMap<u32, Guid>,
+    pub iid_properties: HashMap<u32, Guid>,
 }
 
 impl Entity {

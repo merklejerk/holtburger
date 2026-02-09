@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders};
 
 pub mod action;
@@ -98,10 +98,22 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
     } else {
         Style::default()
     };
+    let input_title = if state.focused_pane == FocusedPane::Input {
+        ">> Input ('/quit' to exit) <<"
+    } else {
+        "Input ('/quit' to exit)"
+    };
     let input_block = Block::default()
         .borders(Borders::ALL)
-        .title("Input ('/quit' to exit)")
-        .border_style(input_style);
+        .title(input_title)
+        .border_style(input_style)
+        .title_style(if state.focused_pane == FocusedPane::Input {
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        });
     let input_para = ratatui::widgets::Paragraph::new(state.input.as_str()).block(input_block);
     f.render_widget(input_para, chunks[2]);
 }

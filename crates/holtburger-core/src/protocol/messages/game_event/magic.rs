@@ -174,6 +174,80 @@ impl ProtocolPack for MagicPurgeBadEnchantmentsData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct MagicDispelEnchantmentData {
+    pub target: Guid,
+    pub sequence: u32,
+    pub spell_id: u16,
+    pub layer: u16,
+}
+
+impl ProtocolUnpack for MagicDispelEnchantmentData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        *offset += 4;
+        Some(MagicDispelEnchantmentData {
+            target: Guid::NULL,
+            sequence: 0,
+            spell_id,
+            layer,
+        })
+    }
+}
+
+impl ProtocolPack for MagicDispelEnchantmentData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.spell_id.to_le_bytes());
+        buf.extend_from_slice(&self.layer.to_le_bytes());
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MagicDispelMultipleEnchantmentsData {
+    pub target: Guid,
+    pub sequence: u32,
+    pub spells: Vec<(u16, u16)>,
+}
+
+impl ProtocolUnpack for MagicDispelMultipleEnchantmentsData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+        *offset += 4;
+        let mut spells = Vec::new();
+        for _ in 0..count {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+            let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+            *offset += 4;
+            spells.push((spell_id, layer));
+        }
+        Some(MagicDispelMultipleEnchantmentsData {
+            target: Guid::NULL,
+            sequence: 0,
+            spells,
+        })
+    }
+}
+
+impl ProtocolPack for MagicDispelMultipleEnchantmentsData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&(self.spells.len() as u32).to_le_bytes());
+        for (spell_id, layer) in &self.spells {
+            buf.extend_from_slice(&spell_id.to_le_bytes());
+            buf.extend_from_slice(&layer.to_le_bytes());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +298,29 @@ mod tests {
         let expected = MagicPurgeEnchantmentsData {
             target: Guid::NULL,
             sequence: 0,
+        };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_magic_dispel_enchantment_parity() {
+        let hex = "01000200";
+        let expected = MagicDispelEnchantmentData {
+            target: Guid::NULL,
+            sequence: 0,
+            spell_id: 1,
+            layer: 2,
+        };
+        assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_magic_dispel_multiple_enchantments_parity() {
+        let hex = "020000000100020003000400";
+        let expected = MagicDispelMultipleEnchantmentsData {
+            target: Guid::NULL,
+            sequence: 0,
+            spells: vec![(1, 2), (3, 4)],
         };
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
     }

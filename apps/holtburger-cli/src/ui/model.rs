@@ -13,7 +13,6 @@ use holtburger_core::{ClientState, RetryState};
 
 use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
 use crate::entities::filter::{EntityFilter, filter_entities};
-use crate::ui::widgets::effects::get_enchantment_name;
 
 pub struct AppState {
     pub account_name: String,
@@ -101,7 +100,7 @@ impl AppState {
             if let Some(guid) = self.current_debug_guid
                 && let Some(entity) = self.entities.get(&guid)
             {
-                let target = crate::entities::CommandTarget::Entity(entity);
+                let target = crate::ui::types::CommandTarget::Entity(entity);
                 let player_guid = self.player_guid;
                 let entities_ref = &self.entities;
 
@@ -142,23 +141,8 @@ impl AppState {
                 EntityFilter::World,
             )
             .len(),
-            DashboardTab::Inventory => filter_entities(
-                &self.entities,
-                self.player_guid,
-                self.player_pos.as_ref(),
-                EntityFilter::Inventory,
-            )
-            .len(),
-            DashboardTab::Effects => self.get_effects_list_enchantments().len(),
-            DashboardTab::Character => {
-                let attr_count = self.attributes.len();
-                let skill_count = self
-                    .skills
-                    .values()
-                    .filter(|s| s.skill_type.is_eor())
-                    .count();
-                attr_count + skill_count + 3 // 2 headers + 1 spacer
-            }
+            DashboardTab::Inventory => self.get_filtered_inventory_tab().len(),
+            DashboardTab::Character => crate::ui::widgets::stats::get_stats_list_items(self).len(),
         }
     }
 
@@ -195,8 +179,8 @@ impl AppState {
 
         // Sort categories by the winner's mod name
         categories.sort_by(|(_, a_list), (_, b_list)| {
-            let a_name = get_enchantment_name(a_list[0]);
-            let b_name = get_enchantment_name(b_list[0]);
+            let a_name = crate::ui::widgets::stats::get_enchantment_name(a_list[0]);
+            let b_name = crate::ui::widgets::stats::get_enchantment_name(b_list[0]);
             a_name.cmp(&b_name)
         });
 

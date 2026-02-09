@@ -415,7 +415,12 @@ impl PlayerState {
             GameMessage::VectorUpdate(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
                     self.instance_sequence = data.instance_sequence;
-                    return false;
+                    events.push(WorldEvent::EntityVectorUpdated {
+                        guid: data.guid,
+                        velocity: data.velocity,
+                        omega: data.omega,
+                    });
+                    return true;
                 }
             }
             GameMessage::UpdateMotion(data) => {
@@ -430,7 +435,7 @@ impl PlayerState {
                         // For MoveToObject/MoveToPosition, we might want a specific event
                         // but for now, the TUI can see the GameMessage if it wants.
                     }
-                    return false;
+                    return true;
                 }
             }
             GameMessage::PrivateUpdateAttribute(data) => {
@@ -711,6 +716,43 @@ impl PlayerState {
                                 self.enchantments
                                     .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                                 events.push(WorldEvent::EnchantmentRemoved {
+                                    spell_id: *spell_id,
+                                    layer: *layer,
+                                });
+                            }
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    GameEvent::MagicDispelEnchantment(data) => {
+                        let MagicDispelEnchantmentData {
+                            target,
+                            spell_id,
+                            layer,
+                            ..
+                        } = &**data;
+                        if *target == self.guid {
+                            self.enchantments
+                                .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
+                            events.push(WorldEvent::EnchantmentDispelled {
+                                spell_id: *spell_id,
+                                layer: *layer,
+                            });
+                            self.emit_derived_stats(events);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    GameEvent::MagicDispelMultipleEnchantments(data) => {
+                        let MagicDispelMultipleEnchantmentsData { target, spells, .. } = &**data;
+                        if *target == self.guid {
+                            for (spell_id, layer) in spells {
+                                self.enchantments
+                                    .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
+                                events.push(WorldEvent::EnchantmentDispelled {
                                     spell_id: *spell_id,
                                     layer: *layer,
                                 });

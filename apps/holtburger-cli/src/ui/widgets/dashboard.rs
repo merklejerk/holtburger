@@ -1,5 +1,6 @@
-use super::super::types::{DashboardTab, FocusedPane};
+use super::super::types::{CommandTarget, DashboardTab, FocusedPane};
 use crate::entities::classification;
+use crate::entities::commands::get_commands_for_target;
 use crate::ui::AppState;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::properties::{PropertyInt, RadarColor};
@@ -20,8 +21,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let tabs = [
         (DashboardTab::Entities, "1", "Near"),
         (DashboardTab::Inventory, "2", "Inv"),
-        (DashboardTab::Character, "3", "Stats"),
-        (DashboardTab::Effects, "4", "Effects"),
+        (DashboardTab::Character, "3", "Char"),
     ];
 
     let mut spans = Vec::new();
@@ -60,16 +60,12 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Tab-specific rendering
     match state.dashboard_tab {
-        DashboardTab::Entities
-        | DashboardTab::Inventory
-        | DashboardTab::Character
-        | DashboardTab::Effects => {
+        DashboardTab::Entities | DashboardTab::Inventory | DashboardTab::Character => {
             // These tabs currently all use a List view
             let items = match state.dashboard_tab {
                 DashboardTab::Entities => get_nearby_list_items(state),
                 DashboardTab::Inventory => get_inventory_list_items(state),
                 DashboardTab::Character => crate::ui::widgets::stats::get_stats_list_items(state),
-                DashboardTab::Effects => crate::ui::widgets::effects::get_effects_list_items(state),
             };
 
             let total = items.len();
@@ -124,11 +120,14 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, dist, depth))| {
+            let target = CommandTarget::Entity(e);
+            let has_commands =
+                !get_commands_for_target(&target, &state.entities, state.player_guid).is_empty();
             render_entity_list_item(
                 e,
                 Some(*dist),
                 *depth,
-                i == state.selected_dashboard_index,
+                i == state.selected_dashboard_index && has_commands,
                 state.use_emojis,
                 false, // Nearby entities aren't "equipped" in our list
             )
@@ -142,12 +141,15 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, _, depth))| {
+            let target = CommandTarget::Entity(e);
+            let has_commands =
+                !get_commands_for_target(&target, &state.entities, state.player_guid).is_empty();
             let is_equipped = state.player_guid.is_some() && e.wielder_id == state.player_guid;
             render_entity_list_item(
                 e,
                 None,
                 *depth,
-                i == state.selected_dashboard_index,
+                i == state.selected_dashboard_index && has_commands,
                 state.use_emojis,
                 is_equipped,
             )
@@ -159,12 +161,12 @@ fn render_entity_list_item(
     e: &Entity,
     dist: Option<f32>,
     depth: usize,
-    is_selected: bool,
+    highlight: bool,
     use_emojis: bool,
     is_equipped: bool,
 ) -> ListItem<'static> {
     let color = get_entity_color(e);
-    let style = if is_selected {
+    let style = if highlight {
         Style::default().bg(Color::DarkGray).fg(color)
     } else {
         Style::default().fg(color)

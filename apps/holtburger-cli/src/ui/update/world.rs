@@ -178,6 +178,38 @@ impl AppState {
                         }
                     }
                     WorldEvent::EnchantmentRemoved { spell_id, layer } => {
+                        // Find the enchantment before removing it to log its name
+                        if let Some(enchant) = self
+                            .player_enchantments
+                            .iter()
+                            .find(|e| e.spell_id == spell_id && e.layer == layer)
+                            && self.verbosity >= 1
+                        {
+                            self.log_chat(
+                                ChatMessageKind::System,
+                                format!(
+                                    "Spell removed: ID {} (Layer {})",
+                                    enchant.spell_id, enchant.layer
+                                ),
+                            );
+                        }
+                        self.player_enchantments
+                            .retain(|e| e.spell_id != spell_id || e.layer != layer);
+                    }
+                    WorldEvent::EnchantmentDispelled { spell_id, layer } => {
+                        if let Some(enchant) = self
+                            .player_enchantments
+                            .iter()
+                            .find(|e| e.spell_id == spell_id && e.layer == layer)
+                        {
+                            self.log_chat(
+                                ChatMessageKind::System,
+                                format!(
+                                    "Spell DISPELLED: ID {} (Layer {})",
+                                    enchant.spell_id, enchant.layer
+                                ),
+                            );
+                        }
                         self.player_enchantments
                             .retain(|e| e.spell_id != spell_id || e.layer != layer);
                     }

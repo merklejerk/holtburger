@@ -1,6 +1,6 @@
-use crate::entities::CommandTarget;
 use crate::entities::classification::{self, EntityClass};
 use crate::entities::filter;
+use crate::ui::types::{CommandHandler, CommandTarget};
 use holtburger_core::ClientCommand;
 use holtburger_core::protocol::properties::PropertyInt;
 use holtburger_core::world::entity::Entity;
@@ -18,12 +18,6 @@ pub enum EntityCommand {
     PickUp,
     MoveToSlot(Guid), // Move item to specific container GUID
     Debug,
-}
-
-#[derive(Debug)]
-pub enum CommandHandler {
-    Command(ClientCommand),
-    ToggleDebug,
 }
 
 impl EntityCommand {

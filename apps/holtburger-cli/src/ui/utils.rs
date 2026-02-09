@@ -1,5 +1,4 @@
-use super::types::DashboardTab;
-use crate::entities::CommandTarget;
+use super::types::{CommandTarget, DashboardTab};
 use crate::ui::AppState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -69,14 +68,12 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
                 .map(|(e, _, _)| CommandTarget::Entity(e))
                 .unwrap_or(CommandTarget::None)
         }
-        DashboardTab::Effects => {
-            let enchants = state.get_effects_list_enchantments();
-            enchants
-                .get(state.selected_dashboard_index)
-                .map(|(e, _)| CommandTarget::Enchantment(e))
-                .unwrap_or(CommandTarget::None)
-        }
-        _ => CommandTarget::None,
+        DashboardTab::Character => crate::ui::widgets::stats::get_enchantment_at_index(
+            state,
+            state.selected_dashboard_index,
+        )
+        .map(CommandTarget::Enchantment)
+        .unwrap_or(CommandTarget::None),
     };
 
     let commands = crate::entities::commands::get_commands_for_target(

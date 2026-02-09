@@ -598,6 +598,10 @@ pub enum GameEventOpcode {
     MagicPurgeEnchantments = 0x02C6,
     /// S2C: Purge all negative enchantments.
     MagicPurgeBadEnchantments = 0x0312,
+    /// S2C: Dispels a specific active enchantment.
+    MagicDispelEnchantment = 0x02C7,
+    /// S2C: Dispels multiple active enchantments.
+    MagicDispelMultipleEnchantments = 0x02C8,
 
     // --- Errors & Feedback ---
     /// S2C: Generic error from the game engine.
@@ -714,10 +718,6 @@ pub enum GameEventOpcode {
     // MagicRemoveSpell = 0x01A8,
     // /// S2C: Adds or updates a spell in the player's spellbook.
     // MagicUpdateSpell = 0x02C1,
-    // /// S2C: Dispels a specific active enchantment.
-    // MagicDispelEnchantment = 0x02C7,
-    // /// S2C: Dispels multiple active enchantments.
-    // MagicDispelMultipleEnchantments = 0x02C8,
     // /// S2C: Response to an item mana query.
     // QueryItemManaResponse = 0x0264,
     // /// S2C: Alerts the client that a portal storm is starting to form due to crowding.

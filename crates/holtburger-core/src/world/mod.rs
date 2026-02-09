@@ -50,6 +50,10 @@ pub enum WorldEvent {
         spell_id: u16,
         layer: u16,
     },
+    EnchantmentDispelled {
+        spell_id: u16,
+        layer: u16,
+    },
     ServerTimeUpdate(f64),
     EnchantmentsPurged,
     DerivedStatsUpdated {

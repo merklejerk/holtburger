@@ -17,11 +17,11 @@ impl Guid {
     pub const NULL: Guid = Guid(0);
 
     pub fn is_player(&self) -> bool {
-        (self.0 & 0x50000000) == 0x50000000
+        (self.0 & 0xF0000000) == 0x50000000
     }
 
     pub fn is_item(&self) -> bool {
-        self.0 < 0x50000000 && self.0 > 0
+        self.0 > 0 && self.0 < 0x50000000
     }
 }
 

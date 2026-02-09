@@ -21,6 +21,7 @@ pub struct Entity {
     pub wielder_id: Option<Guid>,
 
     pub int_properties: HashMap<u32, i32>,
+    pub int64_properties: HashMap<u32, i64>,
     pub bool_properties: HashMap<u32, bool>,
     pub float_properties: HashMap<u32, f64>,
     pub string_properties: HashMap<u32, String>,
@@ -48,6 +49,7 @@ impl Entity {
             container_id: None,
             wielder_id: None,
             int_properties: HashMap::new(),
+            int64_properties: HashMap::new(),
             bool_properties: HashMap::new(),
             float_properties: HashMap::new(),
             string_properties: HashMap::new(),

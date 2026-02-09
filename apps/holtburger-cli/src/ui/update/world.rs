@@ -67,7 +67,7 @@ impl AppState {
                                     entity.int_properties.insert(property_id, v);
                                 }
                                 PropertyValue::Int64(v) => {
-                                    entity.int_properties.insert(property_id, v as i32);
+                                    entity.int64_properties.insert(property_id, v);
                                 }
                                 PropertyValue::Bool(v) => {
                                     entity.bool_properties.insert(property_id, v);
@@ -115,12 +115,40 @@ impl AppState {
                     WorldEvent::SkillUpdated(skill) => {
                         self.skills.insert(skill.skill_type, skill);
                     }
+                    WorldEvent::DerivedStatsUpdated {
+                        attributes,
+                        vitals,
+                        skills,
+                    } => {
+                        for attr in attributes {
+                            self.attributes.insert(attr.attr_type, attr);
+                        }
+                        for vital in vitals {
+                            self.vitals.insert(vital.vital_type, vital);
+                        }
+                        for skill in skills {
+                            self.skills.insert(skill.skill_type, skill);
+                        }
+                    }
                     WorldEvent::EntityMoved { guid, pos } => {
                         if Some(guid) == self.player_guid {
                             self.player_pos = Some(pos);
                         }
                         if let Some(entity) = self.entities.get_mut(&guid) {
                             entity.position = pos;
+                        }
+                    }
+                    WorldEvent::EntityIdentified(entity) => {
+                        let guid = entity.guid;
+                        self.log_chat(
+                            ChatMessageKind::System,
+                            format!("Identified: {}", entity.name),
+                        );
+                        self.entities.insert(guid, *entity);
+
+                        // Refresh view if we are debugging this entity
+                        if self.current_debug_guid == Some(guid) {
+                            self.refresh_context_buffer();
                         }
                     }
                     WorldEvent::EntityVectorUpdated { .. } => {

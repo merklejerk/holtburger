@@ -185,6 +185,7 @@ async fn main() -> Result<()> {
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
         context_view: ui::ContextView::Default,
+        current_debug_guid: None,
         account_password: args.password.clone(),
         logon_retry: holtburger_core::RetryState::new(5),
         enter_retry: holtburger_core::RetryState::new(5),

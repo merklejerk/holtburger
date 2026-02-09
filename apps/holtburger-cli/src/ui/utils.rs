@@ -1,5 +1,5 @@
 use super::types::DashboardTab;
-use crate::entities::commands::CommandTarget;
+use crate::entities::CommandTarget;
 use crate::ui::AppState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};

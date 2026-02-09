@@ -1,4 +1,4 @@
-use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, ChatMessageKind, FocusedPane};
+use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, ChatMessageKind, ContextView, FocusedPane};
 use super::super::utils::wrap_text;
 use crate::ui::AppState;
 use ratatui::Frame;
@@ -136,10 +136,16 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         Style::default()
     };
 
+    let base_title = match state.context_view {
+        ContextView::Default => "Context Information",
+        ContextView::Custom => "Debug Information",
+        ContextView::Assess(_) => "Object Appraisal",
+    };
+
     let ctx_title = if state.focused_pane == FocusedPane::Context {
-        ">> Context Information <<"
+        format!(">> {} <<", base_title)
     } else {
-        " Context Information "
+        format!(" {} ", base_title)
     };
 
     let ctx_list = List::new(ctx_items).block(

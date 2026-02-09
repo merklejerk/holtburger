@@ -43,6 +43,7 @@ pub struct AppState {
     pub context_buffer: Vec<String>,
     pub context_scroll_offset: usize,
     pub context_view: ContextView,
+    pub current_debug_guid: Option<Guid>,
     pub account_password: String,
     pub logon_retry: RetryState,
     pub enter_retry: RetryState,
@@ -97,6 +98,23 @@ impl AppState {
 
     pub fn refresh_context_buffer(&mut self) {
         if self.context_view == ContextView::Custom {
+            if let Some(guid) = self.current_debug_guid
+                && let Some(entity) = self.entities.get(&guid)
+            {
+                let target = crate::entities::CommandTarget::Entity(entity);
+                let player_guid = self.player_guid;
+                let entities_ref = &self.entities;
+
+                self.context_buffer = crate::entities::debug::get_debug_info(&target, |id| {
+                    entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
+                        if Some(id) == player_guid {
+                            Some("You".to_string())
+                        } else {
+                            None
+                        }
+                    })
+                });
+            }
             return;
         }
         self.context_buffer.clear();

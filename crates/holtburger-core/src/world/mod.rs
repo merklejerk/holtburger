@@ -21,6 +21,7 @@ pub enum WorldEvent {
         guid: Guid,
         pos: WorldPosition,
     },
+    EntityIdentified(Box<Entity>),
     EntityVectorUpdated {
         guid: Guid,
         velocity: crate::math::Vector3,

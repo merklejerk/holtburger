@@ -1,28 +1,23 @@
+use crate::entities::CommandTarget;
 use crate::entities::classification::{self, EntityClass};
+use crate::entities::filter;
 use holtburger_core::ClientCommand;
-use holtburger_core::protocol::messages::Enchantment;
-use holtburger_core::protocol::properties::{
-    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString,
-};
+use holtburger_core::protocol::properties::PropertyInt;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::guid::Guid;
 use holtburger_core::world::properties::ObjectDescriptionFlag;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityCommand {
     Assess,
     Use,
+    Equip(u32), // u32 is the equip mask
+    Unequip,
     Drop,
     PickUp,
     MoveToSlot(Guid), // Move item to specific container GUID
     Debug,
-}
-
-pub enum CommandTarget<'a> {
-    Entity(&'a Entity),
-    Enchantment(&'a Enchantment),
-    None,
 }
 
 #[derive(Debug)]
@@ -36,6 +31,8 @@ impl EntityCommand {
         match self {
             EntityCommand::Assess => "Assess",
             EntityCommand::Use => "Use",
+            EntityCommand::Equip(_) => "Equip",
+            EntityCommand::Unequip => "Unequip",
             EntityCommand::Drop => "Drop",
             EntityCommand::PickUp => "Pick up",
             EntityCommand::MoveToSlot(_) => "Secure",
@@ -47,6 +44,8 @@ impl EntityCommand {
         match self {
             EntityCommand::Assess => 'a',
             EntityCommand::Use => 'u',
+            EntityCommand::Equip(_) => 'e',
+            EntityCommand::Unequip => 'k',
             EntityCommand::Drop => 'd',
             EntityCommand::PickUp => 'p',
             EntityCommand::MoveToSlot(_) => 's',
@@ -83,6 +82,19 @@ impl EntityCommand {
             (EntityCommand::Use, CommandTarget::Entity(e)) => {
                 Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
             }
+            (EntityCommand::Equip(mask), CommandTarget::Entity(e)) => {
+                Some(CommandHandler::Command(ClientCommand::GetAndWield {
+                    item: e.guid,
+                    equip_mask: *mask,
+                }))
+            }
+            (EntityCommand::Unequip, CommandTarget::Entity(e)) => player_guid.map(|pguid| {
+                CommandHandler::Command(ClientCommand::MoveItem {
+                    item: e.guid,
+                    container: pguid,
+                    placement: 0,
+                })
+            }),
             (EntityCommand::Drop, CommandTarget::Entity(e)) => {
                 Some(CommandHandler::Command(ClientCommand::Drop(e.guid)))
             }
@@ -113,36 +125,6 @@ impl EntityCommand {
     }
 }
 
-pub fn is_owned_by_player(
-    entity: &Entity,
-    entities: &HashMap<Guid, Entity>,
-    player_guid: Guid,
-) -> bool {
-    let mut current_guid = entity.guid;
-    let mut visited = HashSet::new();
-
-    while visited.insert(current_guid) {
-        if current_guid == player_guid {
-            return true;
-        }
-
-        let ent = if let Some(e) = entities.get(&current_guid) {
-            e
-        } else {
-            return false;
-        };
-
-        if let Some(cid) = ent.container_id {
-            current_guid = cid;
-        } else if let Some(wid) = ent.wielder_id {
-            current_guid = wid;
-        } else {
-            break;
-        }
-    }
-    false
-}
-
 pub fn get_commands_for_target(
     target: &CommandTarget,
     entities: &HashMap<Guid, Entity>,
@@ -155,7 +137,7 @@ pub fn get_commands_for_target(
             let mut ent_commands = vec![EntityCommand::Assess];
 
             let is_inventory = if let Some(pguid) = player_guid {
-                is_owned_by_player(e, entities, pguid)
+                filter::is_owned_by_player(e.guid, entities, pguid)
             } else {
                 e.position.landblock_id == Guid::NULL
             };
@@ -170,10 +152,34 @@ pub fn get_commands_for_target(
                 }
                 EntityClass::Weapon
                 | EntityClass::Apparel
-                | EntityClass::Item
                 | EntityClass::Wand
+                | EntityClass::Item
                 | EntityClass::Tool => {
                     if is_inventory {
+                        let is_equipped =
+                            if let (Some(pguid), Some(wielder)) = (player_guid, e.wielder_id) {
+                                pguid == wielder
+                            } else {
+                                false
+                            };
+
+                        if !is_equipped {
+                            match (
+                                class,
+                                e.int_properties.get(&(PropertyInt::ValidLocations as u32)),
+                            ) {
+                                (
+                                    EntityClass::Weapon | EntityClass::Apparel | EntityClass::Wand,
+                                    Some(&mask),
+                                ) if mask != 0 => {
+                                    ent_commands.push(EntityCommand::Equip(mask as u32));
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            ent_commands.push(EntityCommand::Unequip);
+                        }
+
                         ent_commands.push(EntityCommand::Use);
                         ent_commands.push(EntityCommand::Drop);
                     } else if !flags.intersects(ObjectDescriptionFlag::STUCK) {
@@ -213,149 +219,4 @@ fn should_show_debug(target: &CommandTarget) -> bool {
         CommandTarget::Entity(_) | CommandTarget::Enchantment(_) => true,
         CommandTarget::None => false,
     }
-}
-
-/// Generates a list of strings representing the debug information for a target.
-pub fn get_debug_info(
-    target: &CommandTarget,
-    name_lookup: impl Fn(Guid) -> Option<String>,
-) -> Vec<String> {
-    let mut lines = Vec::new();
-
-    match target {
-        CommandTarget::Entity(e) => {
-            lines.push(format!("DEBUG INFO: {}", e.name));
-            lines.push(format!("GUID:   {:08X}", e.guid));
-            let class = classification::classify_entity(e);
-            lines.push(format!("Class:  {} ({:?})", class.label(), class));
-
-            if let Some(parent_id) = e.physics_parent_id {
-                let parent_name = name_lookup(parent_id).unwrap_or_else(|| "Unknown".to_string());
-                lines.push(format!("Phys Parent: {:08X} ({})", parent_id, parent_name));
-            }
-
-            if let Some(container_id) = e.container_id {
-                let container_name =
-                    name_lookup(container_id).unwrap_or_else(|| "Unknown".to_string());
-                lines.push(format!(
-                    "Container:   {:08X} ({})",
-                    container_id, container_name
-                ));
-            }
-
-            if let Some(wielder_id) = e.wielder_id {
-                let wielder_name = name_lookup(wielder_id).unwrap_or_else(|| "Unknown".to_string());
-                lines.push(format!(
-                    "Wielder:     {:08X} ({})",
-                    wielder_id, wielder_name
-                ));
-            }
-
-            lines.push(format!("WCID:   {:?}", e.wcid));
-            lines.push(format!("GfxID:  {:?}", e.gfx_id));
-            lines.push(format!("Vel:    {:?}", e.velocity));
-            lines.push(format!("Flags:  {:08X}", e.flags.bits()));
-            for (name, _) in e.flags.iter_names() {
-                lines.push(format!("  [X] {}", name));
-            }
-
-            lines.push(format!("Phys:   {:08X}", e.physics_state.bits()));
-            for (name, _) in e.physics_state.iter_names() {
-                lines.push(format!("  [X] {}", name));
-            }
-
-            if let Some(it) = e.item_type {
-                lines.push(format!("IType:  {:08X}", it.bits()));
-                for (name, _) in it.iter_names() {
-                    lines.push(format!("  [X] {}", name));
-                }
-            }
-            lines.push(format!("Pos:    {}", e.position.to_world_coords()));
-            lines.push(format!("LB:     {:08X}", e.position.landblock_id));
-            lines.push(format!("Coords: {:?}", e.position.coords));
-
-            if !e.int_properties.is_empty() {
-                lines.push("-- Int Properties --".to_string());
-                let mut sorted_keys: Vec<_> = e.int_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyInt::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(format!("  {}: {}", name, e.int_properties[&k]));
-                }
-            }
-            if !e.bool_properties.is_empty() {
-                lines.push("-- Bool Properties --".to_string());
-                let mut sorted_keys: Vec<_> = e.bool_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyBool::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(format!("  {}: {}", name, e.bool_properties[&k]));
-                }
-            }
-            if !e.float_properties.is_empty() {
-                lines.push("-- Float Properties --".to_string());
-                let mut sorted_keys: Vec<_> = e.float_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyFloat::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(format!("  {}: {:.4}", name, e.float_properties[&k]));
-                }
-            }
-            if !e.string_properties.is_empty() {
-                lines.push("-- String Properties --".to_string());
-                let mut sorted_keys: Vec<_> = e.string_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyString::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(format!("  {}: {}", name, e.string_properties[&k]));
-                }
-            }
-            if !e.did_properties.is_empty() {
-                lines.push("-- DataID Properties --".to_string());
-                let mut sorted_keys: Vec<_> = e.did_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyDataId::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(format!("  {}: {:08X}", name, e.did_properties[&k]));
-                }
-            }
-            if !e.iid_properties.is_empty() {
-                lines.push("-- InstanceID Properties --".to_string());
-                let mut sorted_keys: Vec<_> = e.iid_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyInstanceId::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(format!("  {}: {:08X}", name, e.iid_properties[&k]));
-                }
-            }
-        }
-        CommandTarget::Enchantment(enchant) => {
-            lines.push(format!("DEBUG ENCHANTMENT: Spell #{}", enchant.spell_id));
-            lines.push(format!("Layer:          {}", enchant.layer));
-            lines.push(format!("Category:       {}", enchant.spell_category));
-            lines.push(format!("Power Level:    {}", enchant.power_level));
-            lines.push(format!("Duration:       {:.1}s", enchant.duration));
-            lines.push(format!("Stat Mod Type:  0x{:08X}", enchant.stat_mod_type));
-            lines.push(format!("Stat Mod Key:   {}", enchant.stat_mod_key));
-            lines.push(format!("Stat Mod Value: {:.2}", enchant.stat_mod_value));
-            lines.push(format!("Caster GUID:    {:08X}", enchant.caster_guid));
-            lines.push(format!("Degrade Limit:  {:.2}", enchant.degrade_limit));
-            lines.push(format!("Last Degraded:  {:.1}", enchant.last_time_degraded));
-        }
-        CommandTarget::None => {}
-    }
-
-    lines
 }

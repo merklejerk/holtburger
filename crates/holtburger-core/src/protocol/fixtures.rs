@@ -55,7 +55,8 @@ pub const ACTION_IDENTIFY: &[u8] = include_bytes!("../../tests/fixtures/action_i
 pub const ACTION_LOGIN_COMPLETE: &[u8] =
     include_bytes!("../../tests/fixtures/action_login_complete.bin");
 pub const OBJ_DESC_EVENT: &[u8] = include_bytes!("../../tests/fixtures/obj_desc_event.bin");
-pub const OBJ_DESC_EVENT_DROP: &[u8] = include_bytes!("../../tests/fixtures/obj_desc_event_drop.bin");
+pub const OBJ_DESC_EVENT_DROP: &[u8] =
+    include_bytes!("../../tests/fixtures/obj_desc_event_drop.bin");
 pub const FORCE_OBJ_DESC_SEND: &[u8] =
     include_bytes!("../../tests/fixtures/force_obj_desc_send.bin");
 pub const UPDATE_SKILL_LEVEL_PRIVATE: &[u8] =

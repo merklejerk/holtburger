@@ -81,7 +81,9 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             .title(chat_title)
             .border_style(chat_style)
             .title_style(if state.focused_pane == FocusedPane::Chat {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             }),
@@ -146,7 +148,9 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             .title(ctx_title)
             .border_style(ctx_style)
             .title_style(if state.focused_pane == FocusedPane::Context {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             }),

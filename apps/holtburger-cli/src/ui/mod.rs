@@ -108,7 +108,9 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         .title(input_title)
         .border_style(input_style)
         .title_style(if state.focused_pane == FocusedPane::Input {
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default()
         });

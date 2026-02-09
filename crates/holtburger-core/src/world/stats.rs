@@ -21,9 +21,20 @@ pub enum AttributeType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr, Hash)]
 #[repr(u32)]
 pub enum VitalType {
-    Health = 2,
-    Stamina = 4,
-    Mana = 6,
+    Health = 1,
+    Stamina = 3,
+    Mana = 5,
+}
+
+impl VitalType {
+    pub fn from_id(id: u32) -> Option<Self> {
+        match id {
+            1 | 2 => Some(VitalType::Health),
+            3 | 4 => Some(VitalType::Stamina),
+            5 | 6 => Some(VitalType::Mana),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

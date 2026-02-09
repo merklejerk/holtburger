@@ -300,6 +300,47 @@ Synchronizes movement and animation states for objects.
 
 ---
 
+## 5. GameEvents (`0xF7B0`)
+
+GameEvents are a high-level wrapper (opcode `0xF7B0`) used for asynchronous server-sent events.
+
+### Payload Structure
+1. `uint32`: Target GUID (The object the event is about).
+2. `uint32`: Sequence Number.
+3. `uint32`: Event Opcode.
+4. `Variable`: Event Data.
+
+### Magic & Enchantment Events
+
+#### `0x02C7` MagicDispelEnchantment
+Silently removes a specific enchantment.
+- `uint16`: Spell ID.
+- `uint16`: Layer ID.
+
+#### `0x02C8` MagicDispelMultipleEnchantments
+Silently removes multiple enchantments.
+- `uint32`: Count.
+- For each item:
+  - `uint16`: Spell ID.
+  - `uint16`: Layer ID.
+
+#### `0x02C2` MagicUpdateEnchantment
+Updates or adds an enchantment to the target.
+- `Enchantment`: Full enchantment structure.
+
+#### `0x02C3` MagicRemoveEnchantment
+Removes an enchantment (typically due to expiration).
+- `uint16`: Spell ID.
+- `uint16`: Layer ID.
+
+#### `0x02C6` MagicPurgeEnchantments
+Removes all enchantments from the target. (No extra data).
+
+#### `0x0312` MagicPurgeBadEnchantments
+Removes all negative/harmful enchantments from the target. (No extra data).
+
+---
+
 ## 5. Common Client-to-Server (C2S) Messages
 
 ### `0xF7C8` CharacterEnterWorldRequest

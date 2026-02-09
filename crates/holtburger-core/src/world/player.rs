@@ -357,6 +357,10 @@ impl PlayerState {
             if let Some(vital) = self.vitals.get_mut(&vital_type) {
                 vital.base = base;
                 vital.buffed_max = buffed_max;
+                // Clamp current to buffed_max if it's higher
+                if vital.current > buffed_max {
+                    vital.current = buffed_max;
+                }
             }
         }
 

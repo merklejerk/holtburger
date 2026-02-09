@@ -21,6 +21,7 @@ pub const SCROLL_STEP: usize = 3;
 
 use holtburger_core::ClientCommand;
 use holtburger_core::protocol::messages::Enchantment;
+use holtburger_core::world::Guid;
 use holtburger_core::world::entity::Entity;
 
 #[derive(Debug, Clone)]
@@ -79,4 +80,5 @@ pub enum FocusedPane {
 pub enum ContextView {
     Default,
     Custom,
+    Assess(Guid),
 }

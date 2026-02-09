@@ -781,8 +781,8 @@ impl ProtocolPack for PickupEventData {
 pub struct ObjDescEventData {
     pub guid: Guid,
     pub model_data: ModelData,
-    pub instance_sequence: u32,
-    pub visual_desc_sequence: u32,
+    pub instance_sequence: u16,
+    pub visual_desc_sequence: u16,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -796,12 +796,12 @@ impl ProtocolUnpack for ObjDescEventData {
 
         let model_data = ModelData::unpack(data, offset)?;
 
-        if *offset + 8 > data.len() {
+        if *offset + 4 > data.len() {
             return None;
         }
-        let instance_sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let visual_desc_sequence = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        *offset += 8;
+        let instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let visual_desc_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
+        *offset += 4;
 
         Some(ObjDescEventData {
             guid,
@@ -816,9 +816,9 @@ impl ProtocolPack for ObjDescEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.guid.pack(buf);
         self.model_data.pack(buf);
-        buf.write_u32::<LittleEndian>(self.instance_sequence)
+        buf.write_u16::<LittleEndian>(self.instance_sequence)
             .unwrap();
-        buf.write_u32::<LittleEndian>(self.visual_desc_sequence)
+        buf.write_u16::<LittleEndian>(self.visual_desc_sequence)
             .unwrap();
     }
 }
@@ -1060,6 +1060,26 @@ mod tests {
             visual_desc_sequence: 5678,
         }));
         assert_pack_unpack_parity(fixtures::OBJ_DESC_EVENT, &expected);
+    }
+
+    #[test]
+    fn test_obj_desc_event_drop_unpack() {
+        let mut offset = 0;
+        // The fixture includes the opcode, but ObjDescEventData::unpack expects data after opcode
+        // Wait, normally GameMessage::unpack handles the opcode.
+        // Let's check how GameMessage::unpack is used.
+        let data = fixtures::OBJ_DESC_EVENT_DROP;
+        let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack ObjDescEvent");
+
+        if let GameMessage::ObjDescEvent(d) = msg {
+            assert_eq!(d.guid, Guid(0x50000001));
+            assert_eq!(d.model_data.header, 0x11);
+            assert_eq!(d.model_data.sub_palettes.len(), 7);
+            assert_eq!(d.model_data.texture_changes.len(), 16);
+            assert_eq!(d.model_data.model_changes.len(), 35);
+        } else {
+            panic!("Expected ObjDescEvent, got {:?}", msg);
+        }
     }
 
     #[test]

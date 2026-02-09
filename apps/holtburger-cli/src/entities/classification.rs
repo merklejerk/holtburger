@@ -174,8 +174,8 @@ pub fn is_targetable(entity: &Entity) -> bool {
     }
 
     match classify_entity(entity) {
-        EntityClass::Player
-        | EntityClass::Npc
+        EntityClass::Player => true,
+        EntityClass::Npc
         | EntityClass::Monster
         | EntityClass::Weapon
         | EntityClass::Apparel

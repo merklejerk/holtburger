@@ -43,6 +43,8 @@ pub enum GameEvent {
     MagicRemoveMultipleEnchantments(Box<MagicRemoveMultipleEnchantmentsData>),
     MagicPurgeEnchantments(Box<MagicPurgeEnchantmentsData>),
     MagicPurgeBadEnchantments(Box<MagicPurgeBadEnchantmentsData>),
+    MagicDispelEnchantment(Box<MagicDispelEnchantmentData>),
+    MagicDispelMultipleEnchantments(Box<MagicDispelMultipleEnchantmentsData>),
     WeenieError(Box<WeenieErrorData>),
     WeenieErrorWithString(Box<WeenieErrorWithStringData>),
     UseDone(Box<UseDoneData>),
@@ -126,6 +128,18 @@ impl ProtocolUnpack for GameEventMessage {
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicPurgeBadEnchantments(Box::new(d))
+                }
+                GameEventOpcode::MagicDispelEnchantment => {
+                    let mut d = MagicDispelEnchantmentData::unpack(data, offset)?;
+                    d.target = target;
+                    d.sequence = sequence;
+                    GameEvent::MagicDispelEnchantment(Box::new(d))
+                }
+                GameEventOpcode::MagicDispelMultipleEnchantments => {
+                    let mut d = MagicDispelMultipleEnchantmentsData::unpack(data, offset)?;
+                    d.target = target;
+                    d.sequence = sequence;
+                    GameEvent::MagicDispelMultipleEnchantments(Box::new(d))
                 }
                 GameEventOpcode::WeenieError => {
                     GameEvent::WeenieError(Box::new(WeenieErrorData::unpack(data, offset)?))
@@ -249,6 +263,18 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::MagicPurgeBadEnchantments(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::MagicPurgeBadEnchantments as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::MagicDispelEnchantment(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::MagicDispelEnchantment as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::MagicDispelMultipleEnchantments(data) => {
+                buf.write_u32::<LittleEndian>(
+                    GameEventOpcode::MagicDispelMultipleEnchantments as u32,
+                )
+                .unwrap();
                 data.pack(buf);
             }
             GameEvent::WeenieError(data) => {

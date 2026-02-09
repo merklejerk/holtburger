@@ -274,31 +274,23 @@ impl Session {
             isaac.consume_key();
 
             header.checksum = header_hash.wrapping_add(payload_hash ^ key);
-            log::trace!(
-                ">>> Encrypted Send to {}: Seq={} ID={} Flags={:08X} FinalCRC={:08X}",
-                addr,
-                header.sequence,
-                header.id,
-                header.flags,
-                header.checksum
-            );
         } else {
             header.checksum = header_hash.wrapping_add(payload_hash);
-            log::trace!(
-                ">>> Cleartext Send to {}: Seq={} ID={} Flags={:08X} Checksum={:08X}",
-                addr,
-                header.sequence,
-                header.id,
-                header.flags,
-                header.checksum
-            );
         }
 
         let mut packet = Vec::with_capacity(HEADER_SIZE + full_payload.len());
         header.pack(&mut packet);
         packet.extend_from_slice(&full_payload);
 
-        log::trace!("RAW OUTBOUND: {:02X?}", packet);
+        log::trace!(
+            ">>> Outbound to {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
+            addr,
+            header.sequence,
+            header.id,
+            header.flags,
+            packet.len(),
+            packet
+        );
 
         if let Some(ref mut capture) = self.capture {
             let _ = capture.write_entry(Direction::Outbound, addr, &packet);
@@ -309,13 +301,6 @@ impl Session {
     }
 
     pub fn process_fragment(&mut self, header: &FragmentHeader, data: &[u8]) -> Option<Vec<u8>> {
-        log::trace!(
-            "Processing fragment Seq={} {}/{} size={}",
-            header.sequence,
-            header.index + 1,
-            header.count,
-            data.len()
-        );
         if header.count == 1 {
             return Some(data.to_vec());
         }
@@ -422,8 +407,6 @@ impl Session {
         let header = PacketHeader::unpack(&buf[..HEADER_SIZE], &mut offset)
             .ok_or_else(|| anyhow::anyhow!("Failed to unpack packet header"))?;
         let data = buf[HEADER_SIZE..len].to_vec();
-
-        log::trace!("RAW INBOUND: {:02X?}", &buf[..len]);
 
         log::trace!(
             "<<< Inbound from {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
@@ -577,9 +560,6 @@ impl Session {
                     events.push(SessionEvent::Message(full));
                 }
                 offset += frag_data_size;
-
-                // Fragments are 4-byte aligned in AC
-                align_offset(&mut offset, 4);
             }
         }
 
@@ -708,5 +688,62 @@ mod tests {
             header_hash.wrapping_add(payload_hash ^ expected_key),
             final_checksum
         );
+    }
+
+    #[tokio::test]
+    async fn test_multi_fragment_packet_unaligned() {
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        struct MultiFragMock(Arc<Mutex<Vec<Vec<u8>>>>);
+        #[async_trait]
+        impl Transport for MultiFragMock {
+            async fn send_to(&self, _buf: &[u8], _addr: SocketAddr) -> Result<usize> {
+                Ok(0)
+            }
+            async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
+                let mut q = self.0.lock().await;
+                if q.is_empty() {
+                    return Err(anyhow!("Empty"));
+                }
+                let data = q.remove(0);
+                buf[..data.len()].copy_from_slice(&data);
+                Ok((data.len(), "127.0.0.1:9001".parse().unwrap()))
+            }
+        }
+
+        // The hex from the user request (@harmself response)
+        // Contains 3 x PrivateUpdateVitalCurrent messages (13 bytes each) in fragments (16 bytes headers)
+        // Total fragment size = 29 bytes (NOT 4-byte aligned!)
+        let hex = "71000000060000003C8E48C70B0029B157000100AD0000000000008001001D0000000900E9020000000200000001000000AE0000000000008001001D0000000900E9020000000400000001000000AF0000000000008001001D0000000900E9020000000600000001000000";
+        let data = hex::decode(hex).unwrap();
+
+        let q = Arc::new(Mutex::new(vec![data]));
+        let mut session = Session::new_test();
+        session.transport = Box::new(MultiFragMock(q));
+
+        let events = session.recv_message().await.unwrap();
+
+        // We expect 3 messages because there were 3 fragments
+        assert_eq!(events.len(), 3);
+
+        for (i, event) in events.iter().enumerate() {
+            if let SessionEvent::Message(msg_data) = event {
+                assert_eq!(msg_data.len(), 13);
+                assert_eq!(msg_data[0..2], [0xE9, 0x02]); // Opcode PrivateUpdateVitalCurrent
+
+                // Verify vital IDs (2, 4, 6)
+                let vital_id = u32::from_le_bytes(msg_data[5..9].try_into().unwrap());
+                let expected_id = match i {
+                    0 => 2,
+                    1 => 4,
+                    2 => 6,
+                    _ => panic!("Too many messages"),
+                };
+                assert_eq!(vital_id, expected_id);
+            } else {
+                panic!("Expected SessionEvent::Message");
+            }
+        }
     }
 }

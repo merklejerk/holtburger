@@ -184,11 +184,7 @@ impl PlayerState {
     pub fn get_vital_multiplier(&self, vital: stats::VitalType) -> f32 {
         let active = self.get_active_enchantments();
         let mut mult = 1.0;
-        let world_id = match vital {
-            stats::VitalType::Health => 1,  // MaxHealth is ID 1 for mods
-            stats::VitalType::Stamina => 3, // MaxStamina is ID 3 for mods
-            stats::VitalType::Mana => 5,    // MaxMana is ID 5 for mods
-        };
+        let world_id = vital as u32;
 
         for e in active {
             let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
@@ -205,11 +201,7 @@ impl PlayerState {
     pub fn get_vital_additive(&self, vital: stats::VitalType) -> f32 {
         let active = self.get_active_enchantments();
         let mut add = 0.0;
-        let world_id = match vital {
-            stats::VitalType::Health => 1,
-            stats::VitalType::Stamina => 3,
-            stats::VitalType::Mana => 5,
-        };
+        let world_id = vital as u32;
 
         for e in active {
             let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
@@ -357,6 +349,10 @@ impl PlayerState {
             if let Some(vital) = self.vitals.get_mut(&vital_type) {
                 vital.base = base;
                 vital.buffed_max = buffed_max;
+                // Clamp current to buffed_max if it's higher
+                if vital.current > buffed_max {
+                    vital.current = buffed_max;
+                }
             }
         }
 
@@ -570,7 +566,7 @@ impl PlayerState {
                     current,
                     ..
                 } = &**data;
-                if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
+                if let Some(vital_type) = stats::VitalType::from_id(*vital) {
                     self.vital_bases.insert(
                         vital_type,
                         VitalBase {
@@ -605,7 +601,7 @@ impl PlayerState {
                     current,
                     ..
                 } = &**data;
-                if let Some(vital_type) = stats::VitalType::from_repr(*vital) {
+                if let Some(vital_type) = stats::VitalType::from_id(*vital) {
                     self.vital_bases.insert(
                         vital_type,
                         VitalBase {
@@ -634,7 +630,7 @@ impl PlayerState {
             }
             GameMessage::PrivateUpdateVitalCurrent(data) => {
                 let UpdateVitalCurrent { vital, current, .. } = &**data;
-                if let Some(vital_type) = stats::VitalType::from_repr(*vital)
+                if let Some(vital_type) = stats::VitalType::from_id(*vital)
                     && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
                 {
                     vital_obj.current = *current;
@@ -1041,5 +1037,73 @@ mod tests {
         } else {
             panic!("Expected EntityVectorUpdated event");
         }
+    }
+
+    #[test]
+    fn test_heal_command_updates() {
+        use crate::protocol::messages::{
+            GameMessage, PrivateUpdateVitalCurrentData, PrivateUpdateVitalData,
+        };
+
+        let mut player = PlayerState::new();
+        player.guid = Guid(0x50000001);
+
+        // 1. Initial login: PrivateUpdateVital for Health (ID 1), Stamina (ID 3), Mana (ID 5)
+        let vitals_to_init = [(1, "Health"), (3, "Stamina"), (5, "Mana")];
+        for (id, _name) in vitals_to_init {
+            let msg = GameMessage::PrivateUpdateVital(Box::new(PrivateUpdateVitalData {
+                sequence: 1,
+                object_guid: None,
+                vital: id,
+                ranks: 0,
+                start: 100,
+                xp: 0,
+                current: 50,
+            }));
+            player.handle_message(&msg, &mut Vec::new());
+        }
+
+        // Verify they are in the map
+        assert!(player.vitals.contains_key(&stats::VitalType::Health));
+        assert!(player.vitals.contains_key(&stats::VitalType::Stamina));
+        assert!(player.vitals.contains_key(&stats::VitalType::Mana));
+
+        // 2. Simulate @heal: PrivateUpdateVitalCurrent for Health (ID 2), Stamina (ID 4), Mana (ID 6)
+        let heal_updates = [(2, 100), (4, 100), (6, 100)];
+        for (id, val) in heal_updates {
+            let msg =
+                GameMessage::PrivateUpdateVitalCurrent(Box::new(PrivateUpdateVitalCurrentData {
+                    sequence: 2,
+                    object_guid: None,
+                    vital: id,
+                    current: val,
+                }));
+            let mut events = Vec::new();
+            let handled = player.handle_message(&msg, &mut events);
+            assert!(handled, "Failed to handle vital update for ID {}", id);
+            assert_eq!(events.len(), 1);
+        }
+
+        // 3. Verify final state
+        assert_eq!(
+            player
+                .vitals
+                .get(&stats::VitalType::Health)
+                .unwrap()
+                .current,
+            100
+        );
+        assert_eq!(
+            player
+                .vitals
+                .get(&stats::VitalType::Stamina)
+                .unwrap()
+                .current,
+            100
+        );
+        assert_eq!(
+            player.vitals.get(&stats::VitalType::Mana).unwrap().current,
+            100
+        );
     }
 }

@@ -3,7 +3,7 @@ use super::super::utils::wrap_text;
 use crate::ui::AppState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState,
@@ -69,11 +69,24 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         Style::default()
     };
 
+    let chat_title = if state.focused_pane == FocusedPane::Chat {
+        ">> World Chat <<"
+    } else {
+        " World Chat "
+    };
+
     let chat_list = List::new(messages).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" World Chat ")
-            .border_style(chat_style),
+            .title(chat_title)
+            .border_style(chat_style)
+            .title_style(if state.focused_pane == FocusedPane::Chat {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            }),
     );
     f.render_widget(chat_list, area);
 
@@ -123,11 +136,24 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         Style::default()
     };
 
+    let ctx_title = if state.focused_pane == FocusedPane::Context {
+        ">> Context Information <<"
+    } else {
+        " Context Information "
+    };
+
     let ctx_list = List::new(ctx_items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Context Information ")
-            .border_style(ctx_style),
+            .title(ctx_title)
+            .border_style(ctx_style)
+            .title_style(if state.focused_pane == FocusedPane::Context {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            }),
     );
     f.render_widget(ctx_list, area);
 

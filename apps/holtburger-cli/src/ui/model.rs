@@ -13,6 +13,7 @@ use holtburger_core::{ClientState, RetryState};
 
 use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
 use crate::entities::filter::{EntityFilter, filter_entities};
+use ratatui::text::Line;
 
 pub struct AppState {
     pub account_name: String,
@@ -39,7 +40,7 @@ pub struct AppState {
     pub context_total_lines: usize,
     pub context_last_total_lines: usize,
     pub dashboard_tab: DashboardTab,
-    pub context_buffer: Vec<String>,
+    pub context_buffer: Vec<Line<'static>>,
     pub context_scroll_offset: usize,
     pub context_view: ContextView,
     pub current_debug_guid: Option<Guid>,
@@ -96,27 +97,35 @@ impl AppState {
     }
 
     pub fn refresh_context_buffer(&mut self) {
-        if self.context_view == ContextView::Custom {
-            if let Some(guid) = self.current_debug_guid
-                && let Some(entity) = self.entities.get(&guid)
-            {
-                let target = crate::ui::types::CommandTarget::Entity(entity);
-                let player_guid = self.player_guid;
-                let entities_ref = &self.entities;
+        match self.context_view {
+            ContextView::Custom => {
+                if let Some(guid) = self.current_debug_guid
+                    && let Some(entity) = self.entities.get(&guid)
+                {
+                    let target = crate::ui::types::CommandTarget::Entity(entity);
+                    let player_guid = self.player_guid;
+                    let entities_ref = &self.entities;
 
-                self.context_buffer = crate::entities::debug::get_debug_info(&target, |id| {
-                    entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
-                        if Some(id) == player_guid {
-                            Some("You".to_string())
-                        } else {
-                            None
-                        }
-                    })
-                });
+                    self.context_buffer = crate::entities::debug::get_debug_info(&target, |id| {
+                        entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
+                            if Some(id) == player_guid {
+                                Some("You".to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    });
+                }
             }
-            return;
+            ContextView::Assess(guid) => {
+                if let Some(entity) = self.entities.get(&guid) {
+                    self.context_buffer = crate::entities::assess::get_assess_info(entity);
+                }
+            }
+            ContextView::Default => {
+                self.context_buffer.clear();
+            }
         }
-        self.context_buffer.clear();
     }
 
     pub fn current_server_time(&self) -> f64 {

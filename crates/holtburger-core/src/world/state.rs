@@ -348,6 +348,17 @@ impl WorldState {
                             for (&k, &v) in &data.did_stats {
                                 entity.did_properties.insert(k, Guid(v));
                             }
+
+                            if data.armor_profile.is_some() {
+                                entity.armor_profile = data.armor_profile.clone();
+                            }
+                            if data.creature_profile.is_some() {
+                                entity.creature_profile = data.creature_profile.clone();
+                            }
+                            if data.weapon_profile.is_some() {
+                                entity.weapon_profile = data.weapon_profile.clone();
+                            }
+
                             events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
                         }
                     }

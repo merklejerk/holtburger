@@ -2,12 +2,13 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKin
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
-use crate::entities::CommandTarget;
-use crate::entities::commands::{self, CommandHandler};
+use crate::entities::commands::{self};
 use crate::entities::debug;
 use crate::ui;
 use crate::ui::model::AppState;
-use crate::ui::types::{ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
+use crate::ui::types::{
+    ChatMessageKind, CommandHandler, CommandTarget, ContextView, DashboardTab, FocusedPane, UIState,
+};
 use crate::ui::utils::{get_next_pane, get_prev_pane};
 
 impl AppState {
@@ -311,10 +312,6 @@ impl AppState {
                                     self.dashboard_tab = DashboardTab::Character;
                                     self.selected_dashboard_index = 0;
                                 }
-                                '4' => {
-                                    self.dashboard_tab = DashboardTab::Effects;
-                                    self.selected_dashboard_index = 0;
-                                }
                                 'x' | 'X' => {
                                     self.context_view = ContextView::Default;
                                     self.current_debug_guid = None;
@@ -338,14 +335,14 @@ impl AppState {
                                                     .map(|(e, _, _)| CommandTarget::Entity(e))
                                                     .unwrap_or(CommandTarget::None)
                                             }
-                                            DashboardTab::Effects => {
-                                                let enchants = self.get_effects_list_enchantments();
-                                                enchants
-                                                    .get(self.selected_dashboard_index)
-                                                    .map(|(e, _)| CommandTarget::Enchantment(e))
-                                                    .unwrap_or(CommandTarget::None)
+                                            DashboardTab::Character => {
+                                                ui::widgets::stats::get_enchantment_at_index(
+                                                    self,
+                                                    self.selected_dashboard_index,
+                                                )
+                                                .map(CommandTarget::Enchantment)
+                                                .unwrap_or(CommandTarget::None)
                                             }
-                                            DashboardTab::Character => CommandTarget::None,
                                         };
 
                                         let player_guid = self.player_guid;

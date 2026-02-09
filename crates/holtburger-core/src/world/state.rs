@@ -174,6 +174,11 @@ impl WorldState {
                     self.player.name = name.clone();
                     self.player.enchantments = data.enchantments.clone();
 
+                    // Ensure entity in our map has the correct name
+                    if let Some(entity) = self.entities.get_mut(guid) {
+                        entity.name = name.clone();
+                    }
+
                     let mut attr_objs = Vec::new();
                     let mut vital_objs = Vec::new();
 
@@ -322,6 +327,30 @@ impl WorldState {
                             message: data.message.clone(),
                         });
                     }
+                    GameEvent::IdentifyObjectResponse(data) => {
+                        let guid = data.object_guid;
+                        if let Some(entity) = self.entities.get_mut(guid) {
+                            for (&k, &v) in &data.int_stats {
+                                entity.int_properties.insert(k, v);
+                            }
+                            for (&k, &v) in &data.int64_stats {
+                                entity.int64_properties.insert(k, v);
+                            }
+                            for (&k, &v) in &data.bool_stats {
+                                entity.bool_properties.insert(k, v);
+                            }
+                            for (&k, &v) in &data.float_stats {
+                                entity.float_properties.insert(k, v);
+                            }
+                            for (k, v) in &data.string_stats {
+                                entity.string_properties.insert(*k, v.clone());
+                            }
+                            for (&k, &v) in &data.did_stats {
+                                entity.did_properties.insert(k, Guid(v));
+                            }
+                            events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -396,9 +425,7 @@ impl WorldState {
                     data.guid
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity
-                        .int_properties
-                        .insert(data.property, data.value as i32);
+                    entity.int64_properties.insert(data.property, data.value);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -413,9 +440,7 @@ impl WorldState {
                     data.guid
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity
-                        .int_properties
-                        .insert(data.property, data.value as i32);
+                    entity.int64_properties.insert(data.property, data.value);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -674,11 +699,7 @@ impl WorldState {
             return Vec::new();
         }
 
-        let lb = if let Some(player) = self.entities.get(self.player.guid) {
-            player.position.landblock_id
-        } else {
-            return Vec::new();
-        };
+        let lb = self.player.position.landblock_id;
 
         let nearby_guids = self.scene.get_nearby_entities(lb);
         nearby_guids

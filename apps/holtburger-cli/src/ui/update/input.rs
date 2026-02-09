@@ -2,7 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKin
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
-use crate::entities::commands::{self, CommandHandler, CommandTarget};
+use crate::entities::CommandTarget;
+use crate::entities::commands::{self, CommandHandler};
+use crate::entities::debug;
 use crate::ui;
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
@@ -315,67 +317,92 @@ impl AppState {
                                 }
                                 'x' | 'X' => {
                                     self.context_view = ContextView::Default;
+                                    self.current_debug_guid = None;
                                     self.refresh_context_buffer();
                                 }
                                 _ => {
                                     // Action processing
-                                    let target = match self.dashboard_tab {
-                                        DashboardTab::Entities => {
-                                            let entities = self.get_filtered_nearby_tab();
-                                            entities
-                                                .get(self.selected_dashboard_index)
-                                                .map(|(e, _, _)| CommandTarget::Entity(e))
-                                                .unwrap_or(CommandTarget::None)
-                                        }
-                                        DashboardTab::Inventory => {
-                                            let entities = self.get_filtered_inventory_tab();
-                                            entities
-                                                .get(self.selected_dashboard_index)
-                                                .map(|(e, _, _)| CommandTarget::Entity(e))
-                                                .unwrap_or(CommandTarget::None)
-                                        }
-                                        DashboardTab::Effects => {
-                                            let enchants = self.get_effects_list_enchantments();
-                                            enchants
-                                                .get(self.selected_dashboard_index)
-                                                .map(|(e, _)| CommandTarget::Enchantment(e))
-                                                .unwrap_or(CommandTarget::None)
-                                        }
-                                        DashboardTab::Character => CommandTarget::None,
+                                    let (handler, debug_lines, target_guid) = {
+                                        let target = match self.dashboard_tab {
+                                            DashboardTab::Entities => {
+                                                let entities = self.get_filtered_nearby_tab();
+                                                entities
+                                                    .get(self.selected_dashboard_index)
+                                                    .map(|(e, _, _)| CommandTarget::Entity(e))
+                                                    .unwrap_or(CommandTarget::None)
+                                            }
+                                            DashboardTab::Inventory => {
+                                                let entities = self.get_filtered_inventory_tab();
+                                                entities
+                                                    .get(self.selected_dashboard_index)
+                                                    .map(|(e, _, _)| CommandTarget::Entity(e))
+                                                    .unwrap_or(CommandTarget::None)
+                                            }
+                                            DashboardTab::Effects => {
+                                                let enchants = self.get_effects_list_enchantments();
+                                                enchants
+                                                    .get(self.selected_dashboard_index)
+                                                    .map(|(e, _)| CommandTarget::Enchantment(e))
+                                                    .unwrap_or(CommandTarget::None)
+                                            }
+                                            DashboardTab::Character => CommandTarget::None,
+                                        };
+
+                                        let player_guid = self.player_guid;
+                                        let entity_commands = commands::get_commands_for_target(
+                                            &target,
+                                            &self.entities,
+                                            player_guid,
+                                        );
+                                        let handler = entity_commands
+                                            .iter()
+                                            .find(|cmd| {
+                                                cmd.shortcut_char() == c.to_ascii_lowercase()
+                                            })
+                                            .and_then(|command| {
+                                                command.handler(&target, player_guid)
+                                            });
+
+                                        let (debug_lines, guid) =
+                                            if let Some(CommandHandler::ToggleDebug) = &handler {
+                                                let guid = if let CommandTarget::Entity(e) = target
+                                                {
+                                                    Some(e.guid)
+                                                } else {
+                                                    None
+                                                };
+                                                let lines = debug::get_debug_info(&target, |id| {
+                                                    self.entities
+                                                        .get(&id)
+                                                        .map(|e| e.name.clone())
+                                                        .or_else(|| {
+                                                            if Some(id) == player_guid {
+                                                                Some("You".to_string())
+                                                            } else {
+                                                                None
+                                                            }
+                                                        })
+                                                });
+                                                (Some(lines), guid)
+                                            } else {
+                                                (None, None)
+                                            };
+
+                                        (handler, debug_lines, guid)
                                     };
 
-                                    let player_guid = self.player_guid;
-                                    let entity_commands = commands::get_commands_for_target(
-                                        &target,
-                                        &self.entities,
-                                        player_guid,
-                                    );
-                                    if let Some(handler) = entity_commands
-                                        .iter()
-                                        .find(|cmd| cmd.shortcut_char() == c.to_ascii_lowercase())
-                                        .and_then(|command| command.handler(&target, player_guid))
-                                    {
+                                    if let Some(handler) = handler {
                                         match handler {
                                             CommandHandler::Command(cmd) => {
                                                 commands.push(cmd);
                                             }
                                             CommandHandler::ToggleDebug => {
-                                                let lines =
-                                                    commands::get_debug_info(&target, |id| {
-                                                        self.entities
-                                                            .get(&id)
-                                                            .map(|e| e.name.clone())
-                                                            .or_else(|| {
-                                                                if Some(id) == player_guid {
-                                                                    Some("You".to_string())
-                                                                } else {
-                                                                    None
-                                                                }
-                                                            })
-                                                    });
-                                                self.context_view = ContextView::Custom;
-                                                self.context_buffer = lines;
-                                                self.context_scroll_offset = 0;
+                                                self.current_debug_guid = target_guid;
+                                                if let Some(lines) = debug_lines {
+                                                    self.context_view = ContextView::Custom;
+                                                    self.context_buffer = lines;
+                                                    self.context_scroll_offset = 0;
+                                                }
                                             }
                                         }
                                     }

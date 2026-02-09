@@ -1070,7 +1070,7 @@ mod tests {
         // Let's check how GameMessage::unpack is used.
         let data = fixtures::OBJ_DESC_EVENT_DROP;
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack ObjDescEvent");
-        
+
         if let GameMessage::ObjDescEvent(d) = msg {
             assert_eq!(d.guid, Guid(0x50000001));
             assert_eq!(d.model_data.header, 0x11);

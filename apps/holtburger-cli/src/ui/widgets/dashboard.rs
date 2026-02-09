@@ -130,6 +130,7 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 *depth,
                 i == state.selected_dashboard_index,
                 state.use_emojis,
+                false, // Nearby entities aren't "equipped" in our list
             )
         })
         .collect()
@@ -141,12 +142,14 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, _, depth))| {
+            let is_equipped = state.player_guid.is_some() && e.wielder_id == state.player_guid;
             render_entity_list_item(
                 e,
                 None,
                 *depth,
                 i == state.selected_dashboard_index,
                 state.use_emojis,
+                is_equipped,
             )
         })
         .collect()
@@ -158,6 +161,7 @@ fn render_entity_list_item(
     depth: usize,
     is_selected: bool,
     use_emojis: bool,
+    is_equipped: bool,
 ) -> ListItem<'static> {
     let color = get_entity_color(e);
     let style = if is_selected {
@@ -175,6 +179,8 @@ fn render_entity_list_item(
 
     let display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
+    } else if is_equipped {
+        format!("{} (E)", e.name)
     } else {
         e.name.clone()
     };

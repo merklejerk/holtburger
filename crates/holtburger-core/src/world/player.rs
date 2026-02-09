@@ -387,12 +387,8 @@ impl PlayerState {
                 if data.guid == self.guid && self.guid != Guid::NULL {
                     if let Some(pos) = data.pos {
                         self.position = pos;
-                        events.push(WorldEvent::EntityMoved {
-                            guid: self.guid,
-                            pos: self.position,
-                        });
                     }
-                    return true;
+                    return false;
                 }
             }
             GameMessage::UpdatePosition(data) => {
@@ -403,40 +399,23 @@ impl PlayerState {
                     self.teleport_sequence = data.pos.teleport_sequence;
                     self.force_position_sequence = data.pos.force_position_sequence;
 
-                    events.push(WorldEvent::EntityMoved {
-                        guid: self.guid,
-                        pos: self.position,
-                    });
-                    return true;
+                    return false;
                 }
             }
             GameMessage::PrivateUpdatePosition(data) => {
                 self.position = data.pos;
-                events.push(WorldEvent::EntityMoved {
-                    guid: self.guid,
-                    pos: self.position,
-                });
-                return true;
+                return false;
             }
             GameMessage::PublicUpdatePosition(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
                     self.position = data.pos;
-                    events.push(WorldEvent::EntityMoved {
-                        guid: self.guid,
-                        pos: self.position,
-                    });
-                    return true;
+                    return false;
                 }
             }
             GameMessage::VectorUpdate(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
                     self.instance_sequence = data.instance_sequence;
-                    events.push(WorldEvent::EntityVectorUpdated {
-                        guid: data.guid,
-                        velocity: data.velocity,
-                        omega: data.omega,
-                    });
-                    return true;
+                    return false;
                 }
             }
             GameMessage::UpdateMotion(data) => {
@@ -451,7 +430,7 @@ impl PlayerState {
                         // For MoveToObject/MoveToPosition, we might want a specific event
                         // but for now, the TUI can see the GameMessage if it wants.
                     }
-                    return true;
+                    return false;
                 }
             }
             GameMessage::PrivateUpdateAttribute(data) => {

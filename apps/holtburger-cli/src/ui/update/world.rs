@@ -1,5 +1,5 @@
 use crate::ui::model::AppState;
-use crate::ui::types::{ChatMessageKind, UIState};
+use crate::ui::types::{ChatMessageKind, ContextView, UIState};
 use holtburger_core::ClientEvent;
 use holtburger_core::world::{Guid, WorldEvent};
 
@@ -146,8 +146,14 @@ impl AppState {
                         );
                         self.entities.insert(guid, *entity);
 
-                        // Refresh view if we are debugging this entity
-                        if self.current_debug_guid == Some(guid) {
+                        // If we are currently debugging this entity, keep it in debug view.
+                        // Otherwise, switch to Assess view for the newly identified entity.
+                        if self.current_debug_guid == Some(guid)
+                            && self.context_view == ContextView::Custom
+                        {
+                            self.refresh_context_buffer();
+                        } else {
+                            self.context_view = ContextView::Assess(guid);
                             self.refresh_context_buffer();
                         }
                     }

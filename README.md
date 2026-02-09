@@ -2,17 +2,14 @@
 
 Holtburger is an exploratory project to build a modern Asheron's Call client ecosystem in Rust. We are currently in the early experimental stages, focusing on reverse-engineering the protocol and developing a functional, reusable client library.
 
+![tui client screenshot](screenshot.png)
+
 ## Project Vision
 
-This project has two ultimate goals:
+This project aims to build a modern, scriptable Asheron's Call client ecosystem in Rust, consisting of:
 
-- Create a fully-featured, cross-platform 3D client for Asheron's Call to replace the aging acclient.exe.
-- Create a powerful, scriptable, multi-character, headless bot client.
-
-However, we're still a long way off. Right now, we are building the foundation:
-
-1.  **`holtburger-core`**: A low-level Rust library handling networking, cryptography, and game logic. This is our primary focus.
-2.  **`holtburger-cli`**: A WIP functional Terminal User Interface (TUI) client to showcase and prove the client library.
+1. **`holtburger-core`**: A low-level Rust library handling networking, cryptography, and game logic. This is our primary focus.
+2. **`holtburger-cli`**: A highly scriptable Terminal User Interface (TUI) client built on top of the core library, designed for automation and scripting capabilities.
 
 ## Disclaimers
 
@@ -30,7 +27,7 @@ Development of this project is heavily reliant on AI coding agents, and is there
 To test the current TUI client:
 
 ```bash
-cargo run --package holtburger-cli
+cargo run -- <ARGS>
 ```
 
 ## License

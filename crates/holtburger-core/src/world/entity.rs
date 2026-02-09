@@ -1,4 +1,5 @@
 use crate::math::Vector3;
+use crate::protocol::messages::common::object::{ArmorProfile, CreatureProfile, WeaponProfile};
 use crate::world::guid::Guid;
 use crate::world::position::WorldPosition;
 use crate::world::properties::{ItemType, ObjectDescriptionFlag, PhysicsState};
@@ -27,6 +28,10 @@ pub struct Entity {
     pub string_properties: HashMap<u32, String>,
     pub did_properties: HashMap<u32, Guid>,
     pub iid_properties: HashMap<u32, Guid>,
+
+    pub armor_profile: Option<ArmorProfile>,
+    pub creature_profile: Option<CreatureProfile>,
+    pub weapon_profile: Option<WeaponProfile>,
 }
 
 impl Entity {
@@ -55,6 +60,9 @@ impl Entity {
             string_properties: HashMap::new(),
             did_properties: HashMap::new(),
             iid_properties: HashMap::new(),
+            armor_profile: None,
+            creature_profile: None,
+            weapon_profile: None,
         }
     }
 }

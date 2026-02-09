@@ -25,6 +25,14 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     ];
 
     let mut spans = Vec::new();
+    
+    // Add focus indicator at the beginning
+    if state.focused_pane == FocusedPane::Dashboard {
+        spans.push(ratatui::text::Span::styled(
+            ">> ",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ));
+    }
     for (i, (tab, key, label)) in tabs.iter().enumerate() {
         if i > 0 {
             spans.push(ratatui::text::Span::raw("|"));
@@ -39,6 +47,14 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             spans.push(ratatui::text::Span::raw(format!(" [{}] {} ", key, label)));
         }
+    }
+    
+    // Add focus indicator at the end
+    if state.focused_pane == FocusedPane::Dashboard {
+        spans.push(ratatui::text::Span::styled(
+            " <<",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ));
     }
 
     let dashboard_block = Block::default()

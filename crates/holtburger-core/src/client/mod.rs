@@ -512,7 +512,6 @@ impl Client {
     }
 
     async fn handle_message(&mut self, data: &[u8]) -> Result<()> {
-        log::trace!("RawPacket ({} bytes): {:02X?}", data.len(), data);
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(ClientEvent::RawMessage(data.to_vec()));
         }

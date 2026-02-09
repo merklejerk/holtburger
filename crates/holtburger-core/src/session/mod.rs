@@ -274,31 +274,23 @@ impl Session {
             isaac.consume_key();
 
             header.checksum = header_hash.wrapping_add(payload_hash ^ key);
-            log::trace!(
-                ">>> Encrypted Send to {}: Seq={} ID={} Flags={:08X} FinalCRC={:08X}",
-                addr,
-                header.sequence,
-                header.id,
-                header.flags,
-                header.checksum
-            );
         } else {
             header.checksum = header_hash.wrapping_add(payload_hash);
-            log::trace!(
-                ">>> Cleartext Send to {}: Seq={} ID={} Flags={:08X} Checksum={:08X}",
-                addr,
-                header.sequence,
-                header.id,
-                header.flags,
-                header.checksum
-            );
         }
 
         let mut packet = Vec::with_capacity(HEADER_SIZE + full_payload.len());
         header.pack(&mut packet);
         packet.extend_from_slice(&full_payload);
 
-        log::trace!("RAW OUTBOUND: {:02X?}", packet);
+        log::trace!(
+            ">>> Outbound to {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",
+            addr,
+            header.sequence,
+            header.id,
+            header.flags,
+            packet.len(),
+            packet
+        );
 
         if let Some(ref mut capture) = self.capture {
             let _ = capture.write_entry(Direction::Outbound, addr, &packet);
@@ -309,13 +301,6 @@ impl Session {
     }
 
     pub fn process_fragment(&mut self, header: &FragmentHeader, data: &[u8]) -> Option<Vec<u8>> {
-        log::trace!(
-            "Processing fragment Seq={} {}/{} size={}",
-            header.sequence,
-            header.index + 1,
-            header.count,
-            data.len()
-        );
         if header.count == 1 {
             return Some(data.to_vec());
         }
@@ -422,8 +407,6 @@ impl Session {
         let header = PacketHeader::unpack(&buf[..HEADER_SIZE], &mut offset)
             .ok_or_else(|| anyhow::anyhow!("Failed to unpack packet header"))?;
         let data = buf[HEADER_SIZE..len].to_vec();
-
-        log::trace!("RAW INBOUND: {:02X?}", &buf[..len]);
 
         log::trace!(
             "<<< Inbound from {}: Seq={} ID={} Flags={:X} Size={} Hex: {:02X?}",

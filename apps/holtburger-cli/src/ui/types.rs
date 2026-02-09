@@ -19,6 +19,23 @@ pub const CHAT_HISTORY_WINDOW_SIZE: usize = 10000;
 // Interaction constants
 pub const SCROLL_STEP: usize = 3;
 
+use holtburger_core::ClientCommand;
+use holtburger_core::protocol::messages::Enchantment;
+use holtburger_core::world::entity::Entity;
+
+#[derive(Debug, Clone)]
+pub enum CommandTarget<'a> {
+    Entity(&'a Entity),
+    Enchantment(&'a Enchantment),
+    None,
+}
+
+#[derive(Debug)]
+pub enum CommandHandler {
+    Command(ClientCommand),
+    ToggleDebug,
+}
+
 #[derive(Debug, Clone)]
 pub enum ChatMessageKind {
     Info,
@@ -48,7 +65,6 @@ pub enum DashboardTab {
     Entities,
     Inventory,
     Character,
-    Effects,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

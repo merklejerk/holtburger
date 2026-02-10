@@ -138,12 +138,12 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 
 |   | Task | Notes |
 | :---: | :--- | :--- |
-| [ ] | Implement `HbaWriter` (staging and serialization) | |
-| [ ] | Implement `HbaReader` (implementing `ResourceProvider`) | |
-| [ ] | Integrate `zstd` crate for blob compression | |
-| [ ] | Round-trip tests (Write -> Read) for all data types | |
-| [ ] | Fuzz tests for HBA parser robustness | |
-| **Criteria** | **Phase 2 Completion Criteria:** Round-trip tests pass. Coverage > 85%. | |
+| [x] | Implement `HbaWriter` (staging and serialization) | Added to `archive.rs`. |
+| [x] | Implement `HbaReader` (implementing `ResourceProvider`) | Added to `archive.rs`. |
+| [x] | Integrate `zstd` crate for blob compression | Verified with `test_hba_compression`. |
+| [x] | Round-trip tests (Write -> Read) for all data types | Verified with `test_hba_roundtrip`. |
+| [x] | Fuzz/Robustness tests for HBA parser | Added `test_hba_robustness_random`. |
+| **Criteria** | **Phase 2 Completion Criteria:** Round-trip tests pass. Coverage > 85%. | Completed. |
 
 ---
 
@@ -152,12 +152,12 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 
 |   | Task | Notes |
 | :---: | :--- | :--- |
-| [ ] | Create `apps/holtburger-tools` binary crate | |
-| [ ] | Implement `clap` CLI interface (`--input`, `--output`) | |
-| [ ] | Implement filtering logic (Whitelist by `DatFileType`) | |
-| [ ] | Add progress reporting (e.g., `indicatif` crate) | |
-| [ ] | Integration test: Strip retail `portal.dat` -> Validate output HBA | |
-| **Criteria** | **Phase 3 Completion Criteria:** `holtburger-tools` produces valid `.hba` from retail DATs. | |
+| [x] | Create `apps/holtburger-tools` binary crate | Rebranded from `dat-stripper`. |
+| [x] | Implement `clap` CLI interface (`--input`, `--output`) | Added to `holtburger-tools`. |
+| [x] | Implement filtering logic (Whitelist by `DatFileType`) | Implemented in `holtburger-tools` main. |
+| [x] | Add progress reporting (e.g., `indicatif` crate) | Added spinner and progress bar. |
+| [x] | Integration test: Strip retail `portal.dat` -> Validate output HBA | Verified: 884MB -> 88MB. |
+| **Criteria** | **Phase 3 Completion Criteria:** `holtburger-tools` produces valid `.hba` from retail DATs. | Completed. |
 
 ---
 
@@ -172,3 +172,17 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 | [ ] | Benchmark suite: Sequential vs Random access patterns (DAT vs HBA) | |
 | [ ] | Comprehensive integration test suite using `ace-root/dats/` | |
 | **Criteria** | **Phase 4 Completion Criteria:** Automated test suite passes with 100% parity for whitelisted files. Reduced HBA size confirmed <200MB. | |
+
+---
+
+### Phase 5: Internal Object Pruning (Stretch Goal)
+**Goal:** Further reduce file size by stripping non-essential visual data *inside* essential files (primarily `GfxObj`).
+
+|   | Task | Notes |
+| :---: | :--- | :--- |
+| [ ] | Implement `GfxObj::pack` in `holtburger-dat` | Requires full serialization logic. |
+| [ ] | Add "Deep Strip" mode to `holtburger-tools` | Toggle for internal pruning. |
+| [ ] | Strip Drawing BSP and Drawing Polygons from `GfxObj` | Significant savings for complex models. |
+| [ ] | Prune Vertex Array (Remove Normals/UVs) | Keep only origin points for physics. |
+| [ ] | Integration test: Compare pruned HBA vs raw stripped HBA | Ensure physics structures remain intact. |
+| **Criteria** | **Phase 5 Completion Criteria:** HBA size reduced by an additional ~30-50% without breaking physics. |

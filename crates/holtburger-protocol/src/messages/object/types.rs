@@ -1,9 +1,9 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{
     align_to_4, pad_to_4, read_packed_u32_with_known_type, write_packed_u32_with_known_type,
 };
-use holtburger_common::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

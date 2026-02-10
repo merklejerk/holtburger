@@ -1,16 +1,16 @@
 use crate::messages::object::types::*;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{
     align_offset, align_to_4, pad_to_4, read_packed_u32_with_known_type, read_string16,
     write_packed_u32_with_known_type, write_string16,
 };
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
     WeenieHeaderFlag2,
 };
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectDescriptionData {
@@ -865,13 +865,11 @@ impl ProtocolPack for ForceObjectDescSendData {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures;
     use crate::messages::game_message::GameMessage;
+    use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
     use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
@@ -885,13 +883,13 @@ mod tests {
 
         let mut offset = 0;
         let msg = GameMessage::unpack(&data, &mut offset).expect("Failed to unpack minimal");
-        
+
         // Basic verification
         if let GameMessage::ObjectCreate(desc) = &msg {
-             assert_eq!(desc.name.as_deref(), Some("Buddy"));
-             assert_eq!(desc.guid.0, 0x50000001);
+            assert_eq!(desc.name.as_deref(), Some("Buddy"));
+            assert_eq!(desc.guid.0, 0x50000001);
         } else {
-             panic!("Wrong message type: {:?}", msg);
+            panic!("Wrong message type: {:?}", msg);
         }
 
         // Parity check (Pack matches constructed data)
@@ -911,14 +909,14 @@ mod tests {
         let msg = GameMessage::unpack(&data, &mut offset).expect("Failed to unpack complex");
 
         if let GameMessage::ObjectCreate(desc) = &msg {
-             assert_eq!(desc.name.as_deref(), Some("Fancy Buddy"));
-             assert_eq!(desc.guid.0, 0x50000002);
-             assert_eq!(desc.sequences[0], 100);
-             // Verify a few flags
-             assert!(desc.physics_flags.contains(PhysicsDescriptionFlag::PARENT));
-             assert_eq!(desc.parent_id.unwrap().0, 0x50000001);
+            assert_eq!(desc.name.as_deref(), Some("Fancy Buddy"));
+            assert_eq!(desc.guid.0, 0x50000002);
+            assert_eq!(desc.sequences[0], 100);
+            // Verify a few flags
+            assert!(desc.physics_flags.contains(PhysicsDescriptionFlag::PARENT));
+            assert_eq!(desc.parent_id.unwrap().0, 0x50000001);
         } else {
-             panic!("Wrong message type: {:?}", msg);
+            panic!("Wrong message type: {:?}", msg);
         }
 
         let mut packed = Vec::new();
@@ -928,7 +926,7 @@ mod tests {
 
     #[test]
     fn test_object_create_minimal_struct() {
-        use holtburger_common::math::{Vector3, Quaternion};
+        use holtburger_common::math::{Quaternion, Vector3};
         let expected = ObjectDescriptionData {
             guid: Guid(0x50000001),
             model_data: ModelData {
@@ -963,7 +961,7 @@ mod tests {
 
     #[test]
     fn test_object_create_complex_struct() {
-        use holtburger_common::math::{Vector3, Quaternion};
+        use holtburger_common::math::{Quaternion, Vector3};
         let expected = ObjectDescriptionData {
             guid: Guid(0x50000002),
             model_data: ModelData {
@@ -1012,11 +1010,15 @@ mod tests {
         let data = hex::decode(hex).unwrap();
         let mut offset = 0;
         let state = SetStateData::unpack(&data, &mut offset).unwrap();
-        
+
         assert_eq!(state.guid.0, 0x50000001);
         assert_eq!(state.instance_sequence, 355);
         assert_eq!(state.state_sequence, 1);
-        assert!(state.physics_state.contains(PhysicsState::REPORT_COLLISIONS));
+        assert!(
+            state
+                .physics_state
+                .contains(PhysicsState::REPORT_COLLISIONS)
+        );
 
         let mut packed = Vec::new();
         state.pack(&mut packed);
@@ -1095,15 +1097,16 @@ mod tests {
         // The fixture labeled OBJECT_CREATE_BUDDY is actually a PrivateUpdatePropertyInt message
         let data = test_fixtures::OBJECT_CREATE_BUDDY;
         let mut offset = 0;
-        let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack buddy as update prop");
-        
+        let msg =
+            GameMessage::unpack(data, &mut offset).expect("Failed to unpack buddy as update prop");
+
         if let GameMessage::PrivateUpdatePropertyInt(prop) = &msg {
             // Private messages do not contain a GUID (implied self), so we expect NULL
-            assert_eq!(prop.guid.0, 0); 
+            assert_eq!(prop.guid.0, 0);
             // Property 0x7D = 125
             assert_eq!(prop.property, 0x7D);
         } else {
-             panic!("Wrong message type for buddy fixture: {:?}", msg);
+            panic!("Wrong message type for buddy fixture: {:?}", msg);
         }
     }
 
@@ -1223,7 +1226,7 @@ mod tests {
 
     #[test]
     fn test_obj_desc_event_parity() {
-        use crate::messages::object::types::{ModelData, SubPalette, TextureChange, ModelChange};
+        use crate::messages::object::types::{ModelChange, ModelData, SubPalette, TextureChange};
         let expected = GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
             guid: Guid(0x50000001),
             instance_sequence: 1234,
@@ -1231,9 +1234,20 @@ mod tests {
             model_data: ModelData {
                 header: 17,
                 palette_id: Some(67108865),
-                sub_palettes: vec![SubPalette { id: 67108866, offset: 0, length: 32 }],
-                texture_changes: vec![TextureChange { part_index: 0, old_id: 83886081, new_id: 83886082 }],
-                model_changes: vec![ModelChange { index: 0, animation_id: 16777217 }],
+                sub_palettes: vec![SubPalette {
+                    id: 67108866,
+                    offset: 0,
+                    length: 32,
+                }],
+                texture_changes: vec![TextureChange {
+                    part_index: 0,
+                    old_id: 83886081,
+                    new_id: 83886082,
+                }],
+                model_changes: vec![ModelChange {
+                    index: 0,
+                    animation_id: 16777217,
+                }],
             },
         }));
         assert_pack_unpack_parity(test_fixtures::OBJ_DESC_EVENT, &expected);
@@ -1244,7 +1258,7 @@ mod tests {
         let mut offset = 0;
         let data = test_fixtures::OBJ_DESC_EVENT;
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack");
-        
+
         if let GameMessage::ObjDescEvent(ev) = msg {
             assert_eq!(ev.guid, Guid(0x50000001));
             assert_eq!(ev.instance_sequence, 1234);

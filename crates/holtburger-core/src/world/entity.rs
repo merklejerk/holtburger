@@ -1,6 +1,6 @@
-use holtburger_common::{Vector3, Guid};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, PhysicsState};
+use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use std::collections::HashMap;
 

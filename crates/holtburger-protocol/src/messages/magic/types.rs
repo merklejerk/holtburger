@@ -1,6 +1,6 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
-use holtburger_common::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -185,4 +185,3 @@ mod tests {
         assert_pack_unpack_parity(test_fixtures::ENCHANTMENT_SIMPLE, &expected);
     }
 }
-

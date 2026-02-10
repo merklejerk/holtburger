@@ -1,6 +1,6 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{read_string16, write_string16};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderingResetData;
@@ -235,4 +235,3 @@ mod tests {
         assert_pack_unpack_parity(&data, &expected);
     }
 }
-

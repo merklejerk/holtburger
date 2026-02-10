@@ -1,9 +1,9 @@
 use crate::messages::movement::types::RawMotionState;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{align_offset, pad_to_4};
+use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -191,11 +191,11 @@ impl ProtocolPack for AutonomousPositionActionData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures;
-    use crate::messages::movement::RawMotionFlags;
     use crate::messages::game_action::{GameAction, GameActionMessage};
     use crate::messages::game_message::GameMessage;
+    use crate::messages::movement::RawMotionFlags;
     use crate::messages::movement::types::{MotionItem, RawMotionState};
+    use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
 
     #[test]

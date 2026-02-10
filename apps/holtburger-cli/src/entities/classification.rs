@@ -1,5 +1,5 @@
-use holtburger_core::world::entity::Entity;
 use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, WeenieType};
+use holtburger_core::world::entity::Entity;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EntityClass {

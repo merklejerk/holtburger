@@ -1,12 +1,12 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{align_offset, pad_to_4};
+use byteorder::{ByteOrder, LittleEndian};
 use holtburger_common::Guid;
 pub use holtburger_common::position::{PositionPack, WorldPosition};
-use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 use crate::messages::movement::types::*;
-pub use crate::messages::movement::types::{RawMotionState, InterpretedMotionState, MotionItem};
+pub use crate::messages::movement::types::{InterpretedMotionState, MotionItem, RawMotionState};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PrivateUpdatePositionData {
@@ -107,8 +107,8 @@ impl ProtocolPack for UpdatePositionData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures;
     use crate::messages::game_message::GameMessage;
+    use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
 
     #[test]
@@ -899,6 +899,3 @@ impl ProtocolPack for TurnToParameters {
         buf.extend_from_slice(&self.desired_heading.to_le_bytes());
     }
 }
-
-
-

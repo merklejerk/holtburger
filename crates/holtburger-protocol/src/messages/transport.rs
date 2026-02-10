@@ -1,5 +1,5 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 pub const HEADER_SIZE: usize = 20;
 pub const FRAGMENT_HEADER_SIZE: usize = 16;
@@ -300,4 +300,3 @@ mod tests {
         );
     }
 }
-

@@ -1,6 +1,6 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
-use holtburger_common::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,8 +70,8 @@ impl ProtocolPack for PlayEffectData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures;
     use crate::messages::game_message::GameMessage;
+    use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
     use holtburger_common::traits::ProtocolUnpack;
 
@@ -119,4 +119,3 @@ mod tests {
         assert_eq!(*msg, expected);
     }
 }
-

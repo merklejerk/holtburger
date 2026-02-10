@@ -1,5 +1,5 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -72,4 +72,3 @@ mod tests {
         assert_pack_unpack_parity(test_fixtures::CREATURE_SKILL_MELEE_DEF, &expected);
     }
 }
-

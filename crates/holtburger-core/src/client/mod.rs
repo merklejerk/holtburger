@@ -1,11 +1,11 @@
 use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
+use anyhow::Result;
 use holtburger_common::{Guid, ProtocolUnpack};
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::errors::CharacterError;
-use holtburger_protocol::messages::*;
 use holtburger_protocol::messages::transport::packet_flags;
-use anyhow::Result;
+use holtburger_protocol::messages::*;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -561,15 +561,16 @@ impl Client {
                     let force_pos_seq = data.pos.force_position_sequence;
 
                     if let Some(old_seq) = self.last_sent_pos_seq
-                        && force_pos_seq > old_seq {
-                            log::warn!(
-                                "Server forced reposition (rubber band): seq {} -> {}",
-                                old_seq,
-                                force_pos_seq
-                            );
-                            // We don't abort movement here, we just accept the new sequence
-                            // WorldState already updated the position via delegation above
-                        }
+                        && force_pos_seq > old_seq
+                    {
+                        log::warn!(
+                            "Server forced reposition (rubber band): seq {} -> {}",
+                            old_seq,
+                            force_pos_seq
+                        );
+                        // We don't abort movement here, we just accept the new sequence
+                        // WorldState already updated the position via delegation above
+                    }
                     self.last_sent_pos_seq = Some(force_pos_seq);
                 }
                 Ok(())
@@ -612,7 +613,8 @@ impl Client {
                 }
             }
             GameMessage::GameEvent(ev) => match &ev.event {
-                GameEvent::PlayerDescription(_) | holtburger_protocol::messages::game_event::GameEvent::StartGame => {
+                GameEvent::PlayerDescription(_)
+                | holtburger_protocol::messages::game_event::GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
                         self.send_status_event();
@@ -1021,13 +1023,12 @@ impl Client {
             self.last_move_sync = now;
 
             let data = holtburger_protocol::messages::game_action::MoveToStateData {
-                raw_motion_state:
-                    holtburger_protocol::messages::game_message::RawMotionState {
-                        flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
-                        current_hold_key: Some(HoldKey::Run as u32),
-                        forward_speed: Some(7.0),
-                        ..Default::default()
-                    },
+                raw_motion_state: holtburger_protocol::messages::game_message::RawMotionState {
+                    flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                    current_hold_key: Some(HoldKey::Run as u32),
+                    forward_speed: Some(7.0),
+                    ..Default::default()
+                },
                 position: self.world.player.position,
                 instance_sequence: self.world.player.instance_sequence,
                 server_control_sequence: self.world.player.server_control_sequence,

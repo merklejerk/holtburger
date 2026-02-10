@@ -1,7 +1,7 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
-use holtburger_common::Guid;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 bitflags! {
@@ -130,4 +130,4 @@ impl ProtocolPack for InventoryRemoveObjectData {
 //     //     }));
 //     //     assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
 //     // }
-// 
+//

@@ -1,6 +1,6 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{read_string16, write_string16};
 use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HearSpeechData {
@@ -166,4 +166,3 @@ impl ProtocolPack for ServerMessageData {
         buf.extend_from_slice(&self.chat_type.to_le_bytes());
     }
 }
-

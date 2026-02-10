@@ -43,6 +43,7 @@ async-trait = "0.1"
 glam = "0.25"
 bitflags = { version = "2.6", features = ["serde"] }
 tempfile = "3.10"
+criterion = "0.5"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]

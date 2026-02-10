@@ -1,4 +1,5 @@
 pub mod gfx_obj;
+pub use gfx_obj::GfxObj;
 
 use std::fmt;
 
@@ -34,6 +35,10 @@ pub enum DatFileType {
 }
 
 impl DatFileType {
+    pub fn is_essential(&self) -> bool {
+        crate::manifest::StripperManifest::logic_only().should_keep(*self)
+    }
+
     pub fn from_id(id: u32) -> Self {
         // Check Cell DAT suffixes first (high priority)
         let suffix = id & 0xFFFF;

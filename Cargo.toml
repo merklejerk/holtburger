@@ -44,6 +44,8 @@ glam = "0.25"
 bitflags = { version = "2.6", features = ["serde"] }
 tempfile = "3.10"
 criterion = "0.5"
+rayon = "1.11.0"
+indicatif = "0.17"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]

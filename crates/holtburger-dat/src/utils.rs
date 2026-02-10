@@ -1,5 +1,5 @@
-use binrw::BinRead;
-use std::io::{Read, Seek, SeekFrom};
+use binrw::{BinRead, BinWrite};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 pub fn read_compressed_u32<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<u32> {
     let b0 = u8::read(reader)?;
@@ -14,6 +14,32 @@ pub fn read_compressed_u32<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<u
             Ok(((((b0 as u32 & 0x3F) << 8) | b1 as u32) << 16) | s as u32)
         }
     }
+}
+
+pub fn write_compressed_u32<W: Write + Seek>(writer: &mut W, val: u32) -> binrw::BinResult<()> {
+    if val > 0x3FFF_FFFF {
+        return Err(binrw::Error::Custom {
+            pos: writer.stream_position()?,
+            err: Box::new("u32 value too large for compressed format (>30 bits)"),
+        });
+    }
+
+    if val < 0x80 {
+        (val as u8).write(writer)?;
+    } else if val < 0x4000 {
+        let b0 = 0x80 | ((val >> 8) & 0x3F) as u8;
+        let b1 = (val & 0xFF) as u8;
+        b0.write(writer)?;
+        b1.write(writer)?;
+    } else {
+        let b0 = 0xC0 | ((val >> 24) & 0x3F) as u8;
+        let b1 = ((val >> 16) & 0xFF) as u8;
+        let s = (val & 0xFFFF) as u16;
+        b0.write(writer)?;
+        b1.write(writer)?;
+        s.write_le(writer)?;
+    }
+    Ok(())
 }
 
 pub fn read_pstring<R: Read + Seek>(
@@ -102,4 +128,112 @@ pub fn decompress_lrs(input: &[u8]) -> Vec<u8> {
     }
 
     output
+}
+
+pub trait FileExtPolyfill {
+    fn read_exact_at_compat(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()>;
+}
+
+impl FileExtPolyfill for std::fs::File {
+    #[cfg(unix)]
+    fn read_exact_at_compat(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        use std::os::unix::fs::FileExt;
+        self.read_exact_at(buf, offset)
+    }
+
+    #[cfg(windows)]
+    fn read_exact_at_compat(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        use std::os::windows::fs::FileExt;
+        // Windows seek_read returns number of bytes read, so we loop to ensure exact read
+        let mut read = 0;
+        while read < buf.len() {
+            let n = self.seek_read(&mut buf[read..], offset + read as u64)?;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "failed to fill whole buffer",
+                ));
+            }
+            read += n;
+        }
+        Ok(())
+    }
+}
+
+/// Helper to find a portal.dat for testing/benchmarking purposes.
+///
+/// Priority 1: `HOLTBURGER_PORTAL_DAT` environment variable.
+/// Priority 2: Repository-relative fallback (`dats/portal.dat` from workspace root).
+pub fn get_portal_dat_path() -> Option<std::path::PathBuf> {
+    if let Ok(path_str) = std::env::var("HOLTBURGER_PORTAL_DAT") {
+        let path = std::path::PathBuf::from(path_str);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // Workspace-relative fallbacks
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
+
+    // 1. Repository dats/ folder
+    let repo_dats = workspace_root.join("dats/portal.dat");
+    if repo_dats.exists() {
+        return Some(repo_dats);
+    }
+
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_compressed_u32_roundtrip() {
+        let test_values = vec![0, 1, 0x7F, 0x80, 0x3FFF, 0x4000, 0x3FFF_FFFF];
+
+        for val in test_values {
+            let mut buf = Vec::new();
+            let mut writer = Cursor::new(&mut buf);
+            write_compressed_u32(&mut writer, val).unwrap();
+
+            let mut reader = Cursor::new(&buf);
+            let read_val = read_compressed_u32(&mut reader).unwrap();
+            assert_eq!(val, read_val, "Value 0x{:08X} failed roundtrip", val);
+        }
+    }
+
+    #[test]
+    fn test_write_compressed_u32_overflow() {
+        let mut buf = Vec::new();
+        let mut writer = Cursor::new(&mut buf);
+        let res = write_compressed_u32(&mut writer, 0x4000_0000);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_decompress_lrs_literal() {
+        let input = vec![
+            4, 0, 0, 0,    // Size 4
+            0x00, // Control byte: all literals (0)
+            0xAA, 0xBB, 0xCC, 0xDD,
+        ];
+        let decompressed = decompress_lrs(&input);
+        assert_eq!(decompressed, vec![0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn test_decompress_lrs_backref() {
+        // Output should be "ABCABC"
+        // 'A', 'B', 'C', then backref to 'A', 'B', 'C' (offset 3, length 1+2=3)
+        // Control bit starts at 0x80.
+        let input = vec![
+            6, 0, 0, 0,    // Size 6
+            0x10, // 0001 0000. bits 0..3 are 0 (literals), bit 4 is 1 (backref)
+            b'A', b'B', b'C', 0x03, 0x01, // b1=3, b2=1 (length 1+2=3)
+        ];
+        let decompressed = decompress_lrs(&input);
+        assert_eq!(decompressed, b"ABCABC");
+    }
 }

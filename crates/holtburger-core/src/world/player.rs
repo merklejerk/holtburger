@@ -1,8 +1,9 @@
 use super::WorldEvent;
-use super::guid::Guid;
 use super::stats;
-use crate::protocol::messages::*;
-use crate::world::properties::EnchantmentTypeFlags;
+use holtburger_common::Guid;
+use holtburger_common::properties::EnchantmentTypeFlags;
+use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::*;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1017,10 +1018,10 @@ mod tests {
 
     #[test]
     fn test_vector_update_routing() {
-        use crate::math::Vector3;
-        use crate::protocol::messages::GameMessage;
-        use crate::protocol::messages::VectorUpdateData;
         use crate::world::WorldEvent;
+        use holtburger_common::Vector3;
+        use holtburger_protocol::messages::GameMessage;
+        use holtburger_protocol::messages::VectorUpdateData;
 
         let mut player = PlayerState::new();
         player.guid = Guid(0x50000001);
@@ -1055,7 +1056,7 @@ mod tests {
 
     #[test]
     fn test_heal_command_updates() {
-        use crate::protocol::messages::{
+        use holtburger_protocol::messages::{
             GameMessage, PrivateUpdateVitalCurrentData, PrivateUpdateVitalData,
         };
 

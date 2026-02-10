@@ -441,10 +441,25 @@ dependencies = [
  "crossterm",
  "env_logger",
  "futures",
+ "holtburger-common",
  "holtburger-core",
+ "holtburger-dat",
+ "holtburger-protocol",
  "log",
  "ratatui",
  "tokio",
+]
+
+[[package]]
+name = "holtburger-common"
+version = "0.1.0"
+dependencies = [
+ "binrw",
+ "bitflags",
+ "byteorder",
+ "serde",
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]
@@ -459,6 +474,9 @@ dependencies = [
  "encoding_rs",
  "glam",
  "hex",
+ "holtburger-common",
+ "holtburger-dat",
+ "holtburger-protocol",
  "log",
  "rand",
  "serde",
@@ -466,6 +484,19 @@ dependencies = [
  "strum_macros",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "holtburger-dat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "binrw",
+ "bitflags",
+ "encoding_rs",
+ "holtburger-common",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -480,6 +511,23 @@ dependencies = [
  "holtburger-core",
  "log",
  "tokio",
+]
+
+[[package]]
+name = "holtburger-protocol"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "binrw",
+ "bitflags",
+ "byteorder",
+ "hex",
+ "holtburger-common",
+ "log",
+ "serde",
+ "strum",
+ "strum_macros",
+ "thiserror",
 ]
 
 [[package]]

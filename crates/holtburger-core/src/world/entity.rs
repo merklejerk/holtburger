@@ -1,8 +1,7 @@
-use crate::math::Vector3;
-use crate::protocol::messages::common::object::{ArmorProfile, CreatureProfile, WeaponProfile};
-use crate::world::guid::Guid;
-use crate::world::position::WorldPosition;
-use crate::world::properties::{ItemType, ObjectDescriptionFlag, PhysicsState};
+use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, PhysicsState};
+use holtburger_common::{Guid, Vector3};
+use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -49,7 +48,7 @@ impl Entity {
             gfx_id: None,
             flags: ObjectDescriptionFlag::empty(),
             item_type: None,
-            physics_state: crate::world::properties::PhysicsState::NONE,
+            physics_state: PhysicsState::NONE,
             physics_parent_id: None,
             container_id: None,
             wielder_id: None,

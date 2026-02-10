@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use holtburger_core::dat::DatDatabase;
+use holtburger_dat::DatDatabase;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -160,7 +160,7 @@ fn main() -> Result<()> {
         Commands::Weenie { id } => {
             let id_val = u32::from_str_radix(id.trim_start_matches("0x"), 16)?;
             let data = db.get_file(id_val)?;
-            let weenie = holtburger_core::dat::weenie::Weenie::unpack(&data)?;
+            let weenie = holtburger_dat::weenie::Weenie::unpack(&data)?;
             println!("Weenie Class ID: {:08X}", weenie.wcid);
             println!("Weenie Type:     {}", weenie.weenie_type);
             if let Some(name) = weenie.name() {
@@ -183,7 +183,7 @@ fn main() -> Result<()> {
             }
 
             let terrain_data = db.get_file(id_val)?;
-            let lb = holtburger_core::dat::landblock::CellLandblock::unpack(&terrain_data)?;
+            let lb = holtburger_dat::landblock::CellLandblock::unpack(&terrain_data)?;
             println!("Landblock ID:   {:08X}", lb.id);
             println!("Has Objects:     {}", lb.has_objects != 0);
             println!("Terrain Vertices: {}", lb.terrain.len());
@@ -199,7 +199,7 @@ fn main() -> Result<()> {
 
             let info_id = (id_val & 0xFFFF0000) | 0xFFFE;
             if let Ok(info_data) = db.get_file(info_id) {
-                let info = holtburger_core::dat::landblock::LandblockInfo::unpack(&info_data)?;
+                let info = holtburger_dat::landblock::LandblockInfo::unpack(&info_data)?;
                 println!("\nLandblock Info ({:08X}):", info_id);
                 println!("Objects:   {}", info.objects.len());
                 println!("Buildings: {}", info.buildings.len());

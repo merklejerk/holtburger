@@ -1,18 +1,15 @@
 pub mod entity;
-pub mod guid;
 pub mod physics_types;
 pub mod player;
-pub mod position;
-pub mod properties;
 pub mod spatial;
 pub mod state;
 pub mod stats;
 
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::PropertyValue;
+use holtburger_common::Guid;
 use crate::world::entity::Entity;
-use crate::world::position::WorldPosition;
-use crate::world::properties::PropertyValue;
-pub use guid::Guid;
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {
@@ -24,8 +21,8 @@ pub enum WorldEvent {
     EntityIdentified(Box<Entity>),
     EntityVectorUpdated {
         guid: Guid,
-        velocity: crate::math::Vector3,
-        omega: crate::math::Vector3,
+        velocity: holtburger_common::math::Vector3,
+        omega: holtburger_common::math::Vector3,
     },
     EntityDespawned(Guid),
     VitalUpdated(stats::Vital),
@@ -63,7 +60,7 @@ pub enum WorldEvent {
     },
     EntityStateUpdated {
         guid: Guid,
-        physics_state: properties::PhysicsState,
+        physics_state: holtburger_common::properties::PhysicsState,
     },
     ForcedReposition {
         guid: Guid,

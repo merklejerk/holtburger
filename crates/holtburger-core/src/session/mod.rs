@@ -1,12 +1,14 @@
 pub mod capture;
 
-use crate::protocol::crypto::Isaac;
-use crate::protocol::messages::utils::align_offset;
-use crate::protocol::messages::*;
 use crate::session::capture::{CaptureWriter, Direction};
 use anyhow::{Result, anyhow};
 pub use async_trait::async_trait;
 use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::{ProtocolPack, ProtocolUnpack};
+use holtburger_protocol::crypto::Isaac;
+use holtburger_protocol::messages::transport::{packet_flags, queues};
+use holtburger_protocol::messages::utils::align_offset;
+use holtburger_protocol::messages::*;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::net::UdpSocket;
@@ -191,7 +193,7 @@ impl Session {
         }
 
         if !header_optional_bytes.is_empty() {
-            let h = crate::protocol::crypto::Hash32::compute(&header_optional_bytes);
+            let h = holtburger_protocol::crypto::Hash32::compute(&header_optional_bytes);
             total_payload_checksum = total_payload_checksum.wrapping_add(h);
         }
 
@@ -205,7 +207,7 @@ impl Session {
                 let frag_header = FragmentHeader::unpack(payload, &mut offset)
                     .expect("Failed to unpack fragment header");
                 // Fragment Header Hash
-                let hh = crate::protocol::crypto::Hash32::compute(&payload[h_start..offset]);
+                let hh = holtburger_protocol::crypto::Hash32::compute(&payload[h_start..offset]);
                 total_payload_checksum = total_payload_checksum.wrapping_add(hh);
 
                 let frag_data_size =
@@ -216,7 +218,7 @@ impl Session {
                     if offset + frag_data_size > payload.len() {
                         break;
                     }
-                    let dh = crate::protocol::crypto::Hash32::compute(
+                    let dh = holtburger_protocol::crypto::Hash32::compute(
                         &payload[offset..offset + frag_data_size],
                     );
                     total_payload_checksum = total_payload_checksum.wrapping_add(dh);
@@ -584,7 +586,7 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::messages::packet_flags;
+    use holtburger_protocol::messages::packet_flags;
 
     #[tokio::test]
     async fn test_payload_offset_handshake() {
@@ -626,7 +628,7 @@ mod tests {
         assert!(hash > 0);
 
         // Should match a direct Hash32 of the 32 bytes
-        let expected = crate::protocol::crypto::Hash32::compute(&payload);
+        let expected = holtburger_protocol::crypto::Hash32::compute(&payload);
         assert_eq!(hash, expected);
     }
 
@@ -645,8 +647,8 @@ mod tests {
         // Checksum = hash(header) + hash(data)
         let hash = session.calculate_payload_hash(packet_flags::BLOB_FRAGMENTS, &payload);
 
-        let h1 = crate::protocol::crypto::Hash32::compute(&payload[0..16]);
-        let h2 = crate::protocol::crypto::Hash32::compute(&payload[16..20]);
+        let h1 = holtburger_protocol::crypto::Hash32::compute(&payload[0..16]);
+        let h2 = holtburger_protocol::crypto::Hash32::compute(&payload[16..20]);
         assert_eq!(hash, h1.wrapping_add(h2));
     }
 
@@ -659,7 +661,7 @@ mod tests {
         payload[7] = 0xBB;
 
         let hash = session.calculate_payload_hash(packet_flags::ECHO_RESPONSE, &payload);
-        let expected = crate::protocol::crypto::Hash32::compute(&payload);
+        let expected = holtburger_protocol::crypto::Hash32::compute(&payload);
         assert_eq!(hash, expected);
     }
 
@@ -667,7 +669,7 @@ mod tests {
     fn test_encrypted_checksum_xor_logic() {
         let mut session = Session::new_test();
         let seed = 0x99E77855;
-        session.isaac_c2s = Some(crate::protocol::crypto::Isaac::new(seed));
+        session.isaac_c2s = Some(holtburger_protocol::crypto::Isaac::new(seed));
 
         // Known first key for this seed is 0xAD497DF3
         let expected_key = 0xAD497DF3;

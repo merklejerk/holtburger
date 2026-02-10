@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+holtburger-common.workspace = true
+holtburger-dat.workspace = true
+holtburger-protocol.workspace = true
 tokio.workspace = true
 byteorder.workspace = true
 anyhow.workspace = true

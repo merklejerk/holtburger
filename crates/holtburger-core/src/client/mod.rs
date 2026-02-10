@@ -1,9 +1,11 @@
-use crate::protocol::crypto::Isaac;
-use crate::protocol::errors::CharacterError;
-use crate::protocol::messages::*;
 use crate::session::Session;
-use crate::world::{Guid, WorldEvent, WorldState, state::ServerTimeSync};
+use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
+use holtburger_common::{Guid, ProtocolUnpack};
+use holtburger_protocol::crypto::Isaac;
+use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::messages::transport::packet_flags;
+use holtburger_protocol::messages::*;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -34,7 +36,7 @@ pub struct Client {
     message_counter: usize,
     move_target: Option<Guid>,
     last_move_sync: Instant,
-    last_move_pos: crate::world::position::WorldPosition,
+    last_move_pos: holtburger_common::position::WorldPosition,
     last_move_pos_time: Instant,
     last_sent_pos_seq: Option<u16>,
 }
@@ -76,7 +78,7 @@ impl Client {
             "ace-root/dats/portal.dat",
             "../dats/portal.dat",
         ] {
-            if let Ok(db) = crate::dat::DatDatabase::new(path) {
+            if let Ok(db) = holtburger_dat::DatDatabase::new(path) {
                 portal_dat = Some(std::sync::Arc::new(db));
                 break;
             }
@@ -97,7 +99,7 @@ impl Client {
             message_counter: 0,
             move_target: None,
             last_move_sync: Instant::now(),
-            last_move_pos: crate::world::position::WorldPosition::default(),
+            last_move_pos: holtburger_common::position::WorldPosition::default(),
             last_move_pos_time: Instant::now(),
             last_sent_pos_seq: None,
         })
@@ -442,7 +444,7 @@ impl Client {
                                                     log::warn!("Approach aborted: Forced reposition by server");
                                                     self.move_target = None;
                                                     if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
-                                                        player.velocity = crate::math::Vector3::zero();
+                                                        player.velocity = holtburger_common::Vector3::zero();
                                                     }
                                                 }
                                         }
@@ -559,15 +561,16 @@ impl Client {
                     let force_pos_seq = data.pos.force_position_sequence;
 
                     if let Some(old_seq) = self.last_sent_pos_seq
-                        && force_pos_seq > old_seq {
-                            log::warn!(
-                                "Server forced reposition (rubber band): seq {} -> {}",
-                                old_seq,
-                                force_pos_seq
-                            );
-                            // We don't abort movement here, we just accept the new sequence
-                            // WorldState already updated the position via delegation above
-                        }
+                        && force_pos_seq > old_seq
+                    {
+                        log::warn!(
+                            "Server forced reposition (rubber band): seq {} -> {}",
+                            old_seq,
+                            force_pos_seq
+                        );
+                        // We don't abort movement here, we just accept the new sequence
+                        // WorldState already updated the position via delegation above
+                    }
                     self.last_sent_pos_seq = Some(force_pos_seq);
                 }
                 Ok(())
@@ -610,7 +613,8 @@ impl Client {
                 }
             }
             GameMessage::GameEvent(ev) => match &ev.event {
-                GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
+                GameEvent::PlayerDescription(_)
+                | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
                         self.send_status_event();
@@ -945,7 +949,7 @@ impl Client {
         activation_addr.set_port(self.session.server_addr.port() + 1);
 
         tokio::time::sleep(Duration::from_millis(
-            crate::protocol::messages::transport::ACE_HANDSHAKE_RACE_DELAY_MS,
+            holtburger_protocol::messages::transport::ACE_HANDSHAKE_RACE_DELAY_MS,
         ))
         .await;
         log::debug!(">>> Sending Handshake Response to {}", activation_addr);
@@ -984,7 +988,7 @@ impl Client {
             log::info!("Arrived at target 0x{:08X}", target_guid);
             self.move_target = None;
             if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
-                player.velocity = crate::math::Vector3::zero();
+                player.velocity = holtburger_common::Vector3::zero();
             }
             return Ok(());
         }
@@ -998,7 +1002,7 @@ impl Client {
                 log::warn!("Approach aborted: Player seems stuck");
                 self.move_target = None;
                 if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
-                    player.velocity = crate::math::Vector3::zero();
+                    player.velocity = holtburger_common::Vector3::zero();
                 }
                 return Ok(());
             }
@@ -1018,14 +1022,13 @@ impl Client {
         if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
             self.last_move_sync = now;
 
-            let data = crate::protocol::messages::game_action::movement::MoveToStateData {
-                raw_motion_state:
-                    crate::protocol::messages::game_message::movement::RawMotionState {
-                        flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
-                        current_hold_key: Some(HoldKey::Run as u32),
-                        forward_speed: Some(7.0),
-                        ..Default::default()
-                    },
+            let data = holtburger_protocol::messages::game_action::MoveToStateData {
+                raw_motion_state: holtburger_protocol::messages::game_message::RawMotionState {
+                    flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                    current_hold_key: Some(HoldKey::Run as u32),
+                    forward_speed: Some(7.0),
+                    ..Default::default()
+                },
                 position: self.world.player.position,
                 instance_sequence: self.world.player.instance_sequence,
                 server_control_sequence: self.world.player.server_control_sequence,

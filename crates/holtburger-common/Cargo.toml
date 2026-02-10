@@ -1,0 +1,15 @@
+[package]
+name = "holtburger-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+byteorder.workspace = true
+serde.workspace = true
+binrw.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+bitflags.workspace = true

@@ -183,3 +183,57 @@ pub fn get_portal_dat_path() -> Option<std::path::PathBuf> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_compressed_u32_roundtrip() {
+        let test_values = vec![0, 1, 0x7F, 0x80, 0x3FFF, 0x4000, 0x3FFF_FFFF];
+
+        for val in test_values {
+            let mut buf = Vec::new();
+            let mut writer = Cursor::new(&mut buf);
+            write_compressed_u32(&mut writer, val).unwrap();
+
+            let mut reader = Cursor::new(&buf);
+            let read_val = read_compressed_u32(&mut reader).unwrap();
+            assert_eq!(val, read_val, "Value 0x{:08X} failed roundtrip", val);
+        }
+    }
+
+    #[test]
+    fn test_write_compressed_u32_overflow() {
+        let mut buf = Vec::new();
+        let mut writer = Cursor::new(&mut buf);
+        let res = write_compressed_u32(&mut writer, 0x4000_0000);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_decompress_lrs_literal() {
+        let input = vec![
+            4, 0, 0, 0, // Size 4
+            0x00, // Control byte: all literals (0)
+            0xAA, 0xBB, 0xCC, 0xDD,
+        ];
+        let decompressed = decompress_lrs(&input);
+        assert_eq!(decompressed, vec![0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn test_decompress_lrs_backref() {
+        // Output should be "ABCABC"
+        // 'A', 'B', 'C', then backref to 'A', 'B', 'C' (offset 3, length 1+2=3)
+        // Control bit starts at 0x80.
+        let input = vec![
+            6, 0, 0, 0, // Size 6
+            0x10,       // 0001 0000. bits 0..3 are 0 (literals), bit 4 is 1 (backref)
+            b'A', b'B', b'C', 0x03, 0x01, // b1=3, b2=1 (length 1+2=3)
+        ];
+        let decompressed = decompress_lrs(&input);
+        assert_eq!(decompressed, b"ABCABC");
+    }
+}

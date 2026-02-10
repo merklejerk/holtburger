@@ -1,8 +1,14 @@
+pub mod env_cell;
 pub mod gfx_obj;
+pub mod setup_model;
+
+pub use env_cell::EnvCell;
+pub use gfx_obj::GfxObj;
+pub use setup_model::SetupModel;
 
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DatFileType {
     // Portal Range (Top Byte)
     Model = 0x01,
@@ -29,12 +35,38 @@ pub enum DatFileType {
     Landblock = 0xFE, // XXYYFFFF (using FE as internal marker for simplicity or specific logic)
     LandblockInfo = 0xFF, // XXYYFFFE
     IndoorCell = 0xFD, // XXYY0001 - XXYYFFFD
+    Iteration = 0xFE01, // 0xFFFF0001 - Special DAT metadata record
 
     Unknown = 0x00,
 }
 
 impl DatFileType {
+    pub fn is_essential(&self) -> bool {
+        matches!(
+            self,
+            DatFileType::Model
+                | DatFileType::SetupModel
+                | DatFileType::Animation
+                | DatFileType::AnimationDone
+                | DatFileType::EnvCell
+                | DatFileType::Table
+                | DatFileType::Region
+                | DatFileType::CombatTable
+                | DatFileType::PhysicsScript
+                | DatFileType::PhysicsScriptTable
+                | DatFileType::LanguageString
+                | DatFileType::Landblock
+                | DatFileType::LandblockInfo
+                | DatFileType::IndoorCell
+        )
+    }
+
     pub fn from_id(id: u32) -> Self {
+        // Special internal files
+        if id == 0xFFFF0001 {
+            return DatFileType::Iteration;
+        }
+
         // Check Cell DAT suffixes first (high priority)
         let suffix = id & 0xFFFF;
         if suffix == 0xFFFF {
@@ -42,12 +74,6 @@ impl DatFileType {
         }
         if suffix == 0xFFFE {
             return DatFileType::LandblockInfo;
-        }
-        if suffix > 0 && suffix < 0xFFFE {
-            // Likely an indoor cell in cell.dat
-            // We can confirm this if the ID is within a reasonable range
-            // But usually only cell.dat has these large suffixes
-            // However, we can use the top byte as a backup
         }
 
         // Check Portal prefixes
@@ -108,8 +134,50 @@ impl fmt::Display for DatFileType {
             DatFileType::Landblock => "Landblock (Terrain)",
             DatFileType::LandblockInfo => "LandblockInfo (Static)",
             DatFileType::IndoorCell => "IndoorCell",
+            DatFileType::Iteration => "Iteration (Metadata)",
             DatFileType::Unknown => "Unknown",
         };
         write!(f, "{}", name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_type_classification() {
+        // Special internal iterations file
+        assert_eq!(DatFileType::from_id(0xFFFF0001), DatFileType::Iteration);
+
+        // Terrain landblocks
+        assert_eq!(DatFileType::from_id(0x1234FFFF), DatFileType::Landblock);
+
+        // Static objects in landblocks (LBI)
+        assert_eq!(DatFileType::from_id(0x1234FFFE), DatFileType::LandblockInfo);
+
+        // Interior/Dungeon cells
+        assert_eq!(DatFileType::from_id(0x76540001), DatFileType::IndoorCell);
+        assert_eq!(DatFileType::from_id(0x7654FDAB), DatFileType::IndoorCell);
+
+        // Portal types (by prefix)
+        assert_eq!(DatFileType::from_id(0x01001234), DatFileType::Model);
+        assert_eq!(DatFileType::from_id(0x02001234), DatFileType::SetupModel);
+        assert_eq!(DatFileType::from_id(0x0E001234), DatFileType::Table);
+
+        // Edge case: ensure 0xFFFF0001 is NOT an IndoorCell
+        assert_ne!(DatFileType::from_id(0xFFFF0001), DatFileType::IndoorCell);
+    }
+
+    #[test]
+    fn test_essential_types() {
+        let manifest = crate::manifest::StripperManifest::logic_only();
+
+        // Iteration should NOT be essential
+        assert!(!manifest.should_keep(DatFileType::Iteration));
+
+        // Models and Landblocks should be essential
+        assert!(manifest.should_keep(DatFileType::Model));
+        assert!(manifest.should_keep(DatFileType::Landblock));
     }
 }

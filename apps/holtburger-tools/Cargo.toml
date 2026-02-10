@@ -1,0 +1,16 @@
+[package]
+name = "holtburger-tools"
+version = "0.1.0"
+edition = "2024"
+authors = ["holtburger contributors"]
+default-run = "dat2hba"
+
+[dependencies]
+holtburger-dat = { path = "../../crates/holtburger-dat" }
+anyhow = { workspace = true }
+clap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+indicatif = { workspace = true } # Progress bars for the win
+rayon = { workspace = true }
+thiserror.workspace = true

@@ -1,8 +1,9 @@
-use binrw::BinRead;
+use binrw::{BinRead, BinWrite};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite, PartialEq, Default)]
 #[br(little)]
+#[bw(little)]
 pub struct Vector3 {
     pub x: f32,
     pub y: f32,
@@ -96,8 +97,9 @@ impl std::ops::Div<f32> for Vector3 {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite, PartialEq, Default)]
 #[br(little)]
+#[bw(little)]
 pub struct Quaternion {
     pub w: f32,
     pub x: f32,
@@ -116,8 +118,9 @@ impl Quaternion {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite)]
 #[br(little)]
+#[bw(little)]
 pub struct Plane {
     pub normal: Vector3,
     pub d: f32,
@@ -130,8 +133,9 @@ impl Plane {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite)]
 #[br(little)]
+#[bw(little)]
 pub struct Sphere {
     pub center: Vector3,
     pub radius: f32,

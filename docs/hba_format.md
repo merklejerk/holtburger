@@ -15,7 +15,7 @@ Unlike the original block-based AC DAT format, HBA uses a flat structure with a 
 
 | Section | Size | Description |
 | :--- | :--- | :--- |
-| **Header** | 28 bytes | Magic, Version, and Index pointers. |
+| **Header** | 28 bytes | Magic, Version, Entry Count, Index Offset, Metadata Size, Profile. |
 | **Metadata** | Variable | Structured or JSON data (optional). |
 | **Blobs** | Variable | Contiguous file data (may be compressed). |
 | **Index** | Entry Count * 28 bytes | Fixed-size list of File Entries. |
@@ -44,7 +44,7 @@ Each entry in the index describes a single asset.
 | Field | Type | Size | Description |
 | :--- | :--- | :--- | :--- |
 | File ID | `u32le` | 4 | The Asheron's Call Object ID (DID/WID). |
-| Type ID | `u32le` | 4 | Logical Type (High byte of DID). |
+| Type ID | `u32le` | 4 | **Logical Type**. Mapping to `DatFileType` (e.g., `0x06` for `GfxObj`). |
 | Offset | `u64le` | 8 | Absolute byte offset to the start of the data blob. |
 | Size | `u32le` | 4 | Decompressed (original) size of the data. |
 | Comp Size | `u32le` | 4 | Compressed (on-disk) size of the data. |

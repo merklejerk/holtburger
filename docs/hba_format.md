@@ -38,15 +38,23 @@ The `Profile` field indicates the intended use of the archive. This allows a cli
 - `0x03`: **Audio Only** (Wave files).
 - `0x04`: **Full** (Equivalent to a retail DAT).
 
-### 3.2. File Entry (HbaEntry)
+### 3.2. File Entry (HbaEntry - 28 bytes)
 Each entry in the index describes a single asset.
 
+| Field | Type | Size | Description |
+| :--- | :--- | :--- | :--- |
+| File ID | `u32le` | 4 | The Asheron's Call Object ID (DID/WID). |
+| Type ID | `u32le` | 4 | Logical Type (High byte of DID). |
+| Offset | `u64le` | 8 | Absolute byte offset to the start of the data blob. |
+| Size | `u32le` | 4 | Decompressed (original) size of the data. |
+| Comp Size | `u32le` | 4 | Compressed (on-disk) size of the data. |
 | Flags | `u8` | 1 | Bitflags (see below). |
-| Storage ID | `u8` | 1 | Reserved. |
+| Storage ID | `u8` | 1 | ID of external store (if ref flag set). |
 | Reserved | `u8[2]` | 2 | Alignment. |
 
 ### 3.3. Entry Flags
 - `0x01` (**Zstd**): Data blob is compressed with Zstandard.
+- `0x02` (**External**): Blob is stored in an external file (identified by `Storage ID`).
 - `0x04` (**Pruned**): Data is a "Lite" version of the original record (e.g., visual data removed from a physics object).
 
 ## 4. Quality-Aware Prioritization
@@ -54,16 +62,8 @@ The `Pruned` flag is used by the `CompositeProvider` (VFS) to ensure the best po
 - If multiple providers offer the same `File ID`, the VFS prefers any entry where `Pruned` is **not** set.
 - If all available entries are marked as `Pruned`, the first match in the provider list is used.
 - This allows Lite HBA archives to serve as space-saving fallbacks or overrides without breaking high-fidelity visuals if the user has full retail DAT files mounted.
-| Flags | `u8` | 1 | Bitflags (see below). |
-| Storage ID | `u8` | 1 | ID of external store (if ref flag set). |
-| Reserved | `u8[2]` | 2 | Alignment. |
 
-#### Flags
-- `0x01`: **Zstd Compression** (Blob is compressed with Zstandard).
-- `0x02`: **External Reference** (Blob is stored in another file identified by `Storage ID`).
-- `0x04`: **Pruned (Internal)** (Record has been internally stripped of non-logic data).
-
-## 4. Layered Content Strategy (VFS)
+## 5. Layered Content Strategy (VFS)
 The VFS (`CompositeProvider`) is designed to handle multiple HBA files simultaneously. This enables a modular distribution:
 1.  `base.hba` (Profile 0x01): Essential physics/logic for all clients.
 2.  `graphics.hba` (Profile 0x02): Textures/Visuals for 3D clients.

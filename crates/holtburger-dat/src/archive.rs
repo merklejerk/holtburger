@@ -1,23 +1,24 @@
 //! Holtburger Archive (HBA) format implementation.
-//! 
+//!
 //! HBA is a simple, high-performance archive format designed for Asheron's Call mods.
 //! It supports Zstd compression, arbitrary metadata, and 64-bit offsets.
-//! 
+//!
 //! Format Layout:
 //! - Header (24 bytes)
 //! - File Data (sequential)
 //! - Index (Entry Count * 32 bytes)
-//! 
+//!
 //! File naming convention for packing: [ID].[TYPE] (both in hex).
 
+use crate::ResourceProvider;
 use crate::error::{DatError, Result};
 use binrw::{BinRead, BinWrite, io::Cursor};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::os::unix::fs::FileExt;
 use std::path::Path;
-use crate::ResourceProvider;
 
 pub const HBA_MAGIC: [u8; 4] = *b"HBA\0";
 pub const HBA_VERSION: u32 = 1;
@@ -131,7 +132,15 @@ impl HbaWriter {
             profile: 0,
         }
     }
+}
 
+impl Default for HbaWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HbaWriter {
     pub fn set_compression(&mut self, compress: bool) {
         self.compress = compress;
     }
@@ -150,7 +159,7 @@ impl HbaWriter {
 
     pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut file = File::create(path)?;
-        
+
         // Placeholder for header
         let dummy_header = HbaHeader {
             magic: HBA_MAGIC,
@@ -162,34 +171,44 @@ impl HbaWriter {
         };
         dummy_header.write(&mut file)?;
 
+        // Parallel compression and preparation
+        let processed: Vec<(u32, u32, Vec<u8>, u32, u8)> = self
+            .entries
+            .par_iter()
+            .map(|(id, type_id, data, is_pruned)| {
+                let flags = if *is_pruned { HbaEntry::FLAG_PRUNED } else { 0 };
+                let original_size = data.len() as u32;
+
+                if self.compress {
+                    let compressed =
+                        zstd::encode_all(Cursor::new(data), 3).unwrap_or_else(|_| data.clone());
+                    if compressed.len() < data.len() {
+                        return (
+                            *id,
+                            *type_id,
+                            compressed,
+                            original_size,
+                            flags | HbaEntry::FLAG_ZSTD,
+                        );
+                    }
+                }
+
+                (*id, *type_id, data.clone(), original_size, flags)
+            })
+            .collect();
+
         let mut hba_entries = Vec::new();
 
-        // Write blobs
-        for (id, type_id, data, is_pruned) in &self.entries {
+        // Sequential write to disk
+        for (id, type_id, final_data, original_size, flags) in processed {
             let current_offset = file.stream_position()?;
-            
-            let (final_data, mut flags) = if self.compress {
-                let compressed = zstd::encode_all(Cursor::new(data), 3)?;
-                if compressed.len() < data.len() {
-                    (compressed, HbaEntry::FLAG_ZSTD)
-                } else {
-                    (data.clone(), 0)
-                }
-            } else {
-                (data.clone(), 0)
-            };
-
-            if *is_pruned {
-                flags |= HbaEntry::FLAG_PRUNED;
-            }
-
             file.write_all(&final_data)?;
 
             hba_entries.push(HbaEntry {
-                id: *id,
-                type_id: *type_id,
+                id,
+                type_id,
                 offset: current_offset,
-                size: data.len() as u32,
+                size: original_size,
                 comp_size: final_data.len() as u32,
                 flags,
                 storage_id: 0,
@@ -308,7 +327,7 @@ mod tests {
             let type_id = rng.r#gen::<u32>();
             let size = rng.gen_range(0..5000);
             let data: Vec<u8> = (0..size).map(|_| rng.r#gen::<u8>()).collect();
-            
+
             writer.add(id, type_id, data.clone());
             expected.insert(id, data);
         }

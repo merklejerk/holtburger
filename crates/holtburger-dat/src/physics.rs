@@ -65,7 +65,9 @@ impl BspNode {
             b"PORT" => Ok(BspNode::Port(BspPortal::read(reader, tree_type)?)),
             b"LEAF" => Ok(BspNode::Leaf(BspLeaf::read(reader, tree_type)?)),
             _ => Ok(BspNode::Internal(InternalNode::read(
-                reader, tree_type, reversed_tag,
+                reader,
+                tree_type,
+                reversed_tag,
             )?)),
         }
     }
@@ -150,10 +152,7 @@ impl BspNode {
 }
 
 impl BspPortal {
-    pub fn read<R: Read + Seek>(
-        reader: &mut R,
-        tree_type: BspType,
-    ) -> BinResult<Self> {
+    pub fn read<R: Read + Seek>(reader: &mut R, tree_type: BspType) -> BinResult<Self> {
         let plane = Plane::read_le(reader)?;
         let pos = Box::new(BspNode::read(reader, tree_type)?);
         let neg = Box::new(BspNode::read(reader, tree_type)?);
@@ -190,11 +189,15 @@ impl BspPortal {
         self.neg.write(writer, tree_type)?;
 
         if tree_type == BspType::Drawing {
-            // Recompute or use a dummy sphere? 
+            // Recompute or use a dummy sphere?
             // For now we'll write a zero sphere or we should store it.
             // Actually the original code skipped reading it into the struct.
             // Let's add it to the struct for parity.
-            Sphere { center: holtburger_common::Vector3::zero(), radius: 0.0 }.write_le(writer)?;
+            Sphere {
+                center: holtburger_common::Vector3::zero(),
+                radius: 0.0,
+            }
+            .write_le(writer)?;
             (self.poly_ids.len() as u32).write_le(writer)?;
             (self.portal_polys.len() as u32).write_le(writer)?;
 
@@ -211,10 +214,7 @@ impl BspPortal {
 }
 
 impl BspLeaf {
-    pub fn read<R: Read + Seek>(
-        reader: &mut R,
-        tree_type: BspType,
-    ) -> BinResult<Self> {
+    pub fn read<R: Read + Seek>(reader: &mut R, tree_type: BspType) -> BinResult<Self> {
         let index = i32::read_le(reader)?;
         let mut solid = 0;
         let mut sphere = None;
@@ -245,7 +245,11 @@ impl BspLeaf {
             if let Some(s) = &self.sphere {
                 s.write_le(writer)?;
             } else {
-                Sphere { center: holtburger_common::Vector3::zero(), radius: 0.0 }.write_le(writer)?;
+                Sphere {
+                    center: holtburger_common::Vector3::zero(),
+                    radius: 0.0,
+                }
+                .write_le(writer)?;
             }
             (self.poly_ids.len() as u32).write_le(writer)?;
             for &id in &self.poly_ids {
@@ -318,7 +322,11 @@ impl InternalNode {
             if let Some(s) = &self.sphere {
                 s.write_le(writer)?;
             } else {
-                Sphere { center: holtburger_common::Vector3::zero(), radius: 0.0 }.write_le(writer)?;
+                Sphere {
+                    center: holtburger_common::Vector3::zero(),
+                    radius: 0.0,
+                }
+                .write_le(writer)?;
             }
 
             if tree_type != BspType::Physics {

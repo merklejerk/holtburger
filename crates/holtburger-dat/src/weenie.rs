@@ -1,5 +1,5 @@
-use crate::utils::{align_boundary, read_pstring};
 use crate::Result;
+use crate::utils::{align_boundary, read_pstring};
 use binrw::BinRead;
 use binrw::io::Cursor;
 use holtburger_common::properties::{PropertyDataId, PropertyString};

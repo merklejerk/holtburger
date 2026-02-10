@@ -123,10 +123,10 @@ impl GfxObj {
             }
         }
 
-        if self.flags.intersects(GfxObjFlags::HAS_DID_DEGRADE) {
-            if let Some(did) = self.did_degrade {
-                did.write_le(writer)?;
-            }
+        if self.flags.intersects(GfxObjFlags::HAS_DID_DEGRADE)
+            && let Some(did) = self.did_degrade
+        {
+            did.write_le(writer)?;
         }
 
         Ok(())
@@ -134,11 +134,24 @@ impl GfxObj {
 
     /// Prune visual data from this GfxObj, keeping only physics and metadata.
     pub fn prune(&mut self) {
+        // 1. Collect vertices used by physics
+        let mut physics_vertex_ids = std::collections::HashSet::new();
+        for poly in self.physics_polygons.values() {
+            for &vid in &poly.vertex_ids {
+                if vid >= 0 {
+                    physics_vertex_ids.insert(vid as u16);
+                }
+            }
+        }
+
+        // 2. Prune the vertex array
+        self.vertex_array.prune(&physics_vertex_ids);
+
+        // 3. Remove drawing data
         self.flags.remove(GfxObjFlags::HAS_DRAWING);
         self.polygons.clear();
         self.drawing_bsp = None;
-        // Note: For now we keep the full vertex array because physics might reference it.
-        // A truly aggressive prune would filter the vertex array too.
+        // Keep did_degrade for now as it's a small ID
     }
 }
 
@@ -151,7 +164,7 @@ mod tests {
     fn test_gfx_obj_roundtrip() {
         let mut data = Vec::new();
         let mut writer = Cursor::new(&mut data);
-        
+
         (0x01000001u32).write_le(&mut writer).unwrap(); // ID
         (0u32).write_le(&mut writer).unwrap(); // Flags
         write_compressed_u32(&mut writer, 0).unwrap(); // Num Surfaces
@@ -174,25 +187,31 @@ mod tests {
     #[test]
     fn test_gfx_obj_prune() {
         use holtburger_common::properties::GfxObjFlags;
-        
+
         let mut obj = GfxObj {
             id: 1,
             flags: GfxObjFlags::HAS_DRAWING | GfxObjFlags::HAS_PHYSICS,
             surfaces: vec![],
-            vertex_array: CVertexArray { vertex_type: 1, vertices: HashMap::new() },
+            vertex_array: CVertexArray {
+                vertex_type: 1,
+                vertices: HashMap::new(),
+            },
             physics_polygons: HashMap::new(),
             physics_bsp: None,
             sort_center: Vector3::zero(),
-            polygons: HashMap::from([(1, Polygon {
-                num_pts: 3,
-                stippling: 0,
-                sides_type: 1,
-                pos_surface: 0,
-                neg_surface: 0,
-                vertex_ids: vec![0, 1, 2],
-                pos_uv_indices: vec![0, 0, 0],
-                neg_uv_indices: vec![0, 0, 0],
-            })]),
+            polygons: HashMap::from([(
+                1,
+                Polygon {
+                    num_pts: 3,
+                    stippling: 0,
+                    sides_type: 1,
+                    pos_surface: 0,
+                    neg_surface: 0,
+                    vertex_ids: vec![0, 1, 2],
+                    pos_uv_indices: vec![0, 0, 0],
+                    neg_uv_indices: vec![0, 0, 0],
+                },
+            )]),
             drawing_bsp: None, // Simplified for test
             did_degrade: None,
         };

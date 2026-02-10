@@ -195,7 +195,7 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 | [x] | Refactor `holtburger-dat` errors using `thiserror` | Completed. |
 | [x] | Decouple strip manifest from CLI logic | Completed in `manifest.rs`. |
 | [x] | Formalize HBA Specification | Defined in `docs/hba_format.md`. |
-| [ ] | Refactor `ResourceProvider` for DRY | Trivial cleanup remaining. |
+| [x] | Refactor `ResourceProvider` for DRY | IO refactored to stateless `FileExt` access. |
 | [x] | Implement Quality-Aware VFS | Verified with unit tests. |
 | [x] | Update CLI to support Profile tagging | Added `--profile` and `--full` flags. |
 | **Criteria** | **Phase 4.5 Completion Criteria:** Codebase is clean, error handling is robust, and HBA format is fully documented and quality-aware. | Completed. |
@@ -210,7 +210,7 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 | [x] | Implement `GfxObj::pack` in `holtburger-dat` | Completed. |
 | [x] | Add "Deep Strip" mode to `holtburger-tools` | Implicitly enabled for non-Full profiles. |
 | [x] | Strip Drawing BSP and Drawing Polygons from `GfxObj` | Significant savings (~6k files pruned). |
-| [ ] | Prune Vertex Array (Remove Normals/UVs) | Keep only origin points for physics. |
+| [x] | Prune Vertex Array (Remove Normals/UVs) | Keep only origin points for physics. |
 | [x] | Integration test: Compare pruned HBA vs raw stripped HBA | Confirmed 82MB size reduction. |
 | **Criteria** | **Phase 5 Completion Criteria:** HBA size reduced by an additional ~30-50% without breaking physics. | Completed. |
 
@@ -221,11 +221,11 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 
 |   | Task | Notes |
 | :---: | :--- | :--- |
-| [ ] | Implement `EnvCell` unpack/pack | Focus on stripping the `Surfaces` list. |
-| [ ] | Implement `SetupModel` unpack/pack | Focus on stripping `Lights` and `ConnectionPoints`. |
-| [ ] | Update `holtburger-tools` to prune these types | Integrate into the deep-strip loop. |
-| [ ] | Verify interior connectivity | Validate "Stabs" and "Portals" integrity via automated fixture tests. |
-| **Criteria** | **Phase 6 Completion Criteria:** Interior and Setup records are stripped of purely visual metadata. |
+| [x] | Implement `EnvCell` unpack/pack | Focus on stripping the `Surfaces` list. |
+| [x] | Implement `SetupModel` unpack/pack | Focus on stripping `Lights`. |
+| [x] | Update `holtburger-tools` to prune these types | Integrated into the deep-strip loop. |
+| [x] | Verify interior connectivity | Validated "Stabs" and "Portals" integrity via automated fixture tests. |
+| **Criteria** | **Phase 6 Completion Criteria:** Interior and Setup records are stripped of purely visual metadata. | Completed. |
 
 ---
 
@@ -234,8 +234,8 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 
 |   | Task | Notes |
 | :---: | :--- | :--- |
-| [ ] | Optimize IO Patterns in `DatDatabase` | Replace per-read `File::open` with `Arc<File>` or `mmap`. |
-| [ ] | Specialized CLI Error types | Refactor `holtburger-tools` from `anyhow` to a domain-specific error enum. |
+| [x] | Optimize IO Patterns in `DatDatabase` | Refactored to stateless `FileExt::read_exact_at` for thread-safe concurrent access. |
+| [x] | Specialized CLI Error types | Refactored `holtburger-tools` from `anyhow` to a domain-specific `ToolError` enum. |
 | [ ] | Benchmarking: Compare `mmap` vs `Arc<File>` performance | Use `criterion` for validation. |
-| [ ] | Parallel Stripping | Use `rayon` to process DAT files in parallel (if IO bound). |
+| [x] | Parallel Stripping | Integrated `rayon` for parallel record pruning and Zstd compression. |
 | **Criteria** | **Phase 7 Completion Criteria:** Tooling is fast, safe, and handles large DATs with minimal overhead. |

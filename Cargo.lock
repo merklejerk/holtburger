@@ -681,6 +681,7 @@ dependencies = [
  "encoding_rs",
  "holtburger-common",
  "rand",
+ "rayon",
  "serde",
  "tempfile",
  "thiserror",
@@ -728,6 +729,8 @@ dependencies = [
  "holtburger-dat",
  "indicatif",
  "log",
+ "rayon",
+ "thiserror",
 ]
 
 [[package]]

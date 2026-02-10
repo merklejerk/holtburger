@@ -3,6 +3,7 @@ name = "holtburger-tools"
 version = "0.1.0"
 edition = "2024"
 authors = ["holtburger contributors"]
+default-run = "dat2hba"
 
 [dependencies]
 holtburger-dat = { path = "../../crates/holtburger-dat" }
@@ -11,3 +12,5 @@ clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 indicatif = "0.17" # Progress bars for the win
+rayon = "1.11.0"
+thiserror.workspace = true

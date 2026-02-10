@@ -613,8 +613,7 @@ impl Client {
                 }
             }
             GameMessage::GameEvent(ev) => match &ev.event {
-                GameEvent::PlayerDescription(_)
-                | GameEvent::StartGame => {
+                GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
                         self.send_status_event();

@@ -2,8 +2,16 @@ use binrw::{
     BinRead, BinWrite,
     io::{Read, Seek, Write},
 };
-use holtburger_common::Vector3;
+use holtburger_common::{Quaternion, Vector3};
 use std::collections::HashMap;
+
+#[derive(BinRead, BinWrite, Debug, Clone, Default, PartialEq)]
+#[br(little)]
+#[bw(little)]
+pub struct Frame {
+    pub origin: Vector3,
+    pub orientation: Quaternion,
+}
 
 #[derive(BinRead, BinWrite, Debug, Clone)]
 #[br(little)]
@@ -28,6 +36,36 @@ pub struct Vec2Duv {
 pub struct CVertexArray {
     pub vertex_type: i32,
     pub vertices: HashMap<u16, SWVertex>,
+}
+
+impl CVertexArray {
+    pub fn new() -> Self {
+        Self {
+            vertex_type: 1,
+            vertices: HashMap::new(),
+        }
+    }
+}
+
+impl Default for CVertexArray {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CVertexArray {
+    /// Prune vertex data, keeping only origin points for physics.
+    pub fn prune(&mut self, kept_ids: &std::collections::HashSet<u16>) {
+        // 1. Remove vertices not used by physics
+        self.vertices.retain(|id, _| kept_ids.contains(id));
+
+        // 2. Strip visual bloat from remaining vertices
+        for vertex in self.vertices.values_mut() {
+            vertex.num_uvs = 0;
+            vertex.uvs = Vec::new();
+            vertex.normal = Vector3::zero();
+        }
+    }
 }
 
 impl BinRead for CVertexArray {

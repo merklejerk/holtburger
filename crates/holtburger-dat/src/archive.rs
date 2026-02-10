@@ -55,6 +55,7 @@ impl HbaEntry {
     }
 }
 
+#[derive(Debug)]
 pub struct HbaReader {
     pub header: HbaHeader,
     pub index: HashMap<u32, HbaEntry>,
@@ -234,6 +235,68 @@ mod tests {
         assert!(entry.is_compressed());
         assert!(entry.comp_size < entry.size);
         assert_eq!(reader.get_file(0x9999)?, data);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hba_invalid_magic() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("bad.hba");
+        // Write enough bytes for header but wrong magic
+        let mut bad_header = [0u8; 24];
+        bad_header[0..4].copy_from_slice(b"BAD!");
+        std::fs::write(&path, bad_header)?;
+
+        let result = HbaReader::open(&path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid HBA magic"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hba_empty() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("empty.hba");
+
+        let writer = HbaWriter::new();
+        writer.write(&path)?;
+
+        let reader = HbaReader::open(&path)?;
+        assert_eq!(reader.header.entry_count, 0);
+        assert_eq!(reader.index.len(), 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hba_robustness_random() -> Result<()> {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let dir = tempdir()?;
+        let path = dir.path().join("robust.hba");
+
+        let mut expected = HashMap::new();
+        let mut writer = HbaWriter::new();
+
+        for _ in 0..50 {
+            let id = rng.r#gen::<u32>();
+            let type_id = rng.r#gen::<u32>();
+            let size = rng.gen_range(0..5000);
+            let data: Vec<u8> = (0..size).map(|_| rng.r#gen::<u8>()).collect();
+            
+            writer.add(id, type_id, data.clone());
+            expected.insert(id, data);
+        }
+
+        writer.write(&path)?;
+
+        let reader = HbaReader::open(&path)?;
+        for (id, data) in expected {
+            assert!(reader.exists(id));
+            assert_eq!(reader.get_file(id)?, data);
+        }
 
         Ok(())
     }

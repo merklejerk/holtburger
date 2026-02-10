@@ -556,6 +556,7 @@ dependencies = [
  "bitflags",
  "encoding_rs",
  "holtburger-common",
+ "rand",
  "serde",
  "tempfile",
  "thiserror",

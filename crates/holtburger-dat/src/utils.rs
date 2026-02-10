@@ -152,3 +152,27 @@ impl FileExtPolyfill for std::fs::File {
         Ok(())
     }
 }
+
+/// Helper to find a portal.dat for testing/benchmarking purposes.
+///
+/// Priority 1: `HOLTBURGER_PORTAL_DAT` environment variable.
+/// Priority 2: Repository-relative fallback (`dats/portal.dat` from workspace root).
+pub fn get_portal_dat_path() -> Option<std::path::PathBuf> {
+    if let Ok(path_str) = std::env::var("HOLTBURGER_PORTAL_DAT") {
+        let path = std::path::PathBuf::from(path_str);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    // Workspace-relative fallbacks
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
+
+    // 1. Repository dats/ folder
+    let repo_dats = workspace_root.join("dats/portal.dat");
+    if repo_dats.exists() {
+        return Some(repo_dats);
+    }
+
+    None
+}

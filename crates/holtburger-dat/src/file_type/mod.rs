@@ -8,7 +8,7 @@ pub use setup_model::SetupModel;
 
 use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DatFileType {
     // Portal Range (Top Byte)
     Model = 0x01,
@@ -42,11 +42,23 @@ pub enum DatFileType {
 
 impl DatFileType {
     pub fn is_essential(&self) -> bool {
-        static MANIFEST: std::sync::OnceLock<crate::manifest::StripperManifest> =
-            std::sync::OnceLock::new();
-        MANIFEST
-            .get_or_init(crate::manifest::StripperManifest::logic_only)
-            .should_keep(*self)
+        match self {
+            DatFileType::Model
+            | DatFileType::SetupModel
+            | DatFileType::Animation
+            | DatFileType::AnimationDone
+            | DatFileType::EnvCell
+            | DatFileType::Table
+            | DatFileType::Region
+            | DatFileType::CombatTable
+            | DatFileType::PhysicsScript
+            | DatFileType::PhysicsScriptTable
+            | DatFileType::LanguageString
+            | DatFileType::Landblock
+            | DatFileType::LandblockInfo
+            | DatFileType::IndoorCell => true,
+            _ => false,
+        }
     }
 
     pub fn from_id(id: u32) -> Self {

@@ -443,6 +443,7 @@ dependencies = [
  "futures",
  "holtburger-common",
  "holtburger-core",
+ "holtburger-dat",
  "holtburger-protocol",
  "log",
  "ratatui",

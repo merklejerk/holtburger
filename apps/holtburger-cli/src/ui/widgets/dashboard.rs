@@ -3,7 +3,7 @@ use crate::entities::classification;
 use crate::entities::verbs::get_verbs_for_target;
 use crate::ui::AppState;
 use holtburger_core::world::entity::Entity;
-use holtburger_core::world::properties::{PropertyInt, RadarColor};
+use holtburger_common::properties::{PropertyInt, RadarColor};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};

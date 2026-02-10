@@ -21,7 +21,7 @@ pub const SCROLL_STEP: usize = 3;
 
 use holtburger_core::ClientCommand;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_core::world::Guid;
+use holtburger_common::Guid;
 use holtburger_core::world::entity::Entity;
 
 #[derive(Debug, Clone)]

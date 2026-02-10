@@ -7,8 +7,8 @@ use std::time::Instant;
 use holtburger_protocol::messages::CharacterEntry;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_core::world::entity::Entity;
-use holtburger_core::world::guid::Guid;
-use holtburger_core::world::position::WorldPosition;
+use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use holtburger_core::{ClientState, RetryState};
 

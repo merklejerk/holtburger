@@ -4,7 +4,7 @@ use holtburger_common::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
     PropertyString,
 };
-use holtburger_core::world::guid::Guid;
+use holtburger_common::Guid;
 use ratatui::text::Line;
 
 /// Generates a list of strings representing the debug information for a target.

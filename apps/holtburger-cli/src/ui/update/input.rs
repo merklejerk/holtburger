@@ -73,7 +73,7 @@ impl AppState {
                         if input == "/jump" {
                             commands.push(ClientCommand::Jump {
                                 extent: 10.0, // Default jump extent
-                                velocity: holtburger_core::math::Vector3::default(),
+                                velocity: holtburger_common::Vector3::default(),
                             });
                             self.input_history.push(input.clone());
                             self.history_index = None;

@@ -1,10 +1,10 @@
+use crate::session::Session;
+use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
+use holtburger_common::{Guid, ProtocolUnpack};
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::messages::transport::packet_flags;
-use holtburger_common::ProtocolUnpack;
-use crate::session::Session;
-use crate::world::{Guid, WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
@@ -36,7 +36,7 @@ pub struct Client {
     message_counter: usize,
     move_target: Option<Guid>,
     last_move_sync: Instant,
-    last_move_pos: crate::world::position::WorldPosition,
+    last_move_pos: holtburger_common::position::WorldPosition,
     last_move_pos_time: Instant,
     last_sent_pos_seq: Option<u16>,
 }
@@ -78,7 +78,7 @@ impl Client {
             "ace-root/dats/portal.dat",
             "../dats/portal.dat",
         ] {
-            if let Ok(db) = crate::dat::DatDatabase::new(path) {
+            if let Ok(db) = holtburger_dat::DatDatabase::new(path) {
                 portal_dat = Some(std::sync::Arc::new(db));
                 break;
             }
@@ -99,7 +99,7 @@ impl Client {
             message_counter: 0,
             move_target: None,
             last_move_sync: Instant::now(),
-            last_move_pos: crate::world::position::WorldPosition::default(),
+            last_move_pos: holtburger_common::position::WorldPosition::default(),
             last_move_pos_time: Instant::now(),
             last_sent_pos_seq: None,
         })
@@ -444,7 +444,7 @@ impl Client {
                                                     log::warn!("Approach aborted: Forced reposition by server");
                                                     self.move_target = None;
                                                     if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
-                                                        player.velocity = crate::math::Vector3::zero();
+                                                        player.velocity = holtburger_common::Vector3::zero();
                                                     }
                                                 }
                                         }
@@ -986,7 +986,7 @@ impl Client {
             log::info!("Arrived at target 0x{:08X}", target_guid);
             self.move_target = None;
             if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
-                player.velocity = crate::math::Vector3::zero();
+                player.velocity = holtburger_common::Vector3::zero();
             }
             return Ok(());
         }
@@ -1000,7 +1000,7 @@ impl Client {
                 log::warn!("Approach aborted: Player seems stuck");
                 self.move_target = None;
                 if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
-                    player.velocity = crate::math::Vector3::zero();
+                    player.velocity = holtburger_common::Vector3::zero();
                 }
                 return Ok(());
             }

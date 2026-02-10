@@ -122,3 +122,33 @@ pub fn decompress_lrs(input: &[u8]) -> Vec<u8> {
 
     output
 }
+
+pub trait FileExtPolyfill {
+    fn read_exact_at_compat(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()>;
+}
+
+impl FileExtPolyfill for std::fs::File {
+    #[cfg(unix)]
+    fn read_exact_at_compat(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        use std::os::unix::fs::FileExt;
+        self.read_exact_at(buf, offset)
+    }
+
+    #[cfg(windows)]
+    fn read_exact_at_compat(&self, buf: &mut [u8], offset: u64) -> std::io::Result<()> {
+        use std::os::windows::fs::FileExt;
+        // Windows seek_read returns number of bytes read, so we loop to ensure exact read
+        let mut read = 0;
+        while read < buf.len() {
+            let n = self.seek_read(&mut buf[read..], offset + read as u64)?;
+            if n == 0 {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::UnexpectedEof,
+                    "failed to fill whole buffer",
+                ));
+            }
+            read += n;
+        }
+        Ok(())
+    }
+}

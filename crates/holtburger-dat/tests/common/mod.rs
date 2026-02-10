@@ -8,5 +8,12 @@ pub fn get_portal_dat_path() -> Option<PathBuf> {
             return Some(path);
         }
     }
+
+    // Priority 2: Workspace-relative fallback (e.g. dats/portal.dat from repo root)
+    let fallback = PathBuf::from("dats/portal.dat");
+    if fallback.exists() {
+        return Some(fallback);
+    }
+
     None
 }

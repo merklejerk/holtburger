@@ -42,7 +42,11 @@ pub enum DatFileType {
 
 impl DatFileType {
     pub fn is_essential(&self) -> bool {
-        crate::manifest::StripperManifest::logic_only().should_keep(*self)
+        static MANIFEST: std::sync::OnceLock<crate::manifest::StripperManifest> =
+            std::sync::OnceLock::new();
+        MANIFEST
+            .get_or_init(crate::manifest::StripperManifest::logic_only)
+            .should_keep(*self)
     }
 
     pub fn from_id(id: u32) -> Self {

@@ -48,7 +48,7 @@ impl Entity {
             gfx_id: None,
             flags: ObjectDescriptionFlag::empty(),
             item_type: None,
-            physics_state: holtburger_common::properties::PhysicsState::NONE,
+            physics_state: PhysicsState::NONE,
             physics_parent_id: None,
             container_id: None,
             wielder_id: None,

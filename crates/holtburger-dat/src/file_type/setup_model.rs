@@ -48,16 +48,16 @@ impl AnimationHook {
         let direction = i32::read_le(reader)?;
 
         let payload_size = match hook_type {
-            0 => 0,  // NoOp
-            1 => 4,  // Sound (Id)
-            2 => 4,  // SoundTable (SoundType)
-            3 => 28, // Attack (AttackCone)
-            4 => 0,  // AnimationDone
-            5 => 6,  // ReplaceObject (PartIndex: u16, PartID: u32)
-            6 => 4,  // Ethereal (Ethereal: i32)
-            7 => 16, // TransparentPart (Part, Start, End, Time)
-            8 => 12, // Luminous (Start, End, Time)
-            9 => 16, // LuminousPart (Part, Start, End, Time)
+            0 => 0,   // NoOp
+            1 => 4,   // Sound (Id)
+            2 => 4,   // SoundTable (SoundType)
+            3 => 28,  // Attack (AttackCone)
+            4 => 0,   // AnimationDone
+            5 => 6,   // ReplaceObject (PartIndex: u16, PartID: u32)
+            6 => 4,   // Ethereal (Ethereal: i32)
+            7 => 16,  // TransparentPart (Part, Start, End, Time)
+            8 => 12,  // Luminous (Start, End, Time)
+            9 => 16,  // LuminousPart (Part, Start, End, Time)
             10 => 12, // Diffuse (Start, End, Time)
             11 => 16, // DiffusePart (Part, Start, End, Time)
             12 => 8,  // Scale (End, Time)
@@ -78,7 +78,10 @@ impl AnimationHook {
             _ => {
                 return Err(binrw::Error::Custom {
                     pos: reader.stream_position()?,
-                    err: Box::new(format!("Unsupported AnimationHook type: 0x{:08X}", hook_type)),
+                    err: Box::new(format!(
+                        "Unsupported AnimationHook type: 0x{:08X}",
+                        hook_type
+                    )),
                 });
             }
         };

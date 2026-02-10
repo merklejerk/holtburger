@@ -28,7 +28,11 @@ pub enum DatError {
     DecompressionFailed(u32),
 
     #[error("Failed to open file at {path}: {source}")]
-    PathError { path: PathBuf, #[source] source: std::io::Error },
+    PathError {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("Other error: {0}")]
     Other(String),

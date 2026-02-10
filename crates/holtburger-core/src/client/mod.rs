@@ -72,11 +72,7 @@ impl Client {
     ) -> Result<Self> {
         // Try to find DATs in common locations
         let mut portal_dat = None;
-        for path in [
-            "portal.dat",
-            "dats/portal.dat",
-            "../dats/portal.dat",
-        ] {
+        for path in ["portal.dat", "dats/portal.dat", "../dats/portal.dat"] {
             if let Ok(db) = holtburger_dat::DatDatabase::new(path) {
                 portal_dat = Some(std::sync::Arc::new(db));
                 break;

@@ -59,6 +59,14 @@ bitflags::bitflags! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr)]
 #[repr(u32)]
+pub enum HoldKey {
+    Invalid = 0,
+    None = 1,
+    Run = 2,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr)]
+#[repr(u32)]
 pub enum PositionType {
     Undef = 0,
     Location = 1,

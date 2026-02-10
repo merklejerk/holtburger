@@ -755,9 +755,11 @@ impl WorldState {
         false
     }
 
-    pub fn tick(&mut self, dt: f32, radius: f32) {
+    pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+
         if self.player.guid == Guid::NULL {
-            return;
+            return events;
         }
 
         let (vel, coords, lb) = if let Some(player) = self.entities.get(self.player.guid) {
@@ -767,23 +769,36 @@ impl WorldState {
                 player.position.landblock_id,
             )
         } else {
-            return;
+            return events;
         };
 
         if vel.length_squared() < 0.0001 {
-            return;
+            return events;
         }
 
         let step = vel * dt;
         let next_coords = coords + step;
 
         if !self.is_colliding(&next_coords, lb, radius) {
-            if let Some(player) = self.entities.get_mut(self.player.guid) {
-                player.position.coords = next_coords;
+            if let Some(player_entity) = self.entities.get_mut(self.player.guid) {
+                player_entity.position.coords = next_coords;
+                self.player.position.coords = next_coords;
                 self.scene.update_entity(self.player.guid, lb, lb);
+
+                events.push(WorldEvent::EntityMoved {
+                    guid: self.player.guid,
+                    pos: self.player.position,
+                });
             }
-        } else if let Some(player) = self.entities.get_mut(self.player.guid) {
-            player.velocity = Vector3::zero();
+        } else if let Some(player_entity) = self.entities.get_mut(self.player.guid) {
+            player_entity.velocity = Vector3::zero();
+
+            events.push(WorldEvent::EntityVectorUpdated {
+                guid: self.player.guid,
+                velocity: Vector3::zero(),
+                omega: Vector3::zero(), // TODO: Keep current omega?
+            });
         }
+        events
     }
 }

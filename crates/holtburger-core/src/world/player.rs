@@ -389,11 +389,21 @@ impl PlayerState {
             }
             GameMessage::UpdatePosition(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
+                    let old_forced_seq = self.force_position_sequence;
+
                     self.position = data.pos.pos;
                     self.instance_sequence = data.pos.instance_sequence;
                     self.position_sequence = data.pos.position_sequence;
                     self.teleport_sequence = data.pos.teleport_sequence;
                     self.force_position_sequence = data.pos.force_position_sequence;
+
+                    if self.force_position_sequence > old_forced_seq {
+                        events.push(WorldEvent::ForcedReposition {
+                            guid: self.guid,
+                            pos: self.position,
+                            sequence: self.force_position_sequence,
+                        });
+                    }
 
                     return false;
                 }
@@ -433,6 +443,10 @@ impl PlayerState {
                     }
                     return true;
                 }
+            }
+            GameMessage::PlayerTeleport(data) => {
+                self.teleport_sequence = data.teleport_sequence;
+                return true;
             }
             GameMessage::PrivateUpdateAttribute(data) => {
                 let UpdateAttribute {

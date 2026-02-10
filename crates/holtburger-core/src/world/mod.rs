@@ -65,6 +65,11 @@ pub enum WorldEvent {
         guid: Guid,
         physics_state: properties::PhysicsState,
     },
+    ForcedReposition {
+        guid: Guid,
+        pos: WorldPosition,
+        sequence: u16,
+    },
     WeenieError {
         error_id: u32,
     },

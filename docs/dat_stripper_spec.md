@@ -15,18 +15,6 @@ These `.hba` files provide a modern, simplified alternative to the complex AC DA
 *   **Complexity:** The original AC DAT format is an ancient block-based file system with complex B-Tree indexing, making it difficult to write efficiently and maintain.
 *   **Requirement:** The TUI client needs a fast, reliable way to access game logic and physics data without the overhead of a legacy file system.
 
-## 3. The Holtburger Archive (.hba) Format
-The `.hba` format is a flat binary archive designed for simplicity and performance.
-
-### 3.1. Binary Layout
-| Section | Type | Description |
-| :--- | :--- | :--- |
-| **Header** | 24 bytes | Magic, Version, Entry Count, Index Offset. |
-| **Index** | Array | List of File Entries (ID, Offset, Size, Flags). |
-| **Blobs** | Data | Compressed or raw file data. |
-
-### 3.2. Header Specification
-| Field | Type | Size | Description |
 ## 3. The Holtburger Architecture: VFS & Resource Providers
 To support both the current TUI client and a future high-fidelity 3D client, we will implement a **Virtual File System (VFS)** abstraction. The client will not interact with DAT/HBA files directly, but rather through a `ResourceProvider` trait.
 
@@ -113,26 +101,74 @@ The following rules determine which files are included in the Lite DATs.
 | **Font** | `0x40` | Low (TUI uses console fonts). |
 | **DegradeInfo** | `0x11` | Low. |
 
-## 6. Implementation Plan
-
-### Phase 1: `.hba` Writer in `holtburger-dat`
-We will add archive creation capabilities to the `holtburger-dat` crate.
-*   **HbaWriter:** A struct to build and serialize archive files.
-*   **HbaReader:** A new database implementation that can replace `DatDatabase` in the TUI client.
-
-### Phase 2: `dat-stripper` CLI
-Create a Rust binary crate in `apps/dat-stripper`.
-*   **CLI:** Use `clap` to handle input DAT paths and output HBA paths.
-*   **Filtering Logic:** Standardize the list of "Keep" file types.
-
-### Phase 3: Client Integration
-Update the TUI client to support loading from `.hba` if configured.
-
-## 7. Feasibility Assessment
-*   **Feasibility:** **High**. The file format is well-understood, and the `holtburger-dat` provides a solid foundation.
+## 6. Feasibility Assessment
+*   **Feasibility:** **High**. The file format is well-understood, and the `ResourceProvider` abstraction provides a safe migration path.
 *   **Risks:**
     *   **Physics Dependencies:** If physics data is unexpectedly intertwined with `DrawingBSP` inside `GfxObj` in a way that requires textures, this assumption might fail. *Mitigation:* `gfx_obj.rs` shows `PhysicsBSP` is distinct.
     *   **Hardcoded Client Checks:** The client might assert the existence of certain files. *Mitigation:* Patch the client codebase to be permissive or include dummy files.
 
-## 8. Conclusion
-Creating a stripped DAT set is the most viable path to a distributable TUI client. It solves the legal/size issue while preserving the integrity of the simulation. The primary engineering effort is implementing the `DatWriter` in Rust.
+## 7. Conclusion
+Moving to a VFS-based architecture with an optimized `.hba` format solves the distribution hurdle for the TUI client while laying the groundwork for future high-performance asset streaming in the 3D client. It's a "no cap" win for the project's long-term health.
+
+---
+
+## 8. Implementation Roadmap
+
+### General Requirements
+*   **Test Coverage:** Minimum 80% coverage for all new components.
+*   **Integration Tests:** Every phase must include integration tests using the retail DAT files found in `ace-root/dats/` to ensure real-world compatibility.
+*   **Performance Benchmarks:** Phase 2 and 3 must include `criterion` benchmarks for read/write performance.
+
+### Phase 1: VFS Foundation
+**Goal:** Abstract all data access behind a `ResourceProvider` trait.
+
+|   | Task | Notes |
+| :---: | :--- | :--- |
+| [ ] | Define `ResourceProvider` trait in `src/lib.rs` | |
+| [ ] | Refactor `DatDatabase` to implement `ResourceProvider` | |
+| [ ] | Implement `CompositeProvider` (Chain of Responsibility) | |
+| [ ] | Add unit tests for `CompositeProvider` using mock providers | |
+| [ ] | Create integration tests validating `ResourceProvider` against retail DAT fixtures | |
+| **Criteria** | **Phase 1 Completion Criteria:** All unit and fixture-based tests pass. 0% reliance on TUI for validation. | |
+
+---
+
+### Phase 2: HBA Format Implementation
+**Goal:** Implement the `.hba` binary format and Zstd compression.
+
+|   | Task | Notes |
+| :---: | :--- | :--- |
+| [ ] | Implement `HbaWriter` (staging and serialization) | |
+| [ ] | Implement `HbaReader` (implementing `ResourceProvider`) | |
+| [ ] | Integrate `zstd` crate for blob compression | |
+| [ ] | Round-trip tests (Write -> Read) for all data types | |
+| [ ] | Fuzz tests for HBA parser robustness | |
+| **Criteria** | **Phase 2 Completion Criteria:** Round-trip tests pass. Coverage > 85%. | |
+
+---
+
+### Phase 3: The `dat-stripper` CLI
+**Goal:** Create the tool that actually performs the conversion.
+
+|   | Task | Notes |
+| :---: | :--- | :--- |
+| [ ] | Create `apps/dat-stripper` binary crate | |
+| [ ] | Implement `clap` CLI interface (`--input`, `--output`) | |
+| [ ] | Implement filtering logic (Whitelist by `DatFileType`) | |
+| [ ] | Add progress reporting (e.g., `indicatif` crate) | |
+| [ ] | Integration test: Strip retail `portal.dat` -> Validate output HBA | |
+| **Criteria** | **Phase 3 Completion Criteria:** `dat-stripper` produces valid `.hba` from retail DATs. | |
+
+---
+
+### Phase 4: Validation & Benchmarking
+**Goal:** Prove the system works at scale using retail data.
+
+|   | Task | Notes |
+| :---: | :---: | :--- |
+| [ ] | Automated "Deep Comparison" test: Compare `DatProvider` vs `HbaProvider` results | |
+| [ ] | Validate login-critical structures (Table/GfxObj) from stripped HBA | |
+| [ ] | Physics sanity check: Automated BSP tree traversal of stripped models | |
+| [ ] | Benchmark suite: Sequential vs Random access patterns (DAT vs HBA) | |
+| [ ] | Comprehensive integration test suite using `ace-root/dats/` | |
+| **Criteria** | **Phase 4 Completion Criteria:** Automated test suite passes with 100% parity for whitelisted files. Reduced HBA size confirmed <200MB. | |

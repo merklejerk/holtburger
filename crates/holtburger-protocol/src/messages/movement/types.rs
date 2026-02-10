@@ -1,5 +1,5 @@
-use byteorder::{ByteOrder, LittleEndian};
 use crate::messages::utils::{align_offset, pad_to_4};
+use byteorder::{ByteOrder, LittleEndian};
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 use strum_macros::FromRepr;

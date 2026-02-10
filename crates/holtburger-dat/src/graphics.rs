@@ -1,8 +1,8 @@
-use holtburger_common::Vector3;
 use binrw::{
     BinRead,
     io::{Read, Seek},
 };
+use holtburger_common::Vector3;
 use std::collections::HashMap;
 
 #[derive(BinRead, Debug, Clone)]

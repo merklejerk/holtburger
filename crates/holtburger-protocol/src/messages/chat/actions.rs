@@ -1,5 +1,5 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{read_string16, write_string16};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TalkData {
@@ -43,9 +43,9 @@ impl ProtocolPack for TellActionData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures;
     use crate::messages::game_action::{GameAction, GameActionMessage};
     use crate::messages::game_message::GameMessage;
+    use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
 
     #[test]

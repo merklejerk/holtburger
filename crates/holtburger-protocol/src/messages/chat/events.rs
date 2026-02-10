@@ -1,6 +1,6 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{read_string16, write_string16};
 use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TellData {
@@ -78,11 +78,13 @@ impl ProtocolPack for ChannelBroadcastData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::chat::types::{
+        EmoteTextData, HearRangedSpeechData, HearSpeechData, ServerMessageData, SoulEmoteData,
+    };
+    use crate::messages::game_message::GameMessage;
     use crate::test_fixtures as fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
-    use crate::messages::game_message::GameMessage;
     use holtburger_common::traits::ProtocolUnpack;
-    use crate::messages::chat::types::{ServerMessageData, HearSpeechData, HearRangedSpeechData, EmoteTextData, SoulEmoteData};
 
     #[test]
     fn test_server_message_parity() {
@@ -108,7 +110,9 @@ mod tests {
         let data = &fixtures::HEAR_SPEECH[4..];
         assert_pack_unpack_parity::<HearSpeechData>(data, &expected);
 
-        let GameMessage::HearSpeech(msg) = GameMessage::unpack(fixtures::HEAR_SPEECH, &mut 0).unwrap() else {
+        let GameMessage::HearSpeech(msg) =
+            GameMessage::unpack(fixtures::HEAR_SPEECH, &mut 0).unwrap()
+        else {
             panic!("Expected HearSpeech");
         };
         assert_eq!(*msg, expected);
@@ -144,7 +148,9 @@ mod tests {
         let data = &fixtures::EMOTE_TEXT[4..];
         assert_pack_unpack_parity::<EmoteTextData>(data, &expected);
 
-        let GameMessage::EmoteText(msg) = GameMessage::unpack(fixtures::EMOTE_TEXT, &mut 0).unwrap() else {
+        let GameMessage::EmoteText(msg) =
+            GameMessage::unpack(fixtures::EMOTE_TEXT, &mut 0).unwrap()
+        else {
             panic!("Expected EmoteText");
         };
         assert_eq!(*msg, expected);
@@ -160,7 +166,9 @@ mod tests {
         let data = &fixtures::SOUL_EMOTE[4..];
         assert_pack_unpack_parity::<SoulEmoteData>(data, &expected);
 
-        let GameMessage::SoulEmote(msg) = GameMessage::unpack(fixtures::SOUL_EMOTE, &mut 0).unwrap() else {
+        let GameMessage::SoulEmote(msg) =
+            GameMessage::unpack(fixtures::SOUL_EMOTE, &mut 0).unwrap()
+        else {
             panic!("Expected SoulEmote");
         };
         assert_eq!(*msg, expected);

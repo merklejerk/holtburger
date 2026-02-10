@@ -1,8 +1,8 @@
-use holtburger_common::{Plane, Sphere};
 use binrw::{
     BinRead, BinResult,
     io::{Read, Seek},
 };
+use holtburger_common::{Plane, Sphere};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BspType {
@@ -69,11 +69,7 @@ impl BspNode {
     }
 
     /// Check if a sphere intersects any "solid" space within this BSP tree.
-    pub fn intersects_solid(
-        &self,
-        center: &holtburger_common::Vector3,
-        radius: f32,
-    ) -> bool {
+    pub fn intersects_solid(&self, center: &holtburger_common::Vector3, radius: f32) -> bool {
         match self {
             BspNode::Port(p) => {
                 let dist = p.plane.distance_to_point(center);

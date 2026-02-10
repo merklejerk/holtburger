@@ -1,7 +1,7 @@
+use crate::world::WorldEvent;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
-use crate::world::WorldEvent;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq, Clone)]

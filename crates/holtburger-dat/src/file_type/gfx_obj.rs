@@ -1,11 +1,11 @@
 use crate::graphics::{CVertexArray, Polygon};
 use crate::physics::{BspNode, BspType};
-use holtburger_common::Vector3;
-use holtburger_common::properties::GfxObjFlags;
 use binrw::{
     BinRead,
     io::{Read, Seek},
 };
+use holtburger_common::Vector3;
+use holtburger_common::properties::GfxObjFlags;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]

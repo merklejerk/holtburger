@@ -1,8 +1,8 @@
 use crate::utils::{align_boundary, read_pstring};
-use holtburger_common::properties::{PropertyDataId, PropertyString};
 use anyhow::Result;
 use binrw::BinRead;
 use binrw::io::Cursor;
+use holtburger_common::properties::{PropertyDataId, PropertyString};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]

@@ -1,20 +1,20 @@
 pub use crate::messages::character::types::*;
 pub use crate::messages::chat::types::*;
 pub use crate::messages::effects::types::*;
-pub use crate::messages::misc::types::*;
-pub use crate::messages::movement::types::*;
-pub use crate::messages::movement::messages::*;
-pub use crate::messages::movement::actions::*;
-pub use crate::messages::object::types::*;
-pub use crate::messages::object::messages::*;
-pub use crate::messages::player::types::*;
 pub use crate::messages::inventory::types::*;
+pub use crate::messages::misc::types::*;
+pub use crate::messages::movement::actions::*;
+pub use crate::messages::movement::messages::*;
+pub use crate::messages::movement::types::*;
+pub use crate::messages::object::messages::*;
+pub use crate::messages::object::types::*;
+pub use crate::messages::player::types::*;
 
 pub use crate::messages::game_action::GameActionMessage;
 pub use crate::messages::game_event::GameEventMessage;
 use crate::opcodes::*;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameMessage {
@@ -627,7 +627,7 @@ mod tests {
         if !check(&msg) {
             panic!("Dispatch failed. Got: {:?}", msg);
         }
-        
+
         // Also verify pack parity for these
         let mut packed = Vec::new();
         msg.pack(&mut packed);
@@ -644,158 +644,220 @@ mod tests {
 
     #[test]
     fn test_dispatch_character_list() {
-        assert_dispatch_match(test_fixtures::CHARACTER_LIST, |msg| matches!(msg, GameMessage::CharacterList(_)));
+        assert_dispatch_match(test_fixtures::CHARACTER_LIST, |msg| {
+            matches!(msg, GameMessage::CharacterList(_))
+        });
     }
 
     #[test]
     fn test_dispatch_character_enter_world() {
-        assert_dispatch_match(test_fixtures::CHARACTER_ENTER_WORLD, |msg| matches!(msg, GameMessage::CharacterEnterWorld(_)));
+        assert_dispatch_match(test_fixtures::CHARACTER_ENTER_WORLD, |msg| {
+            matches!(msg, GameMessage::CharacterEnterWorld(_))
+        });
     }
 
     #[test]
     fn test_dispatch_character_enter_world_request() {
-        assert_dispatch_match(test_fixtures::CHARACTER_ENTER_WORLD_REQUEST, |msg| matches!(msg, GameMessage::CharacterEnterWorldRequest(_)));
+        assert_dispatch_match(test_fixtures::CHARACTER_ENTER_WORLD_REQUEST, |msg| {
+            matches!(msg, GameMessage::CharacterEnterWorldRequest(_))
+        });
     }
 
     #[test]
     fn test_dispatch_play_sound() {
-        assert_dispatch_match(test_fixtures::SOUND, |msg| matches!(msg, GameMessage::PlaySound(_)));
+        assert_dispatch_match(test_fixtures::SOUND, |msg| {
+            matches!(msg, GameMessage::PlaySound(_))
+        });
     }
 
     #[test]
     fn test_dispatch_play_effect() {
-        assert_dispatch_match(test_fixtures::PLAY_EFFECT, |msg| matches!(msg, GameMessage::PlayEffect(_)));
+        assert_dispatch_match(test_fixtures::PLAY_EFFECT, |msg| {
+            matches!(msg, GameMessage::PlayEffect(_))
+        });
     }
 
     #[test]
     fn test_dispatch_hear_speech() {
-        assert_dispatch_match(test_fixtures::HEAR_SPEECH, |msg| matches!(msg, GameMessage::HearSpeech(_)));
+        assert_dispatch_match(test_fixtures::HEAR_SPEECH, |msg| {
+            matches!(msg, GameMessage::HearSpeech(_))
+        });
     }
 
     #[test]
     fn test_dispatch_character_error() {
         // WeenieError is wrapped in GameEvent, not top-level CharacterError
-        assert_dispatch_match(test_fixtures::WEENIE_ERROR, |msg| matches!(msg, GameMessage::GameEvent(_)));
+        assert_dispatch_match(test_fixtures::WEENIE_ERROR, |msg| {
+            matches!(msg, GameMessage::GameEvent(_))
+        });
     }
 
     #[test]
     fn test_dispatch_ddd_interrogation_response() {
-        assert_dispatch_match(test_fixtures::DDD_INTERROGATION_RESPONSE, |msg| matches!(msg, GameMessage::DddInterrogationResponse(_)));
+        assert_dispatch_match(test_fixtures::DDD_INTERROGATION_RESPONSE, |msg| {
+            matches!(msg, GameMessage::DddInterrogationResponse(_))
+        });
     }
 
     #[test]
     fn test_dispatch_game_action_move_to_state() {
-        assert_dispatch_match(test_fixtures::MOVE_TO_STATE, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::MOVE_TO_STATE, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_player_teleport() {
-        assert_dispatch_match(test_fixtures::PLAYER_TELEPORT, |msg| matches!(msg, GameMessage::PlayerTeleport(_)));
+        assert_dispatch_match(test_fixtures::PLAYER_TELEPORT, |msg| {
+            matches!(msg, GameMessage::PlayerTeleport(_))
+        });
     }
 
     #[test]
     fn test_dispatch_game_event_player_description() {
         // Skip parity check for complex player description
-        assert_dispatch_match_no_parity(test_fixtures::PLAYER_DESCRIPTION_TUI_2026_02_07, |msg| matches!(msg, GameMessage::GameEvent(_)));
+        assert_dispatch_match_no_parity(test_fixtures::PLAYER_DESCRIPTION_TUI_2026_02_07, |msg| {
+            matches!(msg, GameMessage::GameEvent(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_talk() {
-        assert_dispatch_match(test_fixtures::ACTION_TALK, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_TALK, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_tell() {
-        assert_dispatch_match(test_fixtures::ACTION_TELL, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_TELL, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_use() {
-        assert_dispatch_match(test_fixtures::ACTION_USE, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_USE, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_drop_item() {
-        assert_dispatch_match(test_fixtures::ACTION_DROP_ITEM, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_DROP_ITEM, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_put_item() {
-        assert_dispatch_match(test_fixtures::ACTION_PUT_ITEM, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_PUT_ITEM, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_identify() {
-        assert_dispatch_match(test_fixtures::ACTION_IDENTIFY, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_IDENTIFY, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_login_complete() {
-        assert_dispatch_match(test_fixtures::ACTION_LOGIN_COMPLETE, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_LOGIN_COMPLETE, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_action_ping_request() {
-        assert_dispatch_match(test_fixtures::ACTION_PING_REQUEST, |msg| matches!(msg, GameMessage::GameAction(_)));
+        assert_dispatch_match(test_fixtures::ACTION_PING_REQUEST, |msg| {
+            matches!(msg, GameMessage::GameAction(_))
+        });
     }
 
     #[test]
     fn test_dispatch_private_update_position() {
-        assert_dispatch_match(test_fixtures::PRIVATE_UPDATE_POSITION, |msg| matches!(msg, GameMessage::PrivateUpdatePosition(_)));
+        assert_dispatch_match(test_fixtures::PRIVATE_UPDATE_POSITION, |msg| {
+            matches!(msg, GameMessage::PrivateUpdatePosition(_))
+        });
     }
 
     #[test]
     fn test_dispatch_public_update_position() {
-        assert_dispatch_match(test_fixtures::PUBLIC_UPDATE_POSITION, |msg| matches!(msg, GameMessage::PublicUpdatePosition(_)));
+        assert_dispatch_match(test_fixtures::PUBLIC_UPDATE_POSITION, |msg| {
+            matches!(msg, GameMessage::PublicUpdatePosition(_))
+        });
     }
 
     #[test]
     fn test_dispatch_hear_ranged_speech() {
-        assert_dispatch_match(test_fixtures::HEAR_RANGED_SPEECH, |msg| matches!(msg, GameMessage::HearRangedSpeech(_)));
+        assert_dispatch_match(test_fixtures::HEAR_RANGED_SPEECH, |msg| {
+            matches!(msg, GameMessage::HearRangedSpeech(_))
+        });
     }
 
     #[test]
     fn test_dispatch_emote_text() {
-        assert_dispatch_match(test_fixtures::EMOTE_TEXT, |msg| matches!(msg, GameMessage::EmoteText(_)));
+        assert_dispatch_match(test_fixtures::EMOTE_TEXT, |msg| {
+            matches!(msg, GameMessage::EmoteText(_))
+        });
     }
 
     #[test]
     fn test_dispatch_soul_emote() {
-        assert_dispatch_match(test_fixtures::SOUL_EMOTE, |msg| matches!(msg, GameMessage::SoulEmote(_)));
+        assert_dispatch_match(test_fixtures::SOUL_EMOTE, |msg| {
+            matches!(msg, GameMessage::SoulEmote(_))
+        });
     }
 
     #[test]
     fn test_dispatch_force_obj_desc_send() {
-        assert_dispatch_match(test_fixtures::FORCE_OBJ_DESC_SEND, |msg| matches!(msg, GameMessage::ForceObjectDescSend(_)));
+        assert_dispatch_match(test_fixtures::FORCE_OBJ_DESC_SEND, |msg| {
+            matches!(msg, GameMessage::ForceObjectDescSend(_))
+        });
     }
 
     #[test]
     fn test_dispatch_obj_desc_event() {
-        assert_dispatch_match(test_fixtures::OBJ_DESC_EVENT, |msg| matches!(msg, GameMessage::ObjDescEvent(_)));
+        assert_dispatch_match(test_fixtures::OBJ_DESC_EVENT, |msg| {
+            matches!(msg, GameMessage::ObjDescEvent(_))
+        });
     }
 
     #[test]
     fn test_dispatch_update_skill_level_private() {
-        assert_dispatch_match(test_fixtures::UPDATE_SKILL_LEVEL_PRIVATE, |msg| matches!(msg, GameMessage::PrivateUpdateSkillLevel(_)));
+        assert_dispatch_match(test_fixtures::UPDATE_SKILL_LEVEL_PRIVATE, |msg| {
+            matches!(msg, GameMessage::PrivateUpdateSkillLevel(_))
+        });
     }
 
     #[test]
     fn test_dispatch_update_skill_level_public() {
-        assert_dispatch_match(test_fixtures::UPDATE_SKILL_LEVEL_PUBLIC, |msg| matches!(msg, GameMessage::PublicUpdateSkillLevel(_)));
+        assert_dispatch_match(test_fixtures::UPDATE_SKILL_LEVEL_PUBLIC, |msg| {
+            matches!(msg, GameMessage::PublicUpdateSkillLevel(_))
+        });
     }
 
     #[test]
     fn test_dispatch_view_contents() {
-        assert_dispatch_match(test_fixtures::VIEW_CONTENTS, |msg| matches!(msg, GameMessage::GameEvent(_)));
+        assert_dispatch_match(test_fixtures::VIEW_CONTENTS, |msg| {
+            matches!(msg, GameMessage::GameEvent(_))
+        });
     }
 
     #[test]
     fn test_dispatch_weenie_error_with_string() {
-        assert_dispatch_match(test_fixtures::WEENIE_ERROR_WITH_STRING, |msg| matches!(msg, GameMessage::GameEvent(_)));
+        assert_dispatch_match(test_fixtures::WEENIE_ERROR_WITH_STRING, |msg| {
+            matches!(msg, GameMessage::GameEvent(_))
+        });
     }
 
     #[test]
     fn test_dispatch_update_property_int_event() {
-        assert_dispatch_match(test_fixtures::UPDATE_PROPERTY_INT, |msg| matches!(msg, GameMessage::GameEvent(_)));
+        assert_dispatch_match(test_fixtures::UPDATE_PROPERTY_INT, |msg| {
+            matches!(msg, GameMessage::GameEvent(_))
+        });
     }
 }

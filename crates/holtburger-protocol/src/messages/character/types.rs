@@ -1,7 +1,7 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{read_string16, write_string16};
-use holtburger_common::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterEntry {
@@ -189,8 +189,8 @@ impl ProtocolPack for ServerNameData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures;
     use crate::messages::game_message::GameMessage;
+    use crate::test_fixtures;
     use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
     #[test]
@@ -198,7 +198,7 @@ mod tests {
         let data = test_fixtures::CHARACTER_LIST;
         let mut offset = 0;
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack character list");
-        
+
         if let GameMessage::CharacterList(_list) = &msg {
             // Check some basics if known, or just parity
             // Let's assume the fixture has at least one character or specific account name if possible
@@ -217,7 +217,7 @@ mod tests {
         let data = test_fixtures::CHARACTER_ENTER_WORLD_REQUEST;
         let mut offset = 0;
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack enter world req");
-        
+
         assert!(matches!(msg, GameMessage::CharacterEnterWorldRequest(_)));
 
         let mut packed = Vec::new();
@@ -230,7 +230,7 @@ mod tests {
         let data = test_fixtures::CHARACTER_ENTER_WORLD;
         let mut offset = 0;
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack enter world");
-        
+
         assert!(matches!(msg, GameMessage::CharacterEnterWorld(_)));
 
         let mut packed = Vec::new();
@@ -264,4 +264,3 @@ mod tests {
         ));
     }
 }
-

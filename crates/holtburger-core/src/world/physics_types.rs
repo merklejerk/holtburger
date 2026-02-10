@@ -1,1 +1,1 @@
-pub use holtburger_common::{Vector3, Plane, Sphere};
+pub use holtburger_common::{Plane, Sphere, Vector3};

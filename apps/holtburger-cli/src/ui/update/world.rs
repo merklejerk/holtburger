@@ -1,7 +1,7 @@
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, ContextView, UIState};
-use holtburger_core::ClientEvent;
 use holtburger_common::Guid;
+use holtburger_core::ClientEvent;
 use holtburger_core::world::WorldEvent;
 
 impl AppState {

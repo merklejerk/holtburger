@@ -1,10 +1,10 @@
-use holtburger_common::{Guid, Vector3};
-use holtburger_common::properties::{ItemType, PropertyValue, PropertyInstanceId};
 use super::WorldEvent;
 use super::entity::{Entity, EntityManager};
 use super::player::PlayerState;
 use super::spatial::SpatialScene;
 use super::stats;
+use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyValue};
+use holtburger_common::{Guid, Vector3};
 use holtburger_dat::DatDatabase;
 use std::sync::Arc;
 

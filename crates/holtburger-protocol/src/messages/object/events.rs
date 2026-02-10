@@ -1,13 +1,13 @@
 use crate::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use crate::messages::utils::{
     read_hashtable_header, read_string16, write_hashtable_header, write_string16,
 };
-use holtburger_common::Guid;
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -434,8 +434,8 @@ mod tests {
         let mut string_stats = BTreeMap::new();
         string_stats.insert(1, "Sword of Awesome".to_string());
 
-        let expected = GameMessage::GameEvent(Box::new(
-            crate::messages::game_event::GameEventMessage {
+        let expected =
+            GameMessage::GameEvent(Box::new(crate::messages::game_event::GameEventMessage {
                 target: Guid(0x50000001),
                 sequence: 123,
                 event: GameEvent::IdentifyObjectResponse(Box::new(IdentifyObjectResponseData {
@@ -462,8 +462,7 @@ mod tests {
                     resist_color: None,
                     armor_levels: None,
                 })),
-            },
-        ));
+            }));
 
         assert_pack_unpack_parity(&data, &expected);
     }
@@ -480,4 +479,3 @@ mod tests {
         assert_eq!(hex::encode(packed).to_uppercase(), hex.to_uppercase());
     }
 }
-

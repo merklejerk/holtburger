@@ -1,12 +1,12 @@
 pub use crate::messages::chat::actions::*;
+pub use crate::messages::inventory::actions::*;
 pub use crate::messages::misc::actions::*;
 pub use crate::messages::movement::actions::*;
 pub use crate::messages::object::actions::*;
-pub use crate::messages::inventory::actions::*;
 
 use crate::opcodes::GameActionOpcode;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameActionMessage {

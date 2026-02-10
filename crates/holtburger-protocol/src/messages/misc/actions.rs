@@ -25,4 +25,3 @@ impl ProtocolUnpack for LoginCompleteData {
 impl ProtocolPack for LoginCompleteData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
-

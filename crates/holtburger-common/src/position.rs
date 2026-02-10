@@ -1,7 +1,7 @@
-use crate::math::{Quaternion, Vector3};
-use crate::traits::{ProtocolPack, ProtocolUnpack};
 use crate::guid::Guid;
+use crate::math::{Quaternion, Vector3};
 use crate::properties::UpdatePositionFlag;
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 

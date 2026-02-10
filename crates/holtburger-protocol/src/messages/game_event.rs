@@ -1,15 +1,15 @@
 pub use crate::messages::chat::events::*;
+pub use crate::messages::inventory::events::*;
 pub use crate::messages::magic::events::*;
 pub use crate::messages::misc::events::*;
 pub use crate::messages::network::events::*;
 pub use crate::messages::object::events::*;
 pub use crate::messages::player::events::*;
-pub use crate::messages::inventory::events::*;
 
 use crate::opcodes::GameEventOpcode;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
-use holtburger_common::Guid;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameEventMessage {

@@ -5,11 +5,11 @@ pub mod spatial;
 pub mod state;
 pub mod stats;
 
-use holtburger_protocol::messages::magic::Enchantment;
+use crate::world::entity::Entity;
+use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyValue;
-use holtburger_common::Guid;
-use crate::world::entity::Entity;
+use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
 pub enum WorldEvent {

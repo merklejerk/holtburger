@@ -15,4 +15,3 @@ impl ProtocolPack for PingResponseData {
         // No payload
     }
 }
-

@@ -145,4 +145,3 @@ impl Sphere {
         dist_sq <= r_sum * r_sum
     }
 }
-

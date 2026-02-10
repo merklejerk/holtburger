@@ -1,8 +1,8 @@
 use crate::ui::AppState;
-use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_common::properties::{PropertyFloat, PropertyInt};
 use holtburger_common::properties::EnchantmentTypeFlags;
+use holtburger_common::properties::{PropertyFloat, PropertyInt};
 use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
+use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;

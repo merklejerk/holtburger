@@ -1,11 +1,11 @@
 use crate::entities::classification::{self, EntityClass};
 use crate::entities::filter;
 use crate::ui::types::{CommandHandler, CommandTarget};
-use holtburger_core::ClientCommand;
-use holtburger_common::properties::PropertyInt;
-use holtburger_core::world::entity::Entity;
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
+use holtburger_common::properties::PropertyInt;
+use holtburger_core::ClientCommand;
+use holtburger_core::world::entity::Entity;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

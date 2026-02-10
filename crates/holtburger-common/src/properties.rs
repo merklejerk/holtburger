@@ -1,7 +1,7 @@
-use strum_macros::{Display, FromRepr};
 use crate::Guid;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
+use strum_macros::{Display, FromRepr};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
 #[repr(u32)]
@@ -1273,4 +1273,3 @@ pub enum PropertyValue {
     DID(Guid),
     IID(Guid),
 }
-

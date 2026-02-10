@@ -1,6 +1,6 @@
 use crate::entities::classification;
 use crate::ui::types::CommandTarget;
-use holtburger_core::protocol::properties::{
+use holtburger_common::properties::{
     PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
     PropertyString,
 };

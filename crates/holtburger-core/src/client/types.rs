@@ -1,5 +1,5 @@
-use crate::protocol::errors::CharacterError;
-use crate::protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
+use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use crate::world::{Guid, WorldEvent};
 use std::time::{Duration, Instant};
 
@@ -31,7 +31,7 @@ pub enum ClientEvent {
     },
     InventoryServerSaveFailed {
         item_guid: Guid,
-        error: crate::protocol::errors::WeenieError,
+        error: holtburger_protocol::errors::WeenieError,
     },
     BootAccount(String),
     World(Box<WorldEvent>),

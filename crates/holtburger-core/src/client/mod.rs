@@ -1,6 +1,8 @@
-use crate::protocol::crypto::Isaac;
-use crate::protocol::errors::CharacterError;
-use crate::protocol::messages::*;
+use holtburger_protocol::crypto::Isaac;
+use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::messages::*;
+use holtburger_protocol::messages::transport::packet_flags;
+use holtburger_common::ProtocolUnpack;
 use crate::session::Session;
 use crate::world::{Guid, WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
@@ -945,7 +947,7 @@ impl Client {
         activation_addr.set_port(self.session.server_addr.port() + 1);
 
         tokio::time::sleep(Duration::from_millis(
-            crate::protocol::messages::transport::ACE_HANDSHAKE_RACE_DELAY_MS,
+            holtburger_protocol::messages::transport::ACE_HANDSHAKE_RACE_DELAY_MS,
         ))
         .await;
         log::debug!(">>> Sending Handshake Response to {}", activation_addr);
@@ -1018,9 +1020,9 @@ impl Client {
         if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
             self.last_move_sync = now;
 
-            let data = crate::protocol::messages::game_action::MoveToStateData {
+            let data = holtburger_protocol::messages::game_action::MoveToStateData {
                 raw_motion_state:
-                    crate::protocol::messages::game_message::RawMotionState {
+                    holtburger_protocol::messages::game_message::RawMotionState {
                         flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
                         current_hold_key: Some(HoldKey::Run as u32),
                         forward_speed: Some(7.0),

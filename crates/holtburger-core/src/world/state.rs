@@ -7,10 +7,10 @@ use super::spatial::SpatialScene;
 use super::stats;
 use crate::dat::DatDatabase;
 use crate::math::Vector3;
-use crate::protocol::properties::PropertyInstanceId;
+use holtburger_common::properties::PropertyInstanceId;
 use std::sync::Arc;
 
-use crate::protocol::messages::*;
+use holtburger_protocol::messages::*;
 
 pub struct ServerTimeSync {
     pub server_time: f64,

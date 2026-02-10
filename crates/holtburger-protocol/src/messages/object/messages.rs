@@ -902,9 +902,6 @@ mod tests {
 
     #[test]
     fn test_create_object_complex() {
-        use holtburger_common::position::WorldPosition;
-        use holtburger_common::math::{Vector3, Quaternion};
-
         let body = test_fixtures::OBJECT_CREATE_COMPLEX;
         let mut data = Vec::new();
         data.write_u32::<LittleEndian>(0xF745).unwrap(); // GameOpcode::ObjectCreate
@@ -1044,7 +1041,6 @@ mod tests {
 
     #[test]
     fn test_update_property_int_pack_private() {
-        let hex = "0C1900000032000000";
         let msg = PrivateUpdatePropertyIntData {
             sequence: 0x0C,
             guid: Guid::NULL,
@@ -1058,7 +1054,6 @@ mod tests {
 
     #[test]
     fn test_update_property_int_pack_public() {
-        let hex = "42785634121900000032000000";
         let msg = PublicUpdatePropertyIntData {
             sequence: 0x42,
             guid: Guid(0x12345678),

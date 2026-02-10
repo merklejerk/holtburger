@@ -4,7 +4,8 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use holtburger_core::protocol::messages::{CharacterEntry, Enchantment};
+use holtburger_protocol::messages::CharacterEntry;
+use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::guid::Guid;
 use holtburger_core::world::position::WorldPosition;

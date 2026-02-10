@@ -1,7 +1,8 @@
 use super::WorldEvent;
 use super::guid::Guid;
 use super::stats;
-use crate::protocol::messages::*;
+use holtburger_protocol::messages::*;
+use holtburger_protocol::messages::magic::Enchantment;
 use crate::world::properties::EnchantmentTypeFlags;
 use std::collections::{BTreeMap, HashMap};
 
@@ -1018,8 +1019,8 @@ mod tests {
     #[test]
     fn test_vector_update_routing() {
         use crate::math::Vector3;
-        use crate::protocol::messages::GameMessage;
-        use crate::protocol::messages::VectorUpdateData;
+        use holtburger_protocol::messages::GameMessage;
+        use holtburger_protocol::messages::VectorUpdateData;
         use crate::world::WorldEvent;
 
         let mut player = PlayerState::new();
@@ -1055,7 +1056,7 @@ mod tests {
 
     #[test]
     fn test_heal_command_updates() {
-        use crate::protocol::messages::{
+        use holtburger_protocol::messages::{
             GameMessage, PrivateUpdateVitalCurrentData, PrivateUpdateVitalData,
         };
 

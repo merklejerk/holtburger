@@ -4,12 +4,13 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use holtburger_core::protocol::messages::{CharacterEntry, Enchantment};
+use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_core::world::entity::Entity;
-use holtburger_core::world::guid::Guid;
-use holtburger_core::world::position::WorldPosition;
 use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use holtburger_core::{ClientState, RetryState};
+use holtburger_protocol::messages::CharacterEntry;
+use holtburger_protocol::messages::magic::Enchantment;
 
 use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
 use crate::entities::filter::{EntityFilter, filter_entities};

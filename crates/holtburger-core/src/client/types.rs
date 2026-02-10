@@ -1,6 +1,7 @@
-use crate::protocol::errors::CharacterError;
-use crate::protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
-use crate::world::{Guid, WorldEvent};
+use crate::world::WorldEvent;
+use holtburger_common::{Guid, Vector3};
+use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq, Clone)]
@@ -31,7 +32,7 @@ pub enum ClientEvent {
     },
     InventoryServerSaveFailed {
         item_guid: Guid,
-        error: crate::protocol::errors::WeenieError,
+        error: holtburger_protocol::errors::WeenieError,
     },
     BootAccount(String),
     World(Box<WorldEvent>),
@@ -85,7 +86,7 @@ pub enum ClientCommand {
     },
     Jump {
         extent: f32,
-        velocity: crate::math::Vector3,
+        velocity: Vector3,
     },
     SetAutonomyLevel(u32),
     SetState(u32),

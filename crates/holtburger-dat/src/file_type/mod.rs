@@ -1,5 +1,10 @@
+pub mod env_cell;
 pub mod gfx_obj;
+pub mod setup_model;
+
+pub use env_cell::EnvCell;
 pub use gfx_obj::GfxObj;
+pub use setup_model::SetupModel;
 
 use std::fmt;
 

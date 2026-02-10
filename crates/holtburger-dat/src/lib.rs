@@ -1,18 +1,18 @@
+pub mod archive;
+pub mod error;
 pub mod file_type;
 pub mod graphics;
 pub mod landblock;
+pub mod manifest;
 pub mod physics;
 pub mod utils;
 pub mod weenie;
-pub mod archive;
-pub mod error;
-pub mod manifest;
 
+pub use archive::{HbaReader, HbaWriter};
+use binrw::{BinRead, io::Cursor};
 pub use error::{DatError, Result};
 pub use file_type::DatFileType;
-pub use archive::{HbaReader, HbaWriter};
 pub use manifest::StripperManifest;
-use binrw::{BinRead, io::Cursor};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
@@ -32,7 +32,7 @@ pub struct FileMetadata {
 pub trait ResourceProvider: Send + Sync {
     /// Retrieves the raw bytes of a file by its Asheron's Call ID.
     fn get_file(&self, id: u32) -> Result<Vec<u8>>;
-    
+
     /// Returns metadata for the file if it exists.
     fn get_metadata(&self, id: u32) -> Option<FileMetadata>;
 
@@ -152,10 +152,7 @@ impl DatDatabase {
     }
 
     pub fn get_file(&self, id: u32) -> Result<Vec<u8>> {
-        let entry = self
-            .files
-            .get(&id)
-            .ok_or(DatError::NotFound(id))?;
+        let entry = self.files.get(&id).ok_or(DatError::NotFound(id))?;
         let data = self.read_file_data(entry.offset, entry.size)?;
 
         if entry.is_compressed() {
@@ -173,7 +170,8 @@ impl DatDatabase {
 
         while remaining_size > 0 {
             let mut ptr_bytes = [0u8; 4];
-            self.file.read_exact_at(&mut ptr_bytes, current_offset as u64)?;
+            self.file
+                .read_exact_at(&mut ptr_bytes, current_offset as u64)?;
             let next_address = u32::from_le_bytes(ptr_bytes);
 
             if next_address == 0 {
@@ -203,10 +201,10 @@ impl DatDatabase {
 
 /// Helper function to get a weenie name from any resource provider.
 pub fn get_weenie_name(provider: &dyn ResourceProvider, wcid: u32) -> Option<String> {
-    if let Ok(data) = provider.get_file(wcid) {
-        if let Ok(weenie) = weenie::Weenie::unpack(&data) {
-            return weenie.name().cloned();
-        }
+    if let Ok(data) = provider.get_file(wcid)
+        && let Ok(weenie) = weenie::Weenie::unpack(&data)
+    {
+        return weenie.name().cloned();
     }
     None
 }
@@ -257,7 +255,7 @@ impl ResourceProvider for CompositeProvider {
                     // Gold standard found! Return immediately.
                     return provider.get_file(id);
                 }
-                
+
                 // Keep track of the first provider that has even a pruned version
                 if first_pruned_provider.is_none() {
                     first_pruned_provider = Some(provider);
@@ -303,7 +301,7 @@ mod tests {
         fn get_file(&self, id: u32) -> Result<Vec<u8>> {
             self.files.get(&id).cloned().ok_or(DatError::NotFound(id))
         }
-        
+
         fn get_metadata(&self, id: u32) -> Option<FileMetadata> {
             self.files.get(&id).map(|data| FileMetadata {
                 id,
@@ -337,7 +335,7 @@ mod tests {
         // Should find the FULL version from p2 even though it was added second!
         let data = composite.get_file(0x1111).unwrap();
         assert_eq!(data, vec![0xBE, 0xEF]);
-        
+
         // Metadata should also reflect the non-pruned status
         let meta = composite.get_metadata(0x1111).unwrap();
         assert!(!meta.is_pruned);

@@ -1,8 +1,8 @@
 use crate::ui::AppState;
-use holtburger_core::protocol::messages::Enchantment;
-use holtburger_core::protocol::properties::{PropertyFloat, PropertyInt};
-use holtburger_core::world::properties::EnchantmentTypeFlags;
+use holtburger_common::properties::EnchantmentTypeFlags;
+use holtburger_common::properties::{PropertyFloat, PropertyInt};
 use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
+use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::ListItem;
@@ -366,7 +366,7 @@ fn format_duration(start: f64, duration: f64) -> String {
     }
 }
 
-pub fn get_enchantment_name(enchant: &holtburger_core::protocol::messages::Enchantment) -> String {
+pub fn get_enchantment_name(enchant: &holtburger_protocol::messages::magic::Enchantment) -> String {
     if (enchant.stat_mod_type & EnchantmentTypeFlags::ATTRIBUTE.bits()) != 0 {
         AttributeType::from_repr(enchant.stat_mod_key)
             .map(|a| a.to_string())

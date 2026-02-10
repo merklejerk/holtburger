@@ -1,16 +1,14 @@
-use super::Guid;
 use super::WorldEvent;
 use super::entity::{Entity, EntityManager};
 use super::player::PlayerState;
-use super::properties::{ItemType, PropertyValue};
 use super::spatial::SpatialScene;
 use super::stats;
-use crate::dat::DatDatabase;
-use crate::math::Vector3;
-use crate::protocol::properties::PropertyInstanceId;
+use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyValue};
+use holtburger_common::{Guid, Vector3};
+use holtburger_dat::DatDatabase;
 use std::sync::Arc;
 
-use crate::protocol::messages::*;
+use holtburger_protocol::messages::*;
 
 pub struct ServerTimeSync {
     pub server_time: f64,

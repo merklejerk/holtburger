@@ -1,7 +1,8 @@
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, ContextView, UIState};
+use holtburger_common::Guid;
 use holtburger_core::ClientEvent;
-use holtburger_core::world::{Guid, WorldEvent};
+use holtburger_core::world::WorldEvent;
 
 impl AppState {
     pub(super) fn handle_received_event(&mut self, event: ClientEvent) {
@@ -58,8 +59,8 @@ impl AppState {
                         property_id,
                         value,
                     } => {
-                        use holtburger_core::protocol::properties::PropertyInstanceId;
-                        use holtburger_core::world::properties::PropertyValue;
+                        use holtburger_common::properties::PropertyInstanceId;
+                        use holtburger_common::properties::PropertyValue;
 
                         if let Some(entity) = self.entities.get_mut(&guid) {
                             match value {
@@ -270,7 +271,7 @@ impl AppState {
                 );
             }
             ClientEvent::CharacterError(error) => {
-                use holtburger_core::protocol::errors::CharacterError;
+                use holtburger_protocol::errors::CharacterError;
                 if error == CharacterError::Logon {
                     self.logon_retry.schedule();
                     self.log_chat(

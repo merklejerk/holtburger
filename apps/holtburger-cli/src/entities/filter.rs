@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
+use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_core::world::entity::Entity;
-use holtburger_core::world::guid::Guid;
-use holtburger_core::world::position::WorldPosition;
 
 use crate::entities::classification;
 

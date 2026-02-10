@@ -34,7 +34,7 @@ The `.hba` format is a flat binary archive optimized for the VFS. It is content-
 #### Binary Layout
 | Section | Type | Description |
 | :--- | :--- | :--- |
-| **Header** | 28 bytes | Magic, Version, Entry Count, Index Offset, Profile. |
+| **Header** | 28 bytes | Magic, Version, Entry Count, Index Offset, Metadata Size, Profile. |
 | **Blobs** | Data | Contiguous file data (supports Zstd compression). |
 | **Index** | Array | Fixed-size list of File Entries. |
 

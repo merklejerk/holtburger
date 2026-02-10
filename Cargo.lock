@@ -674,12 +674,12 @@ dependencies = [
 name = "holtburger-dat"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "binrw",
  "bitflags",
  "criterion",
  "encoding_rs",
  "holtburger-common",
+ "log",
  "rand",
  "rayon",
  "serde",

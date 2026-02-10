@@ -17,6 +17,13 @@ pub fn read_compressed_u32<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<u
 }
 
 pub fn write_compressed_u32<W: Write + Seek>(writer: &mut W, val: u32) -> binrw::BinResult<()> {
+    if val > 0x3FFF_FFFF {
+        return Err(binrw::Error::Custom {
+            pos: writer.stream_position()?,
+            err: Box::new("u32 value too large for compressed format (>30 bits)"),
+        });
+    }
+
     if val < 0x80 {
         (val as u8).write(writer)?;
     } else if val < 0x4000 {

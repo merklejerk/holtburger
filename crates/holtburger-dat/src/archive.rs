@@ -1,7 +1,7 @@
 //! Holtburger Archive (HBA) format implementation.
 //!
 //! HBA is a simple, high-performance archive format designed for Asheron's Call mods.
-//! It supports Zstd compression, arbitrary metadata, and 64-bit offsets.
+//! It supports Zstd compression and 64-bit offsets.
 //!
 //! Format Layout:
 //! - Header (28 bytes)
@@ -72,7 +72,10 @@ pub struct HbaReader {
 
 impl HbaReader {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let mut file = File::open(&path)?;
+        let mut file = File::open(&path).map_err(|e| DatError::PathError {
+            path: path.as_ref().to_path_buf(),
+            source: e,
+        })?;
         let header = HbaHeader::read(&mut file)?;
 
         if header.magic != HBA_MAGIC {
@@ -87,6 +90,12 @@ impl HbaReader {
         let mut index = HashMap::new();
         for _ in 0..header.entry_count {
             let entry = HbaEntry::read(&mut file)?;
+            if index.contains_key(&entry.id) {
+                return Err(DatError::Corruption(format!(
+                    "Duplicate HBA entry id 0x{:08X} in index",
+                    entry.id
+                )));
+            }
             index.insert(entry.id, entry);
         }
 
@@ -101,6 +110,25 @@ impl HbaReader {
 impl ResourceProvider for HbaReader {
     fn get_file(&self, id: u32) -> Result<Vec<u8>> {
         let entry = self.index.get(&id).ok_or(DatError::NotFound(id))?;
+
+        // Validate that the requested range fits within the underlying file.
+        let file_len = self.file.metadata()?.len();
+        let end = entry
+            .offset
+            .checked_add(entry.comp_size as u64)
+            .ok_or_else(|| {
+                DatError::Corruption(format!(
+                    "Entry offset overflow for 0x{:08X}: offset {} + comp_size {}",
+                    id, entry.offset, entry.comp_size
+                ))
+            })?;
+
+        if end > file_len {
+            return Err(DatError::Corruption(format!(
+                "Entry range out of bounds for 0x{:08X}: offset {} + comp_size {} > file_len {}",
+                id, entry.offset, entry.comp_size, file_len
+            )));
+        }
 
         let mut buffer = vec![0u8; entry.comp_size as usize];
         self.file.read_exact_at_compat(&mut buffer, entry.offset)?;
@@ -215,7 +243,7 @@ impl HbaWriter {
                         }
                         Ok(_) => {} // Not smaller, use original
                         Err(e) => {
-                            eprintln!("Warning: Compression failed for 0x{:08X}: {}", id, e);
+                            log::warn!("Compression failed for 0x{:08X}: {}", id, e);
                         }
                     }
                 }
@@ -223,6 +251,9 @@ impl HbaWriter {
                 (*id, *type_id, data.clone(), original_size, flags)
             })
             .collect();
+
+        let mut processed = processed;
+        processed.sort_by_key(|p| p.0);
 
         let mut hba_entries = Vec::new();
 

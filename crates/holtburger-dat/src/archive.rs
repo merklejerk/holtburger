@@ -79,6 +79,10 @@ impl HbaReader {
             return Err(DatError::InvalidMagic("HBA".to_string()));
         }
 
+        if header.version != HBA_VERSION {
+            return Err(DatError::UnsupportedVersion(header.version));
+        }
+
         file.seek(SeekFrom::Start(header.index_offset))?;
         let mut index = HashMap::new();
         for _ in 0..header.entry_count {
@@ -199,16 +203,20 @@ impl HbaWriter {
                 let original_size = data.len() as u32;
 
                 if self.compress {
-                    let compressed =
-                        zstd::encode_all(Cursor::new(data), 3).unwrap_or_else(|_| data.clone());
-                    if compressed.len() < data.len() {
-                        return (
-                            *id,
-                            *type_id,
-                            compressed,
-                            original_size,
-                            flags | HbaEntry::FLAG_ZSTD,
-                        );
+                    match zstd::encode_all(Cursor::new(data), 3) {
+                        Ok(compressed) if compressed.len() < data.len() => {
+                            return (
+                                *id,
+                                *type_id,
+                                compressed,
+                                original_size,
+                                flags | HbaEntry::FLAG_ZSTD,
+                            );
+                        }
+                        Ok(_) => {} // Not smaller, use original
+                        Err(e) => {
+                            eprintln!("Warning: Compression failed for 0x{:08X}: {}", id, e);
+                        }
                     }
                 }
 

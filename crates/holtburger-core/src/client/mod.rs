@@ -75,7 +75,6 @@ impl Client {
         for path in [
             "portal.dat",
             "dats/portal.dat",
-            "ace-root/dats/portal.dat",
             "../dats/portal.dat",
         ] {
             if let Ok(db) = holtburger_dat::DatDatabase::new(path) {

@@ -1,25 +1,9 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use holtburger_dat::{DatDatabase, DatFileType, HbaReader, HbaWriter, ResourceProvider};
-use std::path::PathBuf;
 use tempfile::NamedTempFile;
 
-fn get_portal_dat_path() -> Option<PathBuf> {
-    if let Ok(path_str) = std::env::var("HOLTBURGER_PORTAL_DAT") {
-        let path = PathBuf::from(path_str);
-        if path.exists() {
-            return Some(path);
-        }
-    }
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../");
-    let fallback = workspace_root.join("ace-root/dats/client_portal.dat");
-    if fallback.exists() {
-        return Some(fallback);
-    }
-    None
-}
-
 fn bench_providers(c: &mut Criterion) {
-    let dat_path = match get_portal_dat_path() {
+    let dat_path = match holtburger_dat::utils::get_portal_dat_path() {
         Some(path) => path,
         None => return,
     };
@@ -40,7 +24,9 @@ fn bench_providers(c: &mut Criterion) {
     writer.set_compression(true);
     for &id in &ids {
         let data = dat_db.get_file(id).unwrap();
-        writer.add(id, id >> 24, data);
+        writer
+            .add(id, id >> 24, data)
+            .expect("Benchmark failed to build HBA");
     }
 
     let temp_hba = NamedTempFile::new().unwrap();

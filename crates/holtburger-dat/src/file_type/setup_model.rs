@@ -47,27 +47,45 @@ impl AnimationHook {
         let hook_type = u32::read_le(reader)?;
         let direction = i32::read_le(reader)?;
 
-        // We need to know how much to read based on hook_type.
-        // For now, let's implement the most common ones or just enough to step.
-        let mut data = Vec::new();
-        match hook_type {
-            // Sound Hook
-            0x07 => {
-                let mut buf = [0u8; 12]; // SoundID, Probability, Volume
-                reader.read_exact(&mut buf)?;
-                data.extend_from_slice(&buf);
-            }
-            // Attack Hook
-            0x05 => {
-                let mut buf = [0u8; 16]; // AttackCone: PartID, Radius, Height, Angle
-                reader.read_exact(&mut buf)?;
-                data.extend_from_slice(&buf);
-            }
-            // Many visual ones are just 0 or 4-8 bytes.
+        let payload_size = match hook_type {
+            0 => 0,  // NoOp
+            1 => 4,  // Sound (Id)
+            2 => 4,  // SoundTable (SoundType)
+            3 => 28, // Attack (AttackCone)
+            4 => 0,  // AnimationDone
+            5 => 6,  // ReplaceObject (PartIndex: u16, PartID: u32)
+            6 => 4,  // Ethereal (Ethereal: i32)
+            7 => 16, // TransparentPart (Part, Start, End, Time)
+            8 => 12, // Luminous (Start, End, Time)
+            9 => 16, // LuminousPart (Part, Start, End, Time)
+            10 => 12, // Diffuse (Start, End, Time)
+            11 => 16, // DiffusePart (Part, Start, End, Time)
+            12 => 8,  // Scale (End, Time)
+            13 => 40, // CreateParticle (EmitterInfoId, PartIndex, Offset: Frame, EmitterId)
+            14 => 4,  // DestroyParticle (EmitterId)
+            15 => 4,  // StopParticle (EmitterId)
+            16 => 4,  // NoDraw (NoDraw: u32)
+            17 => 0,  // DefaultScript
+            18 => 4,  // DefaultScriptPart (PartIndex)
+            19 => 8,  // CallPES (PES: u32, Pause: f32)
+            20 => 12, // Transparent (Start, End, Time)
+            21 => 16, // SoundTweaked (SoundID, Priority, Probability, Volume)
+            22 => 12, // SetOmega (Axis: Vector3)
+            23 => 8,  // TextureVelocity (USpeed, VSpeed)
+            24 => 12, // TextureVelocityPart (PartIndex, USpeed, VSpeed)
+            25 => 4,  // SetLight (LightsOn: i32)
+            26 => 40, // CreateBlockingParticle (Inherits from CreateParticle)
             _ => {
-                // If we don't know, we are in trouble.
-                // Let's implement more based on what we find.
+                return Err(binrw::Error::Custom {
+                    pos: reader.stream_position()?,
+                    err: Box::new(format!("Unsupported AnimationHook type: 0x{:08X}", hook_type)),
+                });
             }
+        };
+
+        let mut data = vec![0u8; payload_size];
+        if payload_size > 0 {
+            reader.read_exact(&mut data)?;
         }
 
         Ok(Self {

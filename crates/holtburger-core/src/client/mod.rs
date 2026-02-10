@@ -614,7 +614,7 @@ impl Client {
             }
             GameMessage::GameEvent(ev) => match &ev.event {
                 GameEvent::PlayerDescription(_)
-                | holtburger_protocol::messages::game_event::GameEvent::StartGame => {
+                | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
                         self.send_status_event();

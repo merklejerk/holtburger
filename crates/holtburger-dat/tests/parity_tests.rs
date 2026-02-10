@@ -24,7 +24,9 @@ fn test_hba_parity_with_retail_portal() {
     for &id in dat_db.files.keys() {
         if DatFileType::from_id(id).is_essential() {
             let data = dat_db.get_file(id).expect("Failed to read from DAT");
-            writer.add(id, id >> 24, data);
+            writer
+                .add(id, id >> 24, data)
+                .expect("Failed to add to writer");
             kept_ids.push(id);
         }
     }

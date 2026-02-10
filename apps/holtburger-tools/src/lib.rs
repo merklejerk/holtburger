@@ -150,9 +150,11 @@ pub fn process_dat(input_path: &Path, output_path: &Path, full: bool, profile_ov
 
     for (id, type_id, data, is_pruned) in processed_entries {
         if is_pruned {
-            writer.add_pruned(id, type_id, data);
+            writer.add_pruned(id, type_id, data)
+                .map_err(|e| ToolError::HbaWrite(output_path.to_path_buf(), e.to_string()))?;
         } else {
-            writer.add(id, type_id, data);
+            writer.add(id, type_id, data)
+                .map_err(|e| ToolError::HbaWrite(output_path.to_path_buf(), e.to_string()))?;
         }
     }
 

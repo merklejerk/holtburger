@@ -16,8 +16,8 @@ pub use manifest::StripperManifest;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
-use std::os::unix::fs::FileExt;
 use std::path::Path;
+use crate::utils::FileExtPolyfill;
 
 pub const DAT_HEADER_OFFSET: u64 = 0x140;
 pub const DIRECTORY_NODE_SIZE: usize = 1716;
@@ -94,8 +94,10 @@ pub struct DatDatabase {
 
 impl DatDatabase {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let mut file =
-            File::open(&path).map_err(|_| DatError::PathError(path.as_ref().to_path_buf()))?;
+        let mut file = File::open(&path).map_err(|e| DatError::PathError {
+            path: path.as_ref().to_path_buf(),
+            source: e,
+        })?;
 
         file.seek(SeekFrom::Start(DAT_HEADER_OFFSET))?;
         let header = DatHeader::read(&mut file)?;
@@ -171,11 +173,11 @@ impl DatDatabase {
         while remaining_size > 0 {
             let mut ptr_bytes = [0u8; 4];
             self.file
-                .read_exact_at(&mut ptr_bytes, current_offset as u64)?;
+                .read_exact_at_compat(&mut ptr_bytes, current_offset as u64)?;
             let next_address = u32::from_le_bytes(ptr_bytes);
 
             if next_address == 0 {
-                self.file.read_exact_at(
+                self.file.read_exact_at_compat(
                     &mut buffer[buffer_offset..(buffer_offset + remaining_size as usize)],
                     (current_offset + 4) as u64,
                 )?;
@@ -184,7 +186,7 @@ impl DatDatabase {
                 let block_data_size = (self.header.block_size - 4) as usize;
                 let to_read = (remaining_size as usize).min(block_data_size);
 
-                self.file.read_exact_at(
+                self.file.read_exact_at_compat(
                     &mut buffer[buffer_offset..(buffer_offset + to_read)],
                     (current_offset + 4) as u64,
                 )?;

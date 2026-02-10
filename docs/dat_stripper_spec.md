@@ -140,7 +140,7 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 | [x] | Refactor `DatDatabase` to implement `ResourceProvider` | Inherent `get_file` satisfies trait. |
 | [x] | Implement `CompositeProvider` (Chain of Responsibility) | Added with `add` method for trait objects. |
 | [x] | Add unit tests for `CompositeProvider` using mock providers | Verified via `cargo test`. |
-| [x] | Create integration tests validating `ResourceProvider` against retail DAT fixtures | Verified against `/ace-root/dats/portal.dat`. |
+| [x] | Create integration tests validating `ResourceProvider` against retail DAT fixtures | Verified against `HOLTBURGER_PORTAL_DAT` or local `dats/portal.dat`. |
 | **Criteria** | **Phase 1 Completion Criteria:** All unit and fixture-based tests pass. 0% reliance on TUI for validation. | Completed. |
 
 ---

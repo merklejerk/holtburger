@@ -80,7 +80,7 @@ fn pack_hba(input: &Path, output: &Path, compress: bool) -> Result<()> {
                     .with_context(|| format!("Invalid hex Type ID in filename: {}", filename))?;
 
                 let data = std::fs::read(&path)?;
-                writer.add(id, type_id, data);
+                writer.add(id, type_id, data)?;
                 count += 1;
             } else {
                 println!(

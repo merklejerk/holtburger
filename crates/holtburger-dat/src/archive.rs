@@ -4,9 +4,9 @@
 //! It supports Zstd compression, arbitrary metadata, and 64-bit offsets.
 //!
 //! Format Layout:
-//! - Header (24 bytes)
+//! - Header (28 bytes)
 //! - File Data (sequential)
-//! - Index (Entry Count * 32 bytes)
+//! - Index (Entry Count * 28 bytes)
 //!
 //! File naming convention for packing: [ID].[TYPE] (both in hex).
 
@@ -17,8 +17,8 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
-use std::os::unix::fs::FileExt;
 use std::path::Path;
+use crate::utils::FileExtPolyfill;
 
 pub const HBA_MAGIC: [u8; 4] = *b"HBA\0";
 pub const HBA_VERSION: u32 = 1;
@@ -99,10 +99,21 @@ impl ResourceProvider for HbaReader {
         let entry = self.index.get(&id).ok_or(DatError::NotFound(id))?;
 
         let mut buffer = vec![0u8; entry.comp_size as usize];
-        self.file.read_exact_at(&mut buffer, entry.offset)?;
+        self.file.read_exact_at_compat(&mut buffer, entry.offset)?;
 
         if entry.is_compressed() {
-            let decompressed = zstd::decode_all(Cursor::new(buffer))?;
+            let decompressed = zstd::bulk::decompress(&buffer, entry.size as usize)
+                .map_err(|_| DatError::DecompressionFailed(id))?;
+
+            if decompressed.len() != entry.size as usize {
+                return Err(DatError::Corruption(format!(
+                    "Decompressed size mismatch for 0x{:08X}: expected {}, got {}",
+                    id,
+                    entry.size,
+                    decompressed.len()
+                )));
+            }
+
             Ok(decompressed)
         } else {
             Ok(buffer)
@@ -119,7 +130,7 @@ impl ResourceProvider for HbaReader {
 }
 
 pub struct HbaWriter {
-    entries: Vec<(u32, u32, Vec<u8>, bool)>,
+    entries: HashMap<u32, (u32, Vec<u8>, bool)>,
     compress: bool,
     profile: u32,
 }
@@ -127,7 +138,7 @@ pub struct HbaWriter {
 impl HbaWriter {
     pub fn new() -> Self {
         Self {
-            entries: Vec::new(),
+            entries: HashMap::new(),
             compress: true,
             profile: 0,
         }
@@ -149,12 +160,20 @@ impl HbaWriter {
         self.profile = profile;
     }
 
-    pub fn add(&mut self, id: u32, type_id: u32, data: Vec<u8>) {
-        self.entries.push((id, type_id, data, false));
+    pub fn add(&mut self, id: u32, type_id: u32, data: Vec<u8>) -> Result<()> {
+        if self.entries.contains_key(&id) {
+            return Err(DatError::DuplicateId(id));
+        }
+        self.entries.insert(id, (type_id, data, false));
+        Ok(())
     }
 
-    pub fn add_pruned(&mut self, id: u32, type_id: u32, data: Vec<u8>) {
-        self.entries.push((id, type_id, data, true));
+    pub fn add_pruned(&mut self, id: u32, type_id: u32, data: Vec<u8>) -> Result<()> {
+        if self.entries.contains_key(&id) {
+            return Err(DatError::DuplicateId(id));
+        }
+        self.entries.insert(id, (type_id, data, true));
+        Ok(())
     }
 
     pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -175,7 +194,7 @@ impl HbaWriter {
         let processed: Vec<(u32, u32, Vec<u8>, u32, u8)> = self
             .entries
             .par_iter()
-            .map(|(id, type_id, data, is_pruned)| {
+            .map(|(id, (type_id, data, is_pruned))| {
                 let flags = if *is_pruned { HbaEntry::FLAG_PRUNED } else { 0 };
                 let original_size = data.len() as u32;
 
@@ -245,8 +264,8 @@ mod tests {
         let path = dir.path().join("test.hba");
 
         let mut writer = HbaWriter::new();
-        writer.add(0x1111, 0x01, vec![1, 2, 3]);
-        writer.add(0x2222, 0x02, vec![4, 5, 6]);
+        writer.add(0x1111, 0x01, vec![1, 2, 3])?;
+        writer.add(0x2222, 0x02, vec![4, 5, 6])?;
         writer.write(&path)?;
 
         let reader = HbaReader::open(&path)?;
@@ -269,7 +288,7 @@ mod tests {
         let mut writer = HbaWriter::new();
         // Add some repetitive data that compresses well
         let data = vec![0xCC; 1000];
-        writer.add(0x9999, 0x00, data.clone());
+        writer.add(0x9999, 0x00, data.clone())?;
         writer.write(&path)?;
 
         let reader = HbaReader::open(&path)?;
@@ -328,7 +347,7 @@ mod tests {
             let size = rng.gen_range(0..5000);
             let data: Vec<u8> = (0..size).map(|_| rng.r#gen::<u8>()).collect();
 
-            writer.add(id, type_id, data.clone());
+            writer.add(id, type_id, data.clone())?;
             expected.insert(id, data);
         }
 

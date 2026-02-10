@@ -12,6 +12,9 @@ pub enum DatError {
     #[error("File ID {0:08X} not found in provider")]
     NotFound(u32),
 
+    #[error("Duplicate File ID {0:08X} detected")]
+    DuplicateId(u32),
+
     #[error("Invalid magic for format: {0}")]
     InvalidMagic(String),
 
@@ -21,11 +24,11 @@ pub enum DatError {
     #[error("Corruption detected: {0}")]
     Corruption(String),
 
-    #[error("Failed to decompress file {0:08X}")]
+    #[error("Failed to recover compressed file {0:08X}")]
     DecompressionFailed(u32),
 
-    #[error("Failed to open file at path: {0}")]
-    PathError(PathBuf),
+    #[error("Failed to open file at {path}: {source}")]
+    PathError { path: PathBuf, #[source] source: std::io::Error },
 
     #[error("Other error: {0}")]
     Other(String),

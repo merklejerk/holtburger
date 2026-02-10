@@ -1,7 +1,7 @@
 pub mod error;
 
-pub use error::{Result, ToolError};
 use clap::Parser;
+pub use error::{Result, ToolError};
 use holtburger_dat::file_type::{EnvCell, GfxObj, SetupModel};
 use holtburger_dat::{DatDatabase, DatFileType, HbaWriter, StripperManifest};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -10,7 +10,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Strips Asheron's Call DAT files into Lite HBA archives")]
+#[command(
+    author,
+    version,
+    about = "Strips Asheron's Call DAT files into Lite HBA archives"
+)]
 pub struct Args {
     /// Path to the retail DAT file to process
     pub input: PathBuf,
@@ -27,12 +31,17 @@ pub struct Args {
     pub full: bool,
 }
 
-pub fn process_dat(input_path: &Path, output_path: &Path, full: bool, profile_override: Option<u32>) -> Result<()> {
+pub fn process_dat(
+    input_path: &Path,
+    output_path: &Path,
+    full: bool,
+    profile_override: Option<u32>,
+) -> Result<()> {
     println!("Processing {:?} -> {:?}", input_path, output_path);
-    
+
     let db = DatDatabase::new(input_path)
         .map_err(|e| ToolError::DatOpen(input_path.to_path_buf(), e.to_string()))?;
-    
+
     let manifest = StripperManifest::logic_only();
 
     // Determine profile
@@ -49,7 +58,7 @@ pub fn process_dat(input_path: &Path, output_path: &Path, full: bool, profile_ov
     } else {
         1 // Logic/Physics Only
     };
-    
+
     let pb = ProgressBar::new(db.files.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -69,7 +78,7 @@ pub fn process_dat(input_path: &Path, output_path: &Path, full: bool, profile_ov
         .filter_map(|&id| {
             let file_type = DatFileType::from_id(id);
             let should_keep = (profile == 4) || manifest.should_keep(file_type);
-            
+
             if !should_keep {
                 pb.inc(1);
                 return None;
@@ -139,8 +148,11 @@ pub fn process_dat(input_path: &Path, output_path: &Path, full: bool, profile_ov
         .collect();
 
     pb.finish_with_message(format!(
-        "Done! Kept {}/{} files (Pruned {}, Profile {})", 
-        kept_count.load(Ordering::SeqCst), db.files.len(), pruned_count.load(Ordering::SeqCst), profile
+        "Done! Kept {}/{} files (Pruned {}, Profile {})",
+        kept_count.load(Ordering::SeqCst),
+        db.files.len(),
+        pruned_count.load(Ordering::SeqCst),
+        profile
     ));
 
     println!("📦 Packing HBA archive...");
@@ -150,15 +162,18 @@ pub fn process_dat(input_path: &Path, output_path: &Path, full: bool, profile_ov
 
     for (id, type_id, data, is_pruned) in processed_entries {
         if is_pruned {
-            writer.add_pruned(id, type_id, data)
+            writer
+                .add_pruned(id, type_id, data)
                 .map_err(|e| ToolError::HbaWrite(output_path.to_path_buf(), e.to_string()))?;
         } else {
-            writer.add(id, type_id, data)
+            writer
+                .add(id, type_id, data)
                 .map_err(|e| ToolError::HbaWrite(output_path.to_path_buf(), e.to_string()))?;
         }
     }
 
-    writer.write(output_path)
+    writer
+        .write(output_path)
         .map_err(|e| ToolError::HbaWrite(output_path.to_path_buf(), e.to_string()))?;
     Ok(())
 }

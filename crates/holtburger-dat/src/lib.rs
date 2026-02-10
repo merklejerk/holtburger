@@ -8,6 +8,7 @@ pub mod physics;
 pub mod utils;
 pub mod weenie;
 
+use crate::utils::FileExtPolyfill;
 pub use archive::{HbaReader, HbaWriter};
 use binrw::{BinRead, io::Cursor};
 pub use error::{DatError, Result};
@@ -17,7 +18,6 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::path::Path;
-use crate::utils::FileExtPolyfill;
 
 pub const DAT_HEADER_OFFSET: u64 = 0x140;
 pub const DIRECTORY_NODE_SIZE: usize = 1716;

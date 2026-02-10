@@ -149,13 +149,13 @@ mod tests {
     fn test_file_type_classification() {
         // Special internal iterations file
         assert_eq!(DatFileType::from_id(0xFFFF0001), DatFileType::Iteration);
-        
+
         // Terrain landblocks
         assert_eq!(DatFileType::from_id(0x1234FFFF), DatFileType::Landblock);
-        
+
         // Static objects in landblocks (LBI)
         assert_eq!(DatFileType::from_id(0x1234FFFE), DatFileType::LandblockInfo);
-        
+
         // Interior/Dungeon cells
         assert_eq!(DatFileType::from_id(0x76540001), DatFileType::IndoorCell);
         assert_eq!(DatFileType::from_id(0x7654FDAB), DatFileType::IndoorCell);
@@ -164,7 +164,7 @@ mod tests {
         assert_eq!(DatFileType::from_id(0x01001234), DatFileType::Model);
         assert_eq!(DatFileType::from_id(0x02001234), DatFileType::SetupModel);
         assert_eq!(DatFileType::from_id(0x0E001234), DatFileType::Table);
-        
+
         // Edge case: ensure 0xFFFF0001 is NOT an IndoorCell
         assert_ne!(DatFileType::from_id(0xFFFF0001), DatFileType::IndoorCell);
     }
@@ -172,10 +172,10 @@ mod tests {
     #[test]
     fn test_essential_types() {
         let manifest = crate::manifest::StripperManifest::logic_only();
-        
+
         // Iteration should NOT be essential
         assert!(!manifest.should_keep(DatFileType::Iteration));
-        
+
         // Models and Landblocks should be essential
         assert!(manifest.should_keep(DatFileType::Model));
         assert!(manifest.should_keep(DatFileType::Landblock));

@@ -12,13 +12,13 @@
 
 use crate::ResourceProvider;
 use crate::error::{DatError, Result};
+use crate::utils::FileExtPolyfill;
 use binrw::{BinRead, BinWrite, io::Cursor};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
-use crate::utils::FileExtPolyfill;
 
 pub const HBA_MAGIC: [u8; 4] = *b"HBA\0";
 pub const HBA_VERSION: u32 = 1;

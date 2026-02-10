@@ -1,0 +1,13 @@
+[package]
+name = "holtburger-tools"
+version = "0.1.0"
+edition = "2024"
+authors = ["holtburger contributors"]
+
+[dependencies]
+holtburger-dat = { path = "../../crates/holtburger-dat" }
+anyhow = { workspace = true }
+clap = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+indicatif = "0.17" # Progress bars for the win

@@ -1,13 +1,13 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use holtburger_dat::DatDatabase;
-use std::path::PathBuf;
+use holtburger_dat::{DatDatabase, HbaWriter};
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[arg(short, long, value_name = "FILE")]
-    dat: PathBuf,
+    dat: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Commands,
@@ -46,13 +46,63 @@ enum Commands {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Pack a directory into an HBA archive
+    HbaPack {
+        /// Input directory containing files named [ID].[TYPE] (hex)
+        input: PathBuf,
+        /// Output HBA file
+        output: PathBuf,
+        /// Enable compression
+        #[arg(short, long)]
+        compress: bool,
+    },
+}
+
+fn pack_hba(input: &Path, output: &Path, compress: bool) -> Result<()> {
+    let mut writer = HbaWriter::new();
+    writer.set_compression(compress);
+
+    println!("Packing files from {:?} into {:?}", input, output);
+    
+    let mut count = 0;
+    for entry in std::fs::read_dir(input).context("Failed to read input directory")? {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.is_file() {
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let parts: Vec<&str> = filename.split('.').collect();
+            
+            if parts.len() == 2 {
+                let id = u32::from_str_radix(parts[0], 16)
+                    .with_context(|| format!("Invalid hex ID in filename: {}", filename))?;
+                let type_id = u32::from_str_radix(parts[1], 16)
+                    .with_context(|| format!("Invalid hex Type ID in filename: {}", filename))?;
+                
+                let data = std::fs::read(&path)?;
+                writer.add(id, type_id, data);
+                count += 1;
+            } else {
+                println!("Skipping {} (expected format: [ID].[TYPE] in hex)", filename);
+            }
+        }
+    }
+
+    writer.write(output).context("Failed to write HBA file")?;
+    println!("Successfully packed {} files into {:?}", count, output);
+    Ok(())
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    println!("Loading DAT: {:?}", cli.dat);
-    let db = DatDatabase::new(cli.dat)?;
+    if let Commands::HbaPack { input, output, compress } = &cli.command {
+        return pack_hba(input, output, *compress);
+    }
+
+    let dat_path = cli.dat.as_ref().ok_or_else(|| anyhow::anyhow!("--dat is required for this command"))?;
+    println!("Loading DAT: {:?}", dat_path);
+    let db = DatDatabase::new(dat_path)?;
     println!("Loaded DAT with {} files.", db.files.len());
 
     match cli.command {
@@ -211,7 +261,9 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Commands::HbaPack { .. } => unreachable!(),
     }
 
     Ok(())
 }
+

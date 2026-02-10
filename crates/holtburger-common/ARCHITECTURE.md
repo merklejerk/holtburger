@@ -9,7 +9,7 @@ The foundational "Bedrock" of the workspace. This crate contains shared primitiv
 ## Key Components
 
 ### 1. The Protocol Traits ([src/traits.rs](src/traits.rs))
-Defines `ProtocolPack` and `ProtocolUnpack`. These are the "rules of engagement" for how any structure in the project converted to or from bytes.
+Defines `ProtocolPack` and `ProtocolUnpack`. These are the "rules of engagement" for how any structure in the project is converted to or from bytes.
 
 ### 2. Math & Physics Primitives ([src/math.rs](src/math.rs), [src/position.rs](src/position.rs))
 Custom implementations of `Vector3`, `Quaternion`, and `WorldPosition` that match the specific coordinate systems used by Asheron's Call.

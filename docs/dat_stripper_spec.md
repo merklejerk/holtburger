@@ -1,41 +1,81 @@
 # Technical Specification: DAT File Stripper for TUI Client
 
 ## 1. Executive Summary
-To enable a functional headless/TUI client for the project, we need access to game data (physics, logic tables, landblocks) without distributing the massive, copyrighted retail DAT files containing artwork and audio. This document proposes a CLI tool, `DatStripper`, which processes retail DAT files to produce "Lite" DAT files containing only the essential data required for game logic and physics.
+To enable a functional headless/TUI client for the project, we need access to game data (physics, logic tables, landblocks) without distributing the massive, copyrighted retail DAT files containing artwork and audio. This document proposes a CLI tool, `dat-stripper`, implemented in Rust, which processes retail DAT files to produce "Holtburger Archive" (`.hba`) files.
+
+These `.hba` files provide a modern, simplified alternative to the complex AC DAT format, optimized for fast loading and reduced file size while remaining easy to parse by other tools.
 
 **Estimated Size Reduction:** >90% (from ~3GB to <200MB).
 **Feasibility:** High.
-**Complexity:** Medium (Requires implementing a DAT Writer).
+**Complexity:** Low (Flat binary structure is easier than B-Trees).
 
 ## 2. Problem Statement
-*   **Size:** Retail `client_portal.dat` and `client_cell.dat` are several gigabytes in size, making them unsuitable for bundling.
-*   **Legal:** Distributing retail DATs violates copyright due to the inclusion of art assets.
-*   **Requirement:** The TUI client is "headless" and does not render 3D graphics or play audio, but it *does* simulate physics (movement, collision) and game logic (combat calculations, stats). It requires data tables, physics meshes, and world geometry.
+*   **Size:** Retail `client_portal.dat` and `client_cell.dat` are several gigabytes in size.
+*   **Legal:** Distributing retail DATs violates copyright.
+*   **Complexity:** The original AC DAT format is an ancient block-based file system with complex B-Tree indexing, making it difficult to write efficiently and maintain.
+*   **Requirement:** The TUI client needs a fast, reliable way to access game logic and physics data without the overhead of a legacy file system.
 
-## 3. Analysis of DAT File Structure
-The Asheron's Call DAT format is a block-based file system with a B-Tree directory.
-*   **Header:** Contains file size, versioning, and root directory offset.
-*   **Data Blocks:** Fixed-size blocks (1024 bytes) linked via "next block" pointers.
-*   **Directory:** A B-Tree structure mapping 32-bit Object IDs to File Offsets and Sizes.
+## 3. The Holtburger Archive (.hba) Format
+The `.hba` format is a flat binary archive designed for simplicity and performance.
 
-The `ACE.DatLoader` library in the current codebase provides robust **reading** capabilities but currently lacks **writing** capabilities.
+### 3.1. Binary Layout
+| Section | Type | Description |
+| :--- | :--- | :--- |
+| **Header** | 24 bytes | Magic, Version, Entry Count, Index Offset. |
+| **Index** | Array | List of File Entries (ID, Offset, Size, Flags). |
+| **Blobs** | Data | Compressed or raw file data. |
 
-## 4. Proposed Solution: `DatStripper` Tool
-We will create a C# CLI tool that utilizes `ACE.DatLoader` to read the source DAT files and implements a new `DatWriter` component to write the "Lite" DAT files.
+### 3.2. Header Specification
+| Field | Type | Size | Description |
+## 3. The Holtburger Architecture: VFS & Resource Providers
+To support both the current TUI client and a future high-fidelity 3D client, we will implement a **Virtual File System (VFS)** abstraction. The client will not interact with DAT/HBA files directly, but rather through a `ResourceProvider` trait.
+
+### 3.1. ResourceProvider Trait
+The `ResourceProvider` trait in `holtburger-dat` defines the interface for fetching game assets:
+*   `fn get_file(&self, id: u32) -> Result<Vec<u8>>`
+*   `fn exists(&self, id: u32) -> bool`
+
+**Implementations:**
+*   `DatProvider`: Reads from legacy AC `.dat` files via `DatDatabase`.
+*   `HbaProvider`: Reads from the new high-performance `.hba` archives.
+*   `CompositeProvider`: Chains multiple providers (e.g., "Check HBA first, then fallback to DAT").
+
+### 3.2. The Holtburger Archive (.hba) Format
+The `.hba` format is a flat binary archive optimized for the VFS.
+
+#### Binary Layout
+| Section | Type | Description |
+| :--- | :--- | :--- |
+| **Header** | 24 bytes | Magic (`HBA\0`), Version, Entry Count, Index Offset. |
+| **Index** | Array | Fixed-size list of File Entries. |
+| **Blobs** | Data | Contiguous file data (supports Zstd compression). |
+
+#### Index Entry (28 bytes)
+| Field | Type | Size | Description |
+| :--- | :--- | :--- | :--- |
+| File ID | `u32le` | 4 | The Asheron's Call Object ID (DID/WID). |
+| Offset | `u64le` | 8 | Offset to start of data. |
+| Size | `u32le` | 4 | Decompressed size. |
+| Comp Size | `u32le` | 4 | Compressed size (on disk). |
+| Flags | `u8` | 1 | `0x01`: Zstd, `0x02`: External Reference. |
+| Storage ID | `u8` | 1 | ID of external store (if flag `0x02` set). |
+| Reserved | `u8[6]` | 6 | Alignment / Future proofing. |
+
+## 4. Proposed Solution: `dat-stripper` Tool
+The `dat-stripper` CLI in `apps/dat-stripper` will act as a "Compiler" for the VFS.
 
 ### 4.1. Workflow
-1.  **Input:** Path to retail `client_portal.dat`, `client_cell.dat`, and `client_local_English.dat`.
-2.  **Processing:**
-    *   Iterate through all files in the source DAT.
-    *   Identify the file type based on Object ID (using `ACE.DatLoader.FileTypes`).
-    *   Filter files based on the "Keep/Strip" rules (defined in Section 5).
-    *   For retained files, copy the raw data to the new DAT file.
-3.  **Output:** New `lite_portal.dat`, `lite_cell.dat`, etc.
+1.  **Input:** Path to retail DAT files.
+2.  **Filter:** Select files based on "Keep/Strip" rules.
+3.  **Pack:**
+    *   Iterate through selected files.
+    *   (Optional) Compress data using Zstd.
+    *   Append blobs and build index entries.
+4.  **Output:** `portal.hba`, `cell.hba`, etc.
 
 ### 4.2. Handling Physics and Dependencies
-*   **Physics BSPs:** Stored in `GfxObj` (0x01) files. These must be retained to allow the client to calculate collisions with static objects (trees, buildings).
-*   **Setup Models:** `SetupModel` (0x02) files define the composition of objects. They reference `GfxObj` (0x01) files. Since we are retaining 0x01 files, these references remain valid.
-*   **Missing Textures:** `GfxObj` files reference `Surface` (0x08) and `Texture` (0x06) files. We will strip the texture files. The TUI client must be robust enough to handle missing texture resources (which it shouldn't attempt to load anyway).
+*   **Total Decoupling:** The `.hba` format remains generic. It stores the same blobs found in the DATs, just in a simpler container.
+*   **Client Loading:** The client will swap its `DatDatabase` implementation for a `CompositeProvider` (loading the HBA).
 
 ## 5. File Type Selection
 The following rules determine which files are included in the Lite DATs.
@@ -75,29 +115,24 @@ The following rules determine which files are included in the Lite DATs.
 
 ## 6. Implementation Plan
 
-### Phase 1: DatWriter Implementation
-We need to extend the `ACE.DatLoader` library (or create a helper) to support writing.
-*   **BlockAllocator:** Manages writing data into 1024-byte blocks with linkage.
-*   **DirectoryBuilder:** Constructs the B-Tree structure.
-    *   *Simplification:* Since we are writing a fresh file, we can produce a perfectly balanced B-Tree or even a packed structure without fragmentation.
+### Phase 1: `.hba` Writer in `holtburger-dat`
+We will add archive creation capabilities to the `holtburger-dat` crate.
+*   **HbaWriter:** A struct to build and serialize archive files.
+*   **HbaReader:** A new database implementation that can replace `DatDatabase` in the TUI client.
 
-### Phase 2: DatStripper CLI
-Create a console application `DatStripper.exe`.
-*   **Arguments:** `--input <dir> --output <dir>`
-*   **Configuration:** A hardcoded or JSON-based whitelist/blacklist of file types.
+### Phase 2: `dat-stripper` CLI
+Create a Rust binary crate in `apps/dat-stripper`.
+*   **CLI:** Use `clap` to handle input DAT paths and output HBA paths.
+*   **Filtering Logic:** Standardize the list of "Keep" file types.
 
-### Phase 3: Validation
-*   Run the TUI client with the generated Lite DATs.
-*   Verify successful login.
-*   Verify physics (walking into walls, falling).
-*   Verify combat (attack timing, damage calculation).
-*   Ensure no crashes due to missing texture/sound files (Headless client should mock or ignore `LoadTexture`/`PlaySound` calls).
+### Phase 3: Client Integration
+Update the TUI client to support loading from `.hba` if configured.
 
 ## 7. Feasibility Assessment
-*   **Feasibility:** **High**. The file format is well-understood, and the `ACE.DatLoader` provides a solid foundation.
+*   **Feasibility:** **High**. The file format is well-understood, and the `holtburger-dat` provides a solid foundation.
 *   **Risks:**
-    *   **Physics Dependencies:** If physics data is unexpectedly intertwined with `DrawingBSP` inside `GfxObj` in a way that requires textures, this assumption might fail. *Mitigation:* `GfxObj.cs` shows `PhysicsBSP` is distinct.
-    *   **Hardcoded Client Checks:** The client might assert the existence of certain files. *Mitigation:* Patch the TUI client to be permissive.
+    *   **Physics Dependencies:** If physics data is unexpectedly intertwined with `DrawingBSP` inside `GfxObj` in a way that requires textures, this assumption might fail. *Mitigation:* `gfx_obj.rs` shows `PhysicsBSP` is distinct.
+    *   **Hardcoded Client Checks:** The client might assert the existence of certain files. *Mitigation:* Patch the client codebase to be permissive or include dummy files.
 
 ## 8. Conclusion
-Creating a stripped DAT set is the most viable path to a distributable TUI client. It solves the legal/size issue while preserving the integrity of the simulation. The primary engineering effort is implementing the `DatWriter`.
+Creating a stripped DAT set is the most viable path to a distributable TUI client. It solves the legal/size issue while preserving the integrity of the simulation. The primary engineering effort is implementing the `DatWriter` in Rust.

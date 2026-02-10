@@ -44,7 +44,7 @@ impl EnvCell {
 
         let num_surfaces = u8::read(reader)?;
         let num_portals = u8::read(reader)?;
-        let num_stabs = u16::read_le(reader)?;
+        let num_visible_cells = u16::read_le(reader)?;
 
         let mut surfaces = Vec::with_capacity(num_surfaces as usize);
         for _ in 0..num_surfaces {
@@ -61,8 +61,8 @@ impl EnvCell {
             portals.push(CellPortal::read_le(reader)?);
         }
 
-        let mut visible_cells = Vec::with_capacity(num_stabs as usize);
-        for _ in 0..num_stabs {
+        let mut visible_cells = Vec::with_capacity(num_visible_cells as usize);
+        for _ in 0..num_visible_cells {
             visible_cells.push(u16::read_le(reader)?);
         }
 
@@ -101,9 +101,24 @@ impl EnvCell {
         self.flags.write_le(writer)?;
         self.cell_id.write_le(writer)?;
 
-        (self.surfaces.len() as u8).write_le(writer)?;
-        (self.portals.len() as u8).write_le(writer)?;
-        (self.visible_cells.len() as u16).write_le(writer)?;
+        let num_surfaces = u8::try_from(self.surfaces.len()).map_err(|e| binrw::Error::Custom {
+            pos: writer.stream_position().unwrap_or(0),
+            err: Box::new(e),
+        })?;
+        num_surfaces.write_le(writer)?;
+
+        let num_portals = u8::try_from(self.portals.len()).map_err(|e| binrw::Error::Custom {
+            pos: writer.stream_position().unwrap_or(0),
+            err: Box::new(e),
+        })?;
+        num_portals.write_le(writer)?;
+
+        let num_visible_cells =
+            u16::try_from(self.visible_cells.len()).map_err(|e| binrw::Error::Custom {
+                pos: writer.stream_position().unwrap_or(0),
+                err: Box::new(e),
+            })?;
+        num_visible_cells.write_le(writer)?;
 
         for &surf in &self.surfaces {
             surf.write_le(writer)?;

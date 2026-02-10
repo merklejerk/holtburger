@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn test_decompress_lrs_literal() {
         let input = vec![
-            4, 0, 0, 0, // Size 4
+            4, 0, 0, 0,    // Size 4
             0x00, // Control byte: all literals (0)
             0xAA, 0xBB, 0xCC, 0xDD,
         ];
@@ -229,8 +229,8 @@ mod tests {
         // 'A', 'B', 'C', then backref to 'A', 'B', 'C' (offset 3, length 1+2=3)
         // Control bit starts at 0x80.
         let input = vec![
-            6, 0, 0, 0, // Size 6
-            0x10,       // 0001 0000. bits 0..3 are 0 (literals), bit 4 is 1 (backref)
+            6, 0, 0, 0,    // Size 6
+            0x10, // 0001 0000. bits 0..3 are 0 (literals), bit 4 is 1 (backref)
             b'A', b'B', b'C', 0x03, 0x01, // b1=3, b2=1 (length 1+2=3)
         ];
         let decompressed = decompress_lrs(&input);

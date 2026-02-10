@@ -1,0 +1,16 @@
+[package]
+name = "holtburger-dat"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+holtburger-common.workspace = true
+binrw.workspace = true
+serde.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+bitflags.workspace = true
+encoding_rs.workspace = true

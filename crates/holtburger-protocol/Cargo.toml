@@ -1,0 +1,22 @@
+[package]
+name = "holtburger-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+log = "0.4"
+holtburger-common.workspace = true
+binrw.workspace = true
+serde.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+bitflags.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+byteorder.workspace = true
+hex = "0.4.3"
+
+[dev-dependencies]

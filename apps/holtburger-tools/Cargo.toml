@@ -11,6 +11,6 @@ anyhow = { workspace = true }
 clap = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
-indicatif = "0.17" # Progress bars for the win
-rayon = "1.11.0"
+indicatif = { workspace = true } # Progress bars for the win
+rayon = { workspace = true }
 thiserror.workspace = true

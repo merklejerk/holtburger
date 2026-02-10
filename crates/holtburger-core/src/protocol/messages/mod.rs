@@ -11,9 +11,9 @@ pub mod utils;
 pub mod test_helpers;
 
 // Re-export core enums
-pub use game_action::{GameAction, GameActionMessage, *};
-pub use game_event::{GameEvent, GameEventMessage, *};
-pub use game_message::{GameMessage, *};
+pub use holtburger_protocol::messages::game_action::*;
+pub use holtburger_protocol::messages::game_event::*;
+pub use holtburger_protocol::messages::game_message::*;
 
 pub use common::*;
 pub use opcodes::*;

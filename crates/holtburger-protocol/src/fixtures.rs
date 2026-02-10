@@ -1,0 +1,34 @@
+pub const CHARACTER_LIST: &[u8] = include_bytes!("../tests/fixtures/character_list.bin");
+pub const PLAYER_DESCRIPTION: &[u8] = include_bytes!("../tests/fixtures/player_description.bin");
+pub const UPDATE_PROPERTY_INT: &[u8] =
+    include_bytes!("../tests/fixtures/update_property_int.bin");
+pub const OBJECT_CREATE_BUDDY: &[u8] =
+    include_bytes!("../tests/fixtures/object_create_buddy.bin");
+pub const OBJECT_CREATE_SHIRT: &[u8] =
+    include_bytes!("../tests/fixtures/object_create_shirt.bin");
+pub const CHARACTER_ENTER_WORLD: &[u8] =
+    include_bytes!("../tests/fixtures/character_enter_world.bin");
+pub const CHARACTER_ENTER_WORLD_REQUEST: &[u8] =
+    include_bytes!("../tests/fixtures/character_enter_world_request.bin");
+pub const PLAYER_DESCRIPTION_MINIMAL: &[u8] =
+    include_bytes!("../tests/fixtures/player_description_minimal.bin");
+pub const OBJECT_CREATE_MINIMAL: &[u8] =
+    include_bytes!("../tests/fixtures/object_create_minimal.bin");
+pub const OBJECT_CREATE_COMPLEX: &[u8] =
+    include_bytes!("../tests/fixtures/object_create_complex.bin");
+pub const CREATURE_SKILL_MELEE_DEF: &[u8] =
+    include_bytes!("../tests/fixtures/creature_skill_melee_def.bin");
+pub const MOVEMENT_EVENT_MOVETO: &[u8] =
+    include_bytes!("../tests/fixtures/movement_event_moveto.bin");
+pub const MOVEMENT_EVENT_MOVETO_OBJ: &[u8] =
+    include_bytes!("../tests/fixtures/movement_event_moveto_obj.bin");
+pub const MOVEMENT_TURN_TO_OBJ: &[u8] =
+    include_bytes!("../tests/fixtures/movement_turn_to_obj.bin");
+pub const MOVEMENT_EVENT_COMPLEX: &[u8] =
+    include_bytes!("../tests/fixtures/movement_event_complex.bin");
+pub const MOVEMENT_EVENT_TURN_TO_OBJ: &[u8] =
+    include_bytes!("../tests/fixtures/movement_event_turn_to_obj.bin");
+pub const MOVEMENT_EVENT_IDLE: &[u8] =
+    include_bytes!("../tests/fixtures/movement_event_idle.bin");
+pub const MOVEMENT_MOVE_TO_POS: &[u8] =
+    include_bytes!("../tests/fixtures/movement_move_to_pos.bin");

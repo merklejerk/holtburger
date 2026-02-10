@@ -610,7 +610,7 @@ impl Client {
                 }
             }
             GameMessage::GameEvent(ev) => match &ev.event {
-                GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
+                GameEvent::PlayerDescription(_) | holtburger_protocol::messages::game_event::GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
                         self.send_status_event();
@@ -1018,9 +1018,9 @@ impl Client {
         if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
             self.last_move_sync = now;
 
-            let data = crate::protocol::messages::game_action::movement::MoveToStateData {
+            let data = crate::protocol::messages::game_action::MoveToStateData {
                 raw_motion_state:
-                    crate::protocol::messages::game_message::movement::RawMotionState {
+                    crate::protocol::messages::game_message::RawMotionState {
                         flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
                         current_hold_key: Some(HoldKey::Run as u32),
                         forward_speed: Some(7.0),

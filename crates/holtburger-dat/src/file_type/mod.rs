@@ -42,23 +42,23 @@ pub enum DatFileType {
 
 impl DatFileType {
     pub fn is_essential(&self) -> bool {
-        match self {
+        matches!(
+            self,
             DatFileType::Model
-            | DatFileType::SetupModel
-            | DatFileType::Animation
-            | DatFileType::AnimationDone
-            | DatFileType::EnvCell
-            | DatFileType::Table
-            | DatFileType::Region
-            | DatFileType::CombatTable
-            | DatFileType::PhysicsScript
-            | DatFileType::PhysicsScriptTable
-            | DatFileType::LanguageString
-            | DatFileType::Landblock
-            | DatFileType::LandblockInfo
-            | DatFileType::IndoorCell => true,
-            _ => false,
-        }
+                | DatFileType::SetupModel
+                | DatFileType::Animation
+                | DatFileType::AnimationDone
+                | DatFileType::EnvCell
+                | DatFileType::Table
+                | DatFileType::Region
+                | DatFileType::CombatTable
+                | DatFileType::PhysicsScript
+                | DatFileType::PhysicsScriptTable
+                | DatFileType::LanguageString
+                | DatFileType::Landblock
+                | DatFileType::LandblockInfo
+                | DatFileType::IndoorCell
+        )
     }
 
     pub fn from_id(id: u32) -> Self {

@@ -129,7 +129,7 @@ impl EnvCell {
             }
         }
 
-        if let Some(res) = self.restriction_obj {
+        if let Some(res) = self.restriction_obj.filter(|_| (self.flags & 0x02) != 0) {
             res.write_le(writer)?;
         }
 

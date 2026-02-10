@@ -23,6 +23,7 @@ pub struct BspPortal {
     pub plane: Plane,
     pub pos: Box<BspNode>,
     pub neg: Box<BspNode>,
+    pub sphere: Option<Sphere>,
     pub poly_ids: Vec<u16>,
     pub portal_polys: Vec<PortalPoly>,
 }
@@ -159,9 +160,10 @@ impl BspPortal {
 
         let mut poly_ids = Vec::new();
         let mut portal_polys = Vec::new();
+        let mut sphere = None;
 
         if tree_type == BspType::Drawing {
-            let _sphere = Sphere::read_le(reader)?;
+            sphere = Some(Sphere::read_le(reader)?);
             let num_polys = u32::read_le(reader)?;
             let num_portals = u32::read_le(reader)?;
 
@@ -178,6 +180,7 @@ impl BspPortal {
             plane,
             pos,
             neg,
+            sphere,
             poly_ids,
             portal_polys,
         })
@@ -189,15 +192,15 @@ impl BspPortal {
         self.neg.write(writer, tree_type)?;
 
         if tree_type == BspType::Drawing {
-            // Recompute or use a dummy sphere?
-            // For now we'll write a zero sphere or we should store it.
-            // Actually the original code skipped reading it into the struct.
-            // Let's add it to the struct for parity.
-            Sphere {
-                center: holtburger_common::Vector3::zero(),
-                radius: 0.0,
+            if let Some(s) = &self.sphere {
+                s.write_le(writer)?;
+            } else {
+                Sphere {
+                    center: holtburger_common::Vector3::zero(),
+                    radius: 0.0,
+                }
+                .write_le(writer)?;
             }
-            .write_le(writer)?;
             (self.poly_ids.len() as u32).write_le(writer)?;
             (self.portal_polys.len() as u32).write_le(writer)?;
 

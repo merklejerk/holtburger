@@ -4,18 +4,26 @@ Binary Space Partitioning (BSP) trees are the core of the Asheron's Call physics
 
 ## 1. Node Identification (Tags)
 
-Every node in the tree begins with a 4-byte ASCII tag. These tags are stored in **Little Endian** format on disk (e.g., "BPnn" is read as `nnPB`).
+Every node in the tree begins with a 4-byte ASCII tag. These tags are stored in **Little Endian** format on disk. When read as a 4-byte string, the order must be reversed to match logical tags.
 
-| Tag | Name | Type | Child Nodes |
-| :--- | :--- | :--- | :--- |
-| `PORT` | Portal | Portal Node | Positive & Negative |
-| `LEAF` | Leaf | Leaf Node | None (Terminal) |
-| `BPnn` | Internal | Splitting Node | Positive Only |
-| `BPIn` | Internal | Splitting Node | Positive Only |
-| `BpIN` | Internal | Splitting Node | Negative Only |
-| `BpnN` | Internal | Splitting Node | Negative Only |
-| `BPIN` | Internal | Splitting Node | Positive & Negative |
-| `BPnN` | Internal | Splitting Node | Positive & Negative |
+| Tag (Logical) | Name | Type | Disk Order (Hex) | Child Nodes |
+| :--- | :--- | :--- | :--- | :--- |
+| `PORT` | Portal | Portal Node | `54 52 4F 50` (`TROP`) | Positive & Negative |
+| `LEAF` | Leaf | Leaf Node | `46 41 45 4C` (`FAEL`) | None (Terminal) |
+| `BPnn` | Internal | Splitting Node | `6E 6E 50 42` (`nnPB`) | Positive Only |
+| `BPIn` | Internal | Splitting Node | `6E 49 50 42` (`nIPB`) | Positive Only |
+| `BpIN` | Internal | Splitting Node | `4E 49 70 42` (`NIPb`) | Negative Only |
+| `BpnN` | Internal | Splitting Node | `4E 6E 70 42` (`NnPb`) | Negative Only |
+| `BPIN` | Internal | Splitting Node | `4E 49 50 42` (`NIPB`) | Positive & Negative |
+| `BPnN` | Internal | Splitting Node | `4E 6E 50 42` (`NnPB`) | Positive & Negative |
+
+### Tag Flags (The "BPxx" Logic)
+The two characters following "BP" indicate the presence of child nodes:
+- `I` / `P`: "In" or "Positive" child exists.
+- `N`: "Negative" child exists.
+- `n`: Indicates the child is a **Leaf** or null (structure varies by tag version).
+
+> **Note**: In practice, the engine uses these flags to determine recursion. For example, `BPIN` implies the reader must recursively call `ReadNode` twice.
 
 ## 2. Shared Structures
 

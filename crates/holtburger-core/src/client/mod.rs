@@ -72,12 +72,7 @@ impl Client {
     ) -> Result<Self> {
         // Try to find DATs in common locations
         let mut portal_dat = None;
-        for path in [
-            "portal.dat",
-            "dats/portal.dat",
-            "ace-root/dats/portal.dat",
-            "../dats/portal.dat",
-        ] {
+        for path in ["portal.dat", "dats/portal.dat", "../dats/portal.dat"] {
             if let Ok(db) = holtburger_dat::DatDatabase::new(path) {
                 portal_dat = Some(std::sync::Arc::new(db));
                 break;
@@ -613,8 +608,7 @@ impl Client {
                 }
             }
             GameMessage::GameEvent(ev) => match &ev.event {
-                GameEvent::PlayerDescription(_)
-                | GameEvent::StartGame => {
+                GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.state = ClientState::InWorld;
                         self.send_status_event();

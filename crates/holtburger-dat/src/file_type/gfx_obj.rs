@@ -85,8 +85,29 @@ impl GfxObj {
     }
 
     pub fn pack<W: Write + Seek>(&self, writer: &mut W) -> binrw::BinResult<()> {
+        let mut flags = self.flags;
+
+        // Ensure flags are consistent with presence of BSPs
+        if self.physics_bsp.is_none() {
+            flags.remove(GfxObjFlags::HAS_PHYSICS);
+        } else {
+            flags.insert(GfxObjFlags::HAS_PHYSICS);
+        }
+
+        if self.drawing_bsp.is_none() {
+            flags.remove(GfxObjFlags::HAS_DRAWING);
+        } else {
+            flags.insert(GfxObjFlags::HAS_DRAWING);
+        }
+
+        if self.did_degrade.is_none() {
+            flags.remove(GfxObjFlags::HAS_DID_DEGRADE);
+        } else {
+            flags.insert(GfxObjFlags::HAS_DID_DEGRADE);
+        }
+
         self.id.write_le(writer)?;
-        self.flags.bits().write_le(writer)?;
+        flags.bits().write_le(writer)?;
 
         write_compressed_u32(writer, self.surfaces.len() as u32)?;
         for &surf in &self.surfaces {
@@ -95,7 +116,7 @@ impl GfxObj {
 
         self.vertex_array.write_le(writer)?;
 
-        if self.flags.intersects(GfxObjFlags::HAS_PHYSICS) {
+        if flags.intersects(GfxObjFlags::HAS_PHYSICS) {
             write_compressed_u32(writer, self.physics_polygons.len() as u32)?;
             let mut keys: Vec<_> = self.physics_polygons.keys().collect();
             keys.sort();
@@ -110,7 +131,7 @@ impl GfxObj {
 
         self.sort_center.write_le(writer)?;
 
-        if self.flags.intersects(GfxObjFlags::HAS_DRAWING) {
+        if flags.intersects(GfxObjFlags::HAS_DRAWING) {
             write_compressed_u32(writer, self.polygons.len() as u32)?;
             let mut keys: Vec<_> = self.polygons.keys().collect();
             keys.sort();
@@ -123,7 +144,7 @@ impl GfxObj {
             }
         }
 
-        if self.flags.intersects(GfxObjFlags::HAS_DID_DEGRADE)
+        if flags.intersects(GfxObjFlags::HAS_DID_DEGRADE)
             && let Some(did) = self.did_degrade
         {
             did.write_le(writer)?;

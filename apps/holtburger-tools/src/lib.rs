@@ -143,7 +143,11 @@ pub fn process_dat(
 
             kept_count.fetch_add(1, Ordering::SeqCst);
             pb.inc(1);
-            Some((id, id >> 24, data, is_pruned))
+
+            // Use the logical DatFileType as the type_id instead of deriving it from the raw id.
+            // This ensures cell records (which use coordinate data in the high byte) are correctly typed.
+            let type_id = file_type as u32;
+            Some((id, type_id, data, is_pruned))
         })
         .collect();
 

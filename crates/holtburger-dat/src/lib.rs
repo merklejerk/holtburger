@@ -213,7 +213,7 @@ pub fn get_weenie_name(provider: &dyn ResourceProvider, wcid: u32) -> Option<Str
 
 impl ResourceProvider for DatDatabase {
     fn get_file(&self, id: u32) -> Result<Vec<u8>> {
-        self.get_file(id)
+        DatDatabase::get_file(self, id)
     }
 
     fn get_metadata(&self, id: u32) -> Option<FileMetadata> {

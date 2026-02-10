@@ -1,7 +1,7 @@
 # Technical Specification: DAT File Stripper for TUI Client
 
 ## 1. Executive Summary
-To enable a functional headless/TUI client for the project, we need access to game data (physics, logic tables, landblocks) without distributing the massive, copyrighted retail DAT files containing artwork and audio. This document proposes a CLI tool, `dat-stripper`, implemented in Rust, which processes retail DAT files to produce "Holtburger Archive" (`.hba`) files.
+To enable a functional headless/TUI client for the project, we need access to game data (physics, logic tables, landblocks) without distributing the massive, copyrighted retail DAT files containing artwork and audio. This document proposes a CLI toolset, `holtburger-tools`, implemented in Rust, which processes retail DAT files to produce "Holtburger Archive" (`.hba`) files.
 
 These `.hba` files provide a modern, simplified alternative to the complex AC DAT format, optimized for fast loading and reduced file size while remaining easy to parse by other tools.
 
@@ -49,8 +49,8 @@ The `.hba` format is a flat binary archive optimized for the VFS.
 | Storage ID | `u8` | 1 | ID of external store (if flag `0x02` set). |
 | Reserved | `u8[6]` | 6 | Alignment / Future proofing. |
 
-## 4. Proposed Solution: `dat-stripper` Tool
-The `dat-stripper` CLI in `apps/dat-stripper` will act as a "Compiler" for the VFS.
+## 4. Proposed Solution: `holtburger-tools`
+The `holtburger-tools` binary crate in `apps/holtburger-tools` will act as a "Compiler" for the VFS.
 
 ### 4.1. Workflow
 1.  **Input:** Path to retail DAT files.
@@ -124,12 +124,12 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 
 |   | Task | Notes |
 | :---: | :--- | :--- |
-| [ ] | Define `ResourceProvider` trait in `src/lib.rs` | |
-| [ ] | Refactor `DatDatabase` to implement `ResourceProvider` | |
-| [ ] | Implement `CompositeProvider` (Chain of Responsibility) | |
-| [ ] | Add unit tests for `CompositeProvider` using mock providers | |
-| [ ] | Create integration tests validating `ResourceProvider` against retail DAT fixtures | |
-| **Criteria** | **Phase 1 Completion Criteria:** All unit and fixture-based tests pass. 0% reliance on TUI for validation. | |
+| [x] | Define `ResourceProvider` trait in `src/lib.rs` | Added to `holtburger-dat/src/lib.rs`. |
+| [x] | Refactor `DatDatabase` to implement `ResourceProvider` | Inherent `get_file` satisfies trait. |
+| [x] | Implement `CompositeProvider` (Chain of Responsibility) | Added with `add` method for trait objects. |
+| [x] | Add unit tests for `CompositeProvider` using mock providers | Verified via `cargo test`. |
+| [x] | Create integration tests validating `ResourceProvider` against retail DAT fixtures | Verified against `/ace-root/dats/portal.dat`. |
+| **Criteria** | **Phase 1 Completion Criteria:** All unit and fixture-based tests pass. 0% reliance on TUI for validation. | Completed. |
 
 ---
 
@@ -147,17 +147,17 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 
 ---
 
-### Phase 3: The `dat-stripper` CLI
+### Phase 3: The `holtburger-tools` CLI
 **Goal:** Create the tool that actually performs the conversion.
 
 |   | Task | Notes |
 | :---: | :--- | :--- |
-| [ ] | Create `apps/dat-stripper` binary crate | |
+| [ ] | Create `apps/holtburger-tools` binary crate | |
 | [ ] | Implement `clap` CLI interface (`--input`, `--output`) | |
 | [ ] | Implement filtering logic (Whitelist by `DatFileType`) | |
 | [ ] | Add progress reporting (e.g., `indicatif` crate) | |
 | [ ] | Integration test: Strip retail `portal.dat` -> Validate output HBA | |
-| **Criteria** | **Phase 3 Completion Criteria:** `dat-stripper` produces valid `.hba` from retail DATs. | |
+| **Criteria** | **Phase 3 Completion Criteria:** `holtburger-tools` produces valid `.hba` from retail DATs. | |
 
 ---
 

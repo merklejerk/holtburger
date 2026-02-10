@@ -4,10 +4,12 @@ pub mod landblock;
 pub mod physics;
 pub mod utils;
 pub mod weenie;
+pub mod archive;
 
 use anyhow::{Context, Result};
 use binrw::{BinRead, io::Cursor};
 pub use file_type::DatFileType;
+pub use archive::{HbaReader, HbaWriter};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -15,6 +17,14 @@ use std::path::{Path, PathBuf};
 
 pub const DAT_HEADER_OFFSET: u64 = 0x140;
 pub const DIRECTORY_NODE_SIZE: usize = 1716;
+
+pub trait ResourceProvider: Send + Sync {
+    /// Retrieves the raw bytes of a file by its Asheron's Call ID.
+    fn get_file(&self, id: u32) -> Result<Vec<u8>>;
+    
+    /// Returns true if the file exists in this provider.
+    fn exists(&self, id: u32) -> bool;
+}
 
 #[derive(BinRead, Debug)]
 #[br(little)]
@@ -185,5 +195,94 @@ impl DatDatabase {
         }
 
         Ok(buffer)
+    }
+}
+
+impl ResourceProvider for DatDatabase {
+    fn get_file(&self, id: u32) -> Result<Vec<u8>> {
+        self.get_file(id)
+    }
+
+    fn exists(&self, id: u32) -> bool {
+        self.files.contains_key(&id)
+    }
+}
+
+pub struct CompositeProvider {
+    providers: Vec<Box<dyn ResourceProvider>>,
+}
+
+impl Default for CompositeProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CompositeProvider {
+    pub fn new() -> Self {
+        Self {
+            providers: Vec::new(),
+        }
+    }
+
+    pub fn add(&mut self, provider: impl ResourceProvider + 'static) {
+        self.providers.push(Box::new(provider));
+    }
+}
+
+impl ResourceProvider for CompositeProvider {
+    fn get_file(&self, id: u32) -> Result<Vec<u8>> {
+        for provider in &self.providers {
+            if provider.exists(id) {
+                return provider.get_file(id);
+            }
+        }
+        anyhow::bail!("File ID {:08X} not found in any provider", id)
+    }
+
+    fn exists(&self, id: u32) -> bool {
+        self.providers.iter().any(|p| p.exists(id))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockProvider {
+        files: HashMap<u32, Vec<u8>>,
+    }
+
+    impl ResourceProvider for MockProvider {
+        fn get_file(&self, id: u32) -> Result<Vec<u8>> {
+            self.files.get(&id).cloned().context("Not found")
+        }
+        fn exists(&self, id: u32) -> bool {
+            self.files.contains_key(&id)
+        }
+    }
+
+    #[test]
+    fn test_composite_provider() {
+        let mut p1 = MockProvider {
+            files: HashMap::new(),
+        };
+        p1.files.insert(0x1234, vec![1, 2, 3]);
+
+        let mut p2 = MockProvider {
+            files: HashMap::new(),
+        };
+        p2.files.insert(0x5678, vec![4, 5, 6]);
+
+        let mut composite = CompositeProvider::new();
+        composite.add(p1);
+        composite.add(p2);
+
+        assert!(composite.exists(0x1234));
+        assert!(composite.exists(0x5678));
+        assert!(!composite.exists(0x9999));
+
+        assert_eq!(composite.get_file(0x1234).unwrap(), vec![1, 2, 3]);
+        assert_eq!(composite.get_file(0x5678).unwrap(), vec![4, 5, 6]);
     }
 }

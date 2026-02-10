@@ -1,8 +1,9 @@
 use crate::graphics::{CVertexArray, Polygon};
 use crate::physics::{BspNode, BspType};
+use crate::utils::{read_compressed_u32, write_compressed_u32};
 use binrw::{
-    BinRead,
-    io::{Read, Seek},
+    BinRead, BinWrite,
+    io::{Read, Seek, Write},
 };
 use holtburger_common::Vector3;
 use holtburger_common::properties::GfxObjFlags;
@@ -28,8 +29,7 @@ impl GfxObj {
         let flags_bits = u32::read_le(reader)?;
         let flags = GfxObjFlags::from_bits_retain(flags_bits);
 
-        // surfaces (SmartArray in ACE)
-        let num_surfaces = u32::read_le(reader)?;
+        let num_surfaces = read_compressed_u32(reader)?;
         let mut surfaces = Vec::with_capacity(num_surfaces as usize);
         for _ in 0..num_surfaces {
             surfaces.push(u32::read_le(reader)?);
@@ -41,8 +41,7 @@ impl GfxObj {
         let mut physics_bsp = None;
 
         if flags.intersects(GfxObjFlags::HAS_PHYSICS) {
-            // HasPhysics
-            let num_phys_polys = u32::read_le(reader)?;
+            let num_phys_polys = read_compressed_u32(reader)?;
             for _ in 0..num_phys_polys {
                 let pid = u16::read_le(reader)?;
                 let poly = Polygon::read_le(reader)?;
@@ -57,8 +56,7 @@ impl GfxObj {
         let mut drawing_bsp = None;
 
         if flags.intersects(GfxObjFlags::HAS_DRAWING) {
-            // HasDrawing
-            let num_drawing_polys = u32::read_le(reader)?;
+            let num_drawing_polys = read_compressed_u32(reader)?;
             for _ in 0..num_drawing_polys {
                 let pid = u16::read_le(reader)?;
                 let poly = Polygon::read_le(reader)?;
@@ -69,7 +67,6 @@ impl GfxObj {
 
         let mut did_degrade = None;
         if flags.intersects(GfxObjFlags::HAS_DID_DEGRADE) {
-            // HasDIDDegrade
             did_degrade = Some(u32::read_le(reader)?);
         }
 
@@ -86,6 +83,63 @@ impl GfxObj {
             did_degrade,
         })
     }
+
+    pub fn pack<W: Write + Seek>(&self, writer: &mut W) -> binrw::BinResult<()> {
+        self.id.write_le(writer)?;
+        self.flags.bits().write_le(writer)?;
+
+        write_compressed_u32(writer, self.surfaces.len() as u32)?;
+        for &surf in &self.surfaces {
+            surf.write_le(writer)?;
+        }
+
+        self.vertex_array.write_le(writer)?;
+
+        if self.flags.intersects(GfxObjFlags::HAS_PHYSICS) {
+            write_compressed_u32(writer, self.physics_polygons.len() as u32)?;
+            let mut keys: Vec<_> = self.physics_polygons.keys().collect();
+            keys.sort();
+            for &pid in keys {
+                pid.write_le(writer)?;
+                self.physics_polygons.get(&pid).unwrap().write_le(writer)?;
+            }
+            if let Some(bsp) = &self.physics_bsp {
+                bsp.write(writer, BspType::Physics)?;
+            }
+        }
+
+        self.sort_center.write_le(writer)?;
+
+        if self.flags.intersects(GfxObjFlags::HAS_DRAWING) {
+            write_compressed_u32(writer, self.polygons.len() as u32)?;
+            let mut keys: Vec<_> = self.polygons.keys().collect();
+            keys.sort();
+            for &pid in keys {
+                pid.write_le(writer)?;
+                self.polygons.get(&pid).unwrap().write_le(writer)?;
+            }
+            if let Some(bsp) = &self.drawing_bsp {
+                bsp.write(writer, BspType::Drawing)?;
+            }
+        }
+
+        if self.flags.intersects(GfxObjFlags::HAS_DID_DEGRADE) {
+            if let Some(did) = self.did_degrade {
+                did.write_le(writer)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Prune visual data from this GfxObj, keeping only physics and metadata.
+    pub fn prune(&mut self) {
+        self.flags.remove(GfxObjFlags::HAS_DRAWING);
+        self.polygons.clear();
+        self.drawing_bsp = None;
+        // Note: For now we keep the full vertex array because physics might reference it.
+        // A truly aggressive prune would filter the vertex array too.
+    }
 }
 
 #[cfg(test)]
@@ -94,22 +148,62 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn test_gfx_obj_unpack_minimal() {
+    fn test_gfx_obj_roundtrip() {
         let mut data = Vec::new();
-        data.extend_from_slice(&(0x01000001u32).to_le_bytes()); // ID
-        data.extend_from_slice(&(0u32).to_le_bytes()); // Flags (No Physics, No Drawing)
-        data.extend_from_slice(&(0u32).to_le_bytes()); // Num Surfaces
-        data.extend_from_slice(&(1i32).to_le_bytes()); // VertexArray Type
-        data.extend_from_slice(&(0u32).to_le_bytes()); // Num Vertices
-        data.extend_from_slice(&(0.0f32).to_le_bytes()); // Sort Center X
-        data.extend_from_slice(&(0.0f32).to_le_bytes()); // Sort Center Y
-        data.extend_from_slice(&(0.0f32).to_le_bytes()); // Sort Center Z
+        let mut writer = Cursor::new(&mut data);
+        
+        (0x01000001u32).write_le(&mut writer).unwrap(); // ID
+        (0u32).write_le(&mut writer).unwrap(); // Flags
+        write_compressed_u32(&mut writer, 0).unwrap(); // Num Surfaces
+        (1i32).write_le(&mut writer).unwrap(); // VertexArray Type
+        (0u32).write_le(&mut writer).unwrap(); // Num Vertices
+        (1.0f32).write_le(&mut writer).unwrap(); // Sort Center X
+        (2.0f32).write_le(&mut writer).unwrap(); // Sort Center Y
+        (3.0f32).write_le(&mut writer).unwrap(); // Sort Center Z
 
-        let mut cursor = Cursor::new(data);
+        let mut cursor = Cursor::new(data.clone());
         let obj = GfxObj::unpack(&mut cursor).unwrap();
 
-        assert_eq!(obj.id, 0x01000001);
-        assert_eq!(obj.surfaces.len(), 0);
-        assert!(obj.physics_bsp.is_none());
+        let mut out = Vec::new();
+        let mut writer = Cursor::new(&mut out);
+        obj.pack(&mut writer).unwrap();
+
+        assert_eq!(data, out);
+    }
+
+    #[test]
+    fn test_gfx_obj_prune() {
+        use holtburger_common::properties::GfxObjFlags;
+        
+        let mut obj = GfxObj {
+            id: 1,
+            flags: GfxObjFlags::HAS_DRAWING | GfxObjFlags::HAS_PHYSICS,
+            surfaces: vec![],
+            vertex_array: CVertexArray { vertex_type: 1, vertices: HashMap::new() },
+            physics_polygons: HashMap::new(),
+            physics_bsp: None,
+            sort_center: Vector3::zero(),
+            polygons: HashMap::from([(1, Polygon {
+                num_pts: 3,
+                stippling: 0,
+                sides_type: 1,
+                pos_surface: 0,
+                neg_surface: 0,
+                vertex_ids: vec![0, 1, 2],
+                pos_uv_indices: vec![0, 0, 0],
+                neg_uv_indices: vec![0, 0, 0],
+            })]),
+            drawing_bsp: None, // Simplified for test
+            did_degrade: None,
+        };
+
+        assert!(obj.flags.contains(GfxObjFlags::HAS_DRAWING));
+        assert_eq!(obj.polygons.len(), 1);
+
+        obj.prune();
+
+        assert!(!obj.flags.contains(GfxObjFlags::HAS_DRAWING));
+        assert!(obj.flags.contains(GfxObjFlags::HAS_PHYSICS));
+        assert_eq!(obj.polygons.len(), 0);
     }
 }

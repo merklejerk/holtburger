@@ -62,6 +62,15 @@ The directory is a B-Tree where every node is exactly **1716 bytes**.
 - **`0x00000001` (Compression)**: Data is compressed (usually LZSS or a Zlib variant).
 - **`0x00020000`**: Seen in `LandblockInfo` (LBI) files; usage related to cache/persistence.
 
+## Common Data Types
+
+### Compressed UInt32 (SmartArray length)
+Many file types (GfxObj, Weenie) use a variable-length encoding for item counts and string lengths. This is often referred to as a **SmartArray** prefix.
+
+- **1 Byte**: If the first MSB (`0x80`) is 0, the value is the byte itself (`0x00 - 0x7F`).
+- **2 Bytes**: If the first MSB (`0x80`) is set and the second MSB (`0x40`) is 0, it is 2 bytes. Mask the first byte with `0x7F`, shift left 8, and OR with the second byte.
+- **4 Bytes**: If both `0x80` and `0x40` are set, it is 4 bytes. Mask the first byte with `0x3F`, then shift and OR with the next 3 bytes.
+
 ## File ID Categorization
 
 File IDs (Object IDs) determine both the type of data and which DAT file it resides in.

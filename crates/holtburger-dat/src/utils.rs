@@ -1,5 +1,5 @@
-use binrw::BinRead;
-use std::io::{Read, Seek, SeekFrom};
+use binrw::{BinRead, BinWrite};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 pub fn read_compressed_u32<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<u32> {
     let b0 = u8::read(reader)?;
@@ -14,6 +14,25 @@ pub fn read_compressed_u32<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<u
             Ok(((((b0 as u32 & 0x3F) << 8) | b1 as u32) << 16) | s as u32)
         }
     }
+}
+
+pub fn write_compressed_u32<W: Write + Seek>(writer: &mut W, val: u32) -> binrw::BinResult<()> {
+    if val < 0x80 {
+        (val as u8).write(writer)?;
+    } else if val < 0x4000 {
+        let b0 = 0x80 | ((val >> 8) & 0x3F) as u8;
+        let b1 = (val & 0xFF) as u8;
+        b0.write(writer)?;
+        b1.write(writer)?;
+    } else {
+        let b0 = 0xC0 | ((val >> 24) & 0x3F) as u8;
+        let b1 = ((val >> 16) & 0xFF) as u8;
+        let s = (val & 0xFFFF) as u16;
+        b0.write(writer)?;
+        b1.write(writer)?;
+        s.write_le(writer)?;
+    }
+    Ok(())
 }
 
 pub fn read_pstring<R: Read + Seek>(

@@ -10,12 +10,13 @@
 //! 
 //! File naming convention for packing: [ID].[TYPE] (both in hex).
 
-use anyhow::{Context, Result};
+use crate::error::{DatError, Result};
 use binrw::{BinRead, BinWrite, io::Cursor};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::io::{Seek, SeekFrom, Write};
+use std::os::unix::fs::FileExt;
+use std::path::Path;
 use crate::ResourceProvider;
 
 pub const HBA_MAGIC: [u8; 4] = *b"HBA\0";
@@ -30,6 +31,7 @@ pub struct HbaHeader {
     pub entry_count: u32,
     pub index_offset: u64,
     pub metadata_size: u32,
+    pub profile: u32,
 }
 
 #[derive(BinRead, BinWrite, Debug, Clone)]
@@ -49,9 +51,14 @@ pub struct HbaEntry {
 impl HbaEntry {
     pub const FLAG_ZSTD: u8 = 0x01;
     pub const FLAG_EXTERNAL: u8 = 0x02;
+    pub const FLAG_PRUNED: u8 = 0x04;
 
     pub fn is_compressed(&self) -> bool {
         (self.flags & Self::FLAG_ZSTD) != 0
+    }
+
+    pub fn is_pruned(&self) -> bool {
+        (self.flags & Self::FLAG_PRUNED) != 0
     }
 }
 
@@ -59,16 +66,16 @@ impl HbaEntry {
 pub struct HbaReader {
     pub header: HbaHeader,
     pub index: HashMap<u32, HbaEntry>,
-    path: PathBuf,
+    file: File,
 }
 
 impl HbaReader {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let mut file = File::open(&path)?;
-        let header = HbaHeader::read(&mut file).context("Failed to read HBA header")?;
-        
+        let header = HbaHeader::read(&mut file)?;
+
         if header.magic != HBA_MAGIC {
-            anyhow::bail!("Invalid HBA magic");
+            return Err(DatError::InvalidMagic("HBA".to_string()));
         }
 
         file.seek(SeekFrom::Start(header.index_offset))?;
@@ -81,20 +88,17 @@ impl HbaReader {
         Ok(Self {
             header,
             index,
-            path: path.as_ref().to_path_buf(),
+            file,
         })
     }
 }
 
 impl ResourceProvider for HbaReader {
     fn get_file(&self, id: u32) -> Result<Vec<u8>> {
-        let entry = self.index.get(&id).context("File ID not found in HBA")?;
-        
-        let mut file = File::open(&self.path)?;
-        file.seek(SeekFrom::Start(entry.offset))?;
-        
+        let entry = self.index.get(&id).ok_or(DatError::NotFound(id))?;
+
         let mut buffer = vec![0u8; entry.comp_size as usize];
-        file.read_exact(&mut buffer)?;
+        self.file.read_exact_at(&mut buffer, entry.offset)?;
 
         if entry.is_compressed() {
             let decompressed = zstd::decode_all(Cursor::new(buffer))?;
@@ -104,14 +108,19 @@ impl ResourceProvider for HbaReader {
         }
     }
 
-    fn exists(&self, id: u32) -> bool {
-        self.index.contains_key(&id)
+    fn get_metadata(&self, id: u32) -> Option<crate::FileMetadata> {
+        self.index.get(&id).map(|entry| crate::FileMetadata {
+            id: entry.id,
+            size: entry.size,
+            is_pruned: entry.is_pruned(),
+        })
     }
 }
 
 pub struct HbaWriter {
-    entries: Vec<(u32, u32, Vec<u8>)>,
+    entries: Vec<(u32, u32, Vec<u8>, bool)>,
     compress: bool,
+    profile: u32,
 }
 
 impl HbaWriter {
@@ -119,6 +128,7 @@ impl HbaWriter {
         Self {
             entries: Vec::new(),
             compress: true,
+            profile: 0,
         }
     }
 
@@ -126,8 +136,16 @@ impl HbaWriter {
         self.compress = compress;
     }
 
+    pub fn set_profile(&mut self, profile: u32) {
+        self.profile = profile;
+    }
+
     pub fn add(&mut self, id: u32, type_id: u32, data: Vec<u8>) {
-        self.entries.push((id, type_id, data));
+        self.entries.push((id, type_id, data, false));
+    }
+
+    pub fn add_pruned(&mut self, id: u32, type_id: u32, data: Vec<u8>) {
+        self.entries.push((id, type_id, data, true));
     }
 
     pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -140,16 +158,17 @@ impl HbaWriter {
             entry_count: self.entries.len() as u32,
             index_offset: 0,
             metadata_size: 0,
+            profile: self.profile,
         };
         dummy_header.write(&mut file)?;
 
         let mut hba_entries = Vec::new();
 
         // Write blobs
-        for (id, type_id, data) in &self.entries {
+        for (id, type_id, data, is_pruned) in &self.entries {
             let current_offset = file.stream_position()?;
             
-            let (final_data, flags) = if self.compress {
+            let (final_data, mut flags) = if self.compress {
                 let compressed = zstd::encode_all(Cursor::new(data), 3)?;
                 if compressed.len() < data.len() {
                     (compressed, HbaEntry::FLAG_ZSTD)
@@ -159,6 +178,10 @@ impl HbaWriter {
             } else {
                 (data.clone(), 0)
             };
+
+            if *is_pruned {
+                flags |= HbaEntry::FLAG_PRUNED;
+            }
 
             file.write_all(&final_data)?;
 
@@ -244,13 +267,13 @@ mod tests {
         let dir = tempdir()?;
         let path = dir.path().join("bad.hba");
         // Write enough bytes for header but wrong magic
-        let mut bad_header = [0u8; 24];
+        let mut bad_header = [0u8; 28];
         bad_header[0..4].copy_from_slice(b"BAD!");
         std::fs::write(&path, bad_header)?;
 
         let result = HbaReader::open(&path);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid HBA magic"));
+        assert!(result.unwrap_err().to_string().contains("Invalid magic"));
 
         Ok(())
     }

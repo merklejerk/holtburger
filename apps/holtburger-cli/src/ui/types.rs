@@ -20,7 +20,7 @@ pub const CHAT_HISTORY_WINDOW_SIZE: usize = 10000;
 pub const SCROLL_STEP: usize = 3;
 
 use holtburger_core::ClientCommand;
-use holtburger_core::protocol::messages::Enchantment;
+use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_core::world::Guid;
 use holtburger_core::world::entity::Entity;
 

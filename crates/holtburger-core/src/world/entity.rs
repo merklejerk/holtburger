@@ -1,5 +1,5 @@
 use crate::math::Vector3;
-use crate::protocol::messages::common::object::{ArmorProfile, CreatureProfile, WeaponProfile};
+use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
 use crate::world::guid::Guid;
 use crate::world::position::WorldPosition;
 use crate::world::properties::{ItemType, ObjectDescriptionFlag, PhysicsState};

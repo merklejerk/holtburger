@@ -58,7 +58,7 @@ impl AppState {
                         property_id,
                         value,
                     } => {
-                        use holtburger_core::protocol::properties::PropertyInstanceId;
+                        use holtburger_common::properties::PropertyInstanceId;
                         use holtburger_core::world::properties::PropertyValue;
 
                         if let Some(entity) = self.entities.get_mut(&guid) {
@@ -270,7 +270,7 @@ impl AppState {
                 );
             }
             ClientEvent::CharacterError(error) => {
-                use holtburger_core::protocol::errors::CharacterError;
+                use holtburger_protocol::errors::CharacterError;
                 if error == CharacterError::Logon {
                     self.logon_retry.schedule();
                     self.log_chat(

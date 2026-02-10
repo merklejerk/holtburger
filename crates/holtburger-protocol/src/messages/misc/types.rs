@@ -175,7 +175,6 @@ impl ProtocolPack for DddInterrogationResponseData {
 mod tests {
     use super::*;
     use crate::test_fixtures;
-    use crate::messages::game_message::GameMessage;
     use crate::test_helpers::assert_pack_unpack_parity;
 
     #[test]

@@ -1,4 +1,4 @@
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use byteorder::{ByteOrder, LittleEndian};
 use crate::messages::utils::{align_offset, pad_to_4};
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};

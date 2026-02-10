@@ -1,4 +1,4 @@
-use holtburger_core::protocol::properties::{PropertyInt, PropertyString};
+use holtburger_common::properties::{PropertyInt, PropertyString};
 use holtburger_core::world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};

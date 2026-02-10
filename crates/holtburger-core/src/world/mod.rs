@@ -8,7 +8,7 @@ pub mod spatial;
 pub mod state;
 pub mod stats;
 
-use crate::protocol::messages::Enchantment;
+use holtburger_protocol::messages::magic::Enchantment;
 use crate::world::entity::Entity;
 use crate::world::position::WorldPosition;
 use crate::world::properties::PropertyValue;

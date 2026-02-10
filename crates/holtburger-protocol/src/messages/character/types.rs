@@ -199,7 +199,7 @@ mod tests {
         let mut offset = 0;
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack character list");
         
-        if let GameMessage::CharacterList(list) = &msg {
+        if let GameMessage::CharacterList(_list) = &msg {
             // Check some basics if known, or just parity
             // Let's assume the fixture has at least one character or specific account name if possible
             // But parity is safest first step

@@ -145,11 +145,12 @@ Use this section to track progress. Mark tasks as completed with [x].
 - 2026-02-10: **137 Tests Restored**. Successfully harvested all legacy `old_*.rs` logic and fixtures. The protocol crate is now fully validated with bit-for-bit parity tests for all major message types.
 - **Status**: Verification script passes with 137 tests.
 
-## [ ] Phase 4: Engine Cleanup
-- [ ] Stabilize `holtburger-core` (Client, World, Session)
-- [ ] Remove dead code/empty folders
-- [ ] Final deep scan for lint/clippy issues
-- [ ] **Final Checkpoint**: `scripts/verify_refactor.sh` PASS
+## [x] Phase 4: Engine Cleanup
+- [x] Stabilize `holtburger-core` (Client, World, Session)
+- [x] Remove dead code/empty folders (`crates/holtburger-core/src/protocol`)
+- [x] Fix downstream app (`holtburger-cli`) imports
+- [x] Final deep scan for lint/clippy issues
+- [x] **Final Checkpoint**: `scripts/verify_refactor.sh` PASS
 
 ### Notes (Phase 4)
-- 
+- 2026-02-10: Successfully removed `crates/holtburger-core/src/protocol` directory. Updated `holtburger-core` and `holtburger-cli` to depend directly on `holtburger-protocol`. Fixed all import paths and resolved trait scoping issues. All systems go, 142 protocol tests passing and 12 core tests passing. No cap, the monolith has evolved.

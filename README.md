@@ -1,33 +1,34 @@
 # Holtburger 🍔
 
-Holtburger is an exploratory project to build a modern Asheron's Call client ecosystem in Rust. We are currently in the early experimental stages, focusing on reverse-engineering the protocol and developing a functional, reusable client library.
+Holtburger is a modern, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for both research and gameplay.
 
 ![tui client screenshot](screenshot.png)
 
-## Project Vision
+## The Ecosystem
 
-This project aims to build a modern, scriptable Asheron's Call client ecosystem in Rust, consisting of:
+Holtburger is comprised of several specialized crates:
 
-1. **`holtburger-core`**: A low-level Rust library handling networking, cryptography, and game logic. This is our primary focus.
-2. **`holtburger-cli`**: A highly scriptable Terminal User Interface (TUI) client built on top of the core library, designed for automation and scripting capabilities.
+- **[`holtburger-protocol`](crates/holtburger-protocol)**: The core networking layer. Handles the serialization and deserialization of Asheron's Call packets, opcodes, and complex game messages.
+- **[`holtburger-dat`](crates/holtburger-dat)**: A specialized library for parsing Asheron's Call `.dat`, `.hba`, and other binary asset formats.
+- **[`holtburger-core`](crates/holtburger-core)**: The primary game orchestration library. Manages client state, cryptography, and higher-level game logic.
+- **[`holtburger-cli`](apps/holtburger-cli)**: A Terminal User Interface (TUI) client built on the Holtburger stack, designed for automation and power users.
+- **[`holtburger-common`](crates/holtburger-common)**: Shared types, utilities, and constants used across the entire workspace.
+- **[`holtburger-tools`](apps/holtburger-tools)**: A collection of auxiliary command-line utilities for data extraction and protocol analysis.
 
 ## Disclaimers
 
-Note: This project is extremely experimental. Expect things to break and APIs to shift.
-
-Development of this project is heavily reliant on AI coding agents, and is therefore subject to characteristic misintepretation and hallucinations (which, to be fair, is also present in human code). Don't treat the codebase as a source of truth for anything until we reach a sate of more rigorous verification.
-
+Holtburger is **highly experimental**. APIs are unstable and subject to frequent breaking changes. Much of this code is heavily developed with the assistance of AI coding agents, so don't treat its implementation as authoritative.
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) (latest stable version)
+- [Rust](https://www.rust-lang.org/tools/install) (latest stable or nightly)
 
-### Running the TUI Client (WIP)
+### Running the TUI Client
 
-To test the current TUI client:
+To launch the development TUI client:
 
 ```bash
-cargo run -- <ARGS>
+cargo run --bin holtburger-cli
 ```
 
 ## License

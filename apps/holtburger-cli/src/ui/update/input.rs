@@ -2,8 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKin
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
-use crate::entities::commands::{self};
 use crate::entities::debug;
+use crate::entities::verbs::{self};
 use crate::ui;
 use crate::ui::model::AppState;
 use crate::ui::types::{
@@ -346,19 +346,17 @@ impl AppState {
                                         };
 
                                         let player_guid = self.player_guid;
-                                        let entity_commands = commands::get_commands_for_target(
+                                        let entity_verbs = verbs::get_verbs_for_target(
                                             &target,
                                             &self.entities,
                                             player_guid,
                                         );
-                                        let handler = entity_commands
+                                        let handler = entity_verbs
                                             .iter()
-                                            .find(|cmd| {
-                                                cmd.shortcut_char() == c.to_ascii_lowercase()
+                                            .find(|verb| {
+                                                verb.shortcut_char() == c.to_ascii_lowercase()
                                             })
-                                            .and_then(|command| {
-                                                command.handler(&target, player_guid)
-                                            });
+                                            .and_then(|verb| verb.handler(&target, player_guid));
 
                                         let (debug_lines, guid) =
                                             if let Some(CommandHandler::ToggleDebug) = &handler {

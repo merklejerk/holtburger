@@ -66,6 +66,7 @@ pub struct Session {
     pub last_server_seq: u32,
     pub fragment_reassembler: HashMap<u32, PendingMessage>,
     pub capture: Option<CaptureWriter>,
+    pub game_action_sequence: u32,
 }
 
 impl Session {
@@ -83,6 +84,7 @@ impl Session {
             last_server_seq: 0,
             fragment_reassembler: HashMap::new(),
             capture: None,
+            game_action_sequence: 0,
         })
     }
 
@@ -103,6 +105,7 @@ impl Session {
             last_server_seq: 0,
             fragment_reassembler: HashMap::new(),
             capture: None,
+            game_action_sequence: 0,
         })
     }
 
@@ -124,6 +127,7 @@ impl Session {
             client_id: 0,
             last_server_seq: 0,
             capture: None,
+            game_action_sequence: 0,
         }
     }
 
@@ -377,6 +381,16 @@ impl Session {
         self.packet_sequence += 1;
 
         self.send_packet(header, &body).await
+    }
+
+    pub async fn send_action(&mut self, action: GameAction) -> Result<()> {
+        self.game_action_sequence += 1;
+        let action_msg = GameActionMessage {
+            sequence: self.game_action_sequence,
+            action,
+        };
+        self.send_message(&GameMessage::GameAction(Box::new(action_msg)))
+            .await
     }
 
     pub async fn send_ack(&mut self, sequence: u32) -> Result<()> {

@@ -76,21 +76,18 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
         .unwrap_or(CommandTarget::None),
     };
 
-    let commands = crate::entities::commands::get_commands_for_target(
-        &target,
-        &state.entities,
-        state.player_guid,
-    );
-    if commands.is_empty() {
+    let verbs =
+        crate::entities::verbs::get_verbs_for_target(&target, &state.entities, state.player_guid);
+    if verbs.is_empty() {
         return None;
     }
 
     let mut spans = Vec::new();
-    for (i, command) in commands.iter().enumerate() {
+    for (i, verb) in verbs.iter().enumerate() {
         if i > 0 {
             spans.push(Span::raw(" "));
         }
-        spans.push(Span::raw(command.display_label()));
+        spans.push(Span::raw(verb.display_label()));
     }
 
     Some(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::TOP)))

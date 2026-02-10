@@ -1,6 +1,6 @@
 use super::super::types::{CommandTarget, DashboardTab, FocusedPane};
 use crate::entities::classification;
-use crate::entities::commands::get_commands_for_target;
+use crate::entities::verbs::get_verbs_for_target;
 use crate::ui::AppState;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::properties::{PropertyInt, RadarColor};
@@ -141,13 +141,13 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .enumerate()
         .map(|(i, (e, dist, depth))| {
             let target = CommandTarget::Entity(e);
-            let has_commands =
-                !get_commands_for_target(&target, &state.entities, state.player_guid).is_empty();
+            let has_verbs =
+                !get_verbs_for_target(&target, &state.entities, state.player_guid).is_empty();
             render_entity_list_item(
                 e,
                 Some(*dist),
                 *depth,
-                i == state.selected_dashboard_index && has_commands,
+                i == state.selected_dashboard_index && has_verbs,
                 state.use_emojis,
                 false, // Nearby entities aren't "equipped" in our list
             )
@@ -162,14 +162,14 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .enumerate()
         .map(|(i, (e, _, depth))| {
             let target = CommandTarget::Entity(e);
-            let has_commands =
-                !get_commands_for_target(&target, &state.entities, state.player_guid).is_empty();
+            let has_verbs =
+                !get_verbs_for_target(&target, &state.entities, state.player_guid).is_empty();
             let is_equipped = state.player_guid.is_some() && e.wielder_id == state.player_guid;
             render_entity_list_item(
                 e,
                 None,
                 *depth,
-                i == state.selected_dashboard_index && has_commands,
+                i == state.selected_dashboard_index && has_verbs,
                 state.use_emojis,
                 is_equipped,
             )

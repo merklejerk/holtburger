@@ -32,6 +32,11 @@ pub struct Client {
     connection_cookie: u64,
     pub message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
+    move_target: Option<Guid>,
+    last_move_sync: Instant,
+    last_move_pos: crate::world::position::WorldPosition,
+    last_move_pos_time: Instant,
+    last_sent_pos_seq: Option<u16>,
 }
 
 impl Client {
@@ -90,6 +95,11 @@ impl Client {
             connection_cookie: 0,
             message_dump_dir: None,
             message_counter: 0,
+            move_target: None,
+            last_move_sync: Instant::now(),
+            last_move_pos: crate::world::position::WorldPosition::default(),
+            last_move_pos_time: Instant::now(),
+            last_sent_pos_seq: None,
         })
     }
 
@@ -357,38 +367,11 @@ impl Client {
                     .await
             }
             ClientCommand::MoveTo { target } => {
-                log::info!(">>> Moving to target: 0x{:08X}", target);
-                // Use MoveToObject
-                let data = MovementEventData {
-                    guid: self.world.player.guid,
-                    object_instance_sequence: 0,
-                    movement_sequence: 0,
-                    server_control_sequence: 0,
-                    is_autonomous: true,
-                    movement_type: MovementType::MoveToObject,
-                    motion_flags: 0,
-                    current_style: 0,
-                    data: MovementTypeData::MoveToObject(MoveToObject {
-                        target,
-                        origin: Origin {
-                            cell_id: self.world.player.position.landblock_id,
-                            position: self.world.player.position.coords,
-                        },
-                        params: MoveToParameters {
-                            movement_parameters: 0,
-                            distance_to_object: 1.0,
-                            min_distance: 0.5,
-                            fail_distance: 100.0,
-                            speed: 1.0,
-                            walk_run_threshold: 0.0,
-                            desired_heading: 0.0,
-                        },
-                        run_rate: 1.0,
-                    }),
-                };
-                self.session
-                    .send_message(&GameMessage::UpdateMotion(Box::new(data)))
-                    .await
+                log::info!(">>> Starting approach to target: 0x{:08X}", target);
+                self.move_target = Some(target);
+                self.last_move_pos = self.world.player.position;
+                self.last_move_pos_time = Instant::now();
+                Ok(())
             }
             ClientCommand::SyncPosition => {
                 log::debug!(">>> Syncing Position (Heartbeat)");
@@ -401,13 +384,8 @@ impl Client {
                     last_contact: 1,
                 };
 
-                let action = GameActionMessage {
-                    sequence: 0,
-                    action: GameAction::AutonomousPosition(Box::new(pulse)),
-                };
-
                 self.session
-                    .send_message(&GameMessage::GameAction(Box::new(action)))
+                    .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
                     .await
             }
             ClientCommand::Quit => {
@@ -456,7 +434,18 @@ impl Client {
                             for event in events {
                                 match event {
                                     SessionEvent::Message(msg_data) => {
-                                        self.handle_message(&msg_data).await?;
+                                        let world_events = self.handle_message(&msg_data).await?;
+
+                                        for event in world_events {
+                                            if let WorldEvent::ForcedReposition { .. } = event
+                                                && self.move_target.is_some() {
+                                                    log::warn!("Approach aborted: Forced reposition by server");
+                                                    self.move_target = None;
+                                                    if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
+                                                        player.velocity = crate::math::Vector3::zero();
+                                                    }
+                                                }
+                                        }
 
                                         if matches!(self.state, ClientState::Disconnected) {
                                             return Ok(());
@@ -502,8 +491,17 @@ impl Client {
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
 
+                    if let Some(target_guid) = self.move_target {
+                        self.handle_approach_task(target_guid, dt).await?;
+                    }
+
                     // TODO: Use actual player radius from DAT/Properties
-                    self.world.tick(dt, 0.35);
+                    let physics_events = self.world.tick(dt, 0.35);
+                    for event in physics_events {
+                        if let Some(tx) = &self.event_tx {
+                            let _ = tx.send(ClientEvent::World(Box::new(event)));
+                        }
+                    }
                 }
             }
         }
@@ -511,7 +509,7 @@ impl Client {
         Ok(())
     }
 
-    async fn handle_message(&mut self, data: &[u8]) -> Result<()> {
+    async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(ClientEvent::RawMessage(data.to_vec()));
         }
@@ -537,7 +535,7 @@ impl Client {
                 data.len(),
                 data
             );
-            return Ok(());
+            return Ok(Vec::new());
         }
         let message = message.unwrap();
 
@@ -549,28 +547,50 @@ impl Client {
 
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);
-        for event in world_events {
+        for event in world_events.iter() {
             if let Some(tx) = &self.event_tx {
-                let _ = tx.send(ClientEvent::World(Box::new(event)));
+                let _ = tx.send(ClientEvent::World(Box::new(event.clone())));
             }
         }
 
         match message {
+            GameMessage::UpdatePosition(data) => {
+                if data.guid == self.world.player.guid {
+                    let force_pos_seq = data.pos.force_position_sequence;
+
+                    if let Some(old_seq) = self.last_sent_pos_seq
+                        && force_pos_seq > old_seq {
+                            log::warn!(
+                                "Server forced reposition (rubber band): seq {} -> {}",
+                                old_seq,
+                                force_pos_seq
+                            );
+                            // We don't abort movement here, we just accept the new sequence
+                            // WorldState already updated the position via delegation above
+                        }
+                    self.last_sent_pos_seq = Some(force_pos_seq);
+                }
+                Ok(())
+            }
             GameMessage::UpdateMotion(data) => {
                 if data.guid == self.world.player.guid && !data.is_autonomous {
-                    self.handle_server_controlled_movement(*data).await
-                } else {
-                    Ok(())
+                    self.handle_server_controlled_movement(*data).await?;
                 }
+                Ok(())
             }
             GameMessage::AutonomousPosition(data) => {
                 if data.guid == self.world.player.guid {
-                    log::info!(">>> Server-forced resync: {:?}", data.position);
+                    log::info!(
+                        ">>> Server-forced resync: {:?}. Force Seq: {}",
+                        data.position,
+                        data.force_position_sequence
+                    );
                     self.world.player.position = data.position;
                     self.world.player.instance_sequence = data.instance_sequence;
                     self.world.player.server_control_sequence = data.server_control_sequence;
                     self.world.player.teleport_sequence = data.teleport_sequence;
                     self.world.player.force_position_sequence = data.force_position_sequence;
+                    self.last_sent_pos_seq = Some(data.force_position_sequence);
 
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::EntityMoved {
@@ -693,6 +713,14 @@ impl Client {
                 self.send_status_event();
                 Ok(())
             }
+            GameMessage::PlayerTeleport(data) => {
+                log::info!(
+                    "Portal transition started (seq: {})",
+                    data.teleport_sequence
+                );
+                self.send_login_complete().await?;
+                Ok(())
+            }
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
                 Ok(())
             }
@@ -756,7 +784,9 @@ impl Client {
                 Ok(())
             }
             _ => Ok(()),
-        }
+        }?;
+
+        Ok(world_events)
     }
 
     async fn handle_character_list(&mut self, data: CharacterListData) -> Result<()> {
@@ -933,6 +963,81 @@ impl Client {
         );
         self.connection_cookie = cookie;
         self.session.client_id = client_id;
+
+        Ok(())
+    }
+
+    async fn handle_approach_task(&mut self, target_guid: Guid, _dt: f32) -> Result<()> {
+        let player_pos = self.world.player.position.coords;
+        let target_pos = if let Some(target) = self.world.entities.get(target_guid) {
+            target.position.coords
+        } else {
+            log::warn!("Approach aborted: Target 0x{:08X} not found", target_guid);
+            self.move_target = None;
+            return Ok(());
+        };
+
+        let diff = target_pos - player_pos;
+        let dist = diff.length();
+
+        if dist < 1.0 {
+            log::info!("Arrived at target 0x{:08X}", target_guid);
+            self.move_target = None;
+            if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
+                player.velocity = crate::math::Vector3::zero();
+            }
+            return Ok(());
+        }
+
+        // Stuck detection
+        let now = Instant::now();
+        if now.duration_since(self.last_move_pos_time) > Duration::from_millis(500) {
+            let dist_since_last =
+                (self.world.player.position.coords - self.last_move_pos.coords).length();
+            if dist_since_last < 0.1 {
+                log::warn!("Approach aborted: Player seems stuck");
+                self.move_target = None;
+                if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
+                    player.velocity = crate::math::Vector3::zero();
+                }
+                return Ok(());
+            }
+            self.last_move_pos = self.world.player.position;
+            self.last_move_pos_time = now;
+        }
+
+        // Set velocity toward target (Running speed ~ 7.0m/s)
+        let dir = diff / dist;
+        let velocity = dir * 7.0;
+
+        if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
+            player.velocity = velocity;
+        }
+
+        // Send MoveToState to server periodically (~100ms)
+        if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
+            self.last_move_sync = now;
+
+            let data = crate::protocol::messages::game_action::movement::MoveToStateData {
+                raw_motion_state:
+                    crate::protocol::messages::game_message::movement::RawMotionState {
+                        flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                        current_hold_key: Some(HoldKey::Run as u32),
+                        forward_speed: Some(7.0),
+                        ..Default::default()
+                    },
+                position: self.world.player.position,
+                instance_sequence: self.world.player.instance_sequence,
+                server_control_sequence: self.world.player.server_control_sequence,
+                teleport_sequence: self.world.player.teleport_sequence,
+                force_position_sequence: self.world.player.force_position_sequence,
+                contact_long_jump: 1, // On Ground
+            };
+
+            self.session
+                .send_action(GameAction::MoveToState(Box::new(data)))
+                .await?;
+        }
 
         Ok(())
     }

@@ -1,6 +1,6 @@
 use binrw::{
-    BinRead, BinResult,
-    io::{Read, Seek},
+    BinRead, BinResult, BinWrite,
+    io::{Read, Seek, Write},
 };
 use holtburger_common::{Plane, Sphere};
 
@@ -23,6 +23,7 @@ pub struct BspPortal {
     pub plane: Plane,
     pub pos: Box<BspNode>,
     pub neg: Box<BspNode>,
+    pub sphere: Option<Sphere>,
     pub poly_ids: Vec<u16>,
     pub portal_polys: Vec<PortalPoly>,
 }
@@ -45,8 +46,9 @@ pub struct InternalNode {
     pub poly_ids: Vec<u16>,
 }
 
-#[derive(BinRead, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(BinRead, BinWrite, Debug, Clone, Copy, PartialEq, Eq)]
 #[br(little)]
+#[bw(little)]
 pub struct PortalPoly {
     pub portal_index: i16,
     pub poly_id: i16,
@@ -57,14 +59,38 @@ impl BspNode {
         let mut tag = [0u8; 4];
         reader.read_exact(&mut tag)?;
 
-        // Match on the literal disk order (Little Endian bytes of ASCII "BPnn" etc.)
-        // AC stores these as 4-byte strings.
-        match &tag {
-            b"TROP" => Ok(BspNode::Port(BspPortal::read(reader, tree_type)?)), // PORT
-            b"FAEL" => Ok(BspNode::Leaf(BspLeaf::read(reader, tree_type)?)),   // LEAF
+        let mut reversed_tag = tag;
+        reversed_tag.reverse();
+
+        match &reversed_tag {
+            b"PORT" => Ok(BspNode::Port(BspPortal::read(reader, tree_type)?)),
+            b"LEAF" => Ok(BspNode::Leaf(BspLeaf::read(reader, tree_type)?)),
             _ => Ok(BspNode::Internal(InternalNode::read(
-                reader, tree_type, tag,
+                reader,
+                tree_type,
+                reversed_tag,
             )?)),
+        }
+    }
+
+    pub fn write<W: Write + Seek>(&self, writer: &mut W, tree_type: BspType) -> BinResult<()> {
+        match self {
+            BspNode::Port(p) => {
+                let tag = *b"TROP"; // "PORT" reversed
+                writer.write_all(&tag)?;
+                p.write(writer, tree_type)
+            }
+            BspNode::Leaf(l) => {
+                let tag = *b"FAEL"; // "LEAF" reversed
+                writer.write_all(&tag)?;
+                l.write(writer, tree_type)
+            }
+            BspNode::Internal(i) => {
+                let mut tag = i.tag;
+                tag.reverse();
+                writer.write_all(&tag)?;
+                i.write(writer, tree_type)
+            }
         }
     }
 
@@ -134,9 +160,10 @@ impl BspPortal {
 
         let mut poly_ids = Vec::new();
         let mut portal_polys = Vec::new();
+        let mut sphere = None;
 
         if tree_type == BspType::Drawing {
-            let _sphere = Sphere::read_le(reader)?;
+            sphere = Some(Sphere::read_le(reader)?);
             let num_polys = u32::read_le(reader)?;
             let num_portals = u32::read_le(reader)?;
 
@@ -153,9 +180,39 @@ impl BspPortal {
             plane,
             pos,
             neg,
+            sphere,
             poly_ids,
             portal_polys,
         })
+    }
+
+    pub fn write<W: Write + Seek>(&self, writer: &mut W, tree_type: BspType) -> BinResult<()> {
+        self.plane.write_le(writer)?;
+        self.pos.write(writer, tree_type)?;
+        self.neg.write(writer, tree_type)?;
+
+        if tree_type == BspType::Drawing {
+            if let Some(s) = &self.sphere {
+                s.write_le(writer)?;
+            } else {
+                Sphere {
+                    center: holtburger_common::Vector3::zero(),
+                    radius: 0.0,
+                }
+                .write_le(writer)?;
+            }
+            (self.poly_ids.len() as u32).write_le(writer)?;
+            (self.portal_polys.len() as u32).write_le(writer)?;
+
+            for &id in &self.poly_ids {
+                id.write_le(writer)?;
+            }
+
+            for &poly in &self.portal_polys {
+                poly.write_le(writer)?;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -182,6 +239,28 @@ impl BspLeaf {
             poly_ids,
         })
     }
+
+    pub fn write<W: Write + Seek>(&self, writer: &mut W, tree_type: BspType) -> BinResult<()> {
+        self.index.write_le(writer)?;
+
+        if tree_type == BspType::Physics {
+            self.solid.write_le(writer)?;
+            if let Some(s) = &self.sphere {
+                s.write_le(writer)?;
+            } else {
+                Sphere {
+                    center: holtburger_common::Vector3::zero(),
+                    radius: 0.0,
+                }
+                .write_le(writer)?;
+            }
+            (self.poly_ids.len() as u32).write_le(writer)?;
+            for &id in &self.poly_ids {
+                id.write_le(writer)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl InternalNode {
@@ -196,13 +275,13 @@ impl InternalNode {
         let mut neg = None;
 
         match &tag {
-            b"nnPB" | b"nIPB" => {
+            b"BPnn" | b"BPIn" => {
                 pos = Some(Box::new(BspNode::read(reader, tree_type)?));
             }
-            b"NIPb" | b"NnPb" => {
+            b"BpIN" | b"BpnN" => {
                 neg = Some(Box::new(BspNode::read(reader, tree_type)?));
             }
-            b"NIPB" | b"NnPB" => {
+            b"BPIN" | b"BPnN" => {
                 pos = Some(Box::new(BspNode::read(reader, tree_type)?));
                 neg = Some(Box::new(BspNode::read(reader, tree_type)?));
             }
@@ -230,6 +309,37 @@ impl InternalNode {
             sphere,
             poly_ids,
         })
+    }
+
+    pub fn write<W: Write + Seek>(&self, writer: &mut W, tree_type: BspType) -> BinResult<()> {
+        self.plane.write_le(writer)?;
+
+        if let Some(pos) = &self.pos {
+            pos.write(writer, tree_type)?;
+        }
+        if let Some(neg) = &self.neg {
+            neg.write(writer, tree_type)?;
+        }
+
+        if tree_type != BspType::Cell {
+            if let Some(s) = &self.sphere {
+                s.write_le(writer)?;
+            } else {
+                Sphere {
+                    center: holtburger_common::Vector3::zero(),
+                    radius: 0.0,
+                }
+                .write_le(writer)?;
+            }
+
+            if tree_type != BspType::Physics {
+                (self.poly_ids.len() as u32).write_le(writer)?;
+                for &id in &self.poly_ids {
+                    id.write_le(writer)?;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -299,7 +409,7 @@ mod tests {
         let node = BspNode::read(&mut cursor, BspType::Physics).unwrap();
 
         if let BspNode::Internal(node) = node {
-            assert_eq!(&node.tag, b"nnPB");
+            assert_eq!(&node.tag, b"BPnn");
             assert!(node.pos.is_some());
             assert!(node.neg.is_none());
             assert_eq!(node.sphere.unwrap().radius, 20.0);

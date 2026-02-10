@@ -6,13 +6,14 @@ members = [
     "crates/holtburger-dat",
     "crates/holtburger-protocol",
     "apps/holtburger-cli",
+    "apps/holtburger-tools",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 authors = ["holtburger contributors"]
-license = "MIT OR Apache-2.0"
+license = "GPL-3.0"
 repository = "https://github.com/merklejerk/holtburger"
 
 [workspace.dependencies]
@@ -32,6 +33,7 @@ ratatui = "0.26"
 crossterm = { version = "0.27", features = ["event-stream"] }
 futures = "0.3"
 binrw = "0.14"
+zstd = "0.13"
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "1.0"
 strum = { version = "0.26", features = ["derive"] }
@@ -39,6 +41,10 @@ strum_macros = "0.26"
 async-trait = "0.1"
 glam = "0.25"
 bitflags = { version = "2.6", features = ["serde"] }
+tempfile = "3.10"
+criterion = "0.5"
+rayon = "1.11.0"
+indicatif = "0.17"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]

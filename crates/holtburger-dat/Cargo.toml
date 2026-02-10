@@ -10,7 +10,18 @@ repository.workspace = true
 holtburger-common.workspace = true
 binrw.workspace = true
 serde.workspace = true
-anyhow.workspace = true
 thiserror.workspace = true
 bitflags.workspace = true
 encoding_rs.workspace = true
+zstd.workspace = true
+log.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+rand.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "provider_bench"
+harness = false

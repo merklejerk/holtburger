@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::Result;
 use binrw::{BinRead, binread, io::Cursor};
 use holtburger_common::{Quaternion, Vector3};
 use std::collections::HashMap;

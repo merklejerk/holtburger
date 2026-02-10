@@ -15,7 +15,7 @@ bitflags.workspace = true
 encoding_rs.workspace = true
 zstd.workspace = true
 log.workspace = true
-rayon = "1.11.0"
+rayon.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -10,7 +10,7 @@ modules:
       # We build the binary outside the sandbox to avoid internet issues
       - install -D holtburger-cli /app/bin/holtburger-cli
       - mkdir -p /app/share/holtburger/dats
-      - cp dats/*.hba /app/share/holtburger/dats/
+      - cp *.hba /app/share/holtburger/dats/
       - install -D io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
       - install -D io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
     sources:

@@ -1,6 +1,6 @@
 # Holtburger 🍔
 
-Holtburger is a modern, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots.
+Holtburger is a modern, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. It's still early days so it's not particularly useful yet, but stay tuned!
 
 ![tui client screenshot](screenshot.png)
 

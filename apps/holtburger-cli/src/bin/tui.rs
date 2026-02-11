@@ -5,6 +5,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use directories::ProjectDirs;
 use holtburger_cli::ui::{self, AppState, ChatMessageKind};
 use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -96,7 +97,19 @@ async fn main() -> Result<()> {
         .clone()
         .or_else(|| std::env::var("HOLTBURGER_DATS").ok())
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("./dats"));
+        .unwrap_or_else(|| {
+            // Priority:
+            // 1. Current directory ./dats (typical for portable/zip installs)
+            // 2. Standard project data directory (typical for system installs)
+            let local_dats = std::path::PathBuf::from("./dats");
+            if local_dats.exists() {
+                return local_dats;
+            }
+
+            ProjectDirs::from("io.github", "merklejerk", "holtburger")
+                .map(|dirs| dirs.data_dir().join("dats"))
+                .unwrap_or_else(|| local_dats)
+        });
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();

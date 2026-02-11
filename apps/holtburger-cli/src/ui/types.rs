@@ -36,7 +36,7 @@ pub enum StatType {
 pub enum CommandTarget<'a> {
     Entity(&'a Entity),
     Enchantment(Enchantment),
-    Stat(StatType, Option<u64>),
+    Stat(StatType, Option<u64>, Option<u32>),
     None,
 }
 

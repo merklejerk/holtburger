@@ -96,16 +96,18 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 use crate::ui::utils::format_cost;
                 let text = if info.xp_for_next_level > 0 {
                     format!(
-                        "{} XP until {} / {} XP unspent",
+                        "{} XP until {} | {} XP unspent | {} SP",
                         format_cost(info.xp_for_next_level.saturating_sub(info.xp_into_level)),
                         info.level + 1,
-                        format_cost(info.unspent_xp)
+                        format_cost(info.unspent_xp),
+                        info.unspent_skill_points
                     )
                 } else {
                     format!(
-                        "{} total / {} XP unspent",
+                        "{} total | {} XP unspent | {} SP",
                         info.current_xp,
-                        format_cost(info.unspent_xp)
+                        format_cost(info.unspent_xp),
+                        info.unspent_skill_points
                     )
                 };
 

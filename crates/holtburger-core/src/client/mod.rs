@@ -439,6 +439,15 @@ impl Client {
                     })))
                     .await
             }
+            ClientCommand::TrainSkill { skill, credits } => {
+                log::info!(">>> Training Skill: {:?} (Credits: {})", skill, credits);
+                self.session
+                    .send_action(GameAction::TrainSkill(Box::new(TrainSkillData {
+                        skill_type: skill as u32,
+                        credits_spent: credits as i32,
+                    })))
+                    .await
+            }
             ClientCommand::Quit => {
                 log::info!("Disconnecting...");
                 // First attempt a graceful logout from the world

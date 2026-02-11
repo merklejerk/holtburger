@@ -25,6 +25,7 @@ pub struct PlayerState {
     pub level: u32,
     pub total_experience: u64,
     pub available_experience: u64,
+    pub unspent_skill_points: u32,
     pub attributes: HashMap<stats::AttributeType, stats::Attribute>,
     pub vitals: HashMap<stats::VitalType, stats::Vital>,
     /// Stores the raw ranks and start for vitals so they can be recalculated
@@ -58,6 +59,7 @@ impl PlayerState {
             level: 0,
             total_experience: 0,
             available_experience: 0,
+            unspent_skill_points: 0,
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             vital_bases: HashMap::new(),

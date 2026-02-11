@@ -211,6 +211,7 @@ pub struct CharacterLevelInfo {
     pub level: u32,
     pub current_xp: u64,
     pub unspent_xp: u64,
+    pub unspent_skill_points: u32,
     pub next_level_xp: u64,
     pub xp_into_level: u64,
     pub xp_for_next_level: u64,

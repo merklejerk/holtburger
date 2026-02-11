@@ -5,7 +5,9 @@ use super::spatial::SpatialScene;
 use super::stats;
 use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyValue};
 use holtburger_common::{Guid, Vector3};
-use holtburger_dat::DatDatabase;
+use holtburger_dat::ResourceProvider;
+use holtburger_dat::file_type::XpTable;
+use binrw::BinRead;
 use std::sync::Arc;
 
 use holtburger_protocol::messages::*;
@@ -19,17 +21,118 @@ pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
     pub server_time: Option<ServerTimeSync>,
-    pub dat: Option<Arc<DatDatabase>>,
+    pub portal_dat: Option<Arc<dyn ResourceProvider>>,
+    pub cell_dat: Option<Arc<dyn ResourceProvider>>,
+    pub xp_table: Option<XpTable>,
     pub scene: SpatialScene,
 }
 
 impl WorldState {
-    pub fn new(dat: Option<Arc<DatDatabase>>) -> Self {
+    pub fn get_level_info(&self) -> Option<stats::CharacterLevelInfo> {
+        let table = self.xp_table.as_ref()?;
+        let level = self.player.level;
+        let total_xp = self.player.total_experience;
+        let unspent_xp = self.player.available_experience;
+
+        let level_idx = level as usize;
+        let next_level_idx = level_idx + 1;
+
+        if next_level_idx >= table.character_level_xp_list.len() {
+            // Already max level
+            let level_xp = *table.character_level_xp_list.get(level_idx).unwrap_or(&0);
+            return Some(stats::CharacterLevelInfo {
+                level,
+                current_xp: total_xp,
+                unspent_xp,
+                next_level_xp: level_xp,
+                xp_into_level: total_xp.saturating_sub(level_xp),
+                xp_for_next_level: 0,
+            });
+        }
+
+        let level_xp = table.character_level_xp_list[level_idx];
+        let next_level_xp = table.character_level_xp_list[next_level_idx];
+
+        Some(stats::CharacterLevelInfo {
+            level,
+            current_xp: total_xp,
+            unspent_xp,
+            next_level_xp,
+            xp_into_level: total_xp.saturating_sub(level_xp),
+            xp_for_next_level: next_level_xp.saturating_sub(level_xp),
+        })
+    }
+
+    fn get_next_attribute_rank_xp(&self, ranks: u32) -> Option<u32> {
+        let table = self.xp_table.as_ref()?;
+        let next_rank = (ranks + 1) as usize;
+        if next_rank < table.attribute_xp_list.len() {
+            Some(table.attribute_xp_list[next_rank])
+        } else {
+            None
+        }
+    }
+
+    fn get_next_vital_rank_xp(&self, ranks: u32) -> Option<u32> {
+        let table = self.xp_table.as_ref()?;
+        let next_rank = (ranks + 1) as usize;
+        if next_rank < table.vital_xp_list.len() {
+            Some(table.vital_xp_list[next_rank])
+        } else {
+            None
+        }
+    }
+
+    fn get_next_skill_rank_xp(&self, ranks: u32, training: stats::TrainingLevel) -> Option<u32> {
+        let table = self.xp_table.as_ref()?;
+        let next_rank = (ranks + 1) as usize;
+        match training {
+            stats::TrainingLevel::Trained | stats::TrainingLevel::Untrained => {
+                if next_rank < table.trained_skill_xp_list.len() {
+                    Some(table.trained_skill_xp_list[next_rank])
+                } else {
+                    None
+                }
+            }
+            stats::TrainingLevel::Specialized => {
+                if next_rank < table.specialized_skill_xp_list.len() {
+                    Some(table.specialized_skill_xp_list[next_rank])
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
+        if let Some(info) = self.get_level_info() {
+            events.push(WorldEvent::LevelInfoUpdated(info));
+        }
+    }
+
+    pub fn new(
+        portal_dat: Option<Arc<dyn ResourceProvider>>,
+        cell_dat: Option<Arc<dyn ResourceProvider>>,
+    ) -> Self {
+        let mut xp_table = None;
+        if let Some(db) = &portal_dat {
+            // File ID 0x0E000018 is the XP Table
+            if let Ok(data) = db.get_file(0x0E000018) {
+                let mut cursor = std::io::Cursor::new(data);
+                if let Ok(table) = XpTable::read(&mut cursor) {
+                    xp_table = Some(table);
+                }
+            }
+        }
+
         Self {
             entities: EntityManager::new(),
             player: PlayerState::new(),
             server_time: None,
-            dat,
+            portal_dat,
+            cell_dat,
+            xp_table,
             scene: SpatialScene::new(),
         }
     }
@@ -54,7 +157,10 @@ impl WorldState {
         let mut events = Vec::new();
 
         // Delegate player-specific messages first
-        if self.player.handle_message(msg, &mut events) {
+        if self
+            .player
+            .handle_message(msg, &mut events, self.xp_table.as_ref())
+        {
             return events;
         }
 
@@ -172,6 +278,17 @@ impl WorldState {
                     self.player.name = name.clone();
                     self.player.enchantments = data.enchantments.clone();
 
+                    // Update Experience and Level from properties
+                    if let Some(&xp) = data.properties_int64.get(&1) {
+                        self.player.total_experience = xp as u64;
+                    }
+                    if let Some(&axp) = data.properties_int64.get(&2) {
+                        self.player.available_experience = axp as u64;
+                    }
+                    if let Some(&level) = data.properties_int.get(&25) {
+                        self.player.level = level as u32;
+                    }
+
                     // Ensure entity in our map has the correct name
                     if let Some(entity) = self.entities.get_mut(guid) {
                         entity.name = name.clone();
@@ -190,12 +307,17 @@ impl WorldState {
                         if at_type <= 6 {
                             if let Some(attr_type) = stats::AttributeType::from_repr(at_type) {
                                 let base = ranks + start;
-                                self.player.attributes.insert(attr_type, base);
-                                attr_objs.push(stats::Attribute {
+                                let attr_obj = stats::Attribute {
                                     attr_type,
+                                    ranks,
+                                    start,
+                                    spent_xp: attr.xp,
+                                    next_rank_xp: self.get_next_attribute_rank_xp(ranks),
                                     base,
                                     current: base,
-                                });
+                                };
+                                self.player.attributes.insert(attr_type, attr_obj.clone());
+                                attr_objs.push(attr_obj);
                             }
                         } else if (7..=9).contains(&at_type) {
                             let vital_type = match at_type {
@@ -214,6 +336,10 @@ impl WorldState {
 
                             let vital = stats::Vital {
                                 vital_type,
+                                ranks,
+                                start,
+                                spent_xp: attr.xp,
+                                next_rank_xp: self.get_next_vital_rank_xp(ranks),
                                 base: final_base,
                                 buffed_max: final_base,
                                 current,
@@ -245,6 +371,10 @@ impl WorldState {
                                 .derive_skill_value(skill_type, s.ranks, s.init, false);
                             let skill = stats::Skill {
                                 skill_type,
+                                ranks: s.ranks,
+                                init: s.init,
+                                spent_xp: s.xp,
+                                next_rank_xp: self.get_next_skill_rank_xp(s.ranks, training),
                                 base: base_val,
                                 current: base_val,
                                 training,
@@ -273,6 +403,7 @@ impl WorldState {
                         enchantments: self.player.enchantments.clone(),
                     });
 
+                    self.emit_level_info(&mut events);
                     self.player.emit_derived_stats(&mut events);
                 }
                 match &ev.event {
@@ -406,6 +537,15 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.int_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    match data.property {
+                        25 => {
+                            self.player.level = data.value as u32;
+                            self.emit_level_info(&mut events);
+                        }
+                        _ => {}
+                    }
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -435,6 +575,19 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.int64_properties.insert(data.property, data.value);
+                }
+                if target_guid == self.player.guid {
+                    match data.property {
+                        1 => {
+                            self.player.total_experience = data.value as u64;
+                            self.emit_level_info(&mut events);
+                        }
+                        2 => {
+                            self.player.available_experience = data.value as u64;
+                            self.emit_level_info(&mut events);
+                        }
+                        _ => {}
+                    }
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -734,9 +887,9 @@ impl WorldState {
                     .map(|e| e.gfx_obj.clone());
 
                 if gfx.is_none()
-                    && let Some(dat) = &self.dat
+                    && let Some(dat) = &self.portal_dat
                 {
-                    gfx = self.scene.get_object_geometry(dat, gfx_id);
+                    gfx = self.scene.get_object_geometry(dat.as_ref(), gfx_id);
                 }
 
                 if let Some(gfx_obj) = gfx

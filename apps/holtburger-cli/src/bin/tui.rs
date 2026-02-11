@@ -82,11 +82,18 @@ struct Args {
     verbose: u8,
     #[arg(long)]
     no_emojis: bool,
+    #[arg(short, long)]
+    dats: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    let dats_path = args.dats.clone()
+        .or_else(|| std::env::var("HOLTBURGER_DATS").ok())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("./dats"));
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -136,6 +143,7 @@ async fn main() -> Result<()> {
         args.port,
         &args.account,
         args.character.clone(),
+        dats_path,
     )
     .await?;
 
@@ -161,6 +169,7 @@ async fn main() -> Result<()> {
         account_name: args.account.clone(),
         character_name: None,
         player_guid: None,
+        level_info: None,
         attributes: std::collections::HashMap::new(),
         vitals: std::collections::HashMap::new(),
         skills: std::collections::HashMap::new(),

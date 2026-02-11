@@ -3,6 +3,18 @@ use crate::ui::AppState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
+pub fn format_cost(n: u64) -> String {
+    if n >= 1_000_000_000 {
+        format!("{:.3}B", n as f64 / 1_000_000_000.0)
+    } else if n >= 1_000_000 {
+        format!("{:.3}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.2}k", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
+}
+
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![text.to_string()];
@@ -68,11 +80,11 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
                 .map(|(e, _, _)| CommandTarget::Entity(e))
                 .unwrap_or(CommandTarget::None)
         }
-        DashboardTab::Character => crate::ui::widgets::stats::get_enchantment_at_index(
+        DashboardTab::Character => crate::ui::widgets::stats::get_command_target_at_index(
             state,
+            DashboardTab::Character,
             state.selected_dashboard_index,
         )
-        .map(CommandTarget::Enchantment)
         .unwrap_or(CommandTarget::None),
     };
 

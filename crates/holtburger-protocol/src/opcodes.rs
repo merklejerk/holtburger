@@ -3,6 +3,8 @@ use strum_macros::FromRepr;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 #[repr(u32)]
 pub enum GameOpcode {
+    /// Internal/None opcode. Sometimes used as a logout signal or heartbeat.
+    None = 0x0000,
     // --- Connection & Character Selection ---
     // /// C2S: Request to create a new character.
     // CharacterCreate = 0xF656,
@@ -216,8 +218,8 @@ pub enum GameOpcode {
     /// S2C: Server name information.
     /// Sent during login to inform the client which shard it has connected to.
     ServerName = 0xF7E1,
-    // /// S2C: Force character log off.
-    // CharacterLogOff = 0xF653,
+    /// C2S/S2C: Request or confirm character logout.
+    CharacterLogOff = 0xF653,
     // /// S2C: Get server version.
     // GetServerVersion = 0xF7CC,
     // /// S2C: Friends list (obsolete).
@@ -376,12 +378,12 @@ pub enum GameActionOpcode {
     // SpellbookFilter = 0x0286,
     // /// C2S: Forcibly kill the character.
     // Suicide = 0x0279,
-    // /// C2S: Increase a vital (Health, Stamina, Mana) using experience.
-    // RaiseVital = 0x0044,
-    // /// C2S: Increase an attribute (Strength, Endurance, etc) using experience.
-    // RaiseAttribute = 0x0045,
-    // /// C2S: Increase a skill (Melee Defense, etc) using experience.
-    // RaiseSkill = 0x0046,
+    /// C2S: Increase a vital (Health, Stamina, Mana) using experience.
+    RaiseVital = 0x0044,
+    /// C2S: Increase an attribute (Strength, Endurance, etc) using experience.
+    RaiseAttribute = 0x0045,
+    /// C2S: Increase a skill (Melee Defense, etc) using experience.
+    RaiseSkill = 0x0046,
     // /// C2S: Spend skill points to train or untrain a skill.
     // TrainSkill = 0x0047,
     // /// C2S: Set the desired material/component level for spellcasting.

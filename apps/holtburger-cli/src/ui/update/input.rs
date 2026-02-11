@@ -58,6 +58,10 @@ impl AppState {
                             commands.push(ClientCommand::Quit);
                             return commands;
                         }
+                        if input == "/logout" {
+                            commands.push(ClientCommand::Quit); // For now, treat as quit
+                            return commands;
+                        }
                         if input == "/clear" {
                             self.messages.clear();
                             self.input.clear();
@@ -336,11 +340,11 @@ impl AppState {
                                                     .unwrap_or(CommandTarget::None)
                                             }
                                             DashboardTab::Character => {
-                                                ui::widgets::stats::get_enchantment_at_index(
+                                                ui::widgets::stats::get_command_target_at_index(
                                                     self,
+                                                    DashboardTab::Character,
                                                     self.selected_dashboard_index,
                                                 )
-                                                .map(CommandTarget::Enchantment)
                                                 .unwrap_or(CommandTarget::None)
                                             }
                                         };

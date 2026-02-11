@@ -28,6 +28,10 @@ pub const MOVEMENT_EVENT_TURN_TO_OBJ: &[u8] =
 pub const MOVEMENT_EVENT_IDLE: &[u8] = include_bytes!("../tests/fixtures/movement_event_idle.bin");
 pub const MOVEMENT_MOVE_TO_POS: &[u8] =
     include_bytes!("../tests/fixtures/movement_move_to_pos.bin");
+pub const ACTION_RAISE_ATTRIBUTE: &[u8] =
+    include_bytes!("../tests/fixtures/action_raise_attribute.bin");
+pub const ACTION_RAISE_VITAL: &[u8] = include_bytes!("../tests/fixtures/action_raise_vital.bin");
+pub const ACTION_RAISE_SKILL: &[u8] = include_bytes!("../tests/fixtures/action_raise_skill.bin");
 pub const ACTION_TALK: &[u8] = include_bytes!("../tests/fixtures/action_talk.bin");
 pub const ACTION_TELL: &[u8] = include_bytes!("../tests/fixtures/action_tell.bin");
 pub const MOVE_TO_STATE: &[u8] = include_bytes!("../tests/fixtures/move_to_state.bin");

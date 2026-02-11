@@ -5,10 +5,11 @@ use crate::ui::AppState;
 use holtburger_common::properties::{PropertyInt, RadarColor};
 use holtburger_core::world::entity::Entity;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
 pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -80,12 +81,73 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     // Tab-specific rendering
     match state.dashboard_tab {
-        DashboardTab::Entities | DashboardTab::Inventory | DashboardTab::Character => {
+        DashboardTab::Character => {
+            let mut bottom_area = dashboard_inner_chunks[0];
+
+            if let Some(info) = &state.level_info {
+                let summary_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints([Constraint::Length(1), Constraint::Min(0)])
+                    .split(dashboard_inner_chunks[0]);
+                
+                let top_area = summary_chunks[0];
+                bottom_area = summary_chunks[1];
+
+                use crate::ui::utils::format_cost;
+                let text = if info.xp_for_next_level > 0 {
+                    format!(
+                        "{} XP until {} / {} XP unspent",
+                        format_cost(info.xp_for_next_level.saturating_sub(info.xp_into_level)),
+                        info.level + 1,
+                        format_cost(info.unspent_xp)
+                    )
+                } else {
+                    format!(
+                        "{} total / {} XP unspent",
+                        info.current_xp,
+                        format_cost(info.unspent_xp)
+                    )
+                };
+
+                let summary = Paragraph::new(Line::from(vec![
+                    Span::styled(text, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::raw("  "),
+                ])).alignment(Alignment::Right);
+                f.render_widget(summary, top_area);
+            }
+
+            let items = crate::ui::widgets::stats::get_stats_list_items(state);
+            let total = items.len();
+            let dashboard_list = List::new(items)
+                .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+                .highlight_symbol("> ");
+
+            state.dashboard_list_state.select(Some(state.selected_dashboard_index));
+            f.render_stateful_widget(dashboard_list, bottom_area, &mut state.dashboard_list_state);
+
+            // Render Scrollbar for List-based tabs
+            let height = bottom_area.height as usize;
+            state.last_dashboard_height = height;
+
+            if total > height {
+                let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
+                    .position(state.selected_dashboard_index.min(total.saturating_sub(height)));
+                f.render_stateful_widget(
+                    Scrollbar::default()
+                        .orientation(ScrollbarOrientation::VerticalRight)
+                        .begin_symbol(Some("▲"))
+                        .end_symbol(Some("▼")),
+                    bottom_area,
+                    &mut scrollbar_state,
+                );
+            }
+        }
+        DashboardTab::Entities | DashboardTab::Inventory => {
             // These tabs currently all use a List view
             let items = match state.dashboard_tab {
                 DashboardTab::Entities => get_nearby_list_items(state),
                 DashboardTab::Inventory => get_inventory_list_items(state),
-                DashboardTab::Character => crate::ui::widgets::stats::get_stats_list_items(state),
+                _ => unreachable!(),
             };
 
             let total = items.len();
@@ -93,14 +155,8 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                 .highlight_symbol("> ");
 
-            state
-                .dashboard_list_state
-                .select(Some(state.selected_dashboard_index));
-            f.render_stateful_widget(
-                dashboard_list,
-                dashboard_inner_chunks[0],
-                &mut state.dashboard_list_state,
-            );
+            state.dashboard_list_state.select(Some(state.selected_dashboard_index));
+            f.render_stateful_widget(dashboard_list, dashboard_inner_chunks[0], &mut state.dashboard_list_state);
 
             // Render Scrollbar for List-based tabs
             let height = dashboard_inner_chunks[0].height as usize;
@@ -108,25 +164,17 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
             if total > height {
                 let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
-                    .position(
-                        state
-                            .selected_dashboard_index
-                            .min(total.saturating_sub(height)),
-                    );
+                    .position(state.selected_dashboard_index.min(total.saturating_sub(height)));
                 f.render_stateful_widget(
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)
                         .begin_symbol(Some("▲"))
                         .end_symbol(Some("▼")),
-                    area.inner(&ratatui::layout::Margin {
-                        vertical: 1,
-                        horizontal: 0,
-                    }),
+                    dashboard_inner_chunks[0],
                     &mut scrollbar_state,
                 );
             }
-        } // Future non-list tabs go here
-          // DashboardTab::Party => { render_party_grid(f, state, dashboard_inner_chunks[0]); }
+        }
     }
 
     if let Some(action_bar) = crate::ui::utils::render_action_bar(state) {

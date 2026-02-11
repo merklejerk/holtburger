@@ -267,6 +267,10 @@ pub fn get_debug_info(
                 enchant.last_time_degraded
             )));
         }
+        CommandTarget::Stat(st, cost) => {
+            lines.push(Line::from(format!("DEBUG INFO: {:?}", st)));
+            lines.push(Line::from(format!("XP Cost:    {:?}", cost)));
+        }
         CommandTarget::None => {}
     }
 

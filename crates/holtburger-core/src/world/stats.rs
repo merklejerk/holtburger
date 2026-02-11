@@ -40,6 +40,10 @@ impl VitalType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Attribute {
     pub attr_type: AttributeType,
+    pub ranks: u32,
+    pub start: u32,
+    pub spent_xp: u32,
+    pub next_rank_xp: Option<u32>,
     pub base: u32,
     pub current: u32,
 }
@@ -47,6 +51,10 @@ pub struct Attribute {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Vital {
     pub vital_type: VitalType,
+    pub ranks: u32,
+    pub start: u32,
+    pub spent_xp: u32,
+    pub next_rank_xp: Option<u32>,
     pub base: u32,       // Max Vital (unbuffed)
     pub buffed_max: u32, // Max Vital (including enchantments)
     pub current: u32,    // Current pool
@@ -189,9 +197,23 @@ impl SkillType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Skill {
     pub skill_type: SkillType,
+    pub ranks: u32,
+    pub init: u32,
+    pub spent_xp: u32,
+    pub next_rank_xp: Option<u32>,
     pub base: u32,
     pub current: u32,
     pub training: TrainingLevel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CharacterLevelInfo {
+    pub level: u32,
+    pub current_xp: u64,
+    pub unspent_xp: u64,
+    pub next_level_xp: u64,
+    pub xp_into_level: u64,
+    pub xp_for_next_level: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr)]

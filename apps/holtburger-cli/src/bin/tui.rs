@@ -38,7 +38,8 @@ impl log::Log for TuiLogger {
 
             // Only send to TUI if verbose is high enough or it's a high level message
             let should_send = match record.level() {
-                log::Level::Error | log::Level::Warn => true,
+                log::Level::Error => true,
+                log::Level::Warn => self.verbosity >= 1,
                 log::Level::Info => self.verbosity >= 2,
                 log::Level::Debug => self.verbosity >= 3,
                 log::Level::Trace => self.verbosity >= 4,
@@ -134,38 +135,43 @@ async fn main() -> Result<()> {
         log::set_max_level(log::LevelFilter::Trace);
     }
 
+    println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
+    let mut client = match Client::new(
+        &args.server,
+        args.port,
+        &args.account,
+        args.character.clone(),
+        dats_path.clone(),
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to initialize client: {}", e);
+            return Ok(());
+        }
+    };
+
+    if let Some(mut capture_path) = args.capture.clone() {
+        let caps_dir = std::path::Path::new("caps");
+        if !caps_dir.exists() {
+            let _ = std::fs::create_dir_all(caps_dir);
+        }
+        let path = std::path::Path::new(&capture_path);
+        if path.parent() == Some(std::path::Path::new("")) {
+            capture_path = format!("caps/{}", capture_path);
+        }
+        let _ = client.session.set_capture(&capture_path);
+    }
+
+    client.set_event_tx(event_tx);
+    client.set_command_rx(command_rx);
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    let mut client = Client::new(
-        &args.server,
-        args.port,
-        &args.account,
-        args.character.clone(),
-        dats_path,
-    )
-    .await?;
-
-    if let Some(mut capture_path) = args.capture {
-        // Ensure caps directory exists
-        let caps_dir = std::path::Path::new("caps");
-        if !caps_dir.exists() {
-            std::fs::create_dir_all(caps_dir)?;
-        }
-
-        // If it's just a filename, put it in caps/
-        let path = std::path::Path::new(&capture_path);
-        if path.parent() == Some(std::path::Path::new("")) {
-            capture_path = format!("caps/{}", capture_path);
-        }
-
-        client.session.set_capture(&capture_path)?;
-    }
-    client.set_event_tx(event_tx);
-    client.set_command_rx(command_rx);
 
     let mut app_state = AppState {
         account_name: args.account.clone(),
@@ -220,10 +226,11 @@ async fn main() -> Result<()> {
         );
     }
 
-    let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
-    let client_handle = tokio::spawn(async move {
+    let client_task_handle = tokio::spawn(async move {
         let _ = client.run().await;
     });
+
+    let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
 
     let mut last_tick = Instant::now();
     loop {
@@ -310,6 +317,6 @@ async fn main() -> Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    let _ = client_handle.await;
+    let _ = client_task_handle.await;
     Ok(())
 }

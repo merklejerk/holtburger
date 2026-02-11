@@ -299,14 +299,15 @@ impl AppState {
             KeyCode::Char(c) => {
                 if let UIState::CharacterSelection = self.state
                     && let Some(digit) = c.to_digit(10)
-                        && digit > 0 {
-                            let idx = (digit as usize).saturating_sub(1);
-                            if idx < self.characters.len() {
-                                self.selected_character_index = idx;
-                                commands.push(ClientCommand::SelectCharacterByIndex(idx + 1));
-                                self.state = UIState::Chat;
-                            }
-                        }
+                    && digit > 0
+                {
+                    let idx = (digit as usize).saturating_sub(1);
+                    if idx < self.characters.len() {
+                        self.selected_character_index = idx;
+                        commands.push(ClientCommand::SelectCharacterByIndex(idx + 1));
+                        self.state = UIState::Chat;
+                    }
+                }
 
                 if let UIState::Chat = self.state {
                     match self.focused_pane {

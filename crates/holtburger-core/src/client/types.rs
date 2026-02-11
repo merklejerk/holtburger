@@ -96,6 +96,18 @@ pub enum ClientCommand {
     MoveTo {
         target: Guid,
     },
+    RaiseAttribute {
+        attribute: crate::world::stats::AttributeType,
+        xp_spent: u32,
+    },
+    RaiseVital {
+        vital: crate::world::stats::VitalType,
+        xp_spent: u32,
+    },
+    RaiseSkill {
+        skill: crate::world::stats::SkillType,
+        xp_spent: u32,
+    },
     SyncPosition,
     Quit,
 }

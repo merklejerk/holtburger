@@ -47,41 +47,65 @@ impl Client {
         server_port: u16,
         account_name: &str,
         character_preference: Option<String>,
+        dats_path: std::path::PathBuf,
     ) -> Result<Self> {
         let target = format!("{}:{}", server_ip, server_port).parse::<SocketAddr>()?;
         let session = Session::new(target).await?;
-        Self::create_with_session(session, account_name, character_preference)
+        Self::create_with_session(session, account_name, character_preference, dats_path)
     }
 
     pub fn new_replay(
         replay_path: &str,
         account_name: &str,
         character_preference: Option<String>,
+        dats_path: std::path::PathBuf,
     ) -> Result<Self> {
         // Replay doesn't strictly need a target addr, but we can use a dummy one
         // Use 9001 for World server traffic (player spawns!)
         let target = "127.0.0.1:9001".parse::<SocketAddr>().unwrap();
         let session = Session::new_replay(replay_path, target)?;
-        Self::create_with_session(session, account_name, character_preference)
+        Self::create_with_session(session, account_name, character_preference, dats_path)
     }
 
     fn create_with_session(
         session: Session,
         account_name: &str,
         character_preference: Option<String>,
+        dats_path: std::path::PathBuf,
     ) -> Result<Self> {
-        // Try to find DATs in common locations
-        let mut portal_dat = None;
-        for path in ["portal.dat", "dats/portal.dat", "../dats/portal.dat"] {
-            if let Ok(db) = holtburger_dat::DatDatabase::new(path) {
-                portal_dat = Some(std::sync::Arc::new(db));
-                break;
+        let mut portal_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>> = None;
+        let mut cell_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>> = None;
+
+        match holtburger_dat::open_provider(dats_path.join("portal")) {
+            Ok(p) => {
+                log::info!("Loaded portal data from {}", dats_path.join("portal").display());
+                portal_dat = Some(p);
             }
+            Err(e) => {
+                log::warn!("Could not load portal data: {}", e);
+            }
+        }
+
+        match holtburger_dat::open_provider(dats_path.join("cell")) {
+            Ok(p) => {
+                log::info!("Loaded cell data from {}", dats_path.join("cell").display());
+                cell_dat = Some(p);
+            }
+            Err(e) => {
+                log::warn!("Could not load cell data: {}", e);
+            }
+        }
+
+        if portal_dat.is_none() || cell_dat.is_none() {
+            panic!(
+                "Failed to load required DAT files from {}. Ensure portal.dat/hba and cell.dat/hba exist.",
+                dats_path.display()
+            );
         }
 
         Ok(Client {
             session,
-            world: WorldState::new(portal_dat),
+            world: WorldState::new(portal_dat, cell_dat),
             account_name: account_name.to_string(),
             characters: Vec::new(),
             character_id: None,
@@ -385,8 +409,44 @@ impl Client {
                     .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
                     .await
             }
+            ClientCommand::RaiseAttribute {
+                attribute,
+                xp_spent,
+            } => {
+                log::info!(">>> Raising Attribute: {:?} (XP: {})", attribute, xp_spent);
+                self.session
+                    .send_action(GameAction::RaiseAttribute(Box::new(RaiseAttributeData {
+                        attribute_type: attribute as u32,
+                        xp_spent,
+                    })))
+                    .await
+            }
+            ClientCommand::RaiseVital { vital, xp_spent } => {
+                log::info!(">>> Raising Vital: {:?} (XP: {})", vital, xp_spent);
+                self.session
+                    .send_action(GameAction::RaiseVital(Box::new(RaiseVitalData {
+                        vital_type: vital as u32,
+                        xp_spent,
+                    })))
+                    .await
+            }
+            ClientCommand::RaiseSkill { skill, xp_spent } => {
+                log::info!(">>> Raising Skill: {:?} (XP: {})", skill, xp_spent);
+                self.session
+                    .send_action(GameAction::RaiseSkill(Box::new(RaiseSkillData {
+                        skill_type: skill as u32,
+                        xp_spent,
+                    })))
+                    .await
+            }
             ClientCommand::Quit => {
                 log::info!("Disconnecting...");
+                // First attempt a graceful logout from the world
+                if matches!(self.state, ClientState::InWorld) {
+                    let _ = self.session.send_message(&GameMessage::CharacterLogOff).await;
+                    // Small delay to allow logout to process? Or just proceed to session disconnect.
+                    // AC usually waits for the Server's response, but here we can just fire and move on.
+                }
                 self.disconnect().await?;
                 Ok(())
             }

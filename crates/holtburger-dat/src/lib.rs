@@ -225,6 +225,42 @@ impl ResourceProvider for DatDatabase {
     }
 }
 
+/// Helper to open a resource provider from a path, automatically handling .hba vs .dat extensions.
+///
+/// If the path has no extension, it will probe for `.hba` first (optimized) then `.dat`.
+pub fn open_provider<P: AsRef<Path>>(path: P) -> Result<std::sync::Arc<dyn ResourceProvider>> {
+    let path = path.as_ref();
+
+    // If it has an extension, just open it directly
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let ext = ext.to_lowercase();
+        if ext == "hba" {
+            return Ok(std::sync::Arc::new(archive::HbaReader::open(path)?));
+        } else if ext == "dat" {
+            return Ok(std::sync::Arc::new(DatDatabase::new(path)?));
+        }
+    }
+
+    // Otherwise, probe
+    let hba = path.with_extension("hba");
+    if hba.exists() {
+        return Ok(std::sync::Arc::new(archive::HbaReader::open(&hba)?));
+    }
+
+    let dat = path.with_extension("dat");
+    if dat.exists() {
+        return Ok(std::sync::Arc::new(DatDatabase::new(&dat)?));
+    }
+
+    Err(DatError::PathError {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find .hba or .dat file at this location",
+        ),
+    })
+}
+
 pub struct CompositeProvider {
     providers: Vec<Box<dyn ResourceProvider>>,
 }

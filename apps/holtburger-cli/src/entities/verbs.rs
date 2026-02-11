@@ -19,6 +19,7 @@ pub enum EntityVerb {
     MoveToSlot(Guid), // Move item to specific container GUID
     Debug,
     Approach,
+    LevelUp,
 }
 
 impl EntityVerb {
@@ -33,6 +34,7 @@ impl EntityVerb {
             EntityVerb::MoveToSlot(_) => "Secure",
             EntityVerb::Debug => "Debug",
             EntityVerb::Approach => "Approach",
+            EntityVerb::LevelUp => "Level Up",
         }
     }
 
@@ -47,6 +49,7 @@ impl EntityVerb {
             EntityVerb::MoveToSlot(_) => 's',
             EntityVerb::Debug => 'b',
             EntityVerb::Approach => 'r',
+            EntityVerb::LevelUp => 'l',
         }
     }
 
@@ -121,6 +124,30 @@ impl EntityVerb {
                     placement: 0,
                 }))
             }
+            (EntityVerb::LevelUp, CommandTarget::Stat(st, Some(cost))) => {
+                let xp_spent = *cost as u32;
+                match st {
+                    crate::ui::types::StatType::Attribute(at) => Some(CommandHandler::Command(
+                        ClientCommand::RaiseAttribute {
+                            attribute: *at,
+                            xp_spent,
+                        },
+                    )),
+                    crate::ui::types::StatType::Vital(vt) => Some(CommandHandler::Command(
+                        ClientCommand::RaiseVital {
+                            vital: *vt,
+                            xp_spent,
+                        },
+                    )),
+                    crate::ui::types::StatType::Skill(st) => Some(CommandHandler::Command(
+                        ClientCommand::RaiseSkill {
+                            skill: *st,
+                            xp_spent,
+                        },
+                    )),
+                }
+            }
+            (EntityVerb::LevelUp, CommandTarget::Stat(_, None)) => None,
             (EntityVerb::Debug, _) => Some(CommandHandler::ToggleDebug),
             _ => None,
         }
@@ -215,6 +242,13 @@ pub fn get_verbs_for_target(
             ent_verbs
         }
         CommandTarget::Enchantment(_) => Vec::new(),
+        CommandTarget::Stat(_, cost) => {
+            if cost.is_some() {
+                vec![EntityVerb::LevelUp]
+            } else {
+                Vec::new()
+            }
+        }
         CommandTarget::None => Vec::new(),
     };
 
@@ -228,7 +262,7 @@ pub fn get_verbs_for_target(
 /// Determines if the [D]ebug command should be available.
 fn should_show_debug(target: &CommandTarget) -> bool {
     match target {
-        CommandTarget::Entity(_) | CommandTarget::Enchantment(_) => true,
+        CommandTarget::Entity(_) | CommandTarget::Enchantment(_) | CommandTarget::Stat(_, _) => true,
         CommandTarget::None => false,
     }
 }

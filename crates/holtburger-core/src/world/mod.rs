@@ -28,6 +28,7 @@ pub enum WorldEvent {
     VitalUpdated(stats::Vital),
     AttributeUpdated(stats::Attribute),
     SkillUpdated(stats::Skill),
+    LevelInfoUpdated(stats::CharacterLevelInfo),
     PropertyUpdated {
         guid: Guid,
         property_id: u32,

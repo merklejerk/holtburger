@@ -116,6 +116,9 @@ impl AppState {
                     WorldEvent::SkillUpdated(skill) => {
                         self.skills.insert(skill.skill_type, skill);
                     }
+                    WorldEvent::LevelInfoUpdated(info) => {
+                        self.level_info = Some(info);
+                    }
                     WorldEvent::DerivedStatsUpdated {
                         attributes,
                         vitals,

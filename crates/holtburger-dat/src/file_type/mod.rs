@@ -1,10 +1,12 @@
 pub mod env_cell;
 pub mod gfx_obj;
 pub mod setup_model;
+pub mod xp_table;
 
 pub use env_cell::EnvCell;
 pub use gfx_obj::GfxObj;
 pub use setup_model::SetupModel;
+pub use xp_table::XpTable;
 
 use std::fmt;
 

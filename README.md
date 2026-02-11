@@ -26,35 +26,61 @@ Holtburger is **highly experimental**. APIs are unstable and subject to frequent
 ## Installation
 
 ### Binary Releases (Recommended)
-You can download the latest pre-compiled binaries from the [Releases](https://github.com/merklejerk/holtburger/releases) page. These builds come bundled with the necessary `.hba` data files.
+Pre-compiled binaries for the nightly builds are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives include the necessary pruned HBA data files.
 
-- **Windows/macOS/Linux**: Download the archive for your platform, extract it, and run the `holtburger-cli` executable.
+1.  Download the archive for your platform (Windows, macOS, or Linux).
+2.  Extract the contents.
+3.  Run the `holtburger-cli` (or `holtburger-cli.exe` on Windows) binary.
 
 ### Flatpak (Linux)
-A Flatpak bundle is available for Linux users:
+For Linux users, a Flatpak bundle is built nightly:
 ```bash
+# Install the bundle
 flatpak install holtburger-cli.flatpak
 ```
 
 ### From Source
-If you prefer to build from source:
-1.  Clone the repository: `git clone https://github.com/merklejerk/holtburger.git`
-2.  Build the project: `cargo build --release`
-3.  The binary will be at `target/release/holtburger-cli`.
+To build the ecosystem from scratch, ensure you have the [Rust toolchain](https://www.rust-lang.org/tools/install) installed.
 
-**Note on Data Files:** The TUI client requires game data to function. It is compatible with:
-*   **Official DAT files**: `client_portal.dat` and `client_cell_1.dat` (rename them to `portal.dat` and `cell.dat`).
-*   **Holtburger HBA files**: Our custom, 90% smaller pruned archives (`portal.hba` and `cell.hba`) which are optimized for the TUI client's logic-only needs. These are available as a separate download on the [Releases](https://github.com/merklejerk/holtburger/releases) page (`hba.zip`).
-
-By default, the client looks in a `./dats` folder next to the binary, or in your system's standard data directory (e.g., `~/.local/share/holtburger/dats` on Linux). You can override this using the `--dats <path>` command-line argument or by setting the `HOLTBURGER_DATS` environment variable.
+```bash
+git clone https://github.com/merklejerk/holtburger.git
+cd holtburger
+cargo build --release
+```
+The binaries will be located in `target/release/`.
 
 ## Running the TUI Client
 
-To launch the development TUI client:
-
+### Using the Binary Release
+Simply run the executable from your terminal. If you are in the folder where you extracted the release:
 ```bash
-cargo run --bin holtburger-cli
+./holtburger-cli [ARGS]
 ```
+
+### Using Flatpak
+```bash
+flatpak run io.github.merklejerk.holtburger-cli [ARGS]
+```
+
+### Local Development
+For development, you can run the TUI client directly through `cargo`. We use `--bin tui` as a shorthand in the dev environment. Note that this will require you to provide the client `.dat` files in the `./dats/` folder (see [below](#data-file-configuration)):
+```bash
+cargo run --bin tui -- [ARGS]
+```
+
+### Data File Configuration
+The TUI client requires game data (`portal` and `cell`) to function. It is compatible with both official DAT files and our optimized HBA format, which is >90% smaller. The repo and source distribution does not check these files in so you will have to provide them separately. You can either provide your own DAT files or download the latest `hba.zip` from our [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into a `./dats` folder in the root of the project.
+
+**Search Priority:**
+1.  `--dats <PATH>` command-line argument.
+2.  `HOLTBURGER_DATS` environment variable.
+3.  Local `./dats/` directory relative to the binary.
+4.  Standard OS Data Directory:
+    *   **Linux**: `~/.local/share/holtburger/dats/`
+    *   **macOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
+    *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
+
+> **Note:** Official DAT files (`client_portal.dat` and `client_cell_1.dat`) must be renamed to `portal.dat` and `cell.dat` respectively.
 
 ## License
 

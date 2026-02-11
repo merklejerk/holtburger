@@ -13,6 +13,7 @@ modules:
       - cp *.hba /app/share/holtburger/dats/
       - install -D io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
       - install -D io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
+      - install -D io.github.merklejerk.holtburger-cli.svg /app/share/icons/hicolor/scalable/apps/io.github.merklejerk.holtburger-cli.svg
     sources:
       - type: file
         path: ../../../target/release/holtburger-cli
@@ -22,6 +23,8 @@ modules:
         path: io.github.merklejerk.holtburger-cli.desktop
       - type: file
         path: io.github.merklejerk.holtburger-cli.metainfo.xml
+      - type: file
+        path: io.github.merklejerk.holtburger-cli.svg
 finish-args:
   - --share=network
   - --share=ipc

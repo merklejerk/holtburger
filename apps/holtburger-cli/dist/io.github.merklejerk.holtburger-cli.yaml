@@ -2,13 +2,9 @@ id: io.github.merklejerk.holtburger-cli
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
-sdk-extensions:
-  - org.freedesktop.Sdk.Extension.rust-stable
 command: holtburger-cli
 modules:
   - name: holtburger-cli
-    build-options:
-      append-path: /usr/lib/sdk/rust-stable/bin
     buildsystem: simple
     build-commands:
       # We build the binary outside the sandbox to avoid internet issues

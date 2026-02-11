@@ -233,8 +233,7 @@ impl AppState {
                     }
                     WorldEvent::WeenieError { error_id } => {
                         use holtburger_protocol::errors::WeenieError;
-                        let error =
-                            WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
+                        let error = WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
                         if self.verbosity >= 1 && error != WeenieError::None {
                             self.log_chat(
                                 ChatMessageKind::Warning,
@@ -244,8 +243,7 @@ impl AppState {
                     }
                     WorldEvent::WeenieErrorWithString { error_id, message } => {
                         use holtburger_protocol::errors::WeenieError;
-                        let error =
-                            WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
+                        let error = WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
                         if self.verbosity >= 1 && error != WeenieError::None {
                             self.log_chat(
                                 ChatMessageKind::Warning,

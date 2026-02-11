@@ -18,6 +18,7 @@ use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameMessage {
+    None, // 0x0000
     CharacterList(Box<CharacterListData>),
     CharacterEnterWorldRequest(Box<CharacterEnterWorldRequestData>),
     CharacterEnterWorld(Box<CharacterEnterWorldData>),
@@ -28,6 +29,7 @@ pub enum GameMessage {
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),
     BootAccount(Box<BootAccountData>),
+    CharacterLogOff, // 0xF653
     GameAction(Box<GameActionMessage>),
     GameEvent(Box<GameEventMessage>),
 
@@ -109,6 +111,7 @@ impl ProtocolUnpack for GameMessage {
         }
 
         match op.unwrap() {
+            GameOpcode::None => Some(GameMessage::None),
             GameOpcode::CharacterList => Some(GameMessage::CharacterList(Box::new(
                 CharacterListData::unpack(data, offset)?,
             ))),
@@ -136,6 +139,7 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::BootAccount => Some(GameMessage::BootAccount(Box::new(
                 BootAccountData::unpack(data, offset)?,
             ))),
+            GameOpcode::CharacterLogOff => Some(GameMessage::CharacterLogOff),
             GameOpcode::ServerMessage => Some(GameMessage::ServerMessage(Box::new(
                 ServerMessageData::unpack(data, offset)?,
             ))),
@@ -309,6 +313,10 @@ impl ProtocolUnpack for GameMessage {
 impl ProtocolPack for GameMessage {
     fn pack(&self, buf: &mut Vec<u8>) {
         match self {
+            GameMessage::None => {
+                buf.write_u32::<LittleEndian>(GameOpcode::None as u32)
+                    .unwrap();
+            }
             GameMessage::CharacterList(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::CharacterList as u32)
                     .unwrap();
@@ -347,6 +355,10 @@ impl ProtocolPack for GameMessage {
                 buf.write_u32::<LittleEndian>(GameOpcode::BootAccount as u32)
                     .unwrap();
                 data.pack(buf);
+            }
+            GameMessage::CharacterLogOff => {
+                buf.write_u32::<LittleEndian>(GameOpcode::CharacterLogOff as u32)
+                    .unwrap();
             }
             GameMessage::ServerMessage(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::ServerMessage as u32)

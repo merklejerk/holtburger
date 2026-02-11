@@ -1,6 +1,6 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_dat::DatDatabase;
+use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::gfx_obj::GfxObj;
 use holtburger_dat::landblock::LandblockInfo;
 use std::collections::{HashMap, HashSet};
@@ -42,7 +42,7 @@ impl SpatialScene {
 
     pub fn get_landblock_info(
         &mut self,
-        dat: &DatDatabase,
+        dat: &dyn ResourceProvider,
         lb_id: Guid,
     ) -> Option<Arc<LandblockInfo>> {
         if let Some(info) = self.landblock_info.get(&lb_id) {
@@ -51,9 +51,7 @@ impl SpatialScene {
 
         // Outdoor landblock IDs end in 0xFFFF.
         // LandblockInfo is usually stored with the ID as its key in the cell.dat.
-        if let Ok(data) = dat.get_file(lb_id.into())
-            && let Ok(info) = LandblockInfo::unpack(&data)
-        {
+        if let Ok(info) = LandblockInfo::unpack(&dat.get_file(lb_id.into()).ok()?) {
             let arc = Arc::new(info);
             self.landblock_info.insert(lb_id, arc.clone());
             return Some(arc);
@@ -62,7 +60,11 @@ impl SpatialScene {
     }
 
     /// Load or retrieve GfxObj geometry from the portal dat.
-    pub fn get_object_geometry(&mut self, dat: &DatDatabase, gfx_id: u32) -> Option<Arc<GfxObj>> {
+    pub fn get_object_geometry(
+        &mut self,
+        dat: &dyn ResourceProvider,
+        gfx_id: u32,
+    ) -> Option<Arc<GfxObj>> {
         if let Some(entry) = self.object_geometry.get_mut(&gfx_id) {
             // This is annoying because of borrow checker if we try to update last_accessed
             // but we'll worry about that if we actually add pruning.

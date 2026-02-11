@@ -22,7 +22,11 @@ pub struct VitalBase {
 pub struct PlayerState {
     pub guid: Guid,
     pub name: String,
-    pub attributes: HashMap<stats::AttributeType, u32>,
+    pub level: u32,
+    pub total_experience: u64,
+    pub available_experience: u64,
+    pub unspent_skill_points: u32,
+    pub attributes: HashMap<stats::AttributeType, stats::Attribute>,
     pub vitals: HashMap<stats::VitalType, stats::Vital>,
     /// Stores the raw ranks and start for vitals so they can be recalculated
     pub vital_bases: HashMap<stats::VitalType, VitalBase>,
@@ -52,6 +56,10 @@ impl PlayerState {
         Self {
             guid: Guid::NULL,
             name: "Unknown".to_string(),
+            level: 0,
+            total_experience: 0,
+            available_experience: 0,
+            unspent_skill_points: 0,
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             vital_bases: HashMap::new(),
@@ -71,15 +79,7 @@ impl PlayerState {
     }
 
     pub fn get_attributes(&self) -> Vec<stats::Attribute> {
-        let mut attr_objs: Vec<_> = self
-            .attributes
-            .iter()
-            .map(|(&attr_type, &base)| stats::Attribute {
-                attr_type,
-                base,
-                current: self.get_attribute_current(attr_type),
-            })
-            .collect();
+        let mut attr_objs: Vec<_> = self.attributes.values().cloned().collect();
         attr_objs.sort_by_key(|a| a.attr_type as u32);
         attr_objs
     }
@@ -109,11 +109,11 @@ impl PlayerState {
             match existing {
                 Some(best) => {
                     if e.is_better_than(best) {
-                        by_category.insert(e.spell_category, e.clone());
+                        by_category.insert(e.spell_category, *e);
                     }
                 }
                 None => {
-                    by_category.insert(e.spell_category, e.clone());
+                    by_category.insert(e.spell_category, *e);
                 }
             }
         }
@@ -152,8 +152,12 @@ impl PlayerState {
         add
     }
 
+    pub fn get_attribute_base(&self, attr: stats::AttributeType) -> u32 {
+        self.attributes.get(&attr).map(|a| a.base).unwrap_or(0)
+    }
+
     pub fn get_attribute_current(&self, attr: stats::AttributeType) -> u32 {
-        let base = self.attributes.get(&attr).cloned().unwrap_or(0) as f32;
+        let base = self.get_attribute_base(attr) as f32;
         let mult = self.get_attribute_multiplier(attr);
         let add = self.get_attribute_additive(attr);
 
@@ -169,7 +173,7 @@ impl PlayerState {
             if use_current {
                 self.get_attribute_current(attr)
             } else {
-                self.attributes.get(&attr).cloned().unwrap_or(0)
+                self.get_attribute_base(attr)
             }
         };
 
@@ -319,7 +323,7 @@ impl PlayerState {
             if use_current {
                 self.get_attribute_current(attr)
             } else {
-                self.attributes.get(&attr).cloned().unwrap_or(0)
+                self.get_attribute_base(attr)
             }
         };
 
@@ -339,6 +343,15 @@ impl PlayerState {
     }
 
     pub fn emit_derived_stats(&mut self, events: &mut Vec<WorldEvent>) {
+        // Recalculate Attributes
+        let attr_types: Vec<_> = self.attributes.keys().cloned().collect();
+        for attr_type in attr_types {
+            let current = self.get_attribute_current(attr_type);
+            if let Some(attr) = self.attributes.get_mut(&attr_type) {
+                attr.current = current;
+            }
+        }
+
         // Recalculate Vitals
         for vital_type in [
             stats::VitalType::Health,
@@ -378,7 +391,12 @@ impl PlayerState {
         });
     }
 
-    pub fn handle_message(&mut self, msg: &GameMessage, events: &mut Vec<WorldEvent>) -> bool {
+    pub fn handle_message(
+        &mut self,
+        msg: &GameMessage,
+        events: &mut Vec<WorldEvent>,
+        xp_table: Option<&holtburger_dat::file_type::XpTable>,
+    ) -> bool {
         match msg {
             GameMessage::ObjectCreate(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
@@ -454,17 +472,28 @@ impl PlayerState {
                     attribute,
                     ranks,
                     start,
+                    xp,
                     ..
                 } = &**data;
                 if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
                     let base = start + ranks;
-                    self.attributes.insert(attr_type, base);
+                    let mult = self.get_attribute_multiplier(attr_type);
+                    let add = self.get_attribute_additive(attr_type);
+                    let current = ((base as f32 * mult) + add).round() as u32;
 
-                    events.push(WorldEvent::AttributeUpdated(stats::Attribute {
+                    let attr_obj = stats::Attribute {
                         attr_type,
+                        ranks: *ranks,
+                        start: *start,
+                        spent_xp: *xp,
+                        next_rank_xp: xp_table.and_then(|t| t.get_next_attribute_rank_xp(*ranks)),
                         base,
-                        current: self.get_attribute_current(attr_type),
-                    }));
+                        current,
+                    };
+
+                    self.attributes.insert(attr_type, attr_obj.clone());
+
+                    events.push(WorldEvent::AttributeUpdated(attr_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -475,17 +504,28 @@ impl PlayerState {
                     attribute,
                     ranks,
                     start,
+                    xp,
                     ..
                 } = &**data;
                 if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
                     let base = start + ranks;
-                    self.attributes.insert(attr_type, base);
+                    let mult = self.get_attribute_multiplier(attr_type);
+                    let add = self.get_attribute_additive(attr_type);
+                    let current = ((base as f32 * mult) + add).round() as u32;
 
-                    events.push(WorldEvent::AttributeUpdated(stats::Attribute {
+                    let attr_obj = stats::Attribute {
                         attr_type,
+                        ranks: *ranks,
+                        start: *start,
+                        spent_xp: *xp,
+                        next_rank_xp: xp_table.and_then(|t| t.get_next_attribute_rank_xp(*ranks)),
                         base,
-                        current: self.get_attribute_current(attr_type),
-                    }));
+                        current,
+                    };
+
+                    self.attributes.insert(attr_type, attr_obj.clone());
+
+                    events.push(WorldEvent::AttributeUpdated(attr_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -497,6 +537,7 @@ impl PlayerState {
                     ranks,
                     status,
                     init,
+                    xp,
                     ..
                 } = &**data;
                 if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
@@ -520,10 +561,20 @@ impl PlayerState {
 
                     let skill_obj = stats::Skill {
                         skill_type,
+                        ranks: *ranks,
+                        init: *init,
+                        spent_xp: *xp,
+                        next_rank_xp: xp_table.and_then(|t| {
+                            t.get_next_skill_rank_xp(
+                                *ranks,
+                                training == stats::TrainingLevel::Specialized,
+                            )
+                        }),
                         base: base_val,
                         current: current_val,
                         training,
                     };
+
                     self.skills.insert(skill_type, skill_obj.clone());
 
                     events.push(WorldEvent::SkillUpdated(skill_obj));
@@ -538,6 +589,7 @@ impl PlayerState {
                     ranks,
                     status,
                     init,
+                    xp,
                     ..
                 } = &**data;
                 if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
@@ -561,10 +613,20 @@ impl PlayerState {
 
                     let skill_obj = stats::Skill {
                         skill_type,
+                        ranks: *ranks,
+                        init: *init,
+                        spent_xp: *xp,
+                        next_rank_xp: xp_table.and_then(|t| {
+                            t.get_next_skill_rank_xp(
+                                *ranks,
+                                training == stats::TrainingLevel::Specialized,
+                            )
+                        }),
                         base: base_val,
                         current: current_val,
                         training,
                     };
+
                     self.skills.insert(skill_type, skill_obj.clone());
 
                     events.push(WorldEvent::SkillUpdated(skill_obj));
@@ -579,6 +641,7 @@ impl PlayerState {
                     ranks,
                     start,
                     current,
+                    xp,
                     ..
                 } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_id(*vital) {
@@ -596,6 +659,10 @@ impl PlayerState {
 
                     let vital_obj = stats::Vital {
                         vital_type,
+                        ranks: *ranks,
+                        start: *start,
+                        spent_xp: *xp,
+                        next_rank_xp: xp_table.and_then(|t| t.get_next_vital_rank_xp(*ranks)),
                         base: final_base,
                         buffed_max,
                         current: *current,
@@ -614,6 +681,7 @@ impl PlayerState {
                     ranks,
                     start,
                     current,
+                    xp,
                     ..
                 } = &**data;
                 if let Some(vital_type) = stats::VitalType::from_id(*vital) {
@@ -631,6 +699,10 @@ impl PlayerState {
 
                     let vital_obj = stats::Vital {
                         vital_type,
+                        ranks: *ranks,
+                        start: *start,
+                        spent_xp: *xp,
+                        next_rank_xp: xp_table.and_then(|t| t.get_next_vital_rank_xp(*ranks)),
                         base: final_base,
                         buffed_max,
                         current: *current,
@@ -665,11 +737,11 @@ impl PlayerState {
                             if let Some(existing) = self.enchantments.iter_mut().find(|e| {
                                 e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
                             }) {
-                                *existing = enchantment.clone();
+                                *existing = *enchantment;
                             } else {
-                                self.enchantments.push(enchantment.clone());
+                                self.enchantments.push(*enchantment);
                             }
-                            events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                            events.push(WorldEvent::EnchantmentUpdated(*enchantment));
                             self.emit_derived_stats(events);
                             true
                         } else {
@@ -688,11 +760,11 @@ impl PlayerState {
                                     e.spell_id == enchantment.spell_id
                                         && e.layer == enchantment.layer
                                 }) {
-                                    *existing = enchantment.clone();
+                                    *existing = *enchantment;
                                 } else {
-                                    self.enchantments.push(enchantment.clone());
+                                    self.enchantments.push(*enchantment);
                                 }
-                                events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                                events.push(WorldEvent::EnchantmentUpdated(*enchantment));
                             }
                             self.emit_derived_stats(events);
                             true
@@ -832,29 +904,32 @@ impl PlayerState {
 mod tests {
     use super::*;
 
+    fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
+        player.attributes.insert(
+            attr,
+            stats::Attribute {
+                attr_type: attr,
+                ranks: 0,
+                start: val,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: val,
+                current: val,
+            },
+        );
+    }
+
     #[test]
     fn test_stat_calculations() {
         let mut player = PlayerState::new();
 
         // Setup attributes
-        player
-            .attributes
-            .insert(stats::AttributeType::StrengthAttr, 100);
-        player
-            .attributes
-            .insert(stats::AttributeType::EnduranceAttr, 100);
-        player
-            .attributes
-            .insert(stats::AttributeType::QuicknessAttr, 100);
-        player
-            .attributes
-            .insert(stats::AttributeType::CoordinationAttr, 100);
-        player
-            .attributes
-            .insert(stats::AttributeType::FocusAttr, 100);
-        player
-            .attributes
-            .insert(stats::AttributeType::SelfAttr, 100);
+        set_attr(&mut player, stats::AttributeType::StrengthAttr, 100);
+        set_attr(&mut player, stats::AttributeType::EnduranceAttr, 100);
+        set_attr(&mut player, stats::AttributeType::QuicknessAttr, 100);
+        set_attr(&mut player, stats::AttributeType::CoordinationAttr, 100);
+        set_attr(&mut player, stats::AttributeType::FocusAttr, 100);
+        set_attr(&mut player, stats::AttributeType::SelfAttr, 100);
 
         // Test Vital Bonuses
         assert_eq!(
@@ -894,12 +969,8 @@ mod tests {
     #[test]
     fn test_buff_calculations() {
         let mut player = PlayerState::new();
-        player
-            .attributes
-            .insert(stats::AttributeType::StrengthAttr, 100);
-        player
-            .attributes
-            .insert(stats::AttributeType::CoordinationAttr, 100);
+        set_attr(&mut player, stats::AttributeType::StrengthAttr, 100);
+        set_attr(&mut player, stats::AttributeType::CoordinationAttr, 100);
 
         // Add a Strength Buff (+20 additive)
         player.enchantments.push(Enchantment {
@@ -979,9 +1050,7 @@ mod tests {
     fn test_health_rounding() {
         let mut player = PlayerState::new();
         // Endurance 101 / 2 = 50.5 -> should be 51
-        player
-            .attributes
-            .insert(stats::AttributeType::EnduranceAttr, 101);
+        set_attr(&mut player, stats::AttributeType::EnduranceAttr, 101);
         player.vital_bases.insert(
             stats::VitalType::Health,
             VitalBase {
@@ -1036,7 +1105,7 @@ mod tests {
 
         let msg = GameMessage::VectorUpdate(Box::new(data));
         let mut events = Vec::new();
-        let handled = player.handle_message(&msg, &mut events);
+        let handled = player.handle_message(&msg, &mut events, None);
 
         assert!(handled);
         assert_eq!(events.len(), 1);
@@ -1075,7 +1144,7 @@ mod tests {
                 xp: 0,
                 current: 50,
             }));
-            player.handle_message(&msg, &mut Vec::new());
+            player.handle_message(&msg, &mut Vec::new(), None);
         }
 
         // Verify they are in the map
@@ -1094,7 +1163,7 @@ mod tests {
                     current: val,
                 }));
             let mut events = Vec::new();
-            let handled = player.handle_message(&msg, &mut events);
+            let handled = player.handle_message(&msg, &mut events, None);
             assert!(handled, "Failed to handle vital update for ID {}", id);
             assert_eq!(events.len(), 1);
         }

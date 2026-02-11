@@ -28,6 +28,7 @@ pub enum WorldEvent {
     VitalUpdated(stats::Vital),
     AttributeUpdated(stats::Attribute),
     SkillUpdated(stats::Skill),
+    LevelInfoUpdated(stats::CharacterLevelInfo),
     PropertyUpdated {
         guid: Guid,
         property_id: u32,
@@ -41,6 +42,7 @@ pub enum WorldEvent {
         vitals: Vec<stats::Vital>,
         skills: Vec<stats::Skill>,
         enchantments: Vec<Enchantment>,
+        skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     },
     EnchantmentUpdated(Enchantment),
     EnchantmentRemoved {

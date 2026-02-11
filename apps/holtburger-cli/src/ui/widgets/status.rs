@@ -43,15 +43,46 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         "M --/--".to_string()
     };
 
-    let vitals_para = Paragraph::new(Line::from(vec![
+    let vitals_block = Block::default().borders(Borders::ALL).title("Vitals");
+    let inner_area = vitals_block.inner(chunks[0]);
+    f.render_widget(vitals_block, chunks[0]);
+
+    let vitals_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(20),    // Bars
+            Constraint::Length(15), // Level/XP right aligned
+        ])
+        .split(inner_area);
+
+    let bars_line = Line::from(vec![
         Span::styled(health_str, Style::default().fg(Color::Red)),
-        Span::raw("  "),
+        Span::raw(" "),
         Span::styled(stamina_str, Style::default().fg(Color::Yellow)),
-        Span::raw("  "),
+        Span::raw(" "),
         Span::styled(mana_str, Style::default().fg(Color::Blue)),
-    ]))
-    .block(Block::default().borders(Borders::ALL).title("Vitals"));
-    f.render_widget(vitals_para, chunks[0]);
+    ]);
+    f.render_widget(Paragraph::new(bars_line), vitals_layout[0]);
+
+    if let Some(info) = &state.level_info {
+        let pct = if info.xp_for_next_level > 0 {
+            (info.xp_into_level as f64 / info.xp_for_next_level as f64) * 100.0
+        } else {
+            100.0
+        };
+        let level_line = Line::from(vec![
+            Span::styled(
+                format!("Lv {}", info.level),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::raw(" "),
+            Span::styled(format!("({:.2}%)", pct), Style::default().fg(Color::Cyan)),
+        ]);
+        f.render_widget(
+            Paragraph::new(level_line).alignment(ratatui::layout::Alignment::Right),
+            vitals_layout[1],
+        );
+    }
 
     // 2. Render Info (Right Half)
     let pos_info = if let Some(pos) = &state.player_pos {

@@ -31,6 +31,8 @@ struct Args {
     capture: Option<String>,
     #[arg(long)]
     replay: Option<String>,
+    #[arg(short, long)]
+    dats: Option<String>,
     #[command(subcommand)]
     command: Commands,
 }
@@ -38,6 +40,14 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    let dats_path = args
+        .dats
+        .clone()
+        .or_else(|| std::env::var("HOLTBURGER_DATS").ok())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("./dats"));
+
     let log_level = if args.verbose {
         log::LevelFilter::Debug
     } else {
@@ -54,13 +64,19 @@ async fn main() -> Result<()> {
     };
 
     let mut client = if let Some(replay_path) = args.replay {
-        Client::new_replay(&replay_path, &args.account, character_pref.clone())?
+        Client::new_replay(
+            &replay_path,
+            &args.account,
+            character_pref.clone(),
+            dats_path,
+        )?
     } else {
         Client::new(
             &args.server,
             args.port,
             &args.account,
             character_pref.clone(),
+            dats_path,
         )
         .await?
     };

@@ -3,7 +3,7 @@ use holtburger_common::Guid;
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 pub struct Enchantment {
     pub spell_id: u16,
     pub layer: u16,

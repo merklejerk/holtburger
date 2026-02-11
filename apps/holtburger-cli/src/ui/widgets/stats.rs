@@ -1,7 +1,10 @@
 use crate::ui::AppState;
+use crate::ui::StatType;
+use crate::ui::types::{CommandTarget, DashboardTab};
+use crate::ui::utils::format_cost;
 use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::{PropertyFloat, PropertyInt};
-use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
+use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -21,7 +24,12 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         let highlight = i == state.selected_dashboard_index
             && matches!(
                 line,
-                CharTabLine::Enchantment(_) | CharTabLine::Miscellaneous(_)
+                CharTabLine::Enchantment(_)
+                    | CharTabLine::Miscellaneous(_)
+                    | CharTabLine::Stat {
+                        stat_type: Some(_),
+                        ..
+                    }
             );
 
         let style = if highlight {
@@ -37,11 +45,58 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                     header_style,
                 )])));
             }
-            CharTabLine::Stat { label, value } => {
-                list_items.push(
-                    ListItem::new(Line::from(format!("  {:<15} {:>10}", label, value)))
-                        .style(style),
+            CharTabLine::Stat {
+                label,
+                value,
+                xp_cost,
+                sp_cost,
+                stat_type: _,
+                training,
+            } => {
+                let is_untrained = matches!(
+                    training,
+                    Some(TrainingLevel::Untrained) | Some(TrainingLevel::Unusable)
                 );
+
+                let label_style = if highlight {
+                    Style::default().fg(Color::White)
+                } else if is_untrained {
+                    Style::default().fg(Color::DarkGray)
+                } else {
+                    Style::default()
+                };
+
+                let mut spans = vec![
+                    Span::styled(format!("  {:<15} ", label), label_style),
+                    Span::styled(
+                        value.clone(),
+                        if highlight {
+                            Style::default().fg(Color::Cyan)
+                        } else if is_untrained {
+                            Style::default().fg(Color::DarkGray)
+                        } else {
+                            Style::default()
+                        },
+                    ),
+                ];
+
+                if let Some(c) = xp_cost {
+                    spans.push(Span::raw(" ("));
+                    spans.push(Span::styled(
+                        format_cost(*c),
+                        Style::default().fg(Color::Yellow),
+                    ));
+                    spans.push(Span::raw(" XP)"));
+                } else if let Some(c) = sp_cost {
+                    spans.push(Span::raw(" ("));
+                    spans.push(Span::styled(
+                        c.to_string(),
+                        Style::default().fg(Color::Green),
+                    ));
+                    spans.push(Span::raw(" SP)"));
+                }
+
+                list_items.push(ListItem::new(Line::from(spans)).style(style));
             }
             CharTabLine::Enchantment(enchant) => {
                 let beneficial =
@@ -109,15 +164,22 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     list_items
 }
 
-enum CharTabLine<'a> {
+enum CharTabLine {
     Header(&'static str),
-    Stat { label: String, value: String },
-    Enchantment(&'a Enchantment),
-    Miscellaneous(&'a Enchantment),
+    Stat {
+        label: String,
+        value: String,
+        xp_cost: Option<u64>,
+        sp_cost: Option<u32>,
+        stat_type: Option<StatType>,
+        training: Option<TrainingLevel>,
+    },
+    Enchantment(Enchantment),
+    Miscellaneous(Enchantment),
     Spacer,
 }
 
-fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
+fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     let mut lines = Vec::new();
 
     let resists_props = [
@@ -134,12 +196,12 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
         resists_props.iter().map(|&p| p as u32).collect();
 
     // Group enchantments
-    let mut vital_enchants: HashMap<VitalType, Vec<&Enchantment>> = HashMap::new();
-    let mut attr_enchants: HashMap<AttributeType, Vec<&Enchantment>> = HashMap::new();
-    let mut skill_enchants: HashMap<SkillType, Vec<&Enchantment>> = HashMap::new();
-    let mut float_enchants: HashMap<u32, Vec<&Enchantment>> = HashMap::new();
-    let mut armor_enchants: Vec<&Enchantment> = Vec::new();
-    let mut misc_enchants: Vec<&Enchantment> = Vec::new();
+    let mut vital_enchants: HashMap<VitalType, Vec<Enchantment>> = HashMap::new();
+    let mut attr_enchants: HashMap<AttributeType, Vec<Enchantment>> = HashMap::new();
+    let mut skill_enchants: HashMap<SkillType, Vec<Enchantment>> = HashMap::new();
+    let mut float_enchants: HashMap<u32, Vec<Enchantment>> = HashMap::new();
+    let mut armor_enchants: Vec<Enchantment> = Vec::new();
+    let mut misc_enchants: Vec<Enchantment> = Vec::new();
 
     for enchant in &state.player_enchantments {
         let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
@@ -147,13 +209,13 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
 
         if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
             if let Some(at) = AttributeType::from_repr(enchant.stat_mod_key) {
-                attr_enchants.entry(at).or_default().push(enchant);
+                attr_enchants.entry(at).or_default().push(*enchant);
             } else {
                 categorized = false;
             }
         } else if flags.contains(EnchantmentTypeFlags::SKILL) {
             if let Some(st) = SkillType::from_repr(enchant.stat_mod_key) {
-                skill_enchants.entry(st).or_default().push(enchant);
+                skill_enchants.entry(st).or_default().push(*enchant);
             } else {
                 categorized = false;
             }
@@ -165,7 +227,7 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
                 _ => None,
             };
             if let Some(vt) = vt {
-                vital_enchants.entry(vt).or_default().push(enchant);
+                vital_enchants.entry(vt).or_default().push(*enchant);
             } else {
                 categorized = false;
             }
@@ -177,7 +239,7 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
                     float_enchants
                         .entry(enchant.stat_mod_key)
                         .or_default()
-                        .push(enchant);
+                        .push(*enchant);
                 } else {
                     categorized = false;
                 }
@@ -187,17 +249,17 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
         } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE)
             && enchant.stat_mod_key == 0
         {
-            armor_enchants.push(enchant);
+            armor_enchants.push(*enchant);
         } else {
             categorized = false;
         }
 
         if !categorized {
-            misc_enchants.push(enchant);
+            misc_enchants.push(*enchant);
         }
     }
 
-    let sort_enchants = |list: &mut Vec<&Enchantment>| {
+    let sort_enchants = |list: &mut Vec<Enchantment>| {
         list.sort_by(|a, b| a.spell_id.cmp(&b.spell_id));
     };
     for v in vital_enchants.values_mut() {
@@ -215,7 +277,7 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
     sort_enchants(&mut armor_enchants);
 
     // Misc are sorted by name then ID
-    let sort_by_name = |list: &mut Vec<&Enchantment>| {
+    let sort_by_name = |list: &mut Vec<Enchantment>| {
         list.sort_by(|a, b| {
             let na = get_enchantment_name(a);
             let nb = get_enchantment_name(b);
@@ -229,9 +291,18 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
     let mut vitals: Vec<_> = state.vitals.values().collect();
     vitals.sort_by(|a, b| a.vital_type.to_string().cmp(&b.vital_type.to_string()));
     for v in vitals {
+        let val = format!("{} / {}", v.current, v.buffed_max);
+        let xp_cost = v
+            .next_rank_xp
+            .map(|next| next.saturating_sub(v.spent_xp) as u64);
+
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
-            value: format!("{} / {}", v.current, v.buffed_max),
+            value: val,
+            xp_cost,
+            sp_cost: None,
+            stat_type: Some(StatType::Vital(v.vital_type)),
+            training: None,
         });
         if let Some(enchants) = vital_enchants.get(&v.vital_type) {
             for &e in enchants {
@@ -251,9 +322,17 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
         } else {
             a.base.to_string()
         };
+        let xp_cost = a
+            .next_rank_xp
+            .map(|next| next.saturating_sub(a.spent_xp) as u64);
+
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
             value: val,
+            xp_cost,
+            sp_cost: None,
+            stat_type: Some(StatType::Attribute(a.attr_type)),
+            training: None,
         });
         if let Some(enchants) = attr_enchants.get(&a.attr_type) {
             for &e in enchants {
@@ -270,16 +349,60 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
         .values()
         .filter(|s| s.skill_type.is_eor())
         .collect();
-    skills.sort_by(|a, b| a.skill_type.to_string().cmp(&b.skill_type.to_string()));
+
+    // Sort: (Specialized | Trained) > Untrained, then alphabetically within those two groups
+    skills.sort_by(|a, b| {
+        let a_is_trained = matches!(
+            a.training,
+            TrainingLevel::Trained | TrainingLevel::Specialized
+        );
+        let b_is_trained = matches!(
+            b.training,
+            TrainingLevel::Trained | TrainingLevel::Specialized
+        );
+
+        b_is_trained
+            .cmp(&a_is_trained)
+            .then_with(|| a.skill_type.to_string().cmp(&b.skill_type.to_string()))
+    });
+
     for s in skills {
         let val = if s.current != s.base {
             format!("{} ({})", s.base, s.current)
         } else {
             s.current.to_string()
         };
+
+        let mut xp_cost = None;
+        let mut sp_cost = None;
+
+        if s.training as u32 >= TrainingLevel::Trained as u32 {
+            xp_cost = s
+                .next_rank_xp
+                .map(|next| next.saturating_sub(s.spent_xp) as u64);
+        } else if s.training == TrainingLevel::Untrained {
+            // Check if we can train it
+            sp_cost = state
+                .skill_table
+                .as_ref()
+                .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
+                .and_then(|base| {
+                    let cost = base.trained_cost;
+                    if cost > 0 {
+                        Some(cost as u32)
+                    } else {
+                        None
+                    }
+                });
+        }
+
         lines.push(CharTabLine::Stat {
             label: s.skill_type.to_string(),
             value: val,
+            xp_cost,
+            sp_cost,
+            stat_type: Some(StatType::Skill(s.skill_type)),
+            training: Some(s.training),
         });
         if let Some(enchants) = skill_enchants.get(&s.skill_type) {
             for &e in enchants {
@@ -301,6 +424,10 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
             value: armor.to_string(),
+            xp_cost: None,
+            sp_cost: None,
+            stat_type: None,
+            training: None,
         });
         for &e in &armor_enchants {
             lines.push(CharTabLine::Enchantment(e));
@@ -321,6 +448,10 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
             lines.push(CharTabLine::Stat {
                 label: label.to_string(),
                 value: format!("{:.1}", val),
+                xp_cost: None,
+                sp_cost: None,
+                stat_type: None,
+                training: None,
             });
             if let Some(enchants) = float_enchants.get(&(prop as u32)) {
                 for &e in enchants {
@@ -343,11 +474,35 @@ fn get_char_tab_lines<'a>(state: &'a AppState) -> Vec<CharTabLine<'a>> {
     lines
 }
 
-pub fn get_enchantment_at_index(state: &AppState, index: usize) -> Option<&Enchantment> {
+pub fn get_enchantment_at_index(state: &AppState, index: usize) -> Option<Enchantment> {
     let lines = get_char_tab_lines(state);
     lines.get(index).and_then(|line| match line {
         CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => Some(*e),
         _ => None,
+    })
+}
+
+pub fn get_command_target_at_index<'a>(
+    state: &'a AppState,
+    tab: DashboardTab,
+    index: usize,
+) -> Option<CommandTarget<'a>> {
+    if tab != DashboardTab::Character {
+        return None;
+    }
+
+    let lines = get_char_tab_lines(state);
+    lines.get(index).map(|line| match line {
+        CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => {
+            CommandTarget::Enchantment(*e)
+        }
+        CharTabLine::Stat {
+            stat_type: Some(st),
+            xp_cost,
+            sp_cost,
+            ..
+        } => CommandTarget::Stat(st.clone(), *xp_cost, *sp_cost),
+        _ => CommandTarget::None,
     })
 }
 

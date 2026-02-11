@@ -7,7 +7,9 @@ use std::time::Instant;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::world::entity::Entity;
-use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
+use holtburger_core::world::stats::{
+    Attribute, AttributeType, CharacterLevelInfo, Skill, SkillType, Vital, VitalType,
+};
 use holtburger_core::{ClientState, RetryState};
 use holtburger_protocol::messages::CharacterEntry;
 use holtburger_protocol::messages::magic::Enchantment;
@@ -20,6 +22,7 @@ pub struct AppState {
     pub account_name: String,
     pub character_name: Option<String>,
     pub player_guid: Option<Guid>,
+    pub level_info: Option<CharacterLevelInfo>,
     pub attributes: HashMap<AttributeType, Attribute>,
     pub vitals: HashMap<VitalType, Vital>,
     pub skills: HashMap<SkillType, Skill>,
@@ -51,6 +54,7 @@ pub struct AppState {
     pub core_state: ClientState,
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
+    pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub entities: HashMap<Guid, Entity>,
     pub server_time: Option<(f64, Instant)>,
     pub chat_log: Option<Mutex<File>>,

@@ -3,11 +3,13 @@ use super::entity::{Entity, EntityManager};
 use super::player::PlayerState;
 use super::spatial::SpatialScene;
 use super::stats;
-use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyValue};
+use binrw::BinRead;
+use holtburger_common::properties::{
+    ItemType, PropertyInstanceId, PropertyInt, PropertyInt64, PropertyValue,
+};
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
-use holtburger_dat::file_type::{XpTable, SkillTable};
-use binrw::BinRead;
+use holtburger_dat::file_type::{SkillTable, XpTable};
 use std::sync::Arc;
 
 use holtburger_protocol::messages::*;
@@ -121,15 +123,15 @@ impl WorldState {
         let mut xp_table = None;
         let mut skill_table = None;
         if let Some(db) = &portal_dat {
-            // File ID 0x0E000018 is the XP Table
-            if let Ok(data) = db.get_file(0x0E000018) {
+            // XP Table
+            if let Ok(data) = db.get_file(XpTable::FILE_ID) {
                 let mut cursor = std::io::Cursor::new(data);
                 if let Ok(table) = XpTable::read(&mut cursor) {
                     xp_table = Some(table);
                 }
             }
-            // File ID 0x0E000004 is the Skill Table
-            if let Ok(data) = db.get_file(0x0E000004) {
+            // Skill Table
+            if let Ok(data) = db.get_file(SkillTable::FILE_ID) {
                 let mut cursor = std::io::Cursor::new(data);
                 if let Ok(table) = SkillTable::read(&mut cursor) {
                     skill_table = Some(Arc::new(table));
@@ -291,16 +293,25 @@ impl WorldState {
                     self.player.enchantments = data.enchantments.clone();
 
                     // Update Experience and Level from properties
-                    if let Some(&xp) = data.properties_int64.get(&1) {
+                    if let Some(&xp) = data
+                        .properties_int64
+                        .get(&(PropertyInt64::TotalExperience as u32))
+                    {
                         self.player.total_experience = xp as u64;
                     }
-                    if let Some(&axp) = data.properties_int64.get(&2) {
+                    if let Some(&axp) = data
+                        .properties_int64
+                        .get(&(PropertyInt64::AvailableExperience as u32))
+                    {
                         self.player.available_experience = axp as u64;
                     }
-                    if let Some(&sp) = data.properties_int.get(&3) {
+                    if let Some(&sp) = data
+                        .properties_int
+                        .get(&(PropertyInt::AvailableSkillCredits as u32))
+                    {
                         self.player.unspent_skill_points = sp as u32;
                     }
-                    if let Some(&level) = data.properties_int.get(&25) {
+                    if let Some(&level) = data.properties_int.get(&(PropertyInt::Level as u32)) {
                         self.player.level = level as u32;
                     }
 
@@ -555,8 +566,12 @@ impl WorldState {
                 }
                 if target_guid == self.player.guid {
                     match data.property {
-                        25 => {
+                        p if p == PropertyInt::Level as u32 => {
                             self.player.level = data.value as u32;
+                            self.emit_level_info(&mut events);
+                        }
+                        p if p == PropertyInt::AvailableSkillCredits as u32 => {
+                            self.player.unspent_skill_points = data.value as u32;
                             self.emit_level_info(&mut events);
                         }
                         _ => {}
@@ -594,11 +609,11 @@ impl WorldState {
                 }
                 if target_guid == self.player.guid {
                     match data.property {
-                        1 => {
+                        p if p == PropertyInt64::TotalExperience as u32 => {
                             self.player.total_experience = data.value as u64;
                             self.emit_level_info(&mut events);
                         }
-                        2 => {
+                        p if p == PropertyInt64::AvailableExperience as u32 => {
                             self.player.available_experience = data.value as u64;
                             self.emit_level_info(&mut events);
                         }

@@ -292,7 +292,9 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     vitals.sort_by(|a, b| a.vital_type.to_string().cmp(&b.vital_type.to_string()));
     for v in vitals {
         let val = format!("{} / {}", v.current, v.buffed_max);
-        let xp_cost = v.next_rank_xp.map(|next| next.saturating_sub(v.spent_xp) as u64);
+        let xp_cost = v
+            .next_rank_xp
+            .map(|next| next.saturating_sub(v.spent_xp) as u64);
 
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
@@ -320,7 +322,9 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         } else {
             a.base.to_string()
         };
-        let xp_cost = a.next_rank_xp.map(|next| next.saturating_sub(a.spent_xp) as u64);
+        let xp_cost = a
+            .next_rank_xp
+            .map(|next| next.saturating_sub(a.spent_xp) as u64);
 
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
@@ -348,10 +352,14 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // Sort: (Specialized | Trained) > Untrained, then alphabetically within those two groups
     skills.sort_by(|a, b| {
-        let a_is_trained =
-            matches!(a.training, TrainingLevel::Trained | TrainingLevel::Specialized);
-        let b_is_trained =
-            matches!(b.training, TrainingLevel::Trained | TrainingLevel::Specialized);
+        let a_is_trained = matches!(
+            a.training,
+            TrainingLevel::Trained | TrainingLevel::Specialized
+        );
+        let b_is_trained = matches!(
+            b.training,
+            TrainingLevel::Trained | TrainingLevel::Specialized
+        );
 
         b_is_trained
             .cmp(&a_is_trained)
@@ -364,19 +372,19 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         } else {
             s.current.to_string()
         };
-        
+
         let mut xp_cost = None;
         let mut sp_cost = None;
 
         if s.training as u32 >= TrainingLevel::Trained as u32 {
-            xp_cost = s.next_rank_xp.map(|next| next.saturating_sub(s.spent_xp) as u64);
+            xp_cost = s
+                .next_rank_xp
+                .map(|next| next.saturating_sub(s.spent_xp) as u64);
         } else if s.training == TrainingLevel::Untrained {
             // Check if we can train it
-            if let Some(st) = &state.skill_table {
-                if let Some(base) = st.skill_base_hash.get(&(s.skill_type as u32)) {
-                    sp_cost = Some(base.trained_cost as u32);
-                }
-            }
+            sp_cost = state.skill_table.as_ref()
+                .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
+                .map(|base| base.trained_cost as u32);
         }
 
         lines.push(CharTabLine::Stat {

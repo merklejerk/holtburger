@@ -89,7 +89,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                     .direction(Direction::Vertical)
                     .constraints([Constraint::Length(1), Constraint::Min(0)])
                     .split(dashboard_inner_chunks[0]);
-                
+
                 let top_area = summary_chunks[0];
                 bottom_area = summary_chunks[1];
 
@@ -112,9 +112,15 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 };
 
                 let summary = Paragraph::new(Line::from(vec![
-                    Span::styled(text, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        text,
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw("  "),
-                ])).alignment(Alignment::Right);
+                ]))
+                .alignment(Alignment::Right);
                 f.render_widget(summary, top_area);
             }
 
@@ -124,7 +130,9 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                 .highlight_symbol("> ");
 
-            state.dashboard_list_state.select(Some(state.selected_dashboard_index));
+            state
+                .dashboard_list_state
+                .select(Some(state.selected_dashboard_index));
             f.render_stateful_widget(dashboard_list, bottom_area, &mut state.dashboard_list_state);
 
             // Render Scrollbar for List-based tabs
@@ -133,7 +141,11 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
             if total > height {
                 let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
-                    .position(state.selected_dashboard_index.min(total.saturating_sub(height)));
+                    .position(
+                        state
+                            .selected_dashboard_index
+                            .min(total.saturating_sub(height)),
+                    );
                 f.render_stateful_widget(
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)
@@ -157,8 +169,14 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .highlight_style(Style::default().add_modifier(Modifier::BOLD))
                 .highlight_symbol("> ");
 
-            state.dashboard_list_state.select(Some(state.selected_dashboard_index));
-            f.render_stateful_widget(dashboard_list, dashboard_inner_chunks[0], &mut state.dashboard_list_state);
+            state
+                .dashboard_list_state
+                .select(Some(state.selected_dashboard_index));
+            f.render_stateful_widget(
+                dashboard_list,
+                dashboard_inner_chunks[0],
+                &mut state.dashboard_list_state,
+            );
 
             // Render Scrollbar for List-based tabs
             let height = dashboard_inner_chunks[0].height as usize;
@@ -166,7 +184,11 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
             if total > height {
                 let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height))
-                    .position(state.selected_dashboard_index.min(total.saturating_sub(height)));
+                    .position(
+                        state
+                            .selected_dashboard_index
+                            .min(total.saturating_sub(height)),
+                    );
                 f.render_stateful_widget(
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)

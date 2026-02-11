@@ -109,11 +109,11 @@ impl PlayerState {
             match existing {
                 Some(best) => {
                     if e.is_better_than(best) {
-                        by_category.insert(e.spell_category, e.clone());
+                        by_category.insert(e.spell_category, *e);
                     }
                 }
                 None => {
-                    by_category.insert(e.spell_category, e.clone());
+                    by_category.insert(e.spell_category, *e);
                 }
             }
         }
@@ -737,11 +737,11 @@ impl PlayerState {
                             if let Some(existing) = self.enchantments.iter_mut().find(|e| {
                                 e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
                             }) {
-                                *existing = enchantment.clone();
+                                *existing = *enchantment;
                             } else {
-                                self.enchantments.push(enchantment.clone());
+                                self.enchantments.push(*enchantment);
                             }
-                            events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                            events.push(WorldEvent::EnchantmentUpdated(*enchantment));
                             self.emit_derived_stats(events);
                             true
                         } else {
@@ -760,11 +760,11 @@ impl PlayerState {
                                     e.spell_id == enchantment.spell_id
                                         && e.layer == enchantment.layer
                                 }) {
-                                    *existing = enchantment.clone();
+                                    *existing = *enchantment;
                                 } else {
-                                    self.enchantments.push(enchantment.clone());
+                                    self.enchantments.push(*enchantment);
                                 }
-                                events.push(WorldEvent::EnchantmentUpdated(enchantment.clone()));
+                                events.push(WorldEvent::EnchantmentUpdated(*enchantment));
                             }
                             self.emit_derived_stats(events);
                             true

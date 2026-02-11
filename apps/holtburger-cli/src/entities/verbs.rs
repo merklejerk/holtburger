@@ -130,24 +130,24 @@ impl EntityVerb {
             (EntityVerb::LevelUp, CommandTarget::Stat(st, Some(cost), _)) => {
                 let xp_spent = *cost as u32;
                 match st {
-                    crate::ui::types::StatType::Attribute(at) => Some(CommandHandler::Command(
-                        ClientCommand::RaiseAttribute {
+                    crate::ui::types::StatType::Attribute(at) => {
+                        Some(CommandHandler::Command(ClientCommand::RaiseAttribute {
                             attribute: *at,
                             xp_spent,
-                        },
-                    )),
-                    crate::ui::types::StatType::Vital(vt) => Some(CommandHandler::Command(
-                        ClientCommand::RaiseVital {
+                        }))
+                    }
+                    crate::ui::types::StatType::Vital(vt) => {
+                        Some(CommandHandler::Command(ClientCommand::RaiseVital {
                             vital: *vt,
                             xp_spent,
-                        },
-                    )),
-                    crate::ui::types::StatType::Skill(st) => Some(CommandHandler::Command(
-                        ClientCommand::RaiseSkill {
+                        }))
+                    }
+                    crate::ui::types::StatType::Skill(st) => {
+                        Some(CommandHandler::Command(ClientCommand::RaiseSkill {
                             skill: *st,
                             xp_spent,
-                        },
-                    )),
+                        }))
+                    }
                 }
             }
             (EntityVerb::Train, CommandTarget::Stat(st, _, Some(credits))) => {
@@ -278,7 +278,9 @@ pub fn get_verbs_for_target(
 /// Determines if the [D]ebug command should be available.
 fn should_show_debug(target: &CommandTarget) -> bool {
     match target {
-        CommandTarget::Entity(_) | CommandTarget::Enchantment(_) | CommandTarget::Stat(_, _, _) => true,
+        CommandTarget::Entity(_) | CommandTarget::Enchantment(_) | CommandTarget::Stat(_, _, _) => {
+            true
+        }
         CommandTarget::None => false,
     }
 }

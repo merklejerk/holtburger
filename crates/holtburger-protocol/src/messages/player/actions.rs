@@ -25,7 +25,9 @@ impl ProtocolUnpack for RaiseAttributeData {
 
 impl ProtocolPack for RaiseAttributeData {
     fn pack(&self, writer: &mut Vec<u8>) {
-        writer.write_u32::<LittleEndian>(self.attribute_type).unwrap();
+        writer
+            .write_u32::<LittleEndian>(self.attribute_type)
+            .unwrap();
         writer.write_u32::<LittleEndian>(self.xp_spent).unwrap();
     }
 }
@@ -113,6 +115,8 @@ impl ProtocolUnpack for TrainSkillData {
 impl ProtocolPack for TrainSkillData {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u32::<LittleEndian>(self.skill_type).unwrap();
-        writer.write_i32::<LittleEndian>(self.credits_spent).unwrap();
+        writer
+            .write_i32::<LittleEndian>(self.credits_spent)
+            .unwrap();
     }
 }

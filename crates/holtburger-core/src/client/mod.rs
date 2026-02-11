@@ -62,7 +62,7 @@ impl Client {
     ) -> Result<Self> {
         // Replay doesn't strictly need a target addr, but we can use a dummy one
         // Use 9001 for World server traffic (player spawns!)
-        let target = "127.0.0.1:9001".parse::<SocketAddr>().unwrap();
+        let target = "127.0.0.1:9001".parse::<SocketAddr>()?;
         let session = Session::new_replay(replay_path, target)?;
         Self::create_with_session(session, account_name, character_preference, dats_path)
     }
@@ -100,10 +100,10 @@ impl Client {
         }
 
         if portal_dat.is_none() || cell_dat.is_none() {
-            panic!(
+            return Err(anyhow::anyhow!(
                 "Failed to load required DAT files from {}. Ensure portal.dat/hba and cell.dat/hba exist.",
                 dats_path.display()
-            );
+            ));
         }
 
         Ok(Client {

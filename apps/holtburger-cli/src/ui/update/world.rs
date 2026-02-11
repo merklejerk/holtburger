@@ -232,18 +232,27 @@ impl AppState {
                         self.server_time = Some((time, std::time::Instant::now()));
                     }
                     WorldEvent::WeenieError { error_id } => {
-                        if self.verbosity >= 1 {
+                        use holtburger_protocol::errors::WeenieError;
+                        let error =
+                            WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
+                        if self.verbosity >= 1 && error != WeenieError::None {
                             self.log_chat(
                                 ChatMessageKind::Warning,
-                                format!("[WARNING] WeenieError: 0x{:08X}", error_id),
+                                format!("[!] Weenie Error: {:?} (0x{:08X})", error, error_id),
                             );
                         }
                     }
                     WorldEvent::WeenieErrorWithString { error_id, message } => {
-                        if self.verbosity >= 1 {
+                        use holtburger_protocol::errors::WeenieError;
+                        let error =
+                            WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
+                        if self.verbosity >= 1 && error != WeenieError::None {
                             self.log_chat(
                                 ChatMessageKind::Warning,
-                                format!("[WARNING] WeenieError: 0x{:08X} - {}", error_id, message),
+                                format!(
+                                    "[!] Weenie Error: {:?} (0x{:08X}) - {}",
+                                    error, error_id, message
+                                ),
                             );
                         }
                     }
@@ -270,7 +279,7 @@ impl AppState {
                 self.log_chat(
                     ChatMessageKind::Warning,
                     format!(
-                        "[WARNING] Inventory save failed for item 0x{:08X}: {:?}",
+                        "[!] Inventory save failed (item 0x{:08X}): {:?}",
                         item_guid.0, error
                     ),
                 );
@@ -295,7 +304,16 @@ impl AppState {
                             self.enter_retry.backoff_secs
                         ),
                     );
+                } else if error != CharacterError::None {
+                    self.log_chat(
+                        ChatMessageKind::Error,
+                        format!("[!] Character Error: {:?}", error),
+                    );
                 }
+            }
+            ClientEvent::ClientError(err) => {
+                self.log_chat(ChatMessageKind::Error, format!("[!] Client Error: {}", err));
+                self.state = UIState::Chat;
             }
             ClientEvent::PingResponse => {
                 self.log_chat(ChatMessageKind::System, "Pong!".to_string());

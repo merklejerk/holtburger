@@ -66,9 +66,9 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       
-      - name: Install cargo-dist
+      - name: Build Workspace
         shell: bash
-        run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.30.3/cargo-dist-installer.sh | sh
+        run: cargo build --release --workspace
 
       - name: Fetch HBA files
         shell: bash
@@ -78,15 +78,41 @@ jobs:
           unzip hba.zip -d dats
           rm hba.zip
 
-      - name: Run dist build
+      - name: Prepare Release Bundle
         shell: bash
-        run: dist build --target=${{ matrix.target }}
+        run: |
+          # Create staging directory
+          mkdir -p staging/dats
+          
+          # Detect binary extension (for Windows)
+          EXT=""
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then EXT=".exe"; fi
+          
+          # Copy binaries and rename 'tui' to 'holtburger-cli'
+          cp target/release/tui$EXT staging/holtburger-cli$EXT
+          cp target/release/dat2hba$EXT staging/dat2hba$EXT
+          cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
+          
+          # Copy data files
+          cp dats/*.hba staging/dats/
+          
+          # Archive the staging folder
+          STAMP=$(date +'%Y%m%d')
+          ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
+          
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            7z a "$ARCHIVE_NAME.zip" ./staging/*
+            echo "ASSET_PATH=$ARCHIVE_NAME.zip" >> $GITHUB_ENV
+          else
+            tar -czf "$ARCHIVE_NAME.tar.gz" -C staging .
+            echo "ASSET_PATH=$ARCHIVE_NAME.tar.gz" >> $GITHUB_ENV
+          fi
 
       - name: Upload Artifacts to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
-          files: target/distrib/*
+          files: ${{ env.ASSET_PATH }}
           prerelease: true
           name: "Nightly Build (Live on the edge 🍔)"
           body: |
@@ -113,7 +139,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
-          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          # Setup flathub for the user, not system-wide, to avoid permission issues in CI
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          # Pre-install the runtimes to the user location so the builder finds them
+          flatpak install --user -y flathub org.freedesktop.Platform/x86_64/24.08 org.freedesktop.Sdk/x86_64/24.08
 
       - name: Build TUI Client
         run: |

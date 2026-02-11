@@ -13,15 +13,21 @@ modules:
       append-path: /usr/lib/sdk/rust-stable/bin
     buildsystem: simple
     build-commands:
-      - cargo build --release --package holtburger-cli
-      - install -D target/release/holtburger-cli /app/bin/holtburger-cli
+      # We build the binary outside the sandbox to avoid internet issues
+      - install -D holtburger-cli /app/bin/holtburger-cli
       - mkdir -p /app/share/holtburger/dats
       - cp dats/*.hba /app/share/holtburger/dats/
-      - install -D apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
-      - install -D apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
+      - install -D io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
+      - install -D io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
     sources:
+      - type: file
+        path: ../../../target/release/holtburger-cli
       - type: dir
-        path: ../../..
+        path: ../../../dats
+      - type: file
+        path: io.github.merklejerk.holtburger-cli.desktop
+      - type: file
+        path: io.github.merklejerk.holtburger-cli.metainfo.xml
 finish-args:
   - --share=network
   - --share=ipc

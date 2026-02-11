@@ -115,7 +115,10 @@ jobs:
           sudo apt-get install -y flatpak flatpak-builder
 
       - name: Build TUI Client
-        run: cargo build --release --package holtburger-cli
+        run: |
+          cargo build --release --package holtburger-cli
+          # Rename the binary from 'tui' to 'holtburger-cli' for official releases
+          mv target/release/tui target/release/holtburger-cli
 
       - name: Fetch HBA files
         run: |

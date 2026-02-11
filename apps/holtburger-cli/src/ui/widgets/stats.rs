@@ -48,7 +48,8 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             CharTabLine::Stat {
                 label,
                 value,
-                cost,
+                xp_cost,
+                sp_cost,
                 stat_type: _,
                 training,
             } => {
@@ -79,13 +80,20 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                     ),
                 ];
 
-                if let Some(c) = cost {
+                if let Some(c) = xp_cost {
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
                         format_cost(*c),
                         Style::default().fg(Color::Yellow),
                     ));
                     spans.push(Span::raw(" XP)"));
+                } else if let Some(c) = sp_cost {
+                    spans.push(Span::raw(" ("));
+                    spans.push(Span::styled(
+                        c.to_string(),
+                        Style::default().fg(Color::Green),
+                    ));
+                    spans.push(Span::raw(" SP)"));
                 }
 
                 list_items.push(ListItem::new(Line::from(spans)).style(style));
@@ -161,7 +169,8 @@ enum CharTabLine {
     Stat {
         label: String,
         value: String,
-        cost: Option<u64>,
+        xp_cost: Option<u64>,
+        sp_cost: Option<u32>,
         stat_type: Option<StatType>,
         training: Option<TrainingLevel>,
     },
@@ -283,12 +292,13 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     vitals.sort_by(|a, b| a.vital_type.to_string().cmp(&b.vital_type.to_string()));
     for v in vitals {
         let val = format!("{} / {}", v.current, v.buffed_max);
-        let cost = v.next_rank_xp.map(|next| next.saturating_sub(v.spent_xp) as u64);
+        let xp_cost = v.next_rank_xp.map(|next| next.saturating_sub(v.spent_xp) as u64);
 
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
             value: val,
-            cost,
+            xp_cost,
+            sp_cost: None,
             stat_type: Some(StatType::Vital(v.vital_type)),
             training: None,
         });
@@ -310,12 +320,13 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         } else {
             a.base.to_string()
         };
-        let cost = a.next_rank_xp.map(|next| next.saturating_sub(a.spent_xp) as u64);
+        let xp_cost = a.next_rank_xp.map(|next| next.saturating_sub(a.spent_xp) as u64);
 
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
             value: val,
-            cost,
+            xp_cost,
+            sp_cost: None,
             stat_type: Some(StatType::Attribute(a.attr_type)),
             training: None,
         });
@@ -334,12 +345,16 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         .values()
         .filter(|s| s.skill_type.is_eor())
         .collect();
-    
-    // Sort: Specialized > Trained > Untrained, then by name
+
+    // Sort: (Specialized | Trained) > Untrained, then alphabetically within those two groups
     skills.sort_by(|a, b| {
-        let a_train = a.training as u32;
-        let b_train = b.training as u32;
-        b_train.cmp(&a_train)
+        let a_is_trained =
+            matches!(a.training, TrainingLevel::Trained | TrainingLevel::Specialized);
+        let b_is_trained =
+            matches!(b.training, TrainingLevel::Trained | TrainingLevel::Specialized);
+
+        b_is_trained
+            .cmp(&a_is_trained)
             .then_with(|| a.skill_type.to_string().cmp(&b.skill_type.to_string()))
     });
 
@@ -350,17 +365,25 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
             s.current.to_string()
         };
         
-        // Only allowed to level up if Specialized or Trained
-        let cost = if s.training as u32 >= TrainingLevel::Trained as u32 {
-            s.next_rank_xp.map(|next| next.saturating_sub(s.spent_xp) as u64)
-        } else {
-            None
-        };
+        let mut xp_cost = None;
+        let mut sp_cost = None;
+
+        if s.training as u32 >= TrainingLevel::Trained as u32 {
+            xp_cost = s.next_rank_xp.map(|next| next.saturating_sub(s.spent_xp) as u64);
+        } else if s.training == TrainingLevel::Untrained {
+            // Check if we can train it
+            if let Some(st) = &state.skill_table {
+                if let Some(base) = st.skill_base_hash.get(&(s.skill_type as u32)) {
+                    sp_cost = Some(base.trained_cost as u32);
+                }
+            }
+        }
 
         lines.push(CharTabLine::Stat {
             label: s.skill_type.to_string(),
             value: val,
-            cost,
+            xp_cost,
+            sp_cost,
             stat_type: Some(StatType::Skill(s.skill_type)),
             training: Some(s.training),
         });
@@ -384,7 +407,8 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
             value: armor.to_string(),
-            cost: None,
+            xp_cost: None,
+            sp_cost: None,
             stat_type: None,
             training: None,
         });
@@ -407,7 +431,8 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
             lines.push(CharTabLine::Stat {
                 label: label.to_string(),
                 value: format!("{:.1}", val),
-                cost: None,
+                xp_cost: None,
+                sp_cost: None,
                 stat_type: None,
                 training: None,
             });
@@ -456,10 +481,10 @@ pub fn get_command_target_at_index<'a>(
         }
         CharTabLine::Stat {
             stat_type: Some(st),
-            cost,
-            training: _,
+            xp_cost,
+            sp_cost,
             ..
-        } => CommandTarget::Stat(st.clone(), *cost),
+        } => CommandTarget::Stat(st.clone(), *xp_cost, *sp_cost),
         _ => CommandTarget::None,
     })
 }

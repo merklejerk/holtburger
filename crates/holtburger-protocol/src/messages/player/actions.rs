@@ -87,3 +87,32 @@ impl ProtocolPack for RaiseSkillData {
         writer.write_u32::<LittleEndian>(self.xp_spent).unwrap();
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrainSkillData {
+    pub skill_type: u32,
+    pub credits_spent: i32,
+}
+
+impl ProtocolUnpack for TrainSkillData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let skill_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let credits_spent = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(Self {
+            skill_type,
+            credits_spent,
+        })
+    }
+}
+
+impl ProtocolPack for TrainSkillData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        writer.write_u32::<LittleEndian>(self.skill_type).unwrap();
+        writer.write_i32::<LittleEndian>(self.credits_spent).unwrap();
+    }
+}

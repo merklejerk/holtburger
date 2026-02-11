@@ -108,6 +108,10 @@ pub enum ClientCommand {
         skill: crate::world::stats::SkillType,
         xp_spent: u32,
     },
+    TrainSkill {
+        skill: crate::world::stats::SkillType,
+        credits: u32,
+    },
     SyncPosition,
     Quit,
 }

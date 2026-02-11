@@ -54,6 +54,7 @@ pub struct AppState {
     pub core_state: ClientState,
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
+    pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub entities: HashMap<Guid, Entity>,
     pub server_time: Option<(f64, Instant)>,
     pub chat_log: Option<Mutex<File>>,

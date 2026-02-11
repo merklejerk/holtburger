@@ -41,6 +41,7 @@ impl AppState {
                         vitals,
                         skills,
                         enchantments,
+                        skill_table,
                     } => {
                         self.player_guid = Some(guid);
                         self.character_name = Some(name);
@@ -52,6 +53,7 @@ impl AppState {
                         self.vitals = vitals.into_iter().map(|v| (v.vital_type, v)).collect();
                         self.skills = skills.into_iter().map(|s| (s.skill_type, s)).collect();
                         self.player_enchantments = enchantments;
+                        self.skill_table = skill_table;
                         self.refresh_context_buffer();
                     }
                     WorldEvent::PropertyUpdated {

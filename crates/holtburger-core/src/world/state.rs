@@ -6,7 +6,7 @@ use super::stats;
 use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyValue};
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
-use holtburger_dat::file_type::XpTable;
+use holtburger_dat::file_type::{XpTable, SkillTable};
 use binrw::BinRead;
 use std::sync::Arc;
 
@@ -24,6 +24,7 @@ pub struct WorldState {
     pub portal_dat: Option<Arc<dyn ResourceProvider>>,
     pub cell_dat: Option<Arc<dyn ResourceProvider>>,
     pub xp_table: Option<XpTable>,
+    pub skill_table: Option<Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub scene: SpatialScene,
 }
 
@@ -44,6 +45,7 @@ impl WorldState {
                 level,
                 current_xp: total_xp,
                 unspent_xp,
+                unspent_skill_points: self.player.unspent_skill_points,
                 next_level_xp: level_xp,
                 xp_into_level: total_xp.saturating_sub(level_xp),
                 xp_for_next_level: 0,
@@ -57,6 +59,7 @@ impl WorldState {
             level,
             current_xp: total_xp,
             unspent_xp,
+            unspent_skill_points: self.player.unspent_skill_points,
             next_level_xp,
             xp_into_level: total_xp.saturating_sub(level_xp),
             xp_for_next_level: next_level_xp.saturating_sub(level_xp),
@@ -116,12 +119,20 @@ impl WorldState {
         cell_dat: Option<Arc<dyn ResourceProvider>>,
     ) -> Self {
         let mut xp_table = None;
+        let mut skill_table = None;
         if let Some(db) = &portal_dat {
             // File ID 0x0E000018 is the XP Table
             if let Ok(data) = db.get_file(0x0E000018) {
                 let mut cursor = std::io::Cursor::new(data);
                 if let Ok(table) = XpTable::read(&mut cursor) {
                     xp_table = Some(table);
+                }
+            }
+            // File ID 0x0E000004 is the Skill Table
+            if let Ok(data) = db.get_file(0x0E000004) {
+                let mut cursor = std::io::Cursor::new(data);
+                if let Ok(table) = SkillTable::read(&mut cursor) {
+                    skill_table = Some(Arc::new(table));
                 }
             }
         }
@@ -133,6 +144,7 @@ impl WorldState {
             portal_dat,
             cell_dat,
             xp_table,
+            skill_table,
             scene: SpatialScene::new(),
         }
     }
@@ -285,6 +297,9 @@ impl WorldState {
                     if let Some(&axp) = data.properties_int64.get(&2) {
                         self.player.available_experience = axp as u64;
                     }
+                    if let Some(&sp) = data.properties_int.get(&3) {
+                        self.player.unspent_skill_points = sp as u32;
+                    }
                     if let Some(&level) = data.properties_int.get(&25) {
                         self.player.level = level as u32;
                     }
@@ -401,6 +416,7 @@ impl WorldState {
                         vitals: vital_objs,
                         skills: skill_objs,
                         enchantments: self.player.enchantments.clone(),
+                        skill_table: self.skill_table.clone(),
                     });
 
                     self.emit_level_info(&mut events);

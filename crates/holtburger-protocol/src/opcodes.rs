@@ -384,8 +384,8 @@ pub enum GameActionOpcode {
     RaiseAttribute = 0x0045,
     /// C2S: Increase a skill (Melee Defense, etc) using experience.
     RaiseSkill = 0x0046,
-    // /// C2S: Spend skill points to train or untrain a skill.
-    // TrainSkill = 0x0047,
+    /// C2S: Spend skill points to train or untrain a skill.
+    TrainSkill = 0x0047,
     // /// C2S: Set the desired material/component level for spellcasting.
     // SetDesiredComponentLevel = 0x0224,
 

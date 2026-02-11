@@ -43,6 +43,7 @@ jobs:
           rm -rf ACViewer/
           rm -rf docs/
           rm -rf ace-root/
+          rm -rf release-test/
           rm -rf crates/holtburger-debug-harness/
           rm -f .gitmodules
           

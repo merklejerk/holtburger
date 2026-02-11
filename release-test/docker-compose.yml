@@ -1,0 +1,17 @@
+services:
+  tester:
+    build:
+      context: .
+      dockerfile: Dockerfile.client
+    container_name: holtburger-tester
+    privileged: true # Required for Flatpak inside Docker
+    env_file:
+      - docker.env
+    volumes:
+      - ./staging:/app/staging
+      - ../dats:/app/dats
+    # On Linux, this allows 'host.docker.internal' to point to the host IP
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    stdin_open: true # Allows 'docker attach' or interactive use
+    tty: true

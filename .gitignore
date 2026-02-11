@@ -12,6 +12,11 @@ logs/
 # Captures
 caps/
 
+# Docker
+*.env
+!*.example.env
+release-test/data/
+
 # OS
 .DS_Store
 

@@ -386,7 +386,14 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
                 .skill_table
                 .as_ref()
                 .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
-                .map(|base| base.trained_cost as u32);
+                .and_then(|base| {
+                    let cost = base.trained_cost;
+                    if cost > 0 {
+                        Some(cost as u32)
+                    } else {
+                        None
+                    }
+                });
         }
 
         lines.push(CharTabLine::Stat {

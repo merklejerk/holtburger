@@ -25,6 +25,24 @@ jobs:
           git tag -f nightly
           git push -f origin nightly
 
+  data-release:
+    name: Upload HBA Data
+    needs: tag
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Fetch HBA files
+        run: |
+          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
+      - name: Upload HBA Zip to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          files: hba.zip
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   dist:
     name: Build & Release
     needs: tag
@@ -52,6 +70,14 @@ jobs:
         shell: bash
         run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.30.3/cargo-dist-installer.sh | sh
 
+      - name: Fetch HBA files
+        shell: bash
+        run: |
+          mkdir -p dats
+          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
+          unzip hba.zip -d dats
+          rm hba.zip
+
       - name: Run dist build
         shell: bash
         run: dist build --target=${{ matrix.target }}
@@ -77,11 +103,22 @@ jobs:
     needs: tag
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
-      options: --privileged
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build TUI Client
+        run: cargo build --release --package holtburger-cli
+
+      - name: Fetch HBA files
+        run: |
+          mkdir -p dats
+          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
+          unzip hba.zip -d dats
+          rm hba.zip
+
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: holtburger-cli.flatpak

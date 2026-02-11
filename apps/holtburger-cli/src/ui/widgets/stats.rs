@@ -388,11 +388,7 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
                 .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
                 .and_then(|base| {
                     let cost = base.trained_cost;
-                    if cost > 0 {
-                        Some(cost as u32)
-                    } else {
-                        None
-                    }
+                    if cost > 0 { Some(cost as u32) } else { None }
                 });
         }
 

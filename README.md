@@ -23,7 +23,32 @@ Holtburger is **highly experimental**. APIs are unstable and subject to frequent
 
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable or nightly)
 
-### Running the TUI Client
+## Installation
+
+### Binary Releases (Recommended)
+You can download the latest pre-compiled binaries from the [Releases](https://github.com/merklejerk/holtburger/releases) page. These builds come bundled with the necessary `.hba` data files.
+
+- **Windows/macOS/Linux**: Download the archive for your platform, extract it, and run the `holtburger-cli` executable.
+
+### Flatpak (Linux)
+A Flatpak bundle is available for Linux users:
+```bash
+flatpak install holtburger-cli.flatpak
+```
+
+### From Source
+If you prefer to build from source:
+1.  Clone the repository: `git clone https://github.com/merklejerk/holtburger.git`
+2.  Build the project: `cargo build --release`
+3.  The binary will be at `target/release/holtburger-cli`.
+
+**Note on Data Files:** The TUI client requires game data to function. It is compatible with:
+*   **Official DAT files**: `client_portal.dat` and `client_cell_1.dat` (rename them to `portal.dat` and `cell.dat`).
+*   **Holtburger HBA files**: Our custom, 90% smaller pruned archives (`portal.hba` and `cell.hba`) which are optimized for the TUI client's logic-only needs. These are available as a separate download on the [Releases](https://github.com/merklejerk/holtburger/releases) page (`hba.zip`).
+
+By default, the client looks in a `./dats` folder next to the binary, or in your system's standard data directory (e.g., `~/.local/share/holtburger/dats` on Linux). You can override this using the `--dats <path>` command-line argument or by setting the `HOLTBURGER_DATS` environment variable.
+
+## Running the TUI Client
 
 To launch the development TUI client:
 

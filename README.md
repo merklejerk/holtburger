@@ -42,7 +42,11 @@ If you prefer to build from source:
 2.  Build the project: `cargo build --release`
 3.  The binary will be at `target/release/holtburger-cli`.
 
-**Note on Data Files:** The TUI client requires `portal.hba` and `cell.hba` to function. By default, it looks in a `./dats` folder next to the binary, or in your system's standard data directory (e.g., `~/.local/share/holtburger/dats` on Linux). You can override this using the `--dats <path>` command-line argument or by setting the `HOLTBURGER_DATS` environment variable.
+**Note on Data Files:** The TUI client requires game data to function. It is compatible with:
+*   **Official DAT files**: `client_portal.dat` and `client_cell_1.dat` (rename them to `portal.dat` and `cell.dat`).
+*   **Holtburger HBA files**: Our custom, 90% smaller pruned archives (`portal.hba` and `cell.hba`) which are optimized for the TUI client's logic-only needs. These are available as a separate download on the [Releases](https://github.com/merklejerk/holtburger/releases) page (`hba.zip`).
+
+By default, the client looks in a `./dats` folder next to the binary, or in your system's standard data directory (e.g., `~/.local/share/holtburger/dats` on Linux). You can override this using the `--dats <path>` command-line argument or by setting the `HOLTBURGER_DATS` environment variable.
 
 ## Running the TUI Client
 

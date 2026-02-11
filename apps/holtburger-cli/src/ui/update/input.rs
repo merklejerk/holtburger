@@ -58,6 +58,10 @@ impl AppState {
                             commands.push(ClientCommand::Quit);
                             return commands;
                         }
+                        if input == "/logout" {
+                            commands.push(ClientCommand::Quit); // For now, treat as quit
+                            return commands;
+                        }
                         if input == "/clear" {
                             self.messages.clear();
                             self.input.clear();
@@ -293,6 +297,18 @@ impl AppState {
                 }
             }
             KeyCode::Char(c) => {
+                if let UIState::CharacterSelection = self.state
+                    && let Some(digit) = c.to_digit(10)
+                    && digit > 0
+                {
+                    let idx = (digit as usize).saturating_sub(1);
+                    if idx < self.characters.len() {
+                        self.selected_character_index = idx;
+                        commands.push(ClientCommand::SelectCharacterByIndex(idx + 1));
+                        self.state = UIState::Chat;
+                    }
+                }
+
                 if let UIState::Chat = self.state {
                     match self.focused_pane {
                         FocusedPane::Input => {
@@ -336,11 +352,11 @@ impl AppState {
                                                     .unwrap_or(CommandTarget::None)
                                             }
                                             DashboardTab::Character => {
-                                                ui::widgets::stats::get_enchantment_at_index(
+                                                ui::widgets::stats::get_command_target_at_index(
                                                     self,
+                                                    DashboardTab::Character,
                                                     self.selected_dashboard_index,
                                                 )
-                                                .map(CommandTarget::Enchantment)
                                                 .unwrap_or(CommandTarget::None)
                                             }
                                         };

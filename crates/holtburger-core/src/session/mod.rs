@@ -134,7 +134,7 @@ impl Session {
     }
 
     /// Calculates the payload checksum used by ACE: Sum of hashes for each component.
-    fn calculate_payload_hash(&self, flags: u32, payload: &[u8]) -> u32 {
+    fn calculate_payload_hash(&self, flags: u32, payload: &[u8]) -> Result<u32> {
         let mut total_payload_checksum: u32 = 0;
         let mut offset = 0;
 
@@ -205,7 +205,7 @@ impl Session {
                 }
                 let h_start = offset;
                 let frag_header = FragmentHeader::unpack(payload, &mut offset)
-                    .expect("Failed to unpack fragment header");
+                    .ok_or_else(|| anyhow!("Failed to unpack fragment header"))?;
                 // Fragment Header Hash
                 let hh = holtburger_protocol::crypto::Hash32::compute(&payload[h_start..offset]);
                 total_payload_checksum = total_payload_checksum.wrapping_add(hh);
@@ -229,7 +229,7 @@ impl Session {
             }
         }
 
-        total_payload_checksum
+        Ok(total_payload_checksum)
     }
 
     pub async fn send_packet(&mut self, header: PacketHeader, payload: &[u8]) -> Result<()> {
@@ -273,7 +273,7 @@ impl Session {
         }
 
         let header_hash = header.calculate_checksum();
-        let payload_hash = self.calculate_payload_hash(header.flags, &full_payload);
+        let payload_hash = self.calculate_payload_hash(header.flags, &full_payload)?;
 
         if let (Some(isaac), false) = (&mut self.isaac_c2s, is_handshake) {
             let key = isaac.current_key;
@@ -624,7 +624,9 @@ mod tests {
 
         // ConnectRequest hashing (32 bytes body)
         let payload = vec![1u8; 32];
-        let hash = session.calculate_payload_hash(packet_flags::CONNECT_REQUEST, &payload);
+        let hash = session
+            .calculate_payload_hash(packet_flags::CONNECT_REQUEST, &payload)
+            .unwrap();
         assert!(hash > 0);
 
         // Should match a direct Hash32 of the 32 bytes
@@ -645,7 +647,9 @@ mod tests {
         payload.extend_from_slice(&[1, 2, 3, 4]); // data
 
         // Checksum = hash(header) + hash(data)
-        let hash = session.calculate_payload_hash(packet_flags::BLOB_FRAGMENTS, &payload);
+        let hash = session
+            .calculate_payload_hash(packet_flags::BLOB_FRAGMENTS, &payload)
+            .unwrap();
 
         let h1 = holtburger_protocol::crypto::Hash32::compute(&payload[0..16]);
         let h2 = holtburger_protocol::crypto::Hash32::compute(&payload[16..20]);
@@ -660,7 +664,9 @@ mod tests {
         payload[0] = 0xAA;
         payload[7] = 0xBB;
 
-        let hash = session.calculate_payload_hash(packet_flags::ECHO_RESPONSE, &payload);
+        let hash = session
+            .calculate_payload_hash(packet_flags::ECHO_RESPONSE, &payload)
+            .unwrap();
         let expected = holtburger_protocol::crypto::Hash32::compute(&payload);
         assert_eq!(hash, expected);
     }
@@ -687,7 +693,9 @@ mod tests {
         let payload = vec![0x11, 0x22, 0x33, 0x44];
 
         let header_hash = header.calculate_checksum();
-        let payload_hash = session.calculate_payload_hash(header.flags, &payload);
+        let payload_hash = session
+            .calculate_payload_hash(header.flags, &payload)
+            .unwrap();
 
         // Final = HeaderHash + (PayloadHash ^ Key)
         let final_checksum = header_hash.wrapping_add(payload_hash ^ expected_key);

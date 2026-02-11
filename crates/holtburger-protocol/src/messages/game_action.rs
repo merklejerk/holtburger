@@ -3,6 +3,7 @@ pub use crate::messages::inventory::actions::*;
 pub use crate::messages::misc::actions::*;
 pub use crate::messages::movement::actions::*;
 pub use crate::messages::object::actions::*;
+pub use crate::messages::player::actions::*;
 
 use crate::opcodes::GameActionOpcode;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -29,6 +30,10 @@ pub enum GameAction {
     Use(Box<UseData>),
     IdentifyObject(Box<IdentifyObjectData>),
     LoginComplete(Box<LoginCompleteData>),
+    RaiseAttribute(Box<RaiseAttributeData>),
+    RaiseVital(Box<RaiseVitalData>),
+    RaiseSkill(Box<RaiseSkillData>),
+    TrainSkill(Box<TrainSkillData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -81,6 +86,18 @@ impl ProtocolUnpack for GameActionMessage {
                 }
                 GameActionOpcode::LoginComplete => {
                     GameAction::LoginComplete(Box::new(LoginCompleteData::unpack(data, offset)?))
+                }
+                GameActionOpcode::RaiseAttribute => {
+                    GameAction::RaiseAttribute(Box::new(RaiseAttributeData::unpack(data, offset)?))
+                }
+                GameActionOpcode::RaiseVital => {
+                    GameAction::RaiseVital(Box::new(RaiseVitalData::unpack(data, offset)?))
+                }
+                GameActionOpcode::RaiseSkill => {
+                    GameAction::RaiseSkill(Box::new(RaiseSkillData::unpack(data, offset)?))
+                }
+                GameActionOpcode::TrainSkill => {
+                    GameAction::TrainSkill(Box::new(TrainSkillData::unpack(data, offset)?))
                 }
             },
             None => {
@@ -167,10 +184,97 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::RaiseAttribute(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RaiseAttribute as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RaiseVital(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RaiseVital as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::RaiseSkill(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::RaiseSkill as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TrainSkill(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TrainSkill as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::Unknown(opcode, data) => {
                 buf.write_u32::<LittleEndian>(*opcode).unwrap();
                 buf.extend_from_slice(data);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_fixtures as fixtures;
+    use crate::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_raise_attribute_parity() {
+        let action = GameActionMessage {
+            sequence: 0x55,
+            action: GameAction::RaiseAttribute(Box::new(RaiseAttributeData {
+                attribute_type: 1, // Strength
+                xp_spent: 1000,
+            })),
+        };
+        assert_pack_unpack_parity(fixtures::ACTION_RAISE_ATTRIBUTE, &action);
+    }
+
+    #[test]
+    fn test_raise_vital_parity() {
+        let action = GameActionMessage {
+            sequence: 0x66,
+            action: GameAction::RaiseVital(Box::new(RaiseVitalData {
+                vital_type: 2, // Health
+                xp_spent: 500,
+            })),
+        };
+        assert_pack_unpack_parity(fixtures::ACTION_RAISE_VITAL, &action);
+    }
+
+    #[test]
+    fn test_raise_skill_parity() {
+        let action = GameActionMessage {
+            sequence: 0x77,
+            action: GameAction::RaiseSkill(Box::new(RaiseSkillData {
+                skill_type: 6, // Melee Defense
+                xp_spent: 2500,
+            })),
+        };
+        assert_pack_unpack_parity(fixtures::ACTION_RAISE_SKILL, &action);
+    }
+
+    #[test]
+    fn test_train_skill_parity() {
+        let action = GameActionMessage {
+            sequence: 0x88,
+            action: GameAction::TrainSkill(Box::new(TrainSkillData {
+                skill_type: 14, // Arcane Lore
+                credits_spent: 4,
+            })),
+        };
+        let mut expected = Vec::new();
+        expected.write_u32::<LittleEndian>(0x88).unwrap(); // sequence
+        expected.write_u32::<LittleEndian>(0x0047).unwrap(); // action_type
+        expected.write_u32::<LittleEndian>(14).unwrap(); // skill_type
+        expected.write_i32::<LittleEndian>(4).unwrap(); // credits_spent
+
+        let mut packed = Vec::new();
+        action.pack(&mut packed);
+        assert_eq!(packed, expected);
+
+        let mut offset = 0;
+        let unpacked = GameActionMessage::unpack(&packed, &mut offset).unwrap();
+        assert_eq!(unpacked, action);
     }
 }

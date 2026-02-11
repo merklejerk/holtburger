@@ -382,7 +382,9 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
                 .map(|next| next.saturating_sub(s.spent_xp) as u64);
         } else if s.training == TrainingLevel::Untrained {
             // Check if we can train it
-            sp_cost = state.skill_table.as_ref()
+            sp_cost = state
+                .skill_table
+                .as_ref()
                 .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
                 .map(|base| base.trained_cost as u32);
         }

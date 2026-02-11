@@ -81,21 +81,21 @@ fn parse_skill_hash_table<R: Read + Seek>(
 
     // Add retired skills manually, as ACE does. These are not in the modern portal.dat
     // and would otherwise return None for costs.
+    // Attributes: Str=1, End=2, Quick=3, Coord=4, Focus=5, Self=6
     let retired_skills = [
-        (1, "Axe", 3),
-        (2, "Bow", 2),
-        (3, "Crossbow", 2),
-        (4, "Dagger", 3),
-        (5, "Mace", 3),
-        (8, "Sling", 2),
-        (9, "Spear", 3),
-        (10, "Staff", 3),
-        (11, "Sword", 3),
-        (12, "Thrown Weapon", 2),
-        (13, "Unarmed Combat", 3),
+        (1, "Axe", 1, 4, 3),             // Str, Coord, /3
+        (2, "Bow", 4, 0, 2),             // Coord, Undef, /2
+        (3, "Crossbow", 4, 0, 2),        // Coord, Undef, /2
+        (4, "Dagger", 3, 4, 3),          // Quick, Coord, /3
+        (5, "Mace", 1, 4, 3),            // Str, Coord, /3
+        (9, "Spear", 1, 4, 3),           // Str, Coord, /3
+        (10, "Staff", 1, 4, 3),          // Str, Coord, /3
+        (11, "Sword", 1, 4, 3),          // Str, Coord, /3
+        (12, "Thrown Weapon", 4, 0, 2),  // Coord, Undef, /2
+        (13, "Unarmed Combat", 1, 4, 3), // Str, Coord, /3
     ];
 
-    for (id, name, divisor) in retired_skills {
+    for (id, name, attr1, attr2, divisor) in retired_skills {
         map.entry(id).or_insert_with(|| SkillBase {
             name: name.to_string(),
             description: format!("Retired skill: {}", name),
@@ -110,10 +110,10 @@ fn parse_skill_hash_table<R: Read + Seek>(
             formula: SkillFormula {
                 w: 0,
                 x: 1,
-                y: 1,
+                y: 0, // ACE defaults unused fields to 0
                 z: divisor,
-                attr1: 0,
-                attr2: 0,
+                attr1,
+                attr2,
             },
             upper_bound: 0.0,
             lower_bound: 0.0,
@@ -145,17 +145,16 @@ mod tests {
         // Description: "Desc" (len 4)
         data.extend_from_slice(&4u16.to_le_bytes());
         data.extend_from_slice(b"Desc");
-        // Padding to 4 bytes boundary from START of record/stream?
-        // Let's assume absolute position relative to start of reader.
+        // ACE AlignBoundary confirms alignment is relative to the START of the record.
         // POS: 4(id) + 2(count) + 2(bucket) + 4(key) + 2(len) + 4(bytes) = 18 bytes.
-        // Alignment to 4 bytes: 2 bytes padding.
+        // Alignment to 4 bytes: 2 bytes padding required (18 % 4 = 2).
         data.extend_from_slice(&[0, 0]);
 
         // Name: "Name" (len 4)
         data.extend_from_slice(&4u16.to_le_bytes());
         data.extend_from_slice(b"Name");
         // POS: 18 + 2(pad) + 2(len) + 4(bytes) = 26 bytes.
-        // Alignment to 4 bytes: 2 bytes padding.
+        // Alignment to 4 bytes: 2 bytes padding required (26 % 4 = 2).
         data.extend_from_slice(&[0, 0]);
 
         // Remaining fields

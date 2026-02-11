@@ -28,7 +28,5 @@ modules:
 finish-args:
   - --share=network
   - --share=ipc
-  - --socket=x11 # In case we ever use a GUI, but needed for some terminal features sometimes
-  - --socket=wayland
   - --device=all
   - --env=HOLTBURGER_DATS=/app/share/holtburger/dats

@@ -5,19 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-default-run = "holtburger-cli"
-
-[[bin]]
-name = "holtburger-cli"
-path = "src/bin/tui.rs"
-
-[[bin]]
-name = "dat-tool"
-path = "src/bin/dat-tool.rs"
-
-[[bin]]
-name = "dat2hba"
-path = "src/bin/dat2hba.rs"
+default-run = "tui"
 
 [dependencies]
 holtburger-core = { workspace = true }

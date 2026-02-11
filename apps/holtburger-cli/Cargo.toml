@@ -20,3 +20,4 @@ clap.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 futures.workspace = true
+directories.workspace = true

@@ -52,6 +52,14 @@ jobs:
         shell: bash
         run: curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.30.3/cargo-dist-installer.sh | sh
 
+      - name: Fetch HBA files
+        shell: bash
+        run: |
+          mkdir -p dats
+          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
+          unzip hba.zip -d dats
+          rm hba.zip
+
       - name: Run dist build
         shell: bash
         run: dist build --target=${{ matrix.target }}
@@ -82,6 +90,12 @@ jobs:
       options: --privileged
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch HBA files
+        run: |
+          mkdir -p dats
+          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
+          unzip hba.zip -d dats
+          rm hba.zip
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: holtburger-cli.flatpak

@@ -71,7 +71,10 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
             100.0
         };
         let level_line = Line::from(vec![
-            Span::styled(format!("Lv {}", info.level), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                format!("Lv {}", info.level),
+                Style::default().fg(Color::Cyan),
+            ),
             Span::raw(" "),
             Span::styled(format!("({:.2}%)", pct), Style::default().fg(Color::Cyan)),
         ]);

@@ -90,7 +90,9 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
-    let dats_path = args.dats.clone()
+    let dats_path = args
+        .dats
+        .clone()
         .or_else(|| std::env::var("HOLTBURGER_DATS").ok())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("./dats"));

@@ -78,7 +78,10 @@ impl Client {
 
         match holtburger_dat::open_provider(dats_path.join("portal")) {
             Ok(p) => {
-                log::info!("Loaded portal data from {}", dats_path.join("portal").display());
+                log::info!(
+                    "Loaded portal data from {}",
+                    dats_path.join("portal").display()
+                );
                 portal_dat = Some(p);
             }
             Err(e) => {
@@ -452,7 +455,10 @@ impl Client {
                 log::info!("Disconnecting...");
                 // First attempt a graceful logout from the world
                 if matches!(self.state, ClientState::InWorld) {
-                    let _ = self.session.send_message(&GameMessage::CharacterLogOff).await;
+                    let _ = self
+                        .session
+                        .send_message(&GameMessage::CharacterLogOff)
+                        .await;
                     // Small delay to allow logout to process? Or just proceed to session disconnect.
                     // AC usually waits for the Server's response, but here we can just fire and move on.
                 }

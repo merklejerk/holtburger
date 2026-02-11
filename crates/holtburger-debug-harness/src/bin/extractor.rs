@@ -33,7 +33,9 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let dats_path = args.dats.clone()
+    let dats_path = args
+        .dats
+        .clone()
         .or_else(|| std::env::var("HOLTBURGER_DATS").ok())
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from("./dats"));
@@ -58,7 +60,12 @@ async fn main() -> Result<()> {
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
     let mut client = if let Some(replay_path) = &args.replay {
-        Client::new_replay(replay_path, &args.account, args.character.clone(), dats_path)?
+        Client::new_replay(
+            replay_path,
+            &args.account,
+            args.character.clone(),
+            dats_path,
+        )?
     } else {
         Client::new(
             &args.server,

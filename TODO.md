@@ -2,9 +2,13 @@
 [ ] Left align `account:name` in status panel.
 [ ] Add heading (e.g., `120° E-SE`) to status panel.
 [ ] Add jump for fun.
-[ ] Network traffic visualizer in dynamic panel when otherwise empty.
+[x] Network traffic visualizer in dynamic panel when otherwise empty.
+[x] Compass radar in dynamic panel.
+[x] Dereth chronometer in dynamic panel.
+[ ] Chat tabs (Chat vs combat vs all).
 
 ### Medium
+[ ] Make net stats widget fixed width. Currently Seems to scale with terminal width.
 [x] Tab cycle order is wrong in landscape mode.
 [ ] DC detection.
 [ ] Approach verb is janky.
@@ -19,14 +23,15 @@
 [ ] Equip verb.
 [ ] Missing many unit tests for protocol types (lost in the refactor?).
 [ ] [C]ombine verb (crafting).
+[ ] [T]arget verb (combat).
 [ ] [U]se for Mana charges.
 [x] Enter key for interaction target confirmation.
 
 ### High
 [ ] Vitae penalty not being tracked anymore?
 [ ] Distance calculation is wrong when in different landblocks.
-[~] Add "active entity" system:
-    [~] In entity lists, add [H]eal, [G]ive, [T]arget, [M]ove verbs.
+[x] Add "active entity" system:
+    [x] In entity lists, add [H]eal, [G]ive, [T]arget, [M]ove verbs.
     [x] Add a contextual "active entity" panel below dashboard and context panel.
         [x] Title and content changes depending on entity and verb.
             [x] E.g., creatures display health (and enchantments, attack controls?).

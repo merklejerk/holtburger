@@ -64,6 +64,28 @@ pub struct AppState {
     pub chat_log: Option<Mutex<File>>,
     pub use_emojis: bool,
     pub verbosity: u8,
+    pub net_stats: NetStats,
+    pub world_name: String,
+}
+
+pub struct NetStats {
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+    pub history_in: Vec<u64>,
+    pub history_out: Vec<u64>,
+    pub last_update: Option<Instant>,
+}
+
+impl Default for NetStats {
+    fn default() -> Self {
+        Self {
+            bytes_in: 0,
+            bytes_out: 0,
+            history_in: vec![0; 64],
+            history_out: vec![0; 64],
+            last_update: None,
+        }
+    }
 }
 
 impl AppState {

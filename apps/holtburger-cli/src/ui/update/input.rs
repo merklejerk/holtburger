@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use holtburger_common::math::Quaternion;
 use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
@@ -271,6 +272,28 @@ impl AppState {
             KeyCode::Backspace => {
                 if self.state == UIState::Chat && self.focused_pane == FocusedPane::Input {
                     self.input.pop();
+                }
+            }
+            KeyCode::Left | KeyCode::Right => {
+                if self.state == UIState::Chat && self.focused_pane != FocusedPane::Input {
+                    let mut pos = self.player_pos.unwrap_or_default();
+                    let delta = if key.code == KeyCode::Right {
+                        0.1
+                    } else {
+                        -0.1
+                    };
+
+                    // Adjust yaw (rotation around Z)
+                    let current_heading = pos.rotation.to_heading();
+                    let new_heading = current_heading + delta;
+
+                    // Rebuild quaternion from new heading
+                    pos.rotation = Quaternion::from_heading(new_heading);
+
+                    self.player_pos = Some(pos);
+                    commands.push(ClientCommand::TurnTo {
+                        heading: new_heading,
+                    });
                 }
             }
             KeyCode::Up => match self.state {

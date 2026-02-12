@@ -49,6 +49,6 @@ flatpak run io.github.merklejerk.holtburger-cli --host host.docker.internal --po
 - The root `dats/` folder is mounted at `/app/dats`.
 
 ## Tools Included
-- **Rust Runtime**: `cargo`, `rustc`, etc. are available if you need to build quick tools.
-- **Flatpak**: Pre-configured with Flathub.
+- **Flatpak**: Pre-configured with Flathub and essential runtimes.
 - **Libs**: `libssl`, `libc`, etc. for running the binaries.
+- **D-Bus**: Automatic session bus via `dbus-run-session`.

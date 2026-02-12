@@ -7,9 +7,8 @@ echo "🧹 Cleaning up old container vibes..."
 docker-compose down --volumes --remove-orphans
 
 echo "🚀 Launching pristine tester environment..."
-# Removed --build for speed. If you change the Dockerfile, 
-# run 'docker-compose build' manually, bestie.
-docker-compose up -d
+# We use --build here because we just updated the Dockerfile with runtimes!
+docker-compose up -d --build
 
 echo "📥 Entering the matrix (bash terminal)..."
 docker-compose exec tester bash

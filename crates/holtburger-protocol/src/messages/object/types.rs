@@ -513,3 +513,27 @@ impl ProtocolPack for UseData {
         self.guid.pack(buf);
     }
 }
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct UseWithTargetData {
+    pub item_guid: Guid,
+    pub target_guid: Guid,
+}
+
+impl ProtocolUnpack for UseWithTargetData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let item_guid = Guid::unpack(data, offset)?;
+        let target_guid = Guid::unpack(data, offset)?;
+        Some(UseWithTargetData {
+            item_guid,
+            target_guid,
+        })
+    }
+}
+
+impl ProtocolPack for UseWithTargetData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.item_guid.pack(buf);
+        self.target_guid.pack(buf);
+    }
+}

@@ -88,8 +88,12 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
         .unwrap_or(CommandTarget::None),
     };
 
-    let verbs =
-        crate::entities::verbs::get_verbs_for_target(&target, &state.entities, state.player_guid);
+    let verbs = crate::entities::verbs::get_verbs_for_target(
+        &target,
+        &state.entities,
+        state.player_guid,
+        state.active_interaction,
+    );
     if verbs.is_empty() {
         return None;
     }
@@ -105,42 +109,82 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
     Some(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::TOP)))
 }
 
-pub fn get_next_pane(current: super::types::FocusedPane, width: u16) -> super::types::FocusedPane {
-    if width < super::types::WIDTH_BREAKPOINT {
-        // Narrow: Dashboard -> Context -> Chat
-        match current {
-            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Context,
-            super::types::FocusedPane::Context => super::types::FocusedPane::Chat,
-            super::types::FocusedPane::Chat => super::types::FocusedPane::Dashboard,
-            _ => super::types::FocusedPane::Dashboard,
-        }
+pub fn get_next_pane(
+    current: super::types::FocusedPane,
+    width: u16,
+    active_interaction: bool,
+) -> super::types::FocusedPane {
+    let order = if width < super::types::WIDTH_BREAKPOINT {
+        // Portrait: Dashboard -> Context -> Dynamic -> Chat -> Input
+        [
+            super::types::FocusedPane::Dashboard,
+            super::types::FocusedPane::Context,
+            super::types::FocusedPane::Dynamic,
+            super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Input,
+        ]
     } else {
-        // Wide: Dashboard -> Chat -> Context
-        match current {
-            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Chat,
-            super::types::FocusedPane::Chat => super::types::FocusedPane::Context,
-            super::types::FocusedPane::Context => super::types::FocusedPane::Dashboard,
-            _ => super::types::FocusedPane::Dashboard,
-        }
+        // Landscape: Dashboard -> Chat -> Context -> Dynamic -> Input
+        [
+            super::types::FocusedPane::Dashboard,
+            super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Context,
+            super::types::FocusedPane::Dynamic,
+            super::types::FocusedPane::Input,
+        ]
+    };
+
+    let current_idx = order.iter().position(|&p| p == current).unwrap_or(0);
+    let mut next_idx = (current_idx + 1) % order.len();
+
+    // Skip dynamic if not moving anything
+    if order[next_idx] == super::types::FocusedPane::Dynamic && !active_interaction {
+        next_idx = (next_idx + 1) % order.len();
     }
+
+    order[next_idx]
 }
 
-pub fn get_prev_pane(current: super::types::FocusedPane, width: u16) -> super::types::FocusedPane {
-    if width < super::types::WIDTH_BREAKPOINT {
-        // Narrow reverse: Dashboard -> Chat -> Context
-        match current {
-            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Chat,
-            super::types::FocusedPane::Chat => super::types::FocusedPane::Context,
-            super::types::FocusedPane::Context => super::types::FocusedPane::Dashboard,
-            _ => super::types::FocusedPane::Dashboard,
-        }
+pub fn get_prev_pane(
+    current: super::types::FocusedPane,
+    width: u16,
+    active_interaction: bool,
+) -> super::types::FocusedPane {
+    let order = if width < super::types::WIDTH_BREAKPOINT {
+        // Portrait: Dashboard -> Context -> Dynamic -> Chat -> Input
+        [
+            super::types::FocusedPane::Dashboard,
+            super::types::FocusedPane::Context,
+            super::types::FocusedPane::Dynamic,
+            super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Input,
+        ]
     } else {
-        // Wide reverse: Dashboard -> Context -> Chat
-        match current {
-            super::types::FocusedPane::Dashboard => super::types::FocusedPane::Context,
-            super::types::FocusedPane::Context => super::types::FocusedPane::Chat,
-            super::types::FocusedPane::Chat => super::types::FocusedPane::Dashboard,
-            _ => super::types::FocusedPane::Dashboard,
-        }
+        // Landscape: Dashboard -> Chat -> Context -> Dynamic -> Input
+        [
+            super::types::FocusedPane::Dashboard,
+            super::types::FocusedPane::Chat,
+            super::types::FocusedPane::Context,
+            super::types::FocusedPane::Dynamic,
+            super::types::FocusedPane::Input,
+        ]
+    };
+
+    let current_idx = order.iter().position(|&p| p == current).unwrap_or(0);
+    let mut prev_idx = if current_idx == 0 {
+        order.len() - 1
+    } else {
+        current_idx - 1
+    };
+
+    // Skip dynamic if not moving anything
+    if order[prev_idx] == super::types::FocusedPane::Dynamic && !active_interaction {
+        prev_idx = if prev_idx == 0 {
+            order.len() - 1
+        } else {
+            prev_idx - 1
+        };
     }
+
+    order[prev_idx]
 }

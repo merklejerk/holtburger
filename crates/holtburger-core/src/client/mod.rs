@@ -256,6 +256,18 @@ impl Client {
                     })))
                     .await
             }
+            ClientCommand::UseWithTarget { item, target } => {
+                log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::UseWithTarget(Box::new(UseWithTargetData {
+                            item_guid: item,
+                            target_guid: target,
+                        })),
+                    })))
+                    .await
+            }
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
                 self.session
@@ -448,6 +460,25 @@ impl Client {
                     .send_action(GameAction::TrainSkill(Box::new(TrainSkillData {
                         skill_type: skill as u32,
                         credits_spent: credits as i32,
+                    })))
+                    .await
+            }
+            ClientCommand::GiveObjectRequest {
+                target,
+                item,
+                amount,
+            } => {
+                log::info!(
+                    ">>> Giving item 0x{:08X} to target 0x{:08X} (amount {})",
+                    item,
+                    target,
+                    amount
+                );
+                self.session
+                    .send_action(GameAction::GiveObjectRequest(Box::new(GiveObjectRequestData {
+                        target_guid: target,
+                        item_guid: item,
+                        amount,
                     })))
                     .await
             }

@@ -1,5 +1,6 @@
 // Layout constants
 pub const STATUS_BAR_HEIGHT: u16 = 3;
+pub const DYNAMIC_PANEL_HEIGHT: u16 = 3;
 use holtburger_common::Guid;
 pub const INPUT_AREA_HEIGHT: u16 = 3;
 pub const MIN_MAIN_AREA_HEIGHT: u16 = 10;
@@ -9,8 +10,6 @@ pub const LAYOUT_WIDE_NEARBY_PCT: u16 = 25;
 pub const LAYOUT_WIDE_CHAT_PCT: u16 = 50;
 pub const LAYOUT_WIDE_CONTEXT_PCT: u16 = 25;
 
-pub const LAYOUT_NARROW_TOP_ROW_PCT: u16 = 50;
-pub const LAYOUT_NARROW_BOTTOM_ROW_PCT: u16 = 50;
 pub const LAYOUT_NARROW_DASHBOARD_PCT: u16 = 50;
 pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
 
@@ -44,6 +43,22 @@ pub enum CommandTarget<'a> {
 pub enum CommandHandler {
     Command(ClientCommand),
     ToggleDebug,
+    Move(Guid),
+    Give(Guid),
+    Heal(Guid),
+    ApplyHealing(Guid),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractionMode {
+    Moving,
+    Healing,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActiveInteraction {
+    pub guid: Guid,
+    pub mode: InteractionMode,
 }
 
 #[derive(Debug, Clone)]
@@ -83,6 +98,7 @@ pub enum FocusedPane {
     Context,
     Input,
     Dashboard,
+    Dynamic,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

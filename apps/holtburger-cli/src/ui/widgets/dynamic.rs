@@ -5,6 +5,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 const NETSTATS_WIDTH: u16 = 40;
 const SPARK_WIDTH: usize = 8;
@@ -115,8 +116,9 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
                 })
                 .collect::<String>();
 
-            if s.len() < width {
-                s = format!("{}{}", " ".repeat(width - s.len()), s);
+            let current_width = s.width();
+            if current_width < width {
+                s = format!("{}{}", " ".repeat(width - current_width), s);
             }
             s
         };

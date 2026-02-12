@@ -17,7 +17,7 @@ macro_rules! define_verbs {
 
     (
         $(
-            $variant:ident $( ( $data:ty ) )? $( [$overlap:ident] )? => { $label:expr, $shortcut:expr }
+            $variant:ident $( ( $data:ty ) )? => { $label:expr, $shortcut:expr }
         ),* $(,)?
     ) => {
         #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,19 +40,22 @@ macro_rules! define_verbs {
                     $( define_verbs!(@pat $variant $( ( $data ) )? ) => $label ),*
                 }
             }
-
-            /// Returns all available verb variants and whether they are allowed to overlap.
-            pub fn variants() -> Vec<(Self, bool)> {
-                vec![
-                    $(
-                        (
-                            define_verbs!(@inst $variant $( ( $data ) )? ),
-                            false $( || stringify!($overlap) == "OVERLAP" )?
-                        )
-                    ),*
-                ]
-            }
         }
+
+        const _: () = {
+            let shortcuts = [ $( $shortcut ),* ];
+            let mut i = 0;
+            while i < shortcuts.len() {
+                let mut j = i + 1;
+                while j < shortcuts.len() {
+                    if shortcuts[i] == shortcuts[j] {
+                        panic!("Duplicate EntityVerb shortcut detected!");
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+        };
     }
 }
 
@@ -69,7 +72,6 @@ define_verbs! {
     LevelUp => { "Level Up", 'l' },
     Train => { "Train", 't' },
     Move => { "Move", 'm' },
-    Heal => { "Heal", 'h' },
     Confirm(String) => { "Confirm", '\r' },
     Cancel => { "Cancel", '\x1b' },
 }
@@ -196,22 +198,17 @@ impl EntityVerb {
             (EntityVerb::LevelUp, CommandTarget::Stat(_, None, _)) => None,
             (EntityVerb::Debug, _) => Some(CommandHandler::ToggleDebug),
             (EntityVerb::Move, CommandTarget::Entity(e)) => Some(CommandHandler::Move(e.guid)),
-            (EntityVerb::Heal, CommandTarget::Entity(e)) => {
-                if let Some(interaction) = active_interaction {
-                    if interaction.mode == InteractionMode::Healing {
-                        Some(CommandHandler::ApplyHealing(e.guid))
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            }
             (EntityVerb::Confirm(_), target) => {
                 if let Some(interaction) = active_interaction {
                     match interaction.mode {
                         InteractionMode::Healing => match target {
-                            CommandTarget::Entity(e) => Some(CommandHandler::ApplyHealing(e.guid)),
+                            CommandTarget::Entity(e) => {
+                                if e.guid == interaction.guid {
+                                    player_guid.map(CommandHandler::ApplyHealing)
+                                } else {
+                                    Some(CommandHandler::ApplyHealing(e.guid))
+                                }
+                            }
                             _ => player_guid.map(CommandHandler::ApplyHealing),
                         },
                         InteractionMode::Moving => match target {
@@ -426,22 +423,5 @@ mod tests {
 
         let confirm = EntityVerb::Confirm("Bespoke Message".to_string());
         assert_eq!(confirm.label(), "Bespoke Message");
-    }
-
-    #[test]
-    fn test_verb_shortcuts_uniqueness() {
-        let mut shortcuts = HashMap::new();
-        for (verb, is_overlap) in EntityVerb::variants() {
-            if is_overlap {
-                continue;
-            }
-            let shortcut = verb.shortcut_char();
-            if let Some(existing) = shortcuts.insert(shortcut, verb.clone()) {
-                panic!(
-                    "Duplicate EntityVerb shortcut character '{}' detected between {:?} and {:?}!",
-                    shortcut, verb, existing
-                );
-            }
-        }
     }
 }

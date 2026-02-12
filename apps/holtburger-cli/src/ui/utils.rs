@@ -2,6 +2,7 @@ use super::types::{CommandTarget, DashboardTab};
 use crate::ui::AppState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 pub fn format_cost(n: u64) -> String {
     if n >= 1_000_000_000 {
@@ -27,33 +28,59 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
         }
         let mut current_line = String::new();
         for word in line.split(' ') {
+            let word_width = word.width();
             if current_line.is_empty() {
-                if word.len() > width {
-                    let mut s = word;
-                    while s.len() > width {
-                        let (head, tail) = s.split_at(width);
+                if word_width > width {
+                    let mut s = word.to_string();
+                    while s.width() > width {
+                        let mut split_idx = 0;
+                        let mut current_w = 0;
+                        for (idx, c) in s.char_indices() {
+                            let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                            if current_w + cw > width {
+                                break;
+                            }
+                            current_w += cw;
+                            split_idx = idx + c.len_utf8();
+                        }
+                        if split_idx == 0 {
+                            split_idx = s.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+                        }
+                        let (head, tail) = s.split_at(split_idx);
                         result.push(head.to_string());
-                        s = tail;
+                        s = tail.to_string();
                     }
-                    current_line = s.to_string();
+                    current_line = s;
                 } else {
                     current_line.push_str(word);
                 }
-            } else if current_line.len() + 1 + word.len() <= width {
-                current_line.push(' ');
-                current_line.push_str(word);
             } else {
-                result.push(current_line);
-                if word.len() > width {
-                    let mut s = word;
-                    while s.len() > width {
-                        let (head, tail) = s.split_at(width);
-                        result.push(head.to_string());
-                        s = tail;
-                    }
-                    current_line = s.to_string();
+                let current_width = current_line.width();
+                if current_width + 1 + word_width <= width {
+                    current_line.push(' ');
+                    current_line.push_str(word);
                 } else {
-                    current_line = word.to_string();
+                    result.push(current_line);
+                    let mut s = word.to_string();
+                    while s.width() > width {
+                        let mut split_idx = 0;
+                        let mut current_w = 0;
+                        for (idx, c) in s.char_indices() {
+                            let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                            if current_w + cw > width {
+                                break;
+                            }
+                            current_w += cw;
+                            split_idx = idx + c.len_utf8();
+                        }
+                        if split_idx == 0 {
+                            split_idx = s.chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+                        }
+                        let (head, tail) = s.split_at(split_idx);
+                        result.push(head.to_string());
+                        s = tail.to_string();
+                    }
+                    current_line = s;
                 }
             }
         }

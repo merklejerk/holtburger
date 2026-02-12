@@ -25,8 +25,8 @@ jobs:
           git tag -f nightly
           git push -f origin nightly
 
-  data-release:
-    name: Upload HBA Data
+  data-build:
+    name: Prepare HBA Data
     needs: tag
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
@@ -34,17 +34,14 @@ jobs:
       - name: Fetch HBA files
         run: |
           curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
-      - name: Upload HBA Zip to Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload HBA Artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: nightly
-          files: hba.zip
-          prerelease: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: hba-data
+          path: hba.zip
 
-  dist:
-    name: Build & Release
+  dist-build:
+    name: Build Binaries
     needs: tag
     if: github.ref == 'refs/heads/main'
     strategy:
@@ -81,25 +78,14 @@ jobs:
       - name: Prepare Release Bundle
         shell: bash
         run: |
-          # Create staging directory
           mkdir -p staging/dats
-          
-          # Detect binary extension (for Windows)
           EXT=""
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then EXT=".exe"; fi
-          
-          # Copy binaries and rename 'tui' to 'holtburger-cli'
           cp target/release/tui$EXT staging/holtburger-cli$EXT
           cp target/release/dat2hba$EXT staging/dat2hba$EXT
           cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
-          
-          # Copy data files
           cp dats/*.hba staging/dats/
-          
-          # Archive the staging folder
-          STAMP=$(date +'%Y%m%d')
           ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
-          
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             7z a "$ARCHIVE_NAME.zip" ./staging/*
             echo "ASSET_PATH=$ARCHIVE_NAME.zip" >> $GITHUB_ENV
@@ -108,63 +94,71 @@ jobs:
             echo "ASSET_PATH=$ARCHIVE_NAME.tar.gz" >> $GITHUB_ENV
           fi
 
-      - name: Upload Artifacts to Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: nightly
-          files: ${{ env.ASSET_PATH }}
-          prerelease: true
-          name: "Nightly Build (Live on the edge 🍔)"
-          body: |
-            This is an automated nightly build of the Holtburger TUI client.
-            Built on: ${{ github.event.repository.updated_at }}
-            Commit: ${{ github.sha }}
-            
-            **Warning:** These builds are highly experimental!
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: binary-${{ matrix.target }}
+          path: ${{ env.ASSET_PATH }}
 
-  flatpak:
+  flatpak-build:
     name: Build Flatpak
     needs: tag
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-
       - name: Install Flatpak dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          # Pre-install what we can to avoid later permission drama
           sudo flatpak install -y flathub org.freedesktop.Platform/x86_64/24.08 org.freedesktop.Sdk/x86_64/24.08
-
       - name: Build TUI Client
         run: |
           cargo build --release --package holtburger-cli
-          # Rename the binary from 'tui' to 'holtburger-cli' for official releases
           mv target/release/tui target/release/holtburger-cli
-
       - name: Fetch HBA files
         run: |
           mkdir -p dats
           curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
           unzip hba.zip -d dats
           rm hba.zip
-
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: holtburger-cli.flatpak
           manifest-path: apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml
           cache: true
-      - name: Upload Flatpak to Release
+      - name: Upload Flatpak Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatpak-bundle
+          path: holtburger-cli.flatpak
+
+  publish:
+    name: Publish Nightly Release
+    needs: [data-build, dist-build, flatpak-build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true # This puts all files into the 'artifacts' dir
+
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
-          files: holtburger-cli.flatpak
+          files: artifacts/*
+          prerelease: true
+          name: "Nightly Build (Live on the edge 🍔)"
+          body: |
+            This is an automated nightly build of the Holtburger TUI client.
+            
+            **Warning:** These builds are highly experimental!
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -47,6 +47,8 @@ pub enum CommandHandler {
     Give(Guid),
     Heal(Guid),
     ApplyHealing(Guid),
+    ApplyMoving(Guid),
+    CancelInteraction,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

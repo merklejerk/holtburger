@@ -12,9 +12,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         Style::default()
     };
 
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(style);
+    let mut block = Block::default().borders(Borders::ALL).border_style(style);
 
     if let Some(interaction) = state.active_interaction {
         let title = match interaction.mode {

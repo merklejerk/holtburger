@@ -475,11 +475,13 @@ impl Client {
                     amount
                 );
                 self.session
-                    .send_action(GameAction::GiveObjectRequest(Box::new(GiveObjectRequestData {
-                        target_guid: target,
-                        item_guid: item,
-                        amount,
-                    })))
+                    .send_action(GameAction::GiveObjectRequest(Box::new(
+                        GiveObjectRequestData {
+                            target_guid: target,
+                            item_guid: item,
+                            amount,
+                        },
+                    )))
                     .await
             }
             ClientCommand::Quit => {

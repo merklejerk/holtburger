@@ -14,7 +14,10 @@ use holtburger_core::{ClientState, RetryState};
 use holtburger_protocol::messages::CharacterEntry;
 use holtburger_protocol::messages::magic::Enchantment;
 
-use super::types::{ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
+use super::types::{
+    ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
+    UIState,
+};
 use crate::entities::filter::{EntityFilter, filter_entities};
 use ratatui::text::Line;
 

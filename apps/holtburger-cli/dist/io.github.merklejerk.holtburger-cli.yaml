@@ -27,6 +27,4 @@ modules:
         path: io.github.merklejerk.holtburger-cli.svg
 finish-args:
   - --share=network
-  - --share=ipc
-  - --device=all
   - --env=HOLTBURGER_DATS=/app/share/holtburger/dats

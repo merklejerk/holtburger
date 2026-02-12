@@ -9,6 +9,7 @@ members = [
     "apps/holtburger-tools",
     "crates/holtburger-debug-harness",
 ]
+default-members = ["apps/holtburger-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -47,6 +48,7 @@ criterion = "0.5"
 rayon = "1.11.0"
 indicatif = "0.17"
 directories = "6.0"
+unicode-width = "0.1.13"
 
 # Config for 'cargo dist'
 [workspace.metadata.dist]

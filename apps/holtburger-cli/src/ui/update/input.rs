@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use holtburger_common::math::Quaternion;
 use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientCommand;
@@ -285,7 +285,11 @@ impl AppState {
 
                     // Adjust yaw (rotation around Z)
                     let current_heading = pos.rotation.to_heading();
-                    let new_heading = current_heading + delta;
+                    let mut new_heading = current_heading + delta;
+
+                    // Normalize to [0, 2π)
+                    let two_pi = 2.0 * std::f32::consts::PI;
+                    new_heading = (new_heading % two_pi + two_pi) % two_pi;
 
                     // Rebuild quaternion from new heading
                     pos.rotation = Quaternion::from_heading(new_heading);
@@ -688,11 +692,59 @@ impl AppState {
 
     pub(super) fn handle_mouse_event(
         &mut self,
-        _mouse: MouseEvent,
+        mouse: MouseEvent,
         _chunks: Vec<Rect>,
-        _main_chunks: Vec<Rect>,
+        main_chunks: Vec<Rect>,
         _dynamic_chunk: Rect,
     ) -> Vec<ClientCommand> {
-        Vec::new()
+        let commands = Vec::new();
+        match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                if mouse.row >= main_chunks[1].y
+                    && mouse.row < main_chunks[1].y + main_chunks[1].height
+                    && mouse.column >= main_chunks[1].x
+                    && mouse.column < main_chunks[1].x + main_chunks[1].width
+                {
+                    self.scroll_offset = self.scroll_offset.saturating_add(ui::SCROLL_STEP);
+                } else if mouse.row >= main_chunks[2].y
+                    && mouse.row < main_chunks[2].y + main_chunks[2].height
+                    && mouse.column >= main_chunks[2].x
+                    && mouse.column < main_chunks[2].x + main_chunks[2].width
+                {
+                    self.context_scroll_offset =
+                        self.context_scroll_offset.saturating_add(ui::SCROLL_STEP);
+                } else if mouse.row >= main_chunks[0].y
+                    && mouse.row < main_chunks[0].y + main_chunks[0].height
+                    && mouse.column >= main_chunks[0].x
+                    && mouse.column < main_chunks[0].x + main_chunks[0].width
+                {
+                    self.selected_dashboard_index = self.selected_dashboard_index.saturating_sub(1);
+                }
+            }
+            MouseEventKind::ScrollDown => {
+                if mouse.row >= main_chunks[1].y
+                    && mouse.row < main_chunks[1].y + main_chunks[1].height
+                    && mouse.column >= main_chunks[1].x
+                    && mouse.column < main_chunks[1].x + main_chunks[1].width
+                {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(ui::SCROLL_STEP);
+                } else if mouse.row >= main_chunks[2].y
+                    && mouse.row < main_chunks[2].y + main_chunks[2].height
+                    && mouse.column >= main_chunks[2].x
+                    && mouse.column < main_chunks[2].x + main_chunks[2].width
+                {
+                    self.context_scroll_offset =
+                        self.context_scroll_offset.saturating_sub(ui::SCROLL_STEP);
+                } else if mouse.row >= main_chunks[0].y
+                    && mouse.row < main_chunks[0].y + main_chunks[0].height
+                    && mouse.column >= main_chunks[0].x
+                    && mouse.column < main_chunks[0].x + main_chunks[0].width
+                {
+                    self.selected_dashboard_index = self.selected_dashboard_index.saturating_add(1);
+                }
+            }
+            _ => {}
+        }
+        commands
     }
 }

@@ -537,3 +537,143 @@ impl ProtocolPack for UseWithTargetData {
         self.target_guid.pack(buf);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_fixtures;
+    use crate::test_helpers::assert_pack_unpack_parity;
+    use holtburger_common::Guid;
+
+    #[test]
+    fn test_armor_profile_parity() {
+        let expected = ArmorProfile {
+            slashing: 1.0,
+            piercing: 2.0,
+            bludgeoning: 3.0,
+            cold: 4.0,
+            fire: 5.0,
+            acid: 6.0,
+            nether: 7.0,
+            lightning: 8.0,
+        };
+        assert_pack_unpack_parity(test_fixtures::ARMOR_PROFILE, &expected);
+    }
+
+    #[test]
+    fn test_creature_profile_parity() {
+        let expected = CreatureProfile {
+            flags: CreatureProfileFlags::SHOW_ATTRIBUTES | CreatureProfileFlags::HAS_BUFFS_DEBUFFS,
+            health: 500,
+            health_max: 1000,
+            attributes: Some(CreatureAttributes {
+                strength: 10,
+                endurance: 20,
+                quickness: 30,
+                coordination: 40,
+                focus: 50,
+                self_attr: 60,
+                stamina: 70,
+                mana: 80,
+                stamina_max: 90,
+                mana_max: 100,
+            }),
+            buffs: Some(CreatureBuffs {
+                highlights: 0xAABB,
+                colors: 0xCCDD,
+            }),
+        };
+        assert_pack_unpack_parity(test_fixtures::CREATURE_PROFILE, &expected);
+    }
+
+    #[test]
+    fn test_weapon_profile_parity() {
+        let expected = WeaponProfile {
+            damage_type: 1,
+            weapon_time: 20,
+            weapon_skill: 15,
+            damage: 5,
+            damage_variance: 0.5,
+            damage_mod: 1.5,
+            weapon_length: 1.2,
+            max_velocity: 100.0,
+            weapon_offense: 10.0,
+            max_velocity_estimated: 50,
+        };
+        assert_pack_unpack_parity(test_fixtures::WEAPON_PROFILE, &expected);
+    }
+
+    #[test]
+    fn test_hook_profile_parity() {
+        let expected = HookProfile {
+            flags: 0x3, // HookFlags.Inscribable (0x1) | HookFlags.IsHealer (0x2)
+            valid_locations: 0x100,
+            ammo_type: 2,
+        };
+        assert_pack_unpack_parity(test_fixtures::HOOK_PROFILE, &expected);
+    }
+
+    #[test]
+    fn test_armor_level_parity() {
+        let expected = ArmorLevels {
+            head: 10,
+            chest: 20,
+            abdomen: 30,
+            upper_arm: 40,
+            lower_arm: 50,
+            hand: 60,
+            upper_leg: 70,
+            lower_leg: 80,
+            foot: 90,
+        };
+        assert_pack_unpack_parity(test_fixtures::ARMOR_LEVEL, &expected);
+    }
+
+    #[test]
+    fn test_identify_object_data_parity() {
+        let expected = IdentifyObjectData {
+            guid: Guid(0x12345678),
+        };
+        assert_pack_unpack_parity(test_fixtures::IDENTIFY_OBJECT_DATA, &expected);
+    }
+
+    #[test]
+    fn test_use_data_parity() {
+        let expected = UseData {
+            guid: Guid(0x22222222),
+        };
+        assert_pack_unpack_parity(test_fixtures::USE_DATA, &expected);
+    }
+
+    #[test]
+    fn test_use_with_target_data_parity() {
+        let expected = UseWithTargetData {
+            item_guid: Guid(0x33333333),
+            target_guid: Guid(0x44444444),
+        };
+        assert_pack_unpack_parity(test_fixtures::USE_WITH_TARGET_DATA, &expected);
+    }
+
+    #[test]
+    fn test_model_data_parity() {
+        let expected = ModelData {
+            header: 0x11,
+            palette_id: Some(0x04000001),
+            sub_palettes: vec![SubPalette {
+                id: 0x04000002,
+                offset: 0,
+                length: 32,
+            }],
+            texture_changes: vec![TextureChange {
+                part_index: 0,
+                old_id: 0x05000001,
+                new_id: 0x05000002,
+            }],
+            model_changes: vec![ModelChange {
+                index: 0,
+                animation_id: 0x01000001,
+            }],
+        };
+        assert_pack_unpack_parity(test_fixtures::MODEL_DATA, &expected);
+    }
+}

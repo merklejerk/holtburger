@@ -1,7 +1,7 @@
 use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
-use holtburger_common::{Guid, ProtocolUnpack};
+use holtburger_common::{Guid, ProtocolUnpack, Quaternion};
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::transport::packet_flags;
@@ -221,18 +221,22 @@ impl Client {
                 velocity: _,
             } => {
                 log::info!(">>> Jumping: extent={}", extent);
-                let sequence = 0; // TODO: Real sequence?
+                let obj_inst = self.world.player.instance_sequence;
+                let srv_seq = self.world.player.server_control_sequence;
+                let tele_seq = self.world.player.teleport_sequence;
+                let force_seq = self.world.player.force_position_sequence;
+
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence,
+                        sequence: 0, // GameAction sequence is different?
 
                         action: GameAction::Jump(Box::new(JumpData {
                             extent,
                             velocity: Default::default(),
-                            instance_sequence: 0,
-                            server_control_sequence: 0,
-                            teleport_sequence: 0,
-                            force_position_sequence: 0,
+                            instance_sequence: obj_inst,
+                            server_control_sequence: srv_seq,
+                            teleport_sequence: tele_seq,
+                            force_position_sequence: force_seq,
                             object_guid: self.world.player.guid,
                             spell_id: 0,
                         })),
@@ -358,10 +362,14 @@ impl Client {
             }
             ClientCommand::SetState(state_opcode) => {
                 log::info!(">>> Setting state: 0x{:08X}", state_opcode);
-                let sequence = 0; // TODO
+                let obj_inst = self.world.player.instance_sequence;
+                let srv_seq = self.world.player.server_control_sequence;
+                let tele_seq = self.world.player.teleport_sequence;
+                let force_seq = self.world.player.force_position_sequence;
+
                 self.session
                     .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence,
+                        sequence: 0,
 
                         action: GameAction::MoveToState(Box::new(MoveToStateData {
                             raw_motion_state: RawMotionState {
@@ -370,10 +378,10 @@ impl Client {
                                 ..Default::default()
                             },
                             position: self.world.player.position,
-                            instance_sequence: 0,
-                            server_control_sequence: 0,
-                            teleport_sequence: 0,
-                            force_position_sequence: 0,
+                            instance_sequence: obj_inst,
+                            server_control_sequence: srv_seq,
+                            teleport_sequence: tele_seq,
+                            force_position_sequence: force_seq,
                             contact_long_jump: 0,
                         })),
                     })))
@@ -381,25 +389,28 @@ impl Client {
             }
             ClientCommand::TurnTo { heading } => {
                 log::info!(">>> Turning to heading: {}", heading);
-                let data = MovementEventData {
-                    guid: self.world.player.guid,
-                    object_instance_sequence: 0,
-                    movement_sequence: 0,
-                    server_control_sequence: 0,
-                    is_autonomous: true,
-                    movement_type: MovementType::TurnToHeading,
-                    motion_flags: 0,
-                    current_style: 0,
-                    data: MovementTypeData::TurnToHeading(TurnToHeading {
-                        params: TurnToParameters {
-                            movement_parameters: 0,
-                            speed: 1.0,
-                            desired_heading: heading,
-                        },
-                    }),
-                };
+
+                // Prediction: update local state immediately so UI feels snappy
+                self.world.player.position.rotation = Quaternion::from_heading(heading);
+
+                let obj_inst = self.world.player.instance_sequence;
+                let srv_seq = self.world.player.server_control_sequence;
+                let tele_seq = self.world.player.teleport_sequence;
+                let force_seq = self.world.player.force_position_sequence;
+
                 self.session
-                    .send_message(&GameMessage::UpdateMotion(Box::new(data)))
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::MoveToState(Box::new(MoveToStateData {
+                            raw_motion_state: RawMotionState::default(),
+                            position: self.world.player.position,
+                            instance_sequence: obj_inst,
+                            server_control_sequence: srv_seq,
+                            teleport_sequence: tele_seq,
+                            force_position_sequence: force_seq,
+                            contact_long_jump: 1, // Assume contact
+                        })),
+                    })))
                     .await
             }
             ClientCommand::MoveTo { target } => {

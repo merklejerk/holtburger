@@ -229,6 +229,8 @@ async fn main() -> Result<()> {
         chat_log,
         use_emojis: !args.no_emojis,
         verbosity: args.verbose,
+        net_stats: ui::NetStats::default(),
+        world_name: String::new(),
     };
 
     app_state.refresh_context_buffer();
@@ -312,8 +314,11 @@ async fn main() -> Result<()> {
                         log::info!("WorldEvent: {:?}", world_event);
                     }
                 }
-                ClientEvent::GameMessage(_msg) => {
-                    // Logged by holtburger-core
+                ClientEvent::GameMessage(msg) => {
+                    use holtburger_protocol::messages::GameMessage;
+                    if let GameMessage::ServerName(data) = msg.as_ref() {
+                        app_state.world_name = data.name.clone();
+                    }
                 }
                 ClientEvent::RawMessage(_data) => {
                     // Logged by holtburger-core

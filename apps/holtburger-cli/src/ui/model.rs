@@ -14,7 +14,7 @@ use holtburger_core::{ClientState, RetryState};
 use holtburger_protocol::messages::CharacterEntry;
 use holtburger_protocol::messages::magic::Enchantment;
 
-use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
+use super::types::{ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
 use crate::entities::filter::{EntityFilter, filter_entities};
 use ratatui::text::Line;
 
@@ -48,6 +48,7 @@ pub struct AppState {
     pub context_scroll_offset: usize,
     pub context_view: ContextView,
     pub current_debug_guid: Option<Guid>,
+    pub active_interaction: Option<ActiveInteraction>,
     pub account_password: String,
     pub logon_retry: RetryState,
     pub enter_retry: RetryState,

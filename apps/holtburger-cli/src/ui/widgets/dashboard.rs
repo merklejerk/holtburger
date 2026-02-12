@@ -213,8 +213,13 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .enumerate()
         .map(|(i, (e, dist, depth))| {
             let target = CommandTarget::Entity(e);
-            let has_verbs =
-                !get_verbs_for_target(&target, &state.entities, state.player_guid).is_empty();
+            let has_verbs = !get_verbs_for_target(
+                &target,
+                &state.entities,
+                state.player_guid,
+                state.active_interaction,
+            )
+            .is_empty();
             render_entity_list_item(
                 e,
                 Some(*dist),
@@ -234,8 +239,13 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .enumerate()
         .map(|(i, (e, _, depth))| {
             let target = CommandTarget::Entity(e);
-            let has_verbs =
-                !get_verbs_for_target(&target, &state.entities, state.player_guid).is_empty();
+            let has_verbs = !get_verbs_for_target(
+                &target,
+                &state.entities,
+                state.player_guid,
+                state.active_interaction,
+            )
+            .is_empty();
             let is_equipped = state.player_guid.is_some() && e.wielder_id == state.player_guid;
             render_entity_list_item(
                 e,

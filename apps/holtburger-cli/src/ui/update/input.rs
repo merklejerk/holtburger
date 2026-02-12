@@ -1,4 +1,5 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
@@ -18,6 +19,7 @@ impl AppState {
         width: u16,
         _height: u16,
         main_chunks: Vec<Rect>,
+        _dynamic_chunk: Rect,
     ) -> Vec<ClientCommand> {
         let mut commands = Vec::new();
         match key.code {
@@ -29,17 +31,19 @@ impl AppState {
                 commands.push(ClientCommand::Quit);
             }
             KeyCode::Tab | KeyCode::BackTab => {
+                let active = self.active_interaction.is_some();
                 if key
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL)
                     || key.code == KeyCode::BackTab
                 {
-                    self.focused_pane = get_prev_pane(self.focused_pane, width);
+                    self.focused_pane = get_prev_pane(self.focused_pane, width, active);
                 } else {
-                    self.focused_pane = get_next_pane(self.focused_pane, width);
+                    self.focused_pane = get_next_pane(self.focused_pane, width, active);
                 }
             }
             KeyCode::Esc => {
+                self.active_interaction = None;
                 if self.focused_pane == FocusedPane::Input {
                     self.focused_pane = self.previous_focused_pane;
                 } else if self.state == UIState::CharacterSelection {
@@ -203,6 +207,9 @@ impl AppState {
                             self.selected_dashboard_index -= 1;
                         }
                     }
+                    FocusedPane::Dynamic => {
+                        // TODO: Handle dynamic selection scroll/cycling
+                    }
                 },
                 UIState::CharacterSelection => {
                     if self.selected_character_index > 0 {
@@ -237,6 +244,9 @@ impl AppState {
                         {
                             self.selected_dashboard_index += 1;
                         }
+                    }
+                    FocusedPane::Dynamic => {
+                        // TODO: Handle dynamic selection scroll/cycling
                     }
                 },
                 UIState::CharacterSelection => {
@@ -314,7 +324,7 @@ impl AppState {
                         FocusedPane::Input => {
                             self.input.push(c);
                         }
-                        FocusedPane::Chat | FocusedPane::Context | FocusedPane::Dashboard => {
+                        FocusedPane::Chat | FocusedPane::Context | FocusedPane::Dashboard | FocusedPane::Dynamic => {
                             match c {
                                 '1' => {
                                     self.dashboard_tab = DashboardTab::Entities;
@@ -366,6 +376,7 @@ impl AppState {
                                             &target,
                                             &self.entities,
                                             player_guid,
+                                            self.active_interaction,
                                         );
                                         let handler = entity_verbs
                                             .iter()
@@ -415,6 +426,81 @@ impl AppState {
                                                     self.context_scroll_offset = 0;
                                                 }
                                             }
+                                            CommandHandler::Move(guid) => {
+                                                self.active_interaction = Some(ui::types::ActiveInteraction {
+                                                    guid,
+                                                    mode: ui::types::InteractionMode::Moving,
+                                                });
+                                            }
+                                            CommandHandler::Give(target_guid) => {
+                                                if let Some(ui::types::ActiveInteraction {
+                                                    guid: item_guid,
+                                                    mode: ui::types::InteractionMode::Moving,
+                                                }) = self.active_interaction
+                                                {
+                                                    let item_entity = self.entities.get(&item_guid);
+                                                    let amount = item_entity
+                                                        .and_then(|e| {
+                                                            e.int_properties
+                                                                .get(&(PropertyInt::StackSize as u32))
+                                                        })
+                                                        .cloned()
+                                                        .unwrap_or(1);
+
+                                                    let target_entity =
+                                                        self.entities.get(&target_guid);
+                                                    let class = target_entity.map(|e| {
+                                                        crate::entities::classification::classify_entity(e)
+                                                    });
+
+                                                    let is_self =
+                                                        Some(target_guid) == self.player_guid;
+
+                                                    if is_self
+                                                        || matches!(
+                                                            class,
+                                                            Some(crate::entities::classification::EntityClass::Container)
+                                                                | Some(
+                                                                    crate::entities::classification::EntityClass::Chest,
+                                                                )
+                                                        )
+                                                    {
+                                                        commands.push(ClientCommand::MoveItem {
+                                                            item: item_guid,
+                                                            container: target_guid,
+                                                            placement: 0,
+                                                        });
+                                                    } else {
+                                                        commands.push(
+                                                            ClientCommand::GiveObjectRequest {
+                                                                target: target_guid,
+                                                                item: item_guid,
+                                                                amount: amount as i32,
+                                                            },
+                                                        );
+                                                    }
+                                                    self.active_interaction = None;
+                                                }
+                                            }
+                                            CommandHandler::Heal(guid) => {
+                                                self.active_interaction = Some(ui::types::ActiveInteraction {
+                                                    guid,
+                                                    mode: ui::types::InteractionMode::Healing,
+                                                });
+                                            }
+                                            CommandHandler::ApplyHealing(target_guid) => {
+                                                if let Some(ui::types::ActiveInteraction {
+                                                    guid: kit_guid,
+                                                    mode: ui::types::InteractionMode::Healing,
+                                                }) = self.active_interaction
+                                                {
+                                                    commands.push(ClientCommand::UseWithTarget {
+                                                        item: kit_guid,
+                                                        target: target_guid,
+                                                    });
+                                                    self.active_interaction = None;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -461,85 +547,11 @@ impl AppState {
 
     pub(super) fn handle_mouse_event(
         &mut self,
-        mouse: MouseEvent,
-        chunks: Vec<Rect>,
-        main_chunks: Vec<Rect>,
+        _mouse: MouseEvent,
+        _chunks: Vec<Rect>,
+        _main_chunks: Vec<Rect>,
+        _dynamic_chunk: Rect,
     ) -> Vec<ClientCommand> {
-        let commands = Vec::new();
-        match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                if mouse.row >= chunks[2].y
-                    && mouse.row < chunks[2].y + chunks[2].height
-                    && mouse.column >= chunks[2].x
-                    && mouse.column < chunks[2].x + chunks[2].width
-                {
-                    self.focused_pane = FocusedPane::Input;
-                } else if mouse.row >= main_chunks[0].y
-                    && mouse.row < main_chunks[0].y + main_chunks[0].height
-                    && mouse.column >= main_chunks[0].x
-                    && mouse.column < main_chunks[0].x + main_chunks[0].width
-                {
-                    self.focused_pane = FocusedPane::Dashboard;
-                } else if mouse.row >= main_chunks[1].y
-                    && mouse.row < main_chunks[1].y + main_chunks[1].height
-                    && mouse.column >= main_chunks[1].x
-                    && mouse.column < main_chunks[1].x + main_chunks[1].width
-                {
-                    self.focused_pane = FocusedPane::Chat;
-                } else if mouse.row >= main_chunks[2].y
-                    && mouse.row < main_chunks[2].y + main_chunks[2].height
-                    && mouse.column >= main_chunks[2].x
-                    && mouse.column < main_chunks[2].x + main_chunks[2].width
-                {
-                    self.focused_pane = FocusedPane::Context;
-                }
-            }
-            MouseEventKind::ScrollUp => {
-                if mouse.row >= main_chunks[1].y
-                    && mouse.row < main_chunks[1].y + main_chunks[1].height
-                    && mouse.column >= main_chunks[1].x
-                    && mouse.column < main_chunks[1].x + main_chunks[1].width
-                {
-                    self.scroll_offset = self.scroll_offset.saturating_add(ui::SCROLL_STEP);
-                } else if mouse.row >= main_chunks[2].y
-                    && mouse.row < main_chunks[2].y + main_chunks[2].height
-                    && mouse.column >= main_chunks[2].x
-                    && mouse.column < main_chunks[2].x + main_chunks[2].width
-                {
-                    self.context_scroll_offset =
-                        self.context_scroll_offset.saturating_add(ui::SCROLL_STEP);
-                } else if mouse.row >= main_chunks[0].y
-                    && mouse.row < main_chunks[0].y + main_chunks[0].height
-                    && mouse.column >= main_chunks[0].x
-                    && mouse.column < main_chunks[0].x + main_chunks[0].width
-                {
-                    self.selected_dashboard_index = self.selected_dashboard_index.saturating_sub(1);
-                }
-            }
-            MouseEventKind::ScrollDown => {
-                if mouse.row >= main_chunks[1].y
-                    && mouse.row < main_chunks[1].y + main_chunks[1].height
-                    && mouse.column >= main_chunks[1].x
-                    && mouse.column < main_chunks[1].x + main_chunks[1].width
-                {
-                    self.scroll_offset = self.scroll_offset.saturating_sub(ui::SCROLL_STEP);
-                } else if mouse.row >= main_chunks[2].y
-                    && mouse.row < main_chunks[2].y + main_chunks[2].height
-                    && mouse.column >= main_chunks[2].x
-                    && mouse.column < main_chunks[2].x + main_chunks[2].width
-                {
-                    self.context_scroll_offset =
-                        self.context_scroll_offset.saturating_sub(ui::SCROLL_STEP);
-                } else if mouse.row >= main_chunks[0].y
-                    && mouse.row < main_chunks[0].y + main_chunks[0].height
-                    && mouse.column >= main_chunks[0].x
-                    && mouse.column < main_chunks[0].x + main_chunks[0].width
-                {
-                    self.selected_dashboard_index = self.selected_dashboard_index.saturating_add(1);
-                }
-            }
-            _ => {}
-        }
-        commands
+        Vec::new()
     }
 }

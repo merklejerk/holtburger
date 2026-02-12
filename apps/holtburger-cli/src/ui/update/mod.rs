@@ -13,11 +13,11 @@ impl AppState {
             AppAction::Tick(elapsed) => {
                 commands.extend(self.update_tick(elapsed));
             }
-            AppAction::KeyPress(key, width, height, main_chunks) => {
-                commands.extend(self.handle_key_press(key, width, height, main_chunks));
+            AppAction::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
+                commands.extend(self.handle_key_press(key, width, height, main_chunks, dynamic_chunk));
             }
-            AppAction::Mouse(mouse, chunks, main_chunks) => {
-                commands.extend(self.handle_mouse_event(mouse, chunks, main_chunks));
+            AppAction::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
+                commands.extend(self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk));
             }
             AppAction::ReceivedEvent(event) => {
                 self.handle_received_event(event);

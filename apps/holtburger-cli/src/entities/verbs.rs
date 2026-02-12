@@ -1,61 +1,77 @@
 use crate::entities::classification::{self, EntityClass};
 use crate::entities::filter;
-use crate::ui::types::{CommandHandler, CommandTarget};
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
-use holtburger_common::properties::ObjectDescriptionFlag;
-use holtburger_common::properties::PropertyInt;
+use holtburger_common::properties::{ObjectDescriptionFlag, PropertyBool, PropertyInt};
 use holtburger_core::ClientCommand;
 use holtburger_core::world::entity::Entity;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityVerb {
-    Assess,
-    Use,
-    Equip(u32), // u32 is the equip mask
-    Unequip,
-    Drop,
-    PickUp,
-    MoveToSlot(Guid), // Move item to specific container GUID
-    Debug,
-    Approach,
-    LevelUp,
-    Train,
+macro_rules! define_verbs {
+    // Internal helper to generate patterns for match arms
+    (@pat $variant:ident ( $data:ty ) ) => { EntityVerb::$variant(_) };
+    (@pat $variant:ident ) => { EntityVerb::$variant };
+
+    (
+        $(
+            $variant:ident $( ( $data:ty ) )? => { $label:expr, $shortcut:expr }
+        ),* $(,)?
+    ) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum EntityVerb {
+            $( $variant $( ( $data ) )? ),*
+        }
+
+        impl EntityVerb {
+            pub fn label(&self) -> &'static str {
+                match self {
+                    $( define_verbs!(@pat $variant $( ( $data ) )? ) => $label ),*
+                }
+            }
+
+            pub fn shortcut_char(&self) -> char {
+                match self {
+                    $( define_verbs!(@pat $variant $( ( $data ) )? ) => $shortcut ),*
+                }
+            }
+        }
+
+        const _: () = {
+            let shortcuts = [ $( $shortcut ),* ];
+            let mut i = 0;
+            while i < shortcuts.len() {
+                let mut j = i + 1;
+                while j < shortcuts.len() {
+                    if shortcuts[i] == shortcuts[j] {
+                        panic!("Duplicate EntityVerb shortcut character detected at compile time!");
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+        };
+    }
+}
+
+define_verbs! {
+    Assess => { "Assess", 'a' },
+    Use => { "Use", 'u' },
+    Equip(u32) => { "Equip", 'e' },
+    Unequip => { "Unequip", 'q' },
+    Drop => { "Drop", 'd' },
+    PickUp => { "Pick up", 'p' },
+    MoveToSlot(Guid) => { "Secure", 's' },
+    Debug => { "Debug", 'b' },
+    Approach => { "Approach", 'r' },
+    LevelUp => { "Level Up", 'l' },
+    Train => { "Train", 't' },
+    Move => { "Move", 'm' },
+    Give => { "Give", 'g' },
+    Unpack => { "Unpack", 'n' },
+    Heal => { "Heal", 'h' },
 }
 
 impl EntityVerb {
-    pub fn label(&self) -> &'static str {
-        match self {
-            EntityVerb::Assess => "Assess",
-            EntityVerb::Use => "Use",
-            EntityVerb::Equip(_) => "Equip",
-            EntityVerb::Unequip => "Unequip",
-            EntityVerb::Drop => "Drop",
-            EntityVerb::PickUp => "Pick up",
-            EntityVerb::MoveToSlot(_) => "Secure",
-            EntityVerb::Debug => "Debug",
-            EntityVerb::Approach => "Approach",
-            EntityVerb::LevelUp => "Level Up",
-            EntityVerb::Train => "Train",
-        }
-    }
-
-    pub fn shortcut_char(&self) -> char {
-        match self {
-            EntityVerb::Assess => 'a',
-            EntityVerb::Use => 'u',
-            EntityVerb::Equip(_) => 'e',
-            EntityVerb::Unequip => 'k',
-            EntityVerb::Drop => 'd',
-            EntityVerb::PickUp => 'p',
-            EntityVerb::MoveToSlot(_) => 's',
-            EntityVerb::Debug => 'b',
-            EntityVerb::Approach => 'r',
-            EntityVerb::LevelUp => 'l',
-            EntityVerb::Train => 't',
-        }
-    }
-
     pub fn display_label(&self) -> String {
         let label = self.label();
         let shortcut = self.shortcut_char();
@@ -83,7 +99,11 @@ impl EntityVerb {
                 Some(CommandHandler::Command(ClientCommand::Identify(e.guid)))
             }
             (EntityVerb::Use, CommandTarget::Entity(e)) => {
-                Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
+                if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
+                    Some(CommandHandler::Heal(e.guid))
+                } else {
+                    Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
+                }
             }
             (EntityVerb::Equip(mask), CommandTarget::Entity(e)) => {
                 Some(CommandHandler::Command(ClientCommand::GetAndWield {
@@ -162,6 +182,16 @@ impl EntityVerb {
             }
             (EntityVerb::LevelUp, CommandTarget::Stat(_, None, _)) => None,
             (EntityVerb::Debug, _) => Some(CommandHandler::ToggleDebug),
+            (EntityVerb::Move, CommandTarget::Entity(e)) => Some(CommandHandler::Move(e.guid)),
+            (EntityVerb::Give, CommandTarget::Entity(e)) => Some(CommandHandler::Give(e.guid)),
+            (EntityVerb::Heal, CommandTarget::Entity(e)) => Some(CommandHandler::ApplyHealing(e.guid)),
+            (EntityVerb::Unpack, CommandTarget::Entity(e)) => player_guid.map(|pguid| {
+                CommandHandler::Command(ClientCommand::MoveItem {
+                    item: e.guid,
+                    container: pguid,
+                    placement: 0,
+                })
+            }),
             _ => None,
         }
     }
@@ -171,7 +201,63 @@ pub fn get_verbs_for_target(
     target: &CommandTarget,
     entities: &HashMap<Guid, Entity>,
     player_guid: Option<Guid>,
+    active_interaction: Option<ActiveInteraction>,
 ) -> Vec<EntityVerb> {
+    if let Some(interaction) = active_interaction {
+        let mut verbs = Vec::new();
+
+        if interaction.mode == InteractionMode::Moving {
+            if let CommandTarget::Entity(e) = target {
+                let class = classification::classify_entity(e);
+                let is_player = player_guid.map(|pguid| pguid == e.guid).unwrap_or(false);
+
+                let can_give = match class {
+                    EntityClass::Container
+                    | EntityClass::Npc
+                    | EntityClass::Player
+                    | EntityClass::Chest => true,
+                    _ => {
+                        is_player
+                            || e.bool_properties
+                                .get(&(PropertyBool::AllowGive as u32))
+                                .copied()
+                                .unwrap_or(false)
+                            || e.bool_properties
+                                .get(&(PropertyBool::AiAllowTrade as u32))
+                                .copied()
+                                .unwrap_or(false)
+                            || e.bool_properties
+                                .get(&(PropertyBool::AiAcceptEverything as u32))
+                                .copied()
+                                .unwrap_or(false)
+                    }
+                };
+
+                if can_give {
+                    verbs.push(EntityVerb::Give);
+                }
+            }
+        } else if interaction.mode == InteractionMode::Healing {
+            if let CommandTarget::Entity(e) = target {
+                let class = classification::classify_entity(e);
+                let is_creature = matches!(
+                    class,
+                    EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                );
+
+                if is_creature {
+                    verbs.push(EntityVerb::Heal);
+                }
+            }
+        }
+
+        if should_show_debug(target) {
+            verbs.push(EntityVerb::Debug);
+        }
+
+        return verbs;
+    }
+
     let mut verbs = match target {
         CommandTarget::Entity(e) => {
             let class = classification::classify_entity(e);
@@ -229,6 +315,18 @@ pub fn get_verbs_for_target(
 
                         ent_verbs.push(EntityVerb::Use);
                         ent_verbs.push(EntityVerb::Drop);
+
+                        if !flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
+                            ent_verbs.push(EntityVerb::Move);
+
+                            // If we're in our own inventory but IN a pack, allow unpacking it to main inv
+                            if let (Some(pguid), Some(container_id)) = (player_guid, e.container_id)
+                            {
+                                if container_id != pguid {
+                                    ent_verbs.push(EntityVerb::Unpack);
+                                }
+                            }
+                        }
                     } else if !flags.intersects(ObjectDescriptionFlag::STUCK) {
                         ent_verbs.push(EntityVerb::PickUp);
                     }

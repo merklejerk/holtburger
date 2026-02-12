@@ -112,6 +112,15 @@ pub enum ClientCommand {
         skill: crate::world::stats::SkillType,
         credits: u32,
     },
+    GiveObjectRequest {
+        target: Guid,
+        item: Guid,
+        amount: i32,
+    },
+    UseWithTarget {
+        item: Guid,
+        target: Guid,
+    },
     SyncPosition,
     Quit,
 }

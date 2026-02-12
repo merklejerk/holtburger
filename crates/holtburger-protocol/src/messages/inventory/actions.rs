@@ -118,6 +118,38 @@ impl ProtocolPack for PutItemInContainerData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct GiveObjectRequestData {
+    pub target_guid: Guid,
+    pub item_guid: Guid,
+    pub amount: i32,
+}
+
+impl ProtocolUnpack for GiveObjectRequestData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let target_guid = Guid::unpack(data, offset)?;
+        let item_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let amount = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(GiveObjectRequestData {
+            target_guid,
+            item_guid,
+            amount,
+        })
+    }
+}
+
+impl ProtocolPack for GiveObjectRequestData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.target_guid.pack(buf);
+        self.item_guid.pack(buf);
+        buf.write_i32::<LittleEndian>(self.amount).unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +207,19 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(fixtures::ACTION_PUT_ITEM, &action);
+    }
+
+    #[test]
+    fn test_give_object_request_parity() {
+        let hex_str = "B1F7000078560000CD00000001000050020000507B000000";
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 0x5678,
+            action: GameAction::GiveObjectRequest(Box::new(GiveObjectRequestData {
+                target_guid: Guid(0x50000001),
+                item_guid: Guid(0x50000002),
+                amount: 123,
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
     }
 }

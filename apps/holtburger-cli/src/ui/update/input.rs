@@ -383,7 +383,13 @@ impl AppState {
                                             .find(|verb| {
                                                 verb.shortcut_char() == c.to_ascii_lowercase()
                                             })
-                                            .and_then(|verb| verb.handler(&target, player_guid));
+                                            .and_then(|verb| {
+                                                verb.handler(
+                                                    &target,
+                                                    player_guid,
+                                                    self.active_interaction,
+                                                )
+                                            });
 
                                         let (debug_lines, guid) =
                                             if let Some(CommandHandler::ToggleDebug) = &handler {

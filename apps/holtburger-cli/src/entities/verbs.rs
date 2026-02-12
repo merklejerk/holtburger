@@ -93,6 +93,7 @@ impl EntityVerb {
         &self,
         target: &CommandTarget,
         player_guid: Option<Guid>,
+        active_interaction: Option<ActiveInteraction>,
     ) -> Option<CommandHandler> {
         match (self, target) {
             (EntityVerb::Assess, CommandTarget::Entity(e)) => {
@@ -184,7 +185,24 @@ impl EntityVerb {
             (EntityVerb::Debug, _) => Some(CommandHandler::ToggleDebug),
             (EntityVerb::Move, CommandTarget::Entity(e)) => Some(CommandHandler::Move(e.guid)),
             (EntityVerb::Give, CommandTarget::Entity(e)) => Some(CommandHandler::Give(e.guid)),
-            (EntityVerb::Heal, CommandTarget::Entity(e)) => Some(CommandHandler::ApplyHealing(e.guid)),
+            (EntityVerb::Heal, CommandTarget::Entity(e)) => {
+                if let Some(interaction) = active_interaction {
+                    if interaction.mode == InteractionMode::Healing {
+                        Some(CommandHandler::ApplyHealing(e.guid))
+                    } else {
+                        None
+                    }
+                } else if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
+                    player_guid.map(|pguid| {
+                        CommandHandler::Command(ClientCommand::UseWithTarget {
+                            item: e.guid,
+                            target: pguid,
+                        })
+                    })
+                } else {
+                    None
+                }
+            }
             (EntityVerb::Unpack, CommandTarget::Entity(e)) => player_guid.map(|pguid| {
                 CommandHandler::Command(ClientCommand::MoveItem {
                     item: e.guid,
@@ -315,6 +333,10 @@ pub fn get_verbs_for_target(
 
                         ent_verbs.push(EntityVerb::Use);
                         ent_verbs.push(EntityVerb::Drop);
+
+                        if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
+                            ent_verbs.push(EntityVerb::Heal);
+                        }
 
                         if !flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
                             ent_verbs.push(EntityVerb::Move);

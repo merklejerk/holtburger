@@ -1,6 +1,6 @@
 ### Low
 [ ] Left align `account:name` in status panel.
-[ ] Add heading (e.g., `120° E-SE`) to status panel.
+[x] Add heading (e.g., `120° E-SE`) to status panel.
 [ ] Add jump for fun.
 [x] Network traffic visualizer in dynamic panel when otherwise empty.
 [x] Compass radar in dynamic panel.
@@ -8,7 +8,7 @@
 [ ] Chat tabs (Chat vs combat vs all).
 
 ### Medium
-[ ] Make net stats widget fixed width. Currently Seems to scale with terminal width.
+[x] Make net stats widget fixed width. Currently Seems to scale with terminal width.
 [x] Tab cycle order is wrong in landscape mode.
 [ ] DC detection.
 [ ] Approach verb is janky.

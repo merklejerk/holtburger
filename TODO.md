@@ -20,9 +20,10 @@
 [ ] Missing many unit tests for protocol types (lost in the refactor?).
 [ ] [C]ombine verb (crafting).
 [ ] [U]se for Mana charges.
-[ ] For two-step interactions that can target self, press the shortcut key again to quick apply to self?
+[x] Enter key for interaction target confirmation.
 
 ### High
+[ ] Vitae penalty not being tracked anymore?
 [ ] Distance calculation is wrong when in different landblocks.
 [~] Add "active entity" system:
     [~] In entity lists, add [H]eal, [G]ive, [T]arget, [M]ove verbs.

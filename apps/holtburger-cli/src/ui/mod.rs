@@ -58,10 +58,7 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
     } else {
         let vertical_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),
-                Constraint::Length(DYNAMIC_PANEL_HEIGHT),
-            ])
+            .constraints([Constraint::Min(0), Constraint::Length(DYNAMIC_PANEL_HEIGHT)])
             .split(chunks[1]);
 
         let horizontal_chunks = Layout::default()

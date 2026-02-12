@@ -1,0 +1,5 @@
+- Char tab "resistances" section needs to be prettified. Armor buffs not correctly compounding.
+- Validate enchantment combining logic and order: floats are multiplicative and ints are additive?
+- Approach verb is janky.
+- Distance calculation is wrong when in different landblocks.
+- Augment entities spawned by `ObjectCreate` with weenie template properties.  

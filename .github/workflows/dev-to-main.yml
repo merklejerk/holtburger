@@ -46,6 +46,7 @@ jobs:
           rm -rf release-test/
           rm -rf crates/holtburger-debug-harness/
           rm -f .gitmodules
+          rm -f TODO.md
           
           # Scrub Cargo.toml (remove the harness member)
           # We use a pattern that matches the specific line with its trailing comma if present

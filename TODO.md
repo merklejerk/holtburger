@@ -10,6 +10,7 @@
 - [ ] Move vitae penalty to under "vitals" group.
 
 ### Medium
+- [ ] Noclip mode to disable collision during movement.
 - [x] Make net stats widget fixed width. Currently Seems to scale with terminal width.
 - [x] Tab cycle order is wrong in landscape mode.
 - [ ] DC detection.
@@ -20,7 +21,7 @@
 - [ ] Validate enchantment combining logic and order: floats are multiplicative and ints are additive?
 - [x] [U]se and [H]eal action for healing kits.
 - [ ] All verbs should have synonymous slash chat commands.
-- [ ] Spell IDs need to be converted to names in enchants lists.
+- [ ] Spell IDs need to be converted to names in enchants lists. (Plan: [docs/plans/spell_name_resolution_plan.md](docs/plans/spell_name_resolution_plan.md))
 - [x] Force Verb shortcuts to be unique at compile time.
 - [ ] [E]quip verb.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).

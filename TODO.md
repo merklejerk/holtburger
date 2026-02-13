@@ -10,6 +10,7 @@
 - [ ] Move vitae penalty to under "vitals" group.
 
 ### Medium
+- [ ] Noclip mode to disable collision during movement.
 - [x] Make net stats widget fixed width. Currently Seems to scale with terminal width.
 - [x] Tab cycle order is wrong in landscape mode.
 - [ ] DC detection.

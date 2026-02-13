@@ -24,3 +24,6 @@ release-test/data/
 .github/*.md
 # Agent skills
 .github/skills
+
+*.md
+!README.md

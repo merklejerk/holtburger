@@ -4,6 +4,7 @@ use crate::ui::types::{CommandTarget, DashboardTab};
 use crate::ui::utils::format_cost;
 use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::{PropertyFloat, PropertyInt};
+use holtburger_core::world::magic::get_enchantment_name;
 use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::style::{Color, Modifier, Style};
@@ -110,17 +111,23 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 let val_color = if highlight { Color::Cyan } else { color };
                 let time_str = format_duration(enchant.start_time, enchant.duration);
 
+                let spell_name = state
+                    .spell_names
+                    .get(&(enchant.spell_id as u32))
+                    .cloned()
+                    .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
+
                 list_items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw("    "),
                         Span::styled(
-                            format!("Spell #{} ", enchant.spell_id),
+                            format!("{} ", spell_name),
                             Style::default()
                                 .fg(highlight_fg)
                                 .add_modifier(Modifier::ITALIC),
                         ),
                         Span::styled(
-                            format!("{:<+6} ", enchant.stat_mod_value),
+                            format!("{:+}", enchant.stat_mod_value),
                             Style::default().fg(val_color),
                         ),
                         Span::styled(
@@ -137,14 +144,14 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 } else {
                     Color::DarkGray
                 };
-                let name = get_enchantment_name(enchant);
+                let name = get_enchantment_name(enchant, &state.spell_names);
                 let time_str = format_duration(enchant.start_time, enchant.duration);
                 list_items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw("  "),
                         Span::styled(format!("{:<15} ", name), Style::default().fg(Color::Yellow)),
                         Span::styled(
-                            format!("{:<+6}", enchant.stat_mod_value),
+                            format!("{:+}", enchant.stat_mod_value),
                             Style::default().fg(Color::Cyan),
                         ),
                         Span::styled(
@@ -279,8 +286,8 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     // Misc are sorted by name then ID
     let sort_by_name = |list: &mut Vec<Enchantment>| {
         list.sort_by(|a, b| {
-            let na = get_enchantment_name(a);
-            let nb = get_enchantment_name(b);
+            let na = get_enchantment_name(a, &state.spell_names);
+            let nb = get_enchantment_name(b, &state.spell_names);
             na.cmp(&nb).then(a.spell_id.cmp(&b.spell_id))
         });
     };
@@ -514,42 +521,5 @@ fn format_duration(start: f64, duration: f64) -> String {
         } else {
             format!("{}s", remain as u32)
         }
-    }
-}
-
-pub fn get_enchantment_name(enchant: &holtburger_protocol::messages::magic::Enchantment) -> String {
-    if (enchant.stat_mod_type & EnchantmentTypeFlags::ATTRIBUTE.bits()) != 0 {
-        AttributeType::from_repr(enchant.stat_mod_key)
-            .map(|a| a.to_string())
-            .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits()) != 0 {
-        SkillType::from_repr(enchant.stat_mod_key)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SECOND_ATT.bits()) != 0 {
-        match enchant.stat_mod_key {
-            1 | 2 => "Max Health".to_string(),
-            3 | 4 => "Max Stamina".to_string(),
-            5 | 6 => "Max Mana".to_string(),
-            _ => format!("Vital #{}", enchant.stat_mod_key),
-        }
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::INT.bits()) != 0 {
-        PropertyInt::from_repr(enchant.stat_mod_key)
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| format!("Int #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::FLOAT.bits()) != 0 {
-        PropertyFloat::from_repr(enchant.stat_mod_key)
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| format!("Float #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_ARMOR_VALUE.bits()) != 0 {
-        "Armor".to_string()
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_DAMAGE_VALUE.bits()) != 0 {
-        "Damage".to_string()
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_DAMAGE_VARIANCE.bits()) != 0 {
-        "Variance".to_string()
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::VITAE.bits()) != 0 {
-        "Vitae".to_string()
-    } else {
-        format!("Mod #{}", enchant.stat_mod_key)
     }
 }

@@ -58,6 +58,7 @@ pub struct AppState {
     pub core_state: ClientState,
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
+    pub spell_names: HashMap<u32, String>,
     pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub entities: HashMap<Guid, Entity>,
     pub server_time: Option<(f64, Instant)>,
@@ -219,8 +220,10 @@ impl AppState {
 
         // Sort categories by the winner's mod name
         categories.sort_by(|(_, a_list), (_, b_list)| {
-            let a_name = crate::ui::widgets::stats::get_enchantment_name(a_list[0]);
-            let b_name = crate::ui::widgets::stats::get_enchantment_name(b_list[0]);
+            let a_name =
+                holtburger_core::world::magic::get_enchantment_name(a_list[0], &self.spell_names);
+            let b_name =
+                holtburger_core::world::magic::get_enchantment_name(b_list[0], &self.spell_names);
             a_name.cmp(&b_name)
         });
 

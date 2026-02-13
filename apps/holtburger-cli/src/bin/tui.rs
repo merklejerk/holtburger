@@ -223,6 +223,7 @@ async fn main() -> Result<()> {
         core_state: ClientState::Connected,
         player_pos: None,
         player_enchantments: Vec::new(),
+        spell_names: std::collections::HashMap::new(),
         skill_table: None,
         entities: std::collections::HashMap::new(),
         server_time: None,

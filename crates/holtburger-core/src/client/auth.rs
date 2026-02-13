@@ -2,6 +2,7 @@ use crate::client::types::*;
 use crate::session::Session;
 use anyhow::Result;
 use holtburger_common::Guid;
+use holtburger_common::sequence::is_newer_u32;
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::transport::packet_flags;
@@ -129,7 +130,7 @@ impl AuthState {
         // Wait up to 1s for the server seq to advance (helps ensure our ACK reflects the latest server packet)
         let prev_seq = session.last_server_seq;
         let mut waited = 0u64;
-        while session.last_server_seq <= prev_seq && waited < 1000 {
+        while !is_newer_u32(session.last_server_seq, prev_seq) && waited < 1000 {
             tokio::time::sleep(Duration::from_millis(50)).await;
             waited += 50;
         }

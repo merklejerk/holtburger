@@ -125,7 +125,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
                 net_spans.push(Span::raw(" "));
             }
 
-            // Outbound (Blue)
+            // Outbound (LightRed)
             let out_idx_offset = SPARK_WIDTH - take_out;
             if i >= out_idx_offset {
                 let val = sub_out[i - out_idx_offset];

@@ -3,7 +3,7 @@ use crate::world::WorldState;
 use anyhow::Result;
 use std::net::SocketAddr;
 
-use super::{Client, ClientState, movement::MovementSystem};
+use super::{Client, ClientState, auth::AuthState, movement::MovementSystem};
 
 impl Client {
     pub async fn new(
@@ -73,17 +73,13 @@ impl Client {
         Ok(Client {
             session,
             world: WorldState::new(portal_dat, cell_dat),
-            account_name: account_name.to_string(),
-            characters: Vec::new(),
-            character_id: None,
-            character_preference,
             state: ClientState::Connected,
             event_tx: None,
             command_rx: None,
-            connection_cookie: 0,
             message_dump_dir: None,
             message_counter: 0,
             movement: MovementSystem::new(),
+            auth: AuthState::new(account_name.to_string(), character_preference),
         })
     }
 }

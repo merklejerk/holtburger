@@ -1,8 +1,8 @@
+use super::{Client, types::*};
+use crate::world::WorldEvent;
 use anyhow::Result;
 use holtburger_common::ProtocolUnpack;
 use holtburger_protocol::messages::*;
-use crate::world::WorldEvent;
-use super::{Client, types::*};
 
 impl Client {
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
@@ -71,8 +71,16 @@ impl Client {
             }
             GameMessage::UpdateMotion(data) => {
                 if data.guid == self.world.player.guid && !data.is_autonomous {
-                    let Client { movement, world, session, event_tx, .. } = self;
-                    movement.handle_server_controlled_movement(*data, world, session, event_tx).await?;
+                    let Client {
+                        movement,
+                        world,
+                        session,
+                        event_tx,
+                        ..
+                    } = self;
+                    movement
+                        .handle_server_controlled_movement(*data, world, session, event_tx)
+                        .await?;
                 }
                 Ok(())
             }
@@ -99,10 +107,22 @@ impl Client {
                 }
                 Ok(())
             }
-            GameMessage::CharacterList(data) => self.handle_character_list(*data).await,
+            GameMessage::CharacterList(data) => {
+                let Client {
+                    auth,
+                    session,
+                    state,
+                    event_tx,
+                    ..
+                } = self;
+                auth.handle_character_list(*data, session, state, event_tx)
+                    .await
+            }
             GameMessage::CharacterEnterWorldServerReady => {
-                if let Some(char_id) = self.character_id {
-                    self.send_character_enter_world(char_id).await
+                if let Some(char_id) = self.auth.character_id {
+                    self.auth
+                        .send_character_enter_world(char_id, &mut self.session)
+                        .await
                 } else {
                     Ok(())
                 }
@@ -182,14 +202,16 @@ impl Client {
                 self.world.player.guid = player_id;
 
                 let name = self
+                    .auth
                     .characters
                     .iter()
                     .find(|c| c.guid == player_id)
                     .map(|c| c.name.clone())
                     .unwrap_or_else(|| {
                         // try search by character_id if we have it
-                        if let Some(char_id) = self.character_id {
-                            self.characters
+                        if let Some(char_id) = self.auth.character_id {
+                            self.auth
+                                .characters
                                 .iter()
                                 .find(|c| c.guid == char_id)
                                 .map(|c| c.name.clone())
@@ -206,7 +228,7 @@ impl Client {
                     });
                 }
 
-                self.send_login_complete().await?;
+                self.auth.send_login_complete(&mut self.session).await?;
                 self.state = ClientState::InWorld;
                 self.send_status_event();
                 Ok(())
@@ -216,7 +238,7 @@ impl Client {
                     "Portal transition started (seq: {})",
                     data.teleport_sequence
                 );
-                self.send_login_complete().await?;
+                self.auth.send_login_complete(&mut self.session).await?;
                 Ok(())
             }
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {
@@ -229,8 +251,13 @@ impl Client {
                 }
                 Ok(())
             }
-            GameMessage::CharacterError(data) => self.handle_character_error(data.error_id),
-            GameMessage::BootAccount(data) => self.handle_boot_account(*data),
+            GameMessage::CharacterError(data) => self
+                .auth
+                .handle_character_error(data.error_id, &self.event_tx),
+            GameMessage::BootAccount(data) => {
+                self.auth
+                    .handle_boot_account(*data, &mut self.state, &self.event_tx)
+            }
             GameMessage::DddInterrogation => {
                 let resp =
                     GameMessage::DddInterrogationResponse(Box::new(DddInterrogationResponseData {

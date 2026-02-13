@@ -1,19 +1,18 @@
 use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
-use holtburger_common::Guid;
-use holtburger_protocol::messages::CharacterEntry;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-pub mod types;
-mod builder;
 mod auth;
-mod movement;
+mod builder;
 mod commands;
 mod messages;
-use types::*;
+mod movement;
+pub mod types;
+use auth::AuthState;
 use movement::MovementSystem;
+use types::*;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
@@ -21,17 +20,13 @@ const PHYSICS_TICK_MS: u64 = 30;
 pub struct Client {
     pub session: Session,
     pub world: WorldState,
-    account_name: String,
-    characters: Vec<CharacterEntry>,
-    character_id: Option<Guid>,
-    character_preference: Option<String>,
     state: ClientState,
     event_tx: Option<mpsc::UnboundedSender<ClientEvent>>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
-    connection_cookie: u64,
     pub message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
     movement: MovementSystem,
+    auth: AuthState,
 }
 
 impl Client {
@@ -89,10 +84,10 @@ impl Client {
                                         }
                                     }
                                     SessionEvent::HandshakeRequest(crd) => {
-                                        self.handle_handshake_request(crd).await?;
+                                        self.auth.handle_handshake_request(crd, &mut self.session).await?;
                                     }
                                     SessionEvent::HandshakeResponse { cookie, client_id } => {
-                                        self.handle_handshake_response(cookie, client_id).await?;
+                                        self.auth.handle_handshake_response(cookie, client_id, &mut self.session).await?;
                                     }
                                     SessionEvent::TimeSync(server_time) => {
                                         self.world.server_time = Some(ServerTimeSync {

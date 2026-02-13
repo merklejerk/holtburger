@@ -116,6 +116,54 @@ impl Quaternion {
             z: 0.0,
         }
     }
+
+    /// Converts a quaternion to a heading (yaw) in radians.
+    /// AC heading matches the official client: 0 at West, 90 at North, 180 at East, 270 at South.
+    pub fn to_heading(&self) -> f32 {
+        // M21 = 2wz, M22 = 1 - 2z^2 (for yaw-only quat)
+        let sin_theta = 2.0 * self.w * self.z;
+        let cos_theta = 1.0 - 2.0 * self.z * self.z;
+
+        // We use Atan2(sin, cos) to get the internal theta.
+        // With this 450 offset:
+        // Identity Quat (theta=0) results in Heading 90 (North).
+        // 90 deg CCW Rot (theta=90) results in Heading 0 (West).
+        // This matches the official AC client convention where 0 is West.
+        let rad = f32::atan2(sin_theta, cos_theta);
+        let mut deg = 450.0 - rad.to_degrees();
+
+        deg %= 360.0;
+        if deg < 0.0 {
+            deg += 360.0;
+        }
+
+        deg.to_radians()
+    }
+
+    pub fn from_heading(heading_rad: f32) -> Self {
+        let heading_deg = heading_rad.to_degrees();
+
+        // rad = 450 - deg
+        let rad = (450.0 - heading_deg).to_radians();
+
+        let half_theta = rad * 0.5;
+
+        let mut w = f32::cos(half_theta);
+        let mut z = f32::sin(half_theta);
+
+        // Canonicalize (w must be non-negative to prevent flips)
+        if w < 0.0 {
+            w = -w;
+            z = -z;
+        }
+
+        Self {
+            w,
+            x: 0.0,
+            y: 0.0,
+            z,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, BinRead, BinWrite)]
@@ -147,5 +195,49 @@ impl Sphere {
         let dist_sq = diff.length_squared();
         let r_sum = self.radius + radius;
         dist_sq <= r_sum * r_sum
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_heading_roundtrip() {
+        let test_angles: [f32; 8] = [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0];
+        for deg in test_angles {
+            let rad = deg.to_radians();
+            let q = Quaternion::from_heading(rad);
+            let result_rad = q.to_heading();
+            let result_deg = result_rad.to_degrees();
+
+            // Normalize result to 0-360 for comparison
+            let normalized_result = (result_deg + 360.0) % 360.0;
+            assert!(
+                (normalized_result - deg).abs() < 1e-4,
+                "Failed at {} deg: got {} deg",
+                deg,
+                normalized_result
+            );
+        }
+    }
+
+    #[test]
+    fn test_cardinal_directions() {
+        // West
+        let q_w = Quaternion::from_heading(0.0);
+        assert!((q_w.to_heading().to_degrees() - 0.0).abs() < 1e-4);
+
+        // North
+        let q_n = Quaternion::from_heading(90.0f32.to_radians());
+        assert!((q_n.to_heading().to_degrees() - 90.0).abs() < 1e-4);
+
+        // East
+        let q_e = Quaternion::from_heading(180.0f32.to_radians());
+        assert!((q_e.to_heading().to_degrees() - 180.0).abs() < 1e-4);
+
+        // South
+        let q_s = Quaternion::from_heading(270.0f32.to_radians());
+        assert!((q_s.to_heading().to_degrees() - 270.0).abs() < 1e-4);
     }
 }

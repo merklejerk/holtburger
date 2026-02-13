@@ -96,7 +96,13 @@ impl PlayerState {
         skill_objs
     }
 
-    /// Returns the enchantments that are currently "winning" their categories.
+    /// Increments and returns the next movement sequence.
+    pub fn next_move_seq(&mut self) -> u16 {
+        self.movement_sequence = self.movement_sequence.wrapping_add(1);
+        self.movement_sequence
+    }
+
+    /// Returns the current enchantments that are currently "winning" their categories.
     ///
     /// According to ACE source (PropertiesEnchantmentRegistryExtensions.cs),
     /// the winner is determined by PowerLevel, then StartTime. LayerId is

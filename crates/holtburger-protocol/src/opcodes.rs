@@ -298,8 +298,8 @@ pub enum GameActionOpcode {
     // CreateTinkeringTool = 0x027D,
     // /// C2S: Query current mana levels of an item.
     // QueryItemMana = 0x0263,
-    // /// C2S: Attempt to give an item to another player.
-    // GiveObjectRequest = 0x00CD,
+    /// C2S: Attempt to give an item to another player.
+    GiveObjectRequest = 0x00CD,
 
     // --- Books & Inscriptions ---
     // /// C2S: Request book metadata (title, author, etc).
@@ -324,8 +324,8 @@ pub enum GameActionOpcode {
     /// C2S: Use an object.
     /// Blanket action for clicking doors, Lifestones, or using inventory items.
     Use = 0x0036,
-    // /// C2S: Use an item on a specific target (e.g. lockpicking).
-    // UseWithTarget = 0x0035,
+    /// C2S: Use an item on a specific target (e.g. lockpicking).
+    UseWithTarget = 0x0035,
     /// C2S: Identify an object.
     /// Request full property details for an object (Assess).
     IdentifyObject = 0x00C8,

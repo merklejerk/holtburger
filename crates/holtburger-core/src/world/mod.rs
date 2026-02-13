@@ -43,6 +43,7 @@ pub enum WorldEvent {
         vitals: Vec<stats::Vital>,
         skills: Vec<stats::Skill>,
         enchantments: Vec<Enchantment>,
+        vitae: f32,
         skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
         spell_names: std::collections::HashMap<u32, String>,
     },
@@ -64,6 +65,9 @@ pub enum WorldEvent {
         attributes: Vec<stats::Attribute>,
         vitals: Vec<stats::Vital>,
         skills: Vec<stats::Skill>,
+        resistances: stats::Resistances,
+        armor: u32,
+        vitae: f32,
     },
     EntityStateUpdated {
         guid: Guid,

@@ -206,6 +206,18 @@ pub struct Skill {
     pub training: TrainingLevel,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Resistances {
+    pub slash: f32,
+    pub pierce: f32,
+    pub bludgeon: f32,
+    pub fire: f32,
+    pub cold: f32,
+    pub acid: f32,
+    pub electric: f32,
+    pub nether: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CharacterLevelInfo {
     pub level: u32,

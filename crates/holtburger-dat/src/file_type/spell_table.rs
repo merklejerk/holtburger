@@ -103,9 +103,7 @@ pub enum SpellExtras {
         degrade_limit: f32,
     },
     #[br(pre_assert(meta_spell_type == 7))]
-    PortalSummon {
-        portal_lifetime: f64,
-    },
+    PortalSummon { portal_lifetime: f64 },
     #[br(pre_assert(meta_spell_type != 1 && meta_spell_type != 12 && meta_spell_type != 7))]
     None,
 }
@@ -205,7 +203,7 @@ mod tests {
         let mut data = Vec::new();
         // ID
         data.extend_from_slice(&0x0E00000Eu32.to_le_bytes());
-        
+
         // Spells Hash Table Header: count=0, bucket_size=0
         data.extend_from_slice(&0u16.to_le_bytes());
         data.extend_from_slice(&0u16.to_le_bytes());

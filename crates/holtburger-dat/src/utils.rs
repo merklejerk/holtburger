@@ -74,7 +74,7 @@ pub fn read_obfuscated_string<R: Read + Seek>(reader: &mut R) -> binrw::BinResul
 
     for byte in &mut buffer {
         // flip the bytes in the string to undo the obfuscation: i.e. 0xAB => 0xBA
-        *byte = (*byte >> 4) | (*byte << 4);
+        *byte = byte.rotate_left(4);
     }
 
     let (res, _, _) = encoding_rs::WINDOWS_1252.decode(&buffer);

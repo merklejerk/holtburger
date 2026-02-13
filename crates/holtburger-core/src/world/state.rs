@@ -5,7 +5,8 @@ use super::spatial::SpatialScene;
 use super::stats;
 use binrw::BinRead;
 use holtburger_common::properties::{
-    ItemType, PropertyInstanceId, PropertyInt, PropertyInt64, PropertyValue,
+    EnchantmentTypeFlags, ItemType, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyValue,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
@@ -148,6 +149,41 @@ impl WorldState {
             .map(|s| s.name.clone())
     }
 
+    pub fn get_player_enchanted_int(&self, key: PropertyInt) -> i32 {
+        let base = self
+            .entities
+            .get(self.player.guid)
+            .and_then(|e| e.int_properties.get(&(key as u32)).cloned())
+            .unwrap_or(0);
+
+        if key == PropertyInt::ArmorLevel {
+            super::magic::get_enchanted_armor(base, &self.player.enchantments)
+        } else {
+            let mult = super::magic::get_enchantment_multiplier(
+                &self.player.enchantments,
+                EnchantmentTypeFlags::INT.bits(),
+                key as u32,
+            );
+            let add = super::magic::get_enchantment_additive(
+                &self.player.enchantments,
+                EnchantmentTypeFlags::INT.bits(),
+                key as u32,
+            );
+            ((base as f32 * mult) + add).round() as i32
+        }
+    }
+
+    pub fn get_player_enchanted_float(&self, key: PropertyFloat) -> f32 {
+        let base = self
+            .entities
+            .get(self.player.guid)
+            .and_then(|e| e.float_properties.get(&(key as u32)).cloned())
+            .map(|f| f as f32)
+            .unwrap_or(1.0);
+
+        super::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
+    }
+
     fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
         if let Some(info) = self.get_level_info() {
             events.push(WorldEvent::LevelInfoUpdated(info));
@@ -228,10 +264,9 @@ impl WorldState {
                     enchantment,
                     spell_name,
                 } = ev
+                    && spell_name.is_none()
                 {
-                    if spell_name.is_none() {
-                        *spell_name = self.resolve_spell_name(enchantment.spell_id as u32);
-                    }
+                    *spell_name = self.resolve_spell_name(enchantment.spell_id as u32);
                 }
             }
             return events;
@@ -424,6 +459,13 @@ impl WorldState {
                     self.player.guid = guid;
                     self.player.name = name.clone();
                     self.player.enchantments = data.enchantments.clone();
+                    self.player.int_properties = data.properties_int.clone();
+                    self.player.int64_properties = data.properties_int64.clone();
+                    self.player.bool_properties = data.properties_bool.clone();
+                    self.player.float_properties = data.properties_float.clone();
+                    self.player.string_properties = data.properties_string.clone();
+                    self.player.did_properties = data.properties_did.clone();
+                    self.player.iid_properties = data.properties_iid.clone();
 
                     // Update Experience and Level from properties
                     if let Some(&xp) = data
@@ -558,6 +600,7 @@ impl WorldState {
                         vitals: vital_objs,
                         skills: skill_objs,
                         enchantments: self.player.enchantments.clone(),
+                        vitae: self.player.vitae,
                         skill_table: self.skill_table.clone(),
                         spell_names: self.get_player_spell_names(),
                     });
@@ -634,7 +677,7 @@ impl WorldState {
                                 entity.string_properties.insert(*k, v.clone());
                             }
                             for (&k, &v) in &data.did_stats {
-                                entity.did_properties.insert(k, Guid(v));
+                                entity.did_properties.insert(k, v);
                             }
 
                             if data.armor_profile.is_some() {
@@ -697,6 +740,7 @@ impl WorldState {
                     entity.int_properties.insert(data.property, data.value);
                 }
                 if target_guid == self.player.guid {
+                    self.player.int_properties.insert(data.property, data.value);
                     match data.property {
                         p if p == PropertyInt::Level as u32 => {
                             self.player.level = data.value as u32;
@@ -708,6 +752,7 @@ impl WorldState {
                         }
                         _ => {}
                     }
+                    self.player.emit_derived_stats(&mut events);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -723,6 +768,10 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.int_properties.insert(data.property, data.value);
+                }
+                if target_guid == self.player.guid {
+                    self.player.int_properties.insert(data.property, data.value);
+                    self.player.emit_derived_stats(&mut events);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -740,6 +789,9 @@ impl WorldState {
                     entity.int64_properties.insert(data.property, data.value);
                 }
                 if target_guid == self.player.guid {
+                    self.player
+                        .int64_properties
+                        .insert(data.property, data.value);
                     match data.property {
                         p if p == PropertyInt64::TotalExperience as u32 => {
                             self.player.total_experience = data.value as u64;
@@ -782,6 +834,11 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.bool_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .bool_properties
+                        .insert(data.property, data.value);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -796,6 +853,11 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.bool_properties.insert(data.property, data.value);
+                }
+                if target_guid == self.player.guid {
+                    self.player
+                        .bool_properties
+                        .insert(data.property, data.value);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -812,6 +874,12 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.float_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .float_properties
+                        .insert(data.property, data.value);
+                    self.player.emit_derived_stats(&mut events);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -827,6 +895,12 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.float_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .float_properties
+                        .insert(data.property, data.value);
+                    self.player.emit_derived_stats(&mut events);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -841,6 +915,11 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity
+                        .string_properties
+                        .insert(data.property, data.value.clone());
+                }
+                if target_guid == self.player.guid {
+                    self.player
                         .string_properties
                         .insert(data.property, data.value.clone());
                 }
@@ -861,6 +940,11 @@ impl WorldState {
                         .string_properties
                         .insert(data.property, data.value.clone());
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .string_properties
+                        .insert(data.property, data.value.clone());
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -875,6 +959,9 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.did_properties.insert(data.property, data.value);
+                }
+                if target_guid == self.player.guid {
+                    self.player.did_properties.insert(data.property, data.value);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -891,6 +978,9 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.did_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player.did_properties.insert(data.property, data.value);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -905,6 +995,9 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.iid_properties.insert(data.property, data.value);
+                    if target_guid == self.player.guid {
+                        self.player.iid_properties.insert(data.property, data.value);
+                    }
 
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {
@@ -962,6 +1055,9 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.iid_properties.insert(data.property, data.value);
+                    if target_guid == self.player.guid {
+                        self.player.iid_properties.insert(data.property, data.value);
+                    }
 
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {

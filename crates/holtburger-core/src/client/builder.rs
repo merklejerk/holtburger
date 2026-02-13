@@ -2,9 +2,8 @@ use crate::session::Session;
 use crate::world::WorldState;
 use anyhow::Result;
 use std::net::SocketAddr;
-use std::time::Instant;
 
-use super::{Client, ClientState};
+use super::{Client, ClientState, movement::MovementSystem};
 
 impl Client {
     pub async fn new(
@@ -84,11 +83,7 @@ impl Client {
             connection_cookie: 0,
             message_dump_dir: None,
             message_counter: 0,
-            move_target: None,
-            last_move_sync: Instant::now(),
-            last_move_pos: holtburger_common::position::WorldPosition::default(),
-            last_move_pos_time: Instant::now(),
-            last_sent_pos_seq: None,
+            movement: MovementSystem::new(),
         })
     }
 }

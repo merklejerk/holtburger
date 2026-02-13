@@ -414,7 +414,6 @@ fn should_show_debug(target: &CommandTarget) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
 
     #[test]
     fn test_verb_label_logic() {

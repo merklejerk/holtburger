@@ -1181,6 +1181,21 @@ impl Client {
                     let to_player = self.world.player.position.coords - next_pos.coords;
                     if to_player.length_squared() > 1e-6 {
                         next_pos.coords = next_pos.coords + (to_player.normalize() * arrival_dist);
+
+                        // If desired_heading is 0.0, face the target
+                        if mto.params.desired_heading.abs() <= 1e-6 {
+                            // atan2(-dx, dy) returns math radians (0=North, pi/2=West, pi=South, 3pi/2=East)
+                            let math_rad = f32::atan2(-to_player.x, to_player.y);
+                            let mut heading_deg = 450.0 - math_rad.to_degrees();
+                            heading_deg %= 360.0;
+                            if heading_deg < 0.0 {
+                                heading_deg += 360.0;
+                            }
+                            next_pos.rotation = Quaternion::from_heading(heading_deg.to_radians());
+                        } else {
+                            next_pos.rotation =
+                                Quaternion::from_heading(mto.params.desired_heading);
+                        }
                     } else {
                         // If we are exactly on top, just offset X
                         next_pos.coords.x += arrival_dist;
@@ -1193,10 +1208,50 @@ impl Client {
             MovementTypeData::MoveToPosition(mtp) => {
                 next_pos.landblock_id = mtp.origin.cell_id;
                 next_pos.coords = mtp.origin.position;
+
+                // If desired_heading is not zero, use it.
+                if mtp.params.desired_heading.abs() > 1e-6 {
+                    next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
+                } else {
+                    // Face the target position from our current position
+                    let diff = next_pos.coords - self.world.player.position.coords;
+                    if diff.length_squared() > 1e-6 {
+                        let math_rad = f32::atan2(-diff.x, diff.y);
+                        let mut heading_deg = 450.0 - math_rad.to_degrees();
+                        heading_deg %= 360.0;
+                        if heading_deg < 0.0 {
+                            heading_deg += 360.0;
+                        }
+                        next_pos.rotation = Quaternion::from_heading(heading_deg.to_radians());
+                    }
+                }
+            }
+            MovementTypeData::TurnToHeading(tth) => {
+                next_pos.rotation = Quaternion::from_heading(tth.params.desired_heading);
+            }
+            MovementTypeData::TurnToObject(tto) => {
+                // If the turn has a heading, use it. Some TurnToObjects have 0.0 which means "compute it".
+                if tto.desired_heading.abs() > 1e-6 {
+                    next_pos.rotation = Quaternion::from_heading(tto.desired_heading);
+                } else if let Some(target) = self.world.entities.get(tto.target) {
+                    // Try to compute heading to target (West = 0, North = 90, East = 180, South = 270)
+                    // We only do this if they are in the same landblock for now.
+                    if target.position.landblock_id == next_pos.landblock_id {
+                        let diff = target.position.coords - next_pos.coords;
+                        // atan2(-dx, dy) returns math radians (0=North, pi/2=West, pi=South, 3pi/2=East)
+                        let math_rad = f32::atan2(-diff.x, diff.y);
+                        let mut heading_deg = 450.0 - math_rad.to_degrees();
+                        heading_deg %= 360.0;
+                        if heading_deg < 0.0 {
+                            heading_deg += 360.0;
+                        }
+
+                        next_pos.rotation = Quaternion::from_heading(heading_deg.to_radians());
+                    }
+                }
             }
             _ => {
-                // Ignore Turns for now
-                return Ok(());
+                // For other movement types (like Stop), we just accept current position
             }
         }
 

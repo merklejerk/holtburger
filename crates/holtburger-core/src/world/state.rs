@@ -240,6 +240,11 @@ impl WorldState {
                     entity.position = data.pos.pos;
                     self.scene
                         .update_entity(guid, old_lb, data.pos.pos.landblock_id);
+
+                    if guid == self.player.guid {
+                        self.player.position = data.pos.pos;
+                    }
+
                     events.push(WorldEvent::EntityMoved {
                         guid,
                         pos: data.pos.pos,
@@ -253,6 +258,11 @@ impl WorldState {
                     entity.position = data.pos;
                     self.scene
                         .update_entity(guid, old_lb, data.pos.landblock_id);
+
+                    if guid == self.player.guid {
+                        self.player.position = data.pos;
+                    }
+
                     events.push(WorldEvent::EntityMoved {
                         guid,
                         pos: data.pos,
@@ -266,10 +276,95 @@ impl WorldState {
                     entity.position = data.pos;
                     self.scene
                         .update_entity(guid, old_lb, data.pos.landblock_id);
+
+                    if guid == self.player.guid {
+                        self.player.position = data.pos;
+                    }
+
                     events.push(WorldEvent::EntityMoved {
                         guid,
                         pos: data.pos,
                     });
+                }
+            }
+            GameMessage::AutonomousPosition(data) => {
+                let guid = data.guid;
+                if let Some(entity) = self.entities.get_mut(guid) {
+                    let old_lb = entity.position.landblock_id;
+                    entity.position = data.position;
+                    self.scene
+                        .update_entity(guid, old_lb, data.position.landblock_id);
+
+                    if guid == self.player.guid {
+                        self.player.position = data.position;
+                    }
+
+                    events.push(WorldEvent::EntityMoved {
+                        guid,
+                        pos: data.position,
+                    });
+                }
+            }
+            GameMessage::UpdateMotion(data) => {
+                let guid = data.guid;
+
+                // Pre-fetch target info for TurnToObject to avoid borrow checker conflicts
+                let mut target_info = None;
+                if let MovementTypeData::TurnToObject(tto) = &data.data
+                    && tto.desired_heading.abs() <= 1e-6
+                    && let Some(target) = self.entities.get(tto.target)
+                {
+                    target_info = Some((target.position.landblock_id, target.position.coords));
+                }
+
+                if let Some(entity) = self.entities.get_mut(guid) {
+                    use holtburger_common::math::Quaternion;
+
+                    match &data.data {
+                        MovementTypeData::TurnToHeading(turn) => {
+                            let new_rot = Quaternion::from_heading(turn.params.desired_heading);
+                            entity.position.rotation = new_rot;
+
+                            if guid == self.player.guid {
+                                self.player.position.rotation = new_rot;
+                            }
+
+                            events.push(WorldEvent::EntityMoved {
+                                guid,
+                                pos: entity.position,
+                            });
+                        }
+                        MovementTypeData::TurnToObject(turn) => {
+                            let mut new_rot = entity.position.rotation;
+
+                            if turn.desired_heading.abs() > 1e-6 {
+                                new_rot = Quaternion::from_heading(turn.desired_heading);
+                            } else if let Some((target_lb, target_coords)) = target_info
+                                && target_lb == entity.position.landblock_id
+                            {
+                                let diff = target_coords - entity.position.coords;
+                                let math_rad = f32::atan2(-diff.x, diff.y);
+                                let mut heading_deg = 450.0 - math_rad.to_degrees();
+                                heading_deg %= 360.0;
+                                if heading_deg < 0.0 {
+                                    heading_deg += 360.0;
+                                }
+                                new_rot = Quaternion::from_heading(heading_deg.to_radians());
+                            }
+
+                            entity.position.rotation = new_rot;
+
+                            if guid == self.player.guid {
+                                self.player.position.rotation = new_rot;
+                            }
+
+                            events.push(WorldEvent::EntityMoved {
+                                guid,
+                                pos: entity.position,
+                            });
+                        }
+                        _ => {}
+                    }
                 }
             }
             GameMessage::VectorUpdate(data) => {

@@ -218,7 +218,7 @@ impl Client {
                     });
                 }
 
-                self.auth.send_login_complete(&mut self.session).await?;
+                self.send_login_complete().await?;
                 self.state = ClientState::InWorld;
                 self.send_status_event();
                 Ok(())
@@ -228,7 +228,7 @@ impl Client {
                     "Portal transition started (seq: {})",
                     data.teleport_sequence
                 );
-                self.auth.send_login_complete(&mut self.session).await?;
+                self.send_login_complete().await?;
                 Ok(())
             }
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {

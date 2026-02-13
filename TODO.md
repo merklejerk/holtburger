@@ -1,12 +1,12 @@
 ### Low
-[ ] Left align `account:name` in status panel.
+[x] Left align `account:name` in status panel.
 [x] Add heading (e.g., `120° E-SE`) to status panel.
 [ ] Add jump for fun.
 [x] Network traffic visualizer in dynamic panel when otherwise empty.
 [x] Compass radar in dynamic panel.
 [x] Dereth chronometer in dynamic panel.
 [ ] Chat tabs (Chat vs combat vs all).
-[ ] Just interleave bars in netpulse widget.
+[x] Just interleave bars in netpulse widget.
 
 ### Medium
 [x] Make net stats widget fixed width. Currently Seems to scale with terminal width.

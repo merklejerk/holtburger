@@ -1,64 +1,94 @@
 use crate::entities::classification::{self, EntityClass};
 use crate::entities::filter;
-use crate::ui::types::{CommandHandler, CommandTarget};
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
-use holtburger_common::properties::ObjectDescriptionFlag;
-use holtburger_common::properties::PropertyInt;
+use holtburger_common::properties::{ObjectDescriptionFlag, PropertyInt};
 use holtburger_core::ClientCommand;
 use holtburger_core::world::entity::Entity;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EntityVerb {
-    Assess,
-    Use,
-    Equip(u32), // u32 is the equip mask
-    Unequip,
-    Drop,
-    PickUp,
-    MoveToSlot(Guid), // Move item to specific container GUID
-    Debug,
-    Approach,
-    LevelUp,
-    Train,
+macro_rules! define_verbs {
+    // Internal helpers
+    (@pat $variant:ident ( $data:ty ) ) => { EntityVerb::$variant(_) };
+    (@pat $variant:ident ) => { EntityVerb::$variant };
+
+    (@inst $variant:ident ( $data:ty ) ) => { EntityVerb::$variant(Default::default()) };
+    (@inst $variant:ident ) => { EntityVerb::$variant };
+
+    (
+        $(
+            $variant:ident $( ( $data:ty ) )? => { $label:expr, $shortcut:expr }
+        ),* $(,)?
+    ) => {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum EntityVerb {
+            $( $variant $( ( $data ) )? ),*
+        }
+
+        impl EntityVerb {
+            pub fn shortcut_char(&self) -> char {
+                match self {
+                    $( define_verbs!(@pat $variant $( ( $data ) )? ) => $shortcut ),*
+                }
+            }
+
+            pub fn label(&self) -> &str {
+                if let EntityVerb::Confirm(s) = self {
+                    return s;
+                }
+                match self {
+                    $( define_verbs!(@pat $variant $( ( $data ) )? ) => $label ),*
+                }
+            }
+        }
+
+        const _: () = {
+            let shortcuts = [ $( $shortcut ),* ];
+            let mut i = 0;
+            while i < shortcuts.len() {
+                let mut j = i + 1;
+                while j < shortcuts.len() {
+                    if shortcuts[i] == shortcuts[j] {
+                        panic!("Duplicate EntityVerb shortcut detected!");
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+        };
+    }
+}
+
+define_verbs! {
+    Assess => { "Assess", 'a' },
+    Use => { "Use", 'u' },
+    Equip(u32) => { "Equip", 'e' },
+    Unequip => { "Unequip", 'q' },
+    Drop => { "Drop", 'd' },
+    PickUp => { "Pick up", 'p' },
+    MoveToSlot(Guid) => { "Secure", 's' },
+    Debug => { "Debug", 'b' },
+    Approach => { "Approach", 'r' },
+    LevelUp => { "Level Up", 'l' },
+    Train => { "Train", 't' },
+    Move => { "Move", 'm' },
+    Confirm(String) => { "Confirm", '\r' },
+    Cancel => { "Cancel", '\x1b' },
 }
 
 impl EntityVerb {
-    pub fn label(&self) -> &'static str {
-        match self {
-            EntityVerb::Assess => "Assess",
-            EntityVerb::Use => "Use",
-            EntityVerb::Equip(_) => "Equip",
-            EntityVerb::Unequip => "Unequip",
-            EntityVerb::Drop => "Drop",
-            EntityVerb::PickUp => "Pick up",
-            EntityVerb::MoveToSlot(_) => "Secure",
-            EntityVerb::Debug => "Debug",
-            EntityVerb::Approach => "Approach",
-            EntityVerb::LevelUp => "Level Up",
-            EntityVerb::Train => "Train",
-        }
-    }
-
-    pub fn shortcut_char(&self) -> char {
-        match self {
-            EntityVerb::Assess => 'a',
-            EntityVerb::Use => 'u',
-            EntityVerb::Equip(_) => 'e',
-            EntityVerb::Unequip => 'k',
-            EntityVerb::Drop => 'd',
-            EntityVerb::PickUp => 'p',
-            EntityVerb::MoveToSlot(_) => 's',
-            EntityVerb::Debug => 'b',
-            EntityVerb::Approach => 'r',
-            EntityVerb::LevelUp => 'l',
-            EntityVerb::Train => 't',
-        }
-    }
-
     pub fn display_label(&self) -> String {
         let label = self.label();
         let shortcut = self.shortcut_char();
+
+        if shortcut == '\x1b' {
+            return format!("[ESC] {}", label);
+        }
+
+        if shortcut == '\r' {
+            return format!("[ENTER] {}", label);
+        }
+
         let shortcut_lower = shortcut.to_ascii_lowercase();
         let shortcut_upper = shortcut.to_ascii_uppercase();
 
@@ -77,13 +107,18 @@ impl EntityVerb {
         &self,
         target: &CommandTarget,
         player_guid: Option<Guid>,
+        active_interaction: Option<ActiveInteraction>,
     ) -> Option<CommandHandler> {
         match (self, target) {
             (EntityVerb::Assess, CommandTarget::Entity(e)) => {
                 Some(CommandHandler::Command(ClientCommand::Identify(e.guid)))
             }
             (EntityVerb::Use, CommandTarget::Entity(e)) => {
-                Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
+                if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
+                    Some(CommandHandler::Heal(e.guid))
+                } else {
+                    Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
+                }
             }
             (EntityVerb::Equip(mask), CommandTarget::Entity(e)) => {
                 Some(CommandHandler::Command(ClientCommand::GetAndWield {
@@ -162,6 +197,39 @@ impl EntityVerb {
             }
             (EntityVerb::LevelUp, CommandTarget::Stat(_, None, _)) => None,
             (EntityVerb::Debug, _) => Some(CommandHandler::ToggleDebug),
+            (EntityVerb::Move, CommandTarget::Entity(e)) => Some(CommandHandler::Move(e.guid)),
+            (EntityVerb::Confirm(_), target) => {
+                if let Some(interaction) = active_interaction {
+                    match interaction.mode {
+                        InteractionMode::Healing => match target {
+                            CommandTarget::Entity(e) => {
+                                if e.guid == interaction.guid {
+                                    player_guid.map(CommandHandler::ApplyHealing)
+                                } else {
+                                    Some(CommandHandler::ApplyHealing(e.guid))
+                                }
+                            }
+                            _ => player_guid.map(CommandHandler::ApplyHealing),
+                        },
+                        InteractionMode::Moving => match target {
+                            CommandTarget::Entity(e) if e.guid != interaction.guid => {
+                                let class = classification::classify_entity(e);
+                                match class {
+                                    classification::EntityClass::Container
+                                    | classification::EntityClass::Chest => {
+                                        Some(CommandHandler::ApplyMoving(e.guid))
+                                    }
+                                    _ => Some(CommandHandler::Give(e.guid)),
+                                }
+                            }
+                            _ => player_guid.map(CommandHandler::ApplyMoving),
+                        },
+                    }
+                } else {
+                    None
+                }
+            }
+            (EntityVerb::Cancel, _) => Some(CommandHandler::CancelInteraction),
             _ => None,
         }
     }
@@ -171,7 +239,61 @@ pub fn get_verbs_for_target(
     target: &CommandTarget,
     entities: &HashMap<Guid, Entity>,
     player_guid: Option<Guid>,
+    active_interaction: Option<ActiveInteraction>,
 ) -> Vec<EntityVerb> {
+    if let Some(interaction) = active_interaction {
+        if let CommandTarget::Entity(e) = target {
+            let mut verbs = Vec::new();
+
+            match interaction.mode {
+                InteractionMode::Moving => {
+                    let class = classification::classify_entity(e);
+                    let is_creature = matches!(
+                        class,
+                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                    );
+                    let is_self = Some(e.guid) == player_guid;
+                    if !is_self {
+                        let is_container =
+                            matches!(class, EntityClass::Container | EntityClass::Chest);
+                        let is_subject = e.guid == interaction.guid;
+                        let is_in_main_pack = e.container_id == player_guid;
+
+                        if is_subject && !is_in_main_pack {
+                            verbs.push(EntityVerb::Confirm("Move to main pack".to_string()));
+                        } else if is_container {
+                            verbs.push(EntityVerb::Confirm(format!("Move to {}", e.name)));
+                        } else if is_creature {
+                            verbs.push(EntityVerb::Confirm(format!("Give to {}", e.name)));
+                        }
+                    }
+                }
+                InteractionMode::Healing => {
+                    let class = classification::classify_entity(e);
+                    let is_creature = matches!(
+                        class,
+                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                    );
+
+                    if is_creature || e.guid == interaction.guid {
+                        let label = if Some(e.guid) == player_guid || e.guid == interaction.guid {
+                            "Heal yourself".to_string()
+                        } else {
+                            format!("Heal {}", e.name)
+                        };
+                        verbs.push(EntityVerb::Confirm(label));
+                    }
+                }
+            }
+
+            verbs.push(EntityVerb::Cancel);
+
+            return verbs;
+        }
+
+        return vec![EntityVerb::Cancel];
+    }
+
     let mut verbs = match target {
         CommandTarget::Entity(e) => {
             let class = classification::classify_entity(e);
@@ -229,6 +351,10 @@ pub fn get_verbs_for_target(
 
                         ent_verbs.push(EntityVerb::Use);
                         ent_verbs.push(EntityVerb::Drop);
+
+                        if !flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
+                            ent_verbs.push(EntityVerb::Move);
+                        }
                     } else if !flags.intersects(ObjectDescriptionFlag::STUCK) {
                         ent_verbs.push(EntityVerb::PickUp);
                     }
@@ -282,5 +408,19 @@ fn should_show_debug(target: &CommandTarget) -> bool {
             true
         }
         CommandTarget::None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_verb_label_logic() {
+        let assess = EntityVerb::Assess;
+        assert_eq!(assess.label(), "Assess");
+
+        let confirm = EntityVerb::Confirm("Bespoke Message".to_string());
+        assert_eq!(confirm.label(), "Bespoke Message");
     }
 }

@@ -144,6 +144,14 @@ impl AppState {
                             entity.position = pos;
                         }
                     }
+                    WorldEvent::ForcedReposition { guid, pos, .. } => {
+                        if Some(guid) == self.player_guid {
+                            self.player_pos = Some(pos);
+                        }
+                        if let Some(entity) = self.entities.get_mut(&guid) {
+                            entity.position = pos;
+                        }
+                    }
                     WorldEvent::EntityIdentified(entity) => {
                         let guid = entity.guid;
                         self.log_chat(
@@ -315,6 +323,9 @@ impl AppState {
             }
             ClientEvent::PingResponse => {
                 self.log_chat(ChatMessageKind::System, "Pong!".to_string());
+            }
+            ClientEvent::RawMessage(data) => {
+                self.net_stats.bytes_in += data.len() as u64;
             }
             _ => {}
         }

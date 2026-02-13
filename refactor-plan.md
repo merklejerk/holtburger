@@ -167,15 +167,13 @@ systems borrowing shared state concurrently.
 ### Phase 0 — Prep & Safety Net
 > Establish a testing baseline so we know nothing regresses.
 
-- [ ] **0.1** Ensure `cargo build` and `cargo test` pass cleanly on the current `main` branch.
-- [ ] **0.2** Identify and catalogue every public symbol exported from `client/mod.rs` and
+- [x] **0.1** Ensure `cargo build` and `cargo test` pass cleanly on the current `main` branch.
+- [x] **0.2** Identify and catalogue every public symbol exported from `client/mod.rs` and
   `client/types.rs`. Confirm `lib.rs` re-exports match downstream usage in `holtburger-cli`.
-- [ ] **0.3** Tag a git commit (`pre-client-refactor`) as the safe rollback point.
+- [x] **0.3** Tag a git commit (`pre-client-refactor`) as the safe rollback point.
 
 **Notes:**
-- The existing `lib.rs` does `pub use client::Client` and `pub use client::types::*`. This
-  contract must not change until all consumers are updated (out of scope for this refactor).
-- No code changes in this phase.
+- **Completed 2026-02-12:** Verified world and player tests. Catalogued `Client`, `ClientState`, `ClientEvent`, `ClientCommand`. Tagged `pre-client-refactor`.
 
 ---
 
@@ -183,15 +181,14 @@ systems borrowing shared state concurrently.
 > Move `Client::new()`, `Client::new_replay()`, and `Client::create_with_session()` into
 > `client/builder.rs`.
 
-- [ ] **1.1** Create `client/builder.rs` containing the three constructor functions as an
+- [x] **1.1** Create `client/builder.rs` containing the three constructor functions as an
   `impl Client` block (Rust allows `impl` blocks across files in the same module).
-- [ ] **1.2** Remove the constructor bodies from `mod.rs`, add `mod builder;`.
-- [ ] **1.3** `cargo build && cargo test` — green.
-- [ ] **1.4** Commit: `refactor(client): extract builder.rs`.
+- [x] **1.2** Remove the constructor bodies from `mod.rs`, add `mod builder;`.
+- [x] **1.3** `cargo build && cargo test` — green.
+- [x] **1.4** Commit: `refactor(client): extract builder.rs`.
 
 **Notes:**
-- Lowest-risk extraction — constructors have no state dependencies beyond field
-  initialization. Good warm-up.
+- **Completed 2026-02-12:** Successfully moved constructors. Cleaned up imports in `mod.rs`.
 
 ---
 
@@ -209,15 +206,15 @@ Functions to move:
 - `handle_character_error()`
 - `handle_boot_account()`
 
-- [ ] **2.1** Create `client/auth.rs` with an `impl Client` block containing all auth methods.
-- [ ] **2.2** Move the function bodies, keeping signatures identical. Everything stays as
+- [x] **2.1** Create `client/auth.rs` with an `impl Client` block containing all auth methods.
+- [x] **2.2** Move the function bodies, keeping signatures identical. Everything stays as
   `&mut self` methods for now.
-- [ ] **2.3** Remove the moved functions from `mod.rs`, add `mod auth;`.
-- [ ] **2.4** `cargo build && cargo test` — green.
-- [ ] **2.5** Commit: `refactor(client): extract auth.rs`.
+- [x] **2.3** Remove the moved functions from `mod.rs`, add `mod auth;`.
+- [x] **2.4** `cargo build && cargo test` — green.
+- [x] **2.5** Commit: `refactor(client): extract auth.rs`.
 
 **Notes:**
-- These functions touch `self.session`, `self.state`, `self.characters`, `self.event_tx`,
+- **Completed 2026-02-12:** Moved handshake and character flow logic. Removed `Isaac` and `CharacterError` imports from `mod.rs`.
   `self.connection_cookie`, and `self.character_id`. They don't touch movement state at all,
   so the cut is clean.
 - Future improvement (Phase 7): model the auth flow as an `AuthState` struct with explicit

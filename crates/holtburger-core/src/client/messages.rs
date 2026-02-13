@@ -91,19 +91,8 @@ impl Client {
                         data.position,
                         data.force_position_sequence
                     );
-                    self.world.player.position = data.position;
-                    self.world.player.instance_sequence = data.instance_sequence;
-                    self.world.player.server_control_sequence = data.server_control_sequence;
-                    self.world.player.teleport_sequence = data.teleport_sequence;
-                    self.world.player.force_position_sequence = data.force_position_sequence;
+                    // WorldState already updated position and sequences via self.world.handle_message()
                     self.movement.last_sent_pos_seq = Some(data.force_position_sequence);
-
-                    if let Some(tx) = &self.event_tx {
-                        let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::EntityMoved {
-                            guid: self.world.player.guid,
-                            pos: data.position,
-                        })));
-                    }
                 }
                 Ok(())
             }

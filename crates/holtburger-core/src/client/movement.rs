@@ -1,6 +1,6 @@
 use crate::client::ClientEvent;
 use crate::session::Session;
-use crate::world::{WorldEvent, WorldState};
+use crate::world::WorldState;
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
@@ -99,9 +99,7 @@ impl MovementSystem {
         if dist < 1.0 {
             log::info!("Arrived at target 0x{:08X}", target_guid);
             self.move_target = None;
-            if let Some(player) = world.entities.get_mut(world.player.guid) {
-                player.velocity = holtburger_common::Vector3::zero();
-            }
+            world.set_player_velocity(holtburger_common::Vector3::zero());
             return Ok(());
         }
 
@@ -115,9 +113,7 @@ impl MovementSystem {
             ) {
                 log::warn!("Approach aborted: Player seems stuck");
                 self.move_target = None;
-                if let Some(player) = world.entities.get_mut(world.player.guid) {
-                    player.velocity = holtburger_common::Vector3::zero();
-                }
+                world.set_player_velocity(holtburger_common::Vector3::zero());
                 return Ok(());
             }
             self.last_move_pos = world.player.position;
@@ -128,9 +124,7 @@ impl MovementSystem {
         let dir = diff / dist;
         let velocity = dir * 7.0;
 
-        if let Some(player) = world.entities.get_mut(world.player.guid) {
-            player.velocity = velocity;
-        }
+        world.set_player_velocity(velocity);
 
         // Send MoveToState to server periodically (~100ms)
         if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
@@ -266,14 +260,13 @@ impl MovementSystem {
             return Ok(());
         }
 
-        world.player.position = next_pos;
+        let world_events = world.set_player_position(next_pos);
 
-        // Emit event so TUI knows we "arrived"
+        // Emit events so TUI knows we "arrived"
         if let Some(tx) = event_tx {
-            let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::EntityMoved {
-                guid: world.player.guid,
-                pos: next_pos,
-            })));
+            for event in world_events {
+                let _ = tx.send(ClientEvent::World(Box::new(event)));
+            }
         }
 
         // Respond with AutonomousPosition heartbeat to confirm arrival

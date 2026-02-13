@@ -1,4 +1,4 @@
-use crate::client::types::ClientCommand;
+use crate::client::types::{ClientCommand, ClientEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
 use holtburger_common::Quaternion;
@@ -282,7 +282,14 @@ impl Client {
                 log::info!(">>> Turning to heading: {}", heading);
 
                 // Prediction: update local state immediately so UI feels snappy
-                self.world.player.position.rotation = Quaternion::from_heading(heading);
+                let mut next_pos = self.world.player.position;
+                next_pos.rotation = Quaternion::from_heading(heading);
+                let world_events = self.world.set_player_position(next_pos);
+                if let Some(tx) = &self.event_tx {
+                    for event in world_events {
+                        let _ = tx.send(ClientEvent::World(Box::new(event)));
+                    }
+                }
 
                 let obj_inst = self.world.player.instance_sequence;
                 let srv_seq = self.world.player.server_control_sequence;

@@ -73,8 +73,11 @@ impl Client {
                                                 && self.movement.move_target.is_some() {
                                                     log::warn!("Approach aborted: Forced reposition by server");
                                                     self.movement.move_target = None;
-                                                    if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
-                                                        player.velocity = holtburger_common::Vector3::zero();
+                                                    let events = self.world.set_player_velocity(holtburger_common::Vector3::zero());
+                                                    if let Some(tx) = &self.event_tx {
+                                                        for ev in events {
+                                                            let _ = tx.send(ClientEvent::World(Box::new(ev)));
+                                                        }
                                                     }
                                                 }
                                         }

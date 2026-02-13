@@ -466,6 +466,7 @@ impl WorldState {
                     self.player.string_properties = data.properties_string.clone();
                     self.player.did_properties = data.properties_did.clone();
                     self.player.iid_properties = data.properties_iid.clone();
+                    self.player.spells = data.spells.clone();
 
                     // Update Experience and Level from properties
                     if let Some(&xp) = data
@@ -600,6 +601,7 @@ impl WorldState {
                         vitals: vital_objs,
                         skills: skill_objs,
                         enchantments: self.player.enchantments.clone(),
+                        spells: self.player.spells.keys().cloned().collect(),
                         vitae: self.player.vitae,
                         skill_table: self.skill_table.clone(),
                         spell_names: self.get_player_spell_names(),

@@ -896,6 +896,18 @@ impl PlayerState {
                             false
                         }
                     }
+                    GameEvent::MagicUpdateSpell(data) => {
+                        let spell_id = data.spell_id as u32;
+                        self.spells.insert(spell_id, 0.0);
+                        events.push(WorldEvent::SpellUpdated { spell_id });
+                        true
+                    }
+                    GameEvent::MagicRemoveSpell(data) => {
+                        let spell_id = data.spell_id as u32;
+                        self.spells.remove(&spell_id);
+                        events.push(WorldEvent::SpellRemoved { spell_id });
+                        true
+                    }
                     GameEvent::UpdateHealth(data) => {
                         let UpdateHealthData { target, health } = &**data;
                         let target_guid = if *target == Guid::NULL {

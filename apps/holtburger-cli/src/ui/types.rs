@@ -36,6 +36,7 @@ pub enum CommandTarget<'a> {
     Entity(&'a Entity),
     Enchantment(Enchantment),
     Stat(StatType, Option<u64>, Option<u32>),
+    Spell(u32),
     None,
 }
 
@@ -48,6 +49,7 @@ pub enum CommandHandler {
     Heal(Guid),
     ApplyHealing(Guid),
     ApplyMoving(Guid),
+    Target(Guid),
     CancelInteraction,
 }
 
@@ -55,6 +57,7 @@ pub enum CommandHandler {
 pub enum InteractionMode {
     Moving,
     Healing,
+    Target,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +95,7 @@ pub enum DashboardTab {
     Entities,
     Inventory,
     Character,
+    Spells,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

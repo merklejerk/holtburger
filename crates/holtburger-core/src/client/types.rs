@@ -121,6 +121,13 @@ pub enum ClientCommand {
         item: Guid,
         target: Guid,
     },
+    CastTargetedSpell {
+        target: Guid,
+        spell_id: u32,
+    },
+    CastUntargetedSpell {
+        spell_id: u32,
+    },
     SyncPosition,
     Quit,
 }

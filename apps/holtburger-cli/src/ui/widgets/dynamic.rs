@@ -36,6 +36,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         let title = match interaction.mode {
             InteractionMode::Moving => " Moving Item | [ESC] to cancel ",
             InteractionMode::Healing => " Healing | [ESC] to cancel ",
+            InteractionMode::Target => " Targeting | [ESC] to cancel ",
         };
         block = block.title(title);
 

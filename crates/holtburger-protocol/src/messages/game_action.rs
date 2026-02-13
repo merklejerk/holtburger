@@ -1,5 +1,6 @@
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::inventory::actions::*;
+pub use crate::messages::magic::actions::*;
 pub use crate::messages::misc::actions::*;
 pub use crate::messages::movement::actions::*;
 pub use crate::messages::object::actions::*;
@@ -36,6 +37,8 @@ pub enum GameAction {
     RaiseSkill(Box<RaiseSkillData>),
     TrainSkill(Box<TrainSkillData>),
     GiveObjectRequest(Box<GiveObjectRequestData>),
+    CastTargetedSpell(Box<CastTargetedSpellData>),
+    CastUntargetedSpell(Box<CastUntargetedSpellData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -106,6 +109,12 @@ impl ProtocolUnpack for GameActionMessage {
                 }
                 GameActionOpcode::GiveObjectRequest => GameAction::GiveObjectRequest(Box::new(
                     GiveObjectRequestData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::CastTargetedSpell => GameAction::CastTargetedSpell(Box::new(
+                    CastTargetedSpellData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::CastUntargetedSpell => GameAction::CastUntargetedSpell(Box::new(
+                    CastUntargetedSpellData::unpack(data, offset)?,
                 )),
             },
             None => {
@@ -219,6 +228,16 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::GiveObjectRequest(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::GiveObjectRequest as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::CastTargetedSpell(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::CastTargetedSpell as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::CastUntargetedSpell(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::CastUntargetedSpell as u32)
                     .unwrap();
                 data.pack(buf);
             }

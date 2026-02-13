@@ -163,6 +163,29 @@ impl Client {
                     })))
                     .await
             }
+            ClientCommand::CastTargetedSpell { target, spell_id } => {
+                log::info!(">>> Casting spell {} on 0x{:08X}", spell_id, target.0);
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::CastTargetedSpell(Box::new(CastTargetedSpellData {
+                            target,
+                            spell_id,
+                        })),
+                    })))
+                    .await
+            }
+            ClientCommand::CastUntargetedSpell { spell_id } => {
+                log::info!(">>> Casting spell {}", spell_id);
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::CastUntargetedSpell(Box::new(
+                            CastUntargetedSpellData { spell_id },
+                        )),
+                    })))
+                    .await
+            }
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
                 self.session

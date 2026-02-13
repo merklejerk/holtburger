@@ -9,7 +9,8 @@ use crate::entities::verbs::{self};
 use crate::ui;
 use crate::ui::model::AppState;
 use crate::ui::types::{
-    ChatMessageKind, CommandHandler, CommandTarget, ContextView, DashboardTab, FocusedPane, UIState,
+    ActiveInteraction, ChatMessageKind, CommandHandler, CommandTarget, ContextView, DashboardTab,
+    FocusedPane, InteractionMode, UIState,
 };
 use crate::ui::utils::{get_next_pane, get_prev_pane};
 
@@ -80,6 +81,19 @@ impl AppState {
                                     )
                                     .unwrap_or(CommandTarget::None)
                                 }
+                                DashboardTab::Spells => {
+                                    let mut spells = self.player_spells.clone();
+                                    spells.sort_by_key(|&sid| {
+                                        self.spell_names
+                                            .get(&sid)
+                                            .cloned()
+                                            .unwrap_or_else(|| "".to_string())
+                                    });
+                                    spells
+                                        .get(self.selected_dashboard_index)
+                                        .map(|&sid| CommandTarget::Spell(sid))
+                                        .unwrap_or(CommandTarget::None)
+                                }
                             },
                             _ => CommandTarget::None,
                         };
@@ -125,6 +139,12 @@ impl AppState {
                                 }
                                 CommandHandler::CancelInteraction => {
                                     self.active_interaction = None;
+                                }
+                                CommandHandler::Target(guid) => {
+                                    self.active_interaction = Some(ActiveInteraction {
+                                        guid,
+                                        mode: InteractionMode::Target,
+                                    });
                                 }
                                 CommandHandler::Give(receiver_guid) => {
                                     if let Some(interaction) = self.active_interaction {
@@ -444,19 +464,33 @@ impl AppState {
                         | FocusedPane::Context
                         | FocusedPane::Dashboard
                         | FocusedPane::Dynamic => {
+                            if self.focused_pane == FocusedPane::Dashboard {
+                                match c {
+                                    '1' => {
+                                        self.dashboard_tab = DashboardTab::Entities;
+                                        self.selected_dashboard_index = 0;
+                                        return commands;
+                                    }
+                                    '2' => {
+                                        self.dashboard_tab = DashboardTab::Inventory;
+                                        self.selected_dashboard_index = 0;
+                                        return commands;
+                                    }
+                                    '3' => {
+                                        self.dashboard_tab = DashboardTab::Character;
+                                        self.selected_dashboard_index = 0;
+                                        return commands;
+                                    }
+                                    '4' => {
+                                        self.dashboard_tab = DashboardTab::Spells;
+                                        self.selected_dashboard_index = 0;
+                                        return commands;
+                                    }
+                                    _ => {}
+                                }
+                            }
+
                             match c {
-                                '1' => {
-                                    self.dashboard_tab = DashboardTab::Entities;
-                                    self.selected_dashboard_index = 0;
-                                }
-                                '2' => {
-                                    self.dashboard_tab = DashboardTab::Inventory;
-                                    self.selected_dashboard_index = 0;
-                                }
-                                '3' => {
-                                    self.dashboard_tab = DashboardTab::Character;
-                                    self.selected_dashboard_index = 0;
-                                }
                                 'x' | 'X' => {
                                     self.context_view = ContextView::Default;
                                     self.current_debug_guid = None;
@@ -487,6 +521,19 @@ impl AppState {
                                                     self.selected_dashboard_index,
                                                 )
                                                 .unwrap_or(CommandTarget::None)
+                                            }
+                                            DashboardTab::Spells => {
+                                                let mut spells = self.player_spells.clone();
+                                                spells.sort_by_key(|&sid| {
+                                                    self.spell_names
+                                                        .get(&sid)
+                                                        .cloned()
+                                                        .unwrap_or_else(|| "".to_string())
+                                                });
+                                                spells
+                                                    .get(self.selected_dashboard_index)
+                                                    .map(|&sid| CommandTarget::Spell(sid))
+                                                    .unwrap_or(CommandTarget::None)
                                             }
                                         };
 
@@ -556,6 +603,13 @@ impl AppState {
                                                     Some(ui::types::ActiveInteraction {
                                                         guid,
                                                         mode: ui::types::InteractionMode::Moving,
+                                                    });
+                                            }
+                                            CommandHandler::Target(guid) => {
+                                                self.active_interaction =
+                                                    Some(ui::types::ActiveInteraction {
+                                                        guid,
+                                                        mode: ui::types::InteractionMode::Target,
                                                     });
                                             }
                                             CommandHandler::Give(target_guid) => {

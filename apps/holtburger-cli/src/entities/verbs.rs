@@ -69,9 +69,11 @@ define_verbs! {
     MoveToSlot(Guid) => { "Secure", 's' },
     Debug => { "Debug", 'b' },
     Approach => { "Approach", 'r' },
+    Target => { "Target", 'f' },
     LevelUp => { "Level Up", 'l' },
     Train => { "Train", 't' },
     Move => { "Move", 'm' },
+    Cast => { "Cast", 'c' },
     Confirm(String) => { "Confirm", '\r' },
     Cancel => { "Cancel", '\x1b' },
 }
@@ -155,6 +157,7 @@ impl EntityVerb {
                     target: e.guid,
                 }))
             }
+            (EntityVerb::Target, CommandTarget::Entity(e)) => Some(CommandHandler::Target(e.guid)),
             (EntityVerb::MoveToSlot(slot_guid), CommandTarget::Entity(e)) => {
                 Some(CommandHandler::Command(ClientCommand::MoveItem {
                     item: e.guid,
@@ -198,6 +201,24 @@ impl EntityVerb {
             (EntityVerb::LevelUp, CommandTarget::Stat(_, None, _)) => None,
             (EntityVerb::Debug, _) => Some(CommandHandler::ToggleDebug),
             (EntityVerb::Move, CommandTarget::Entity(e)) => Some(CommandHandler::Move(e.guid)),
+            (EntityVerb::Cast, CommandTarget::Spell(spell_id)) => {
+                use crate::ui::types::InteractionMode;
+                if let Some(interaction) = active_interaction
+                    && (interaction.mode == InteractionMode::Target
+                        || interaction.mode == InteractionMode::Healing)
+                {
+                    Some(CommandHandler::Command(ClientCommand::CastTargetedSpell {
+                        target: interaction.guid,
+                        spell_id: *spell_id,
+                    }))
+                } else {
+                    Some(CommandHandler::Command(
+                        ClientCommand::CastUntargetedSpell {
+                            spell_id: *spell_id,
+                        },
+                    ))
+                }
+            }
             (EntityVerb::Confirm(_), target) => {
                 if let Some(interaction) = active_interaction {
                     match interaction.mode {
@@ -224,6 +245,7 @@ impl EntityVerb {
                             }
                             _ => player_guid.map(CommandHandler::ApplyMoving),
                         },
+                        InteractionMode::Target => None,
                     }
                 } else {
                     None
@@ -241,6 +263,10 @@ pub fn get_verbs_for_target(
     player_guid: Option<Guid>,
     active_interaction: Option<ActiveInteraction>,
 ) -> Vec<EntityVerb> {
+    if let CommandTarget::Spell(_) = target {
+        return vec![EntityVerb::Cast, EntityVerb::Debug];
+    }
+
     if let Some(interaction) = active_interaction {
         if let CommandTarget::Entity(e) = target {
             let mut verbs = Vec::new();
@@ -284,6 +310,9 @@ pub fn get_verbs_for_target(
                         verbs.push(EntityVerb::Confirm(label));
                     }
                 }
+                InteractionMode::Target => {
+                    verbs.push(EntityVerb::Confirm(format!("Target {}", e.name)));
+                }
             }
 
             verbs.push(EntityVerb::Cancel);
@@ -298,7 +327,7 @@ pub fn get_verbs_for_target(
         CommandTarget::Entity(e) => {
             let class = classification::classify_entity(e);
             let flags = e.flags;
-            let mut ent_verbs = vec![EntityVerb::Assess];
+            let mut ent_verbs = vec![EntityVerb::Assess, EntityVerb::Target];
 
             let is_inventory = if let Some(pguid) = player_guid {
                 filter::is_owned_by_player(e.guid, entities, pguid)
@@ -391,6 +420,7 @@ pub fn get_verbs_for_target(
             }
             v
         }
+        CommandTarget::Spell(_) => vec![EntityVerb::Cast],
         CommandTarget::None => Vec::new(),
     };
 
@@ -404,9 +434,10 @@ pub fn get_verbs_for_target(
 /// Determines if the [D]ebug command should be available.
 fn should_show_debug(target: &CommandTarget) -> bool {
     match target {
-        CommandTarget::Entity(_) | CommandTarget::Enchantment(_) | CommandTarget::Stat(_, _, _) => {
-            true
-        }
+        CommandTarget::Entity(_)
+        | CommandTarget::Enchantment(_)
+        | CommandTarget::Stat(_, _, _)
+        | CommandTarget::Spell(_) => true,
         CommandTarget::None => false,
     }
 }

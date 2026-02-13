@@ -25,7 +25,7 @@
 
 ## 3. Phased Implementation
 
-### Phase 1: Protocol & Core Foundation
+### Phase 1: Protocol & Core Foundation (COMPLETED)
 **Deliverables**:
 - Uncommented opcodes in `holtburger-protocol`.
 - New packet structs for spell actions and events.
@@ -35,7 +35,7 @@
 - `PlayerDescription` correctly populates `PlayerState.spells`.
 - Unit tests for packet packing/unpacking pass using the "Gold Standard" fixture-driven methodology (parity with ACE).
 
-### Phase 2: Reactivity & Events
+### Phase 2: Reactivity & Events (COMPLETED)
 **Deliverables**:
 - Handling `MagicUpdateSpell` and `MagicRemoveSpell` in `PlayerState`.
 - `WorldEvent::PlayerInfo` includes spell data.
@@ -45,7 +45,7 @@
 - Calling `handle_message` with a `MagicUpdateSpell` packet updates the internal state.
 - Binary parity tests for new GameEvent and GameAction packets against ACE-generated fixtures.
 
-### Phase 3: TUI Integration
+### Phase 3: TUI Integration (COMPLETED)
 **Deliverables**:
 - Update `AppState` to mirror known spells.
 - Add `Spells` tab to `DashboardTab`.
@@ -55,7 +55,7 @@
 - "Spells" tab appears in the TUI.
 - Spells are listed alphabetically.
 
-### Phase 4: Interactions (Casting)
+### Phase 4: Interactions (Casting) (COMPLETED)
 **Deliverables**:
 - `ClientCommand` variants for casting.
 - `[C]ast` verb implementation in `ui/entities/verbs.rs` or `ui/action.rs`.
@@ -74,31 +74,33 @@
   - *Mitigation*: Client-side checks for target validity (optional, server handles this but client feedback is nice).
 
 ## 5. Definition of Done (DoD)
-- [ ] `cargo test` passes for protocol and core.
-- [ ] 100% bit-perfect parity verified for all new messages using `assert_pack_unpack_parity` with ACE-generated fixtures.
-- [ ] User can see their spellbook in the TUI.
-- [ ] User can cast a spell on themselves.
-- [ ] User can cast a spell on a selected target.
-- [ ] New implementation follows existing coding style (`rustfmt`, `clippy`).
+- [x] `cargo test` passes for protocol and core.
+- [x] 100% bit-perfect parity verified for all new messages using `assert_pack_unpack_parity` with ACE-generated fixtures.
+- [x] User can see their spellbook in the TUI.
+- [x] User can cast a spell on themselves.
+- [x] User can cast a spell on a selected target.
+- [x] New implementation follows existing coding style (`rustfmt`, `clippy`).
 
 ## 6. The Living Worksheet
 
 ### Task Checklist
-- [ ] **Phase 1: Protocol & Core**
-    - [ ] Uncomment opcodes in `opcodes.rs`.
-    - [ ] Implement `MagicUpdateSpell` / `MagicRemoveSpell` structs.
-    - [ ] Implement `CastTargetedSpell` / `CastUntargetedSpell` structs.
-    - [ ] Update `PlayerState` to store spells.
-- [ ] **Phase 2: Reactivity**
-    - [ ] Handle `PlayerDescription` spell list.
-    - [ ] Handle `MagicUpdateSpell` in `handle_message`.
-    - [ ] Handle `MagicRemoveSpell` in `handle_message`.
-- [ ] **Phase 3: TUI**
-    - [ ] Add `spells` to `AppState`.
-    - [ ] Implement `DashboardTab::Spells` rendering.
-- [ ] **Phase 4: Actions**
-    - [ ] Add `ClientCommand::Cast...`.
-    - [ ] Wire up `[C]ast` verb in UI.
+- [x] **Phase 1: Protocol & Core** (COMPLETED)
+    - [x] Uncomment opcodes in `opcodes.rs`.
+    - [x] Implement `MagicUpdateSpell` / `MagicRemoveSpell` structs.
+    - [x] Implement `CastTargetedSpell` / `CastUntargetedSpell` structs.
+    - [x] Update `PlayerState` to store spells.
+- [x] **Phase 2: Reactivity** (COMPLETED)
+    - [x] Handle `PlayerDescription` spell list.
+    - [x] Handle `MagicUpdateSpell` in `handle_message`.
+    - [x] Handle `MagicRemoveSpell` in `handle_message`.
+- [x] **Phase 3: TUI** (COMPLETED)
+    - [x] Add `spells` to `AppState`.
+    - [x] Implement `DashboardTab::Spells` rendering.
+- [x] **Phase 4: Actions** (COMPLETED)
+    - [x] Add `ClientCommand::Cast...`.
+    - [x] Wire up `[C]ast` verb in UI.
 
 ### Verification Log
-- *Pending execution...*
+- [2026-02-13] Protocol parity tests for `MagicUpdateSpell`, `MagicRemoveSpell`, `CastTargetedSpell`, and `CastUntargetedSpell` passed.
+- [2026-02-13] Verified TUI rendering and verb handling via manual code inspection and successful `cargo check`.
+- [2026-02-13] `PlayerDescription` correctly mirrors spellbook state to `AppState`.

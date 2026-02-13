@@ -356,14 +356,10 @@ pub enum GameActionOpcode {
     /// C2S: Periodic position pulse (Heartbeat).
     AutonomousPosition = 0xF753,
     // --- Combat & Spells ---
-    // /// C2S: Initiate a melee attack on a target.
-    // TargetedMeleeAttack = 0x0008,
-    // /// C2S: Initiate a missile attack on a target.
-    // TargetedMissileAttack = 0x000A,
-    // /// C2S: Cast a spell on a specific target.
-    // CastTargetedSpell = 0x004A,
-    // /// C2S: Cast a spell without a target (e.g. self-buff).
-    // CastUntargetedSpell = 0x0048,
+    /// C2S: Cast a spell on a specific target.
+    CastTargetedSpell = 0x004A,
+    /// C2S: Cast a spell without a target (e.g. self-buff).
+    CastUntargetedSpell = 0x0048,
     // /// C2S: Cycle through combat modes (Peace, Melee, Missile, Magic).
     // ChangeCombatMode = 0x0053,
     // /// C2S: Cancel the current combat attack sequence.
@@ -716,10 +712,10 @@ pub enum GameEventOpcode {
     // KillerNotification = 0x01AD,
 
     // --- Magic & Enchantments (Extra) ---
-    // /// S2C: Removes a spell from the player's spellbook.
-    // MagicRemoveSpell = 0x01A8,
-    // /// S2C: Adds or updates a spell in the player's spellbook.
-    // MagicUpdateSpell = 0x02C1,
+    /// S2C: Removes a spell from the player's spellbook.
+    MagicRemoveSpell = 0x01A8,
+    /// S2C: Adds or updates a spell in the player's spellbook.
+    MagicUpdateSpell = 0x02C1,
     // /// S2C: Response to an item mana query.
     // QueryItemManaResponse = 0x0264,
     // /// S2C: Alerts the client that a portal storm is starting to form due to crowding.

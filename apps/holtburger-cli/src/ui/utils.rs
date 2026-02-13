@@ -113,6 +113,20 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
             state.selected_dashboard_index,
         )
         .unwrap_or(CommandTarget::None),
+        DashboardTab::Spells => {
+            let mut spells = state.player_spells.clone();
+            spells.sort_by_key(|&sid| {
+                state
+                    .spell_names
+                    .get(&sid)
+                    .cloned()
+                    .unwrap_or_else(|| "".to_string())
+            });
+            spells
+                .get(state.selected_dashboard_index)
+                .map(|&sid| CommandTarget::Spell(sid))
+                .unwrap_or(CommandTarget::None)
+        }
     };
 
     let verbs = crate::entities::verbs::get_verbs_for_target(

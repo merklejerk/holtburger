@@ -41,6 +41,7 @@ impl AppState {
                         vitals,
                         skills,
                         enchantments,
+                        spells,
                         vitae,
                         skill_table,
                         spell_names,
@@ -55,6 +56,7 @@ impl AppState {
                         self.vitals = vitals.into_iter().map(|v| (v.vital_type, v)).collect();
                         self.skills = skills.into_iter().map(|s| (s.skill_type, s)).collect();
                         self.player_enchantments = enchantments;
+                        self.player_spells = spells;
                         self.vitae = vitae;
                         self.spell_names = spell_names;
                         self.skill_table = skill_table;
@@ -249,6 +251,14 @@ impl AppState {
                     }
                     WorldEvent::EnchantmentsPurged => {
                         self.player_enchantments.clear();
+                    }
+                    WorldEvent::SpellUpdated { spell_id } => {
+                        if !self.player_spells.contains(&spell_id) {
+                            self.player_spells.push(spell_id);
+                        }
+                    }
+                    WorldEvent::SpellRemoved { spell_id } => {
+                        self.player_spells.retain(|&s| s != spell_id);
                     }
                     WorldEvent::ServerTimeUpdate(time) => {
                         self.server_time = Some((time, std::time::Instant::now()));

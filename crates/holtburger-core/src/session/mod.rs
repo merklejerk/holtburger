@@ -4,6 +4,7 @@ use crate::session::capture::{CaptureWriter, Direction};
 use anyhow::{Result, anyhow};
 pub use async_trait::async_trait;
 use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::sequence::is_newer_u32;
 use holtburger_common::{ProtocolPack, ProtocolUnpack};
 use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::messages::transport::{packet_flags, queues};
@@ -66,6 +67,7 @@ pub struct Session {
     // NetID/ClientID assigned by server
     pub client_id: u16,
     pub last_server_seq: u32,
+    pub has_server_seq: bool,
     pub fragment_reassembler: HashMap<u32, PendingMessage>,
     pub capture: Option<CaptureWriter>,
     pub game_action_sequence: u32,
@@ -84,6 +86,7 @@ impl Session {
             fragment_id: 1,
             client_id: 0,
             last_server_seq: 0,
+            has_server_seq: false,
             fragment_reassembler: HashMap::new(),
             capture: None,
             game_action_sequence: 0,
@@ -105,6 +108,7 @@ impl Session {
             fragment_id: 1,
             client_id: 0,
             last_server_seq: 0,
+            has_server_seq: false,
             fragment_reassembler: HashMap::new(),
             capture: None,
             game_action_sequence: 0,
@@ -128,6 +132,7 @@ impl Session {
             fragment_reassembler: HashMap::new(),
             client_id: 0,
             last_server_seq: 0,
+            has_server_seq: false,
             capture: None,
             game_action_sequence: 0,
         }
@@ -247,7 +252,7 @@ impl Session {
         let caller_provided_ack = (header.flags & packet_flags::ACK_SEQUENCE) != 0;
 
         if !caller_provided_ack
-            && self.last_server_seq > 0
+            && self.has_server_seq
             && (header.flags & packet_flags::CONNECT_REQUEST == 0)
             && (header.flags & packet_flags::CONNECT_RESPONSE == 0)
             && (header.flags & packet_flags::LOGIN_REQUEST == 0)
@@ -434,8 +439,9 @@ impl Session {
             &buf[..len]
         );
 
-        if header.sequence > self.last_server_seq {
+        if is_newer_u32(header.sequence, self.last_server_seq) {
             self.last_server_seq = header.sequence;
+            self.has_server_seq = true;
         }
 
         if header.flags & packet_flags::ENCRYPTED_CHECKSUM != 0

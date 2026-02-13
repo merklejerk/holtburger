@@ -2,6 +2,7 @@ use super::WorldEvent;
 use super::stats;
 use holtburger_common::Guid;
 use holtburger_common::properties::EnchantmentTypeFlags;
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::*;
 use std::collections::{BTreeMap, HashMap};
@@ -427,7 +428,7 @@ impl PlayerState {
                     self.teleport_sequence = data.pos.teleport_sequence;
                     self.force_position_sequence = data.pos.force_position_sequence;
 
-                    if self.force_position_sequence > old_forced_seq {
+                    if is_newer_u16(self.force_position_sequence, old_forced_seq) {
                         events.push(WorldEvent::ForcedReposition {
                             guid: self.guid,
                             pos: self.position,

@@ -28,12 +28,14 @@ pub enum GameAction {
     DropItem(Box<DropItemData>),
     PutItemInContainer(Box<PutItemInContainerData>),
     Use(Box<UseData>),
+    UseWithTarget(Box<UseWithTargetData>),
     IdentifyObject(Box<IdentifyObjectData>),
     LoginComplete(Box<LoginCompleteData>),
     RaiseAttribute(Box<RaiseAttributeData>),
     RaiseVital(Box<RaiseVitalData>),
     RaiseSkill(Box<RaiseSkillData>),
     TrainSkill(Box<TrainSkillData>),
+    GiveObjectRequest(Box<GiveObjectRequestData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -81,6 +83,9 @@ impl ProtocolUnpack for GameActionMessage {
                     PutItemInContainerData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::Use => GameAction::Use(Box::new(UseData::unpack(data, offset)?)),
+                GameActionOpcode::UseWithTarget => {
+                    GameAction::UseWithTarget(Box::new(UseWithTargetData::unpack(data, offset)?))
+                }
                 GameActionOpcode::IdentifyObject => {
                     GameAction::IdentifyObject(Box::new(IdentifyObjectData::unpack(data, offset)?))
                 }
@@ -99,6 +104,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::TrainSkill => {
                     GameAction::TrainSkill(Box::new(TrainSkillData::unpack(data, offset)?))
                 }
+                GameActionOpcode::GiveObjectRequest => GameAction::GiveObjectRequest(Box::new(
+                    GiveObjectRequestData::unpack(data, offset)?,
+                )),
             },
             None => {
                 let remaining = data[*offset..].to_vec();
@@ -174,6 +182,11 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::UseWithTarget(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::UseWithTarget as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::IdentifyObject(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::IdentifyObject as u32)
                     .unwrap();
@@ -201,6 +214,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::TrainSkill(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::TrainSkill as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::GiveObjectRequest(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::GiveObjectRequest as u32)
                     .unwrap();
                 data.pack(buf);
             }

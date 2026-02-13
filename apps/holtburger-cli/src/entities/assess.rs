@@ -2,6 +2,7 @@ use holtburger_common::properties::{PropertyInt, PropertyString};
 use holtburger_core::world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 
 /// Generates a list of strings representing human-friendly assessment information for an entity.
 pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
@@ -212,7 +213,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         for word in paragraph.split_whitespace() {
             if current_line.is_empty() {
                 current_line.push_str(word);
-            } else if current_line.len() + 1 + word.len() <= width {
+            } else if current_line.width() + 1 + word.width() <= width {
                 current_line.push(' ');
                 current_line.push_str(word);
             } else {

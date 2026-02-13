@@ -16,10 +16,11 @@ pub use self::types::*;
 pub use self::update::*;
 use self::widgets::chat::{render_chat_pane, render_context_pane};
 use self::widgets::dashboard::render_dashboard_pane;
+use self::widgets::dynamic::render_dynamic_pane;
 use self::widgets::selection::render_character_selection;
 use self::widgets::status::render_status_bar;
 
-pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>) {
+pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -29,12 +30,15 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>) {
         ])
         .split(area);
 
-    let main_chunks = if area.width < WIDTH_BREAKPOINT || area.height > area.width {
+    let is_narrow = area.width < WIDTH_BREAKPOINT || area.height > area.width;
+
+    if is_narrow {
         let vertical_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(LAYOUT_NARROW_TOP_ROW_PCT),
-                Constraint::Percentage(LAYOUT_NARROW_BOTTOM_ROW_PCT),
+                Constraint::Fill(1),
+                Constraint::Length(DYNAMIC_PANEL_HEIGHT),
+                Constraint::Fill(1),
             ])
             .split(chunks[1]);
 
@@ -46,8 +50,17 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>) {
             ])
             .split(vertical_chunks[0]);
 
-        vec![top_chunks[0], vertical_chunks[1], top_chunks[1]]
+        (
+            chunks.to_vec(),
+            vec![top_chunks[0], vertical_chunks[2], top_chunks[1]],
+            vertical_chunks[1],
+        )
     } else {
+        let vertical_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(DYNAMIC_PANEL_HEIGHT)])
+            .split(chunks[1]);
+
         let horizontal_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
@@ -55,19 +68,22 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>) {
                 Constraint::Percentage(LAYOUT_WIDE_CHAT_PCT),
                 Constraint::Percentage(LAYOUT_WIDE_CONTEXT_PCT),
             ])
-            .split(chunks[1]);
-        vec![
-            horizontal_chunks[0],
-            horizontal_chunks[1],
-            horizontal_chunks[2],
-        ]
-    };
+            .split(vertical_chunks[0]);
 
-    (chunks.to_vec(), main_chunks)
+        (
+            chunks.to_vec(),
+            vec![
+                horizontal_chunks[0],
+                horizontal_chunks[1],
+                horizontal_chunks[2],
+            ],
+            vertical_chunks[1],
+        )
+    }
 }
 
 pub fn ui(f: &mut Frame, state: &mut AppState) {
-    let (chunks, main_chunks_vec) = get_layout(f.size());
+    let (chunks, main_chunks_vec, dynamic_chunk) = get_layout(f.size());
     let chunks = &chunks;
 
     // 1. Status Area
@@ -86,6 +102,9 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
 
             // --- Context Pane ---
             render_context_pane(f, state, main_chunks[2]);
+
+            // --- Dynamic Pane ---
+            render_dynamic_pane(f, state, dynamic_chunk);
         }
         UIState::CharacterSelection => {
             render_character_selection(f, state, chunks[1]);

@@ -1,4 +1,6 @@
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+use holtburger_common::math::Quaternion;
+use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
@@ -18,6 +20,7 @@ impl AppState {
         width: u16,
         _height: u16,
         main_chunks: Vec<Rect>,
+        _dynamic_chunk: Rect,
     ) -> Vec<ClientCommand> {
         let mut commands = Vec::new();
         match key.code {
@@ -29,17 +32,19 @@ impl AppState {
                 commands.push(ClientCommand::Quit);
             }
             KeyCode::Tab | KeyCode::BackTab => {
+                let active = self.active_interaction.is_some();
                 if key
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL)
                     || key.code == KeyCode::BackTab
                 {
-                    self.focused_pane = get_prev_pane(self.focused_pane, width);
+                    self.focused_pane = get_prev_pane(self.focused_pane, width, active);
                 } else {
-                    self.focused_pane = get_next_pane(self.focused_pane, width);
+                    self.focused_pane = get_next_pane(self.focused_pane, width, active);
                 }
             }
             KeyCode::Esc => {
+                self.active_interaction = None;
                 if self.focused_pane == FocusedPane::Input {
                     self.focused_pane = self.previous_focused_pane;
                 } else if self.state == UIState::CharacterSelection {
@@ -48,6 +53,95 @@ impl AppState {
             }
             KeyCode::Enter => match self.state {
                 UIState::Chat => {
+                    if self.active_interaction.is_some() && self.focused_pane != FocusedPane::Input
+                    {
+                        // Find the Enter verb for the currently focused target
+                        let target = match self.focused_pane {
+                            FocusedPane::Dashboard => match self.dashboard_tab {
+                                DashboardTab::Entities => {
+                                    let entities = self.get_filtered_nearby_tab();
+                                    entities
+                                        .get(self.selected_dashboard_index)
+                                        .map(|(e, _, _)| CommandTarget::Entity(e))
+                                        .unwrap_or(CommandTarget::None)
+                                }
+                                DashboardTab::Inventory => {
+                                    let entities = self.get_filtered_inventory_tab();
+                                    entities
+                                        .get(self.selected_dashboard_index)
+                                        .map(|(e, _, _)| CommandTarget::Entity(e))
+                                        .unwrap_or(CommandTarget::None)
+                                }
+                                DashboardTab::Character => {
+                                    ui::widgets::stats::get_command_target_at_index(
+                                        self,
+                                        DashboardTab::Character,
+                                        self.selected_dashboard_index,
+                                    )
+                                    .unwrap_or(CommandTarget::None)
+                                }
+                            },
+                            _ => CommandTarget::None,
+                        };
+
+                        let player_guid = self.player_guid;
+                        let entity_verbs = verbs::get_verbs_for_target(
+                            &target,
+                            &self.entities,
+                            player_guid,
+                            self.active_interaction,
+                        );
+
+                        let handler = entity_verbs
+                            .iter()
+                            .find(|v| v.shortcut_char() == '\r')
+                            .and_then(|verb| {
+                                verb.handler(&target, player_guid, self.active_interaction)
+                            });
+
+                        if let Some(handler) = handler {
+                            match handler {
+                                CommandHandler::Command(cmd) => {
+                                    commands.push(cmd);
+                                }
+                                CommandHandler::ApplyHealing(target_guid) => {
+                                    if let Some(interaction) = self.active_interaction {
+                                        commands.push(ClientCommand::UseWithTarget {
+                                            item: interaction.guid,
+                                            target: target_guid,
+                                        });
+                                        self.active_interaction = None;
+                                    }
+                                }
+                                CommandHandler::ApplyMoving(container_guid) => {
+                                    if let Some(interaction) = self.active_interaction {
+                                        commands.push(ClientCommand::MoveItem {
+                                            item: interaction.guid,
+                                            container: container_guid,
+                                            placement: 0,
+                                        });
+                                        self.active_interaction = None;
+                                    }
+                                }
+                                CommandHandler::CancelInteraction => {
+                                    self.active_interaction = None;
+                                }
+                                CommandHandler::Give(receiver_guid) => {
+                                    if let Some(interaction) = self.active_interaction {
+                                        commands.push(ClientCommand::GiveObjectRequest {
+                                            target: receiver_guid,
+                                            item: interaction.guid,
+                                            amount: 1, // TODO: Amount selection
+                                        });
+                                        self.active_interaction = None;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        return commands;
+                    }
+
                     if self.focused_pane == FocusedPane::Input {
                         let input = self.input.drain(..).collect::<String>();
                         if input.is_empty() {
@@ -180,6 +274,32 @@ impl AppState {
                     self.input.pop();
                 }
             }
+            KeyCode::Left | KeyCode::Right => {
+                if self.state == UIState::Chat && self.focused_pane != FocusedPane::Input {
+                    let mut pos = self.player_pos.unwrap_or_default();
+                    let delta = if key.code == KeyCode::Right {
+                        0.1
+                    } else {
+                        -0.1
+                    };
+
+                    // Adjust yaw (rotation around Z)
+                    let current_heading = pos.rotation.to_heading();
+                    let mut new_heading = current_heading + delta;
+
+                    // Normalize to [0, 2π)
+                    let two_pi = 2.0 * std::f32::consts::PI;
+                    new_heading = (new_heading % two_pi + two_pi) % two_pi;
+
+                    // Rebuild quaternion from new heading
+                    pos.rotation = Quaternion::from_heading(new_heading);
+
+                    self.player_pos = Some(pos);
+                    commands.push(ClientCommand::TurnTo {
+                        heading: new_heading,
+                    });
+                }
+            }
             KeyCode::Up => match self.state {
                 UIState::Chat => match self.focused_pane {
                     FocusedPane::Input => {
@@ -202,6 +322,9 @@ impl AppState {
                         if self.selected_dashboard_index > 0 {
                             self.selected_dashboard_index -= 1;
                         }
+                    }
+                    FocusedPane::Dynamic => {
+                        // TODO: Handle dynamic selection scroll/cycling
                     }
                 },
                 UIState::CharacterSelection => {
@@ -237,6 +360,9 @@ impl AppState {
                         {
                             self.selected_dashboard_index += 1;
                         }
+                    }
+                    FocusedPane::Dynamic => {
+                        // TODO: Handle dynamic selection scroll/cycling
                     }
                 },
                 UIState::CharacterSelection => {
@@ -314,7 +440,10 @@ impl AppState {
                         FocusedPane::Input => {
                             self.input.push(c);
                         }
-                        FocusedPane::Chat | FocusedPane::Context | FocusedPane::Dashboard => {
+                        FocusedPane::Chat
+                        | FocusedPane::Context
+                        | FocusedPane::Dashboard
+                        | FocusedPane::Dynamic => {
                             match c {
                                 '1' => {
                                     self.dashboard_tab = DashboardTab::Entities;
@@ -366,13 +495,20 @@ impl AppState {
                                             &target,
                                             &self.entities,
                                             player_guid,
+                                            self.active_interaction,
                                         );
                                         let handler = entity_verbs
                                             .iter()
                                             .find(|verb| {
                                                 verb.shortcut_char() == c.to_ascii_lowercase()
                                             })
-                                            .and_then(|verb| verb.handler(&target, player_guid));
+                                            .and_then(|verb| {
+                                                verb.handler(
+                                                    &target,
+                                                    player_guid,
+                                                    self.active_interaction,
+                                                )
+                                            });
 
                                         let (debug_lines, guid) =
                                             if let Some(CommandHandler::ToggleDebug) = &handler {
@@ -414,6 +550,101 @@ impl AppState {
                                                     self.context_buffer = lines;
                                                     self.context_scroll_offset = 0;
                                                 }
+                                            }
+                                            CommandHandler::Move(guid) => {
+                                                self.active_interaction =
+                                                    Some(ui::types::ActiveInteraction {
+                                                        guid,
+                                                        mode: ui::types::InteractionMode::Moving,
+                                                    });
+                                            }
+                                            CommandHandler::Give(target_guid) => {
+                                                if let Some(ui::types::ActiveInteraction {
+                                                    guid: item_guid,
+                                                    mode: ui::types::InteractionMode::Moving,
+                                                }) = self.active_interaction
+                                                {
+                                                    let item_entity = self.entities.get(&item_guid);
+                                                    let amount = item_entity
+                                                        .and_then(|e| {
+                                                            e.int_properties.get(
+                                                                &(PropertyInt::StackSize as u32),
+                                                            )
+                                                        })
+                                                        .cloned()
+                                                        .unwrap_or(1);
+
+                                                    let target_entity =
+                                                        self.entities.get(&target_guid);
+                                                    let class = target_entity.map(|e| {
+                                                        crate::entities::classification::classify_entity(e)
+                                                    });
+
+                                                    let is_self =
+                                                        Some(target_guid) == self.player_guid;
+
+                                                    if !is_self
+                                                        && matches!(
+                                                            class,
+                                                            Some(crate::entities::classification::EntityClass::Container)
+                                                                | Some(
+                                                                    crate::entities::classification::EntityClass::Chest,
+                                                                )
+                                                        )
+                                                    {
+                                                        commands.push(ClientCommand::MoveItem {
+                                                            item: item_guid,
+                                                            container: target_guid,
+                                                            placement: 0,
+                                                        });
+                                                    } else {
+                                                        commands.push(
+                                                            ClientCommand::GiveObjectRequest {
+                                                                target: target_guid,
+                                                                item: item_guid,
+                                                                amount,
+                                                            },
+                                                        );
+                                                    }
+                                                    self.active_interaction = None;
+                                                }
+                                            }
+                                            CommandHandler::Heal(guid) => {
+                                                self.active_interaction =
+                                                    Some(ui::types::ActiveInteraction {
+                                                        guid,
+                                                        mode: ui::types::InteractionMode::Healing,
+                                                    });
+                                            }
+                                            CommandHandler::ApplyHealing(target_guid) => {
+                                                if let Some(ui::types::ActiveInteraction {
+                                                    guid: kit_guid,
+                                                    mode: ui::types::InteractionMode::Healing,
+                                                }) = self.active_interaction
+                                                {
+                                                    commands.push(ClientCommand::UseWithTarget {
+                                                        item: kit_guid,
+                                                        target: target_guid,
+                                                    });
+                                                    self.active_interaction = None;
+                                                }
+                                            }
+                                            CommandHandler::ApplyMoving(container_guid) => {
+                                                if let Some(ui::types::ActiveInteraction {
+                                                    guid: item_guid,
+                                                    mode: ui::types::InteractionMode::Moving,
+                                                }) = self.active_interaction
+                                                {
+                                                    commands.push(ClientCommand::MoveItem {
+                                                        item: item_guid,
+                                                        container: container_guid,
+                                                        placement: 0,
+                                                    });
+                                                    self.active_interaction = None;
+                                                }
+                                            }
+                                            CommandHandler::CancelInteraction => {
+                                                self.active_interaction = None;
                                             }
                                         }
                                     }
@@ -462,38 +693,12 @@ impl AppState {
     pub(super) fn handle_mouse_event(
         &mut self,
         mouse: MouseEvent,
-        chunks: Vec<Rect>,
+        _chunks: Vec<Rect>,
         main_chunks: Vec<Rect>,
+        _dynamic_chunk: Rect,
     ) -> Vec<ClientCommand> {
         let commands = Vec::new();
         match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                if mouse.row >= chunks[2].y
-                    && mouse.row < chunks[2].y + chunks[2].height
-                    && mouse.column >= chunks[2].x
-                    && mouse.column < chunks[2].x + chunks[2].width
-                {
-                    self.focused_pane = FocusedPane::Input;
-                } else if mouse.row >= main_chunks[0].y
-                    && mouse.row < main_chunks[0].y + main_chunks[0].height
-                    && mouse.column >= main_chunks[0].x
-                    && mouse.column < main_chunks[0].x + main_chunks[0].width
-                {
-                    self.focused_pane = FocusedPane::Dashboard;
-                } else if mouse.row >= main_chunks[1].y
-                    && mouse.row < main_chunks[1].y + main_chunks[1].height
-                    && mouse.column >= main_chunks[1].x
-                    && mouse.column < main_chunks[1].x + main_chunks[1].width
-                {
-                    self.focused_pane = FocusedPane::Chat;
-                } else if mouse.row >= main_chunks[2].y
-                    && mouse.row < main_chunks[2].y + main_chunks[2].height
-                    && mouse.column >= main_chunks[2].x
-                    && mouse.column < main_chunks[2].x + main_chunks[2].width
-                {
-                    self.focused_pane = FocusedPane::Context;
-                }
-            }
             MouseEventKind::ScrollUp => {
                 if mouse.row >= main_chunks[1].y
                     && mouse.row < main_chunks[1].y + main_chunks[1].height

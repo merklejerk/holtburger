@@ -216,6 +216,7 @@ async fn main() -> Result<()> {
         context_scroll_offset: 0,
         context_view: ui::ContextView::Default,
         current_debug_guid: None,
+        active_interaction: None,
         account_password: args.password.clone(),
         logon_retry: holtburger_core::RetryState::new(5),
         enter_retry: holtburger_core::RetryState::new(5),
@@ -228,6 +229,8 @@ async fn main() -> Result<()> {
         chat_log,
         use_emojis: !args.no_emojis,
         verbosity: args.verbose,
+        net_stats: ui::NetStats::default(),
+        world_name: String::new(),
     };
 
     app_state.refresh_context_buffer();
@@ -261,12 +264,13 @@ async fn main() -> Result<()> {
             match event::read()? {
                 Event::Key(key) => {
                     let size = terminal.size()?;
-                    let (_, main_chunks) = ui::get_layout(size);
+                    let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
                     let actions = app_state.handle_action(ui::AppAction::KeyPress(
                         key,
                         size.width,
                         size.height,
                         main_chunks,
+                        dynamic_chunk,
                     ));
                     let mut should_quit = false;
                     for action in actions {
@@ -281,11 +285,12 @@ async fn main() -> Result<()> {
                 }
                 Event::Mouse(mouse) => {
                     let size = terminal.size()?;
-                    let (chunks, main_chunks) = ui::get_layout(size);
+                    let (chunks, main_chunks, dynamic_chunk) = ui::get_layout(size);
                     let actions = app_state.handle_action(ui::AppAction::Mouse(
                         mouse,
                         chunks.to_vec(),
                         main_chunks.to_vec(),
+                        dynamic_chunk,
                     ));
                     for action in actions {
                         let _ = command_tx.send(action);
@@ -309,8 +314,11 @@ async fn main() -> Result<()> {
                         log::info!("WorldEvent: {:?}", world_event);
                     }
                 }
-                ClientEvent::GameMessage(_msg) => {
-                    // Logged by holtburger-core
+                ClientEvent::GameMessage(msg) => {
+                    use holtburger_protocol::messages::GameMessage;
+                    if let GameMessage::ServerName(data) = msg.as_ref() {
+                        app_state.world_name = data.name.clone();
+                    }
                 }
                 ClientEvent::RawMessage(_data) => {
                     // Logged by holtburger-core

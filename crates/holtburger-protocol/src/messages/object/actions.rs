@@ -1,4 +1,4 @@
-pub use crate::messages::object::types::{IdentifyObjectData, UseData};
+pub use crate::messages::object::types::{IdentifyObjectData, UseData, UseWithTargetData};
 
 #[cfg(test)]
 mod tests {

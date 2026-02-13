@@ -80,3 +80,15 @@ pub const UPDATE_VITAL_CURRENT_PRIVATE: &[u8] =
     include_bytes!("../tests/fixtures/update_vital_current_private.bin");
 pub const PLAYER_CREATE: &[u8] = include_bytes!("../tests/fixtures/player_create.bin");
 pub const OBJ_DESC_EVENT_DROP: &[u8] = include_bytes!("../tests/fixtures/obj_desc_event_drop.bin");
+
+pub const ARMOR_PROFILE: &[u8] = include_bytes!("../tests/fixtures/armor_profile.bin");
+pub const CREATURE_PROFILE: &[u8] = include_bytes!("../tests/fixtures/creature_profile.bin");
+pub const WEAPON_PROFILE: &[u8] = include_bytes!("../tests/fixtures/weapon_profile.bin");
+pub const HOOK_PROFILE: &[u8] = include_bytes!("../tests/fixtures/hook_profile.bin");
+pub const ARMOR_LEVEL: &[u8] = include_bytes!("../tests/fixtures/armor_level.bin");
+pub const IDENTIFY_OBJECT_DATA: &[u8] =
+    include_bytes!("../tests/fixtures/identify_object_data.bin");
+pub const USE_DATA: &[u8] = include_bytes!("../tests/fixtures/use_data.bin");
+pub const USE_WITH_TARGET_DATA: &[u8] =
+    include_bytes!("../tests/fixtures/use_with_target_data.bin");
+pub const MODEL_DATA: &[u8] = include_bytes!("../tests/fixtures/model_data.bin");

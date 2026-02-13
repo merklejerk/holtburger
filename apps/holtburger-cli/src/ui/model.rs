@@ -14,7 +14,10 @@ use holtburger_core::{ClientState, RetryState};
 use holtburger_protocol::messages::CharacterEntry;
 use holtburger_protocol::messages::magic::Enchantment;
 
-use super::types::{ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, UIState};
+use super::types::{
+    ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
+    UIState,
+};
 use crate::entities::filter::{EntityFilter, filter_entities};
 use ratatui::text::Line;
 
@@ -48,6 +51,7 @@ pub struct AppState {
     pub context_scroll_offset: usize,
     pub context_view: ContextView,
     pub current_debug_guid: Option<Guid>,
+    pub active_interaction: Option<ActiveInteraction>,
     pub account_password: String,
     pub logon_retry: RetryState,
     pub enter_retry: RetryState,
@@ -60,6 +64,28 @@ pub struct AppState {
     pub chat_log: Option<Mutex<File>>,
     pub use_emojis: bool,
     pub verbosity: u8,
+    pub net_stats: NetStats,
+    pub world_name: String,
+}
+
+pub struct NetStats {
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+    pub history_in: Vec<u64>,
+    pub history_out: Vec<u64>,
+    pub last_update: Option<Instant>,
+}
+
+impl Default for NetStats {
+    fn default() -> Self {
+        Self {
+            bytes_in: 0,
+            bytes_out: 0,
+            history_in: vec![0; 64],
+            history_out: vec![0; 64],
+            last_update: None,
+        }
+    }
 }
 
 impl AppState {

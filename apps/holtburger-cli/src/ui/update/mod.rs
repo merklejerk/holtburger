@@ -13,22 +13,54 @@ impl AppState {
             AppAction::Tick(elapsed) => {
                 commands.extend(self.update_tick(elapsed));
             }
-            AppAction::KeyPress(key, width, height, main_chunks) => {
-                commands.extend(self.handle_key_press(key, width, height, main_chunks));
+            AppAction::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
+                commands.extend(self.handle_key_press(
+                    key,
+                    width,
+                    height,
+                    main_chunks,
+                    dynamic_chunk,
+                ));
             }
-            AppAction::Mouse(mouse, chunks, main_chunks) => {
-                commands.extend(self.handle_mouse_event(mouse, chunks, main_chunks));
+            AppAction::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
+                commands.extend(self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk));
             }
             AppAction::ReceivedEvent(event) => {
                 self.handle_received_event(event);
             }
         }
+
+        // Track bytes_out for commands
+        for _cmd in &commands {
+            // Very rough estimate: ~64 bytes per command packet
+            // In a real world we'd track the encoded length, but this is for rizz
+            self.net_stats.bytes_out += 64;
+        }
+
         commands
     }
 
     fn update_tick(&mut self, elapsed: f64) -> Vec<ClientCommand> {
         let mut commands = Vec::new();
         let now = std::time::Instant::now();
+
+        // Update net stats
+        let last_update = self.net_stats.last_update.get_or_insert(now);
+        if now.duration_since(*last_update).as_secs() >= 1 {
+            self.net_stats.history_in.push(self.net_stats.bytes_in);
+            self.net_stats.bytes_in = 0;
+            if self.net_stats.history_in.len() > 64 {
+                self.net_stats.history_in.remove(0);
+            }
+
+            self.net_stats.history_out.push(self.net_stats.bytes_out);
+            self.net_stats.bytes_out = 0;
+            if self.net_stats.history_out.len() > 64 {
+                self.net_stats.history_out.remove(0);
+            }
+
+            self.net_stats.last_update = Some(now);
+        }
 
         if self.logon_retry.tick(now) {
             self.log_chat(

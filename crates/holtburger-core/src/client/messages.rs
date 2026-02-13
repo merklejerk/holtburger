@@ -1,6 +1,7 @@
 use super::{Client, types::*};
 use crate::world::WorldEvent;
 use anyhow::Result;
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::ProtocolUnpack;
 use holtburger_protocol::messages::*;
 
@@ -55,7 +56,7 @@ impl Client {
                     let force_pos_seq = data.pos.force_position_sequence;
 
                     if let Some(old_seq) = self.movement.last_sent_pos_seq
-                        && force_pos_seq > old_seq
+                        && is_newer_u16(force_pos_seq, old_seq)
                     {
                         log::warn!(
                             "Server forced reposition (rubber band): seq {} -> {}",

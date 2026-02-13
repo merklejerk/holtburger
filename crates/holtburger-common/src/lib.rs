@@ -1,6 +1,7 @@
 pub mod guid;
 pub mod math;
 pub mod properties;
+pub mod sequence;
 pub mod traits;
 
 pub use guid::Guid;

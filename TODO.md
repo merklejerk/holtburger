@@ -8,7 +8,8 @@
 - [ ] Chat tabs (Chat vs combat vs all).
 - [x] Just interleave bars in netpulse widget.
 - [x] Move vitae penalty to under "vitals" group. (Done)
-- [ ] Reverse direction of netpulse animation.
+- [x] Reverse direction of netpulse animation.
+- [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 
 ### Medium
 - [ ] Noclip mode to disable collision during movement.
@@ -31,7 +32,6 @@
 - [ ] [U]se for Mana charges.
 - [x] Enter key for interaction target confirmation.
 - [ ] In-world containers.
-- [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Search/filter on list tabs.
 
 ### High

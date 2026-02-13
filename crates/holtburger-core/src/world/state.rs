@@ -19,6 +19,15 @@ pub struct ServerTimeSync {
     pub local_time: std::time::Instant,
 }
 
+/// The authoritative state of the game world.
+///
+/// NOTE: The player's state is partially mirrored between `self.player` (session sequence data)
+/// and the `Entity` map (physical landblock/coords/velocity).
+///
+/// !!! CRITICAL !!!
+/// ALWAYS use the `set_player_*` mutation methods to update player position or velocity.
+/// Hand-writing to `self.player.position` or `self.entities` directly will cause
+/// physics desyncs and is considered "highly sus" behavior.
 pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
@@ -235,15 +244,14 @@ impl WorldState {
             }
             GameMessage::UpdatePosition(data) => {
                 let guid = data.guid;
-                if let Some(entity) = self.entities.get_mut(guid) {
+                if guid == self.player.guid {
+                    events.extend(self.set_player_position(data.pos.pos));
+                    // Sequence updates are partly handled by PlayerState::handle_message
+                } else if let Some(entity) = self.entities.get_mut(guid) {
                     let old_lb = entity.position.landblock_id;
                     entity.position = data.pos.pos;
                     self.scene
                         .update_entity(guid, old_lb, data.pos.pos.landblock_id);
-
-                    if guid == self.player.guid {
-                        self.player.position = data.pos.pos;
-                    }
 
                     events.push(WorldEvent::EntityMoved {
                         guid,
@@ -252,34 +260,17 @@ impl WorldState {
                 }
             }
             GameMessage::PrivateUpdatePosition(data) => {
-                let guid = self.player.guid;
-                if let Some(entity) = self.entities.get_mut(guid) {
-                    let old_lb = entity.position.landblock_id;
-                    entity.position = data.pos;
-                    self.scene
-                        .update_entity(guid, old_lb, data.pos.landblock_id);
-
-                    if guid == self.player.guid {
-                        self.player.position = data.pos;
-                    }
-
-                    events.push(WorldEvent::EntityMoved {
-                        guid,
-                        pos: data.pos,
-                    });
-                }
+                events.extend(self.set_player_position(data.pos));
             }
             GameMessage::PublicUpdatePosition(data) => {
                 let guid = data.guid;
-                if let Some(entity) = self.entities.get_mut(guid) {
+                if guid == self.player.guid {
+                    events.extend(self.set_player_position(data.pos));
+                } else if let Some(entity) = self.entities.get_mut(guid) {
                     let old_lb = entity.position.landblock_id;
                     entity.position = data.pos;
                     self.scene
                         .update_entity(guid, old_lb, data.pos.landblock_id);
-
-                    if guid == self.player.guid {
-                        self.player.position = data.pos;
-                    }
 
                     events.push(WorldEvent::EntityMoved {
                         guid,
@@ -288,19 +279,16 @@ impl WorldState {
                 }
             }
             GameMessage::AutonomousPosition(data) => {
-                let guid = data.guid;
-                if let Some(entity) = self.entities.get_mut(guid) {
+                if data.guid == self.player.guid {
+                    events.extend(self.apply_player_autonomous_position(data));
+                } else if let Some(entity) = self.entities.get_mut(data.guid) {
                     let old_lb = entity.position.landblock_id;
                     entity.position = data.position;
                     self.scene
-                        .update_entity(guid, old_lb, data.position.landblock_id);
-
-                    if guid == self.player.guid {
-                        self.player.position = data.position;
-                    }
+                        .update_entity(data.guid, old_lb, data.position.landblock_id);
 
                     events.push(WorldEvent::EntityMoved {
-                        guid,
+                        guid: data.guid,
                         pos: data.position,
                     });
                 }
@@ -323,16 +311,17 @@ impl WorldState {
                     match &data.data {
                         MovementTypeData::TurnToHeading(turn) => {
                             let new_rot = Quaternion::from_heading(turn.params.desired_heading);
-                            entity.position.rotation = new_rot;
-
                             if guid == self.player.guid {
-                                self.player.position.rotation = new_rot;
+                                let mut pos = self.player.position;
+                                pos.rotation = new_rot;
+                                events.extend(self.set_player_position(pos));
+                            } else {
+                                entity.position.rotation = new_rot;
+                                events.push(WorldEvent::EntityMoved {
+                                    guid,
+                                    pos: entity.position,
+                                });
                             }
-
-                            events.push(WorldEvent::EntityMoved {
-                                guid,
-                                pos: entity.position,
-                            });
                         }
                         MovementTypeData::TurnToObject(turn) => {
                             let mut new_rot = entity.position.rotation;
@@ -342,26 +331,21 @@ impl WorldState {
                             } else if let Some((target_lb, target_coords)) = target_info
                                 && target_lb == entity.position.landblock_id
                             {
-                                let diff = target_coords - entity.position.coords;
-                                let math_rad = f32::atan2(-diff.x, diff.y);
-                                let mut heading_deg = 450.0 - math_rad.to_degrees();
-                                heading_deg %= 360.0;
-                                if heading_deg < 0.0 {
-                                    heading_deg += 360.0;
-                                }
-                                new_rot = Quaternion::from_heading(heading_deg.to_radians());
+                                let heading = entity.position.coords.heading_to(&target_coords);
+                                new_rot = Quaternion::from_heading(heading);
                             }
-
-                            entity.position.rotation = new_rot;
 
                             if guid == self.player.guid {
-                                self.player.position.rotation = new_rot;
+                                let mut pos = self.player.position;
+                                pos.rotation = new_rot;
+                                events.extend(self.set_player_position(pos));
+                            } else {
+                                entity.position.rotation = new_rot;
+                                events.push(WorldEvent::EntityMoved {
+                                    guid,
+                                    pos: entity.position,
+                                });
                             }
-
-                            events.push(WorldEvent::EntityMoved {
-                                guid,
-                                pos: entity.position,
-                            });
                         }
                         _ => {}
                     }
@@ -369,13 +353,17 @@ impl WorldState {
             }
             GameMessage::VectorUpdate(data) => {
                 let guid = data.guid;
-                // Note: We might want to store velocity/omega in the entity eventually
-                // for client-side interpolation. For now, just emit the event.
-                events.push(WorldEvent::EntityVectorUpdated {
-                    guid,
-                    velocity: data.velocity,
-                    omega: data.omega,
-                });
+
+                if guid == self.player.guid {
+                    events.extend(self.set_player_velocity(data.velocity));
+                } else if let Some(entity) = self.entities.get_mut(guid) {
+                    entity.velocity = data.velocity;
+                    events.push(WorldEvent::EntityVectorUpdated {
+                        guid,
+                        velocity: data.velocity,
+                        omega: data.omega,
+                    });
+                }
             }
             GameMessage::GameEvent(ev) => {
                 if let GameEvent::PlayerDescription(data) = &ev.event {
@@ -508,10 +496,8 @@ impl WorldState {
                     self.player.spells = data.spells.clone();
                     self.player.spell_lists = data.spell_lists.clone();
 
-                    if let Some(p) = pos
-                        && let Some(entity) = self.entities.get_mut(guid)
-                    {
-                        entity.position = *p;
+                    if let Some(p) = pos {
+                        events.extend(self.set_player_position(*p));
                     }
 
                     events.push(WorldEvent::PlayerInfo {
@@ -878,9 +864,13 @@ impl WorldState {
                                     Some(data.value)
                                 };
                                 if data.value != Guid::NULL {
-                                    let old_lb = entity.position.landblock_id;
-                                    if old_lb != Guid::NULL {
-                                        entity.position.landblock_id = Guid::NULL;
+                                    let mut pos = entity.position;
+                                    pos.landblock_id = Guid::NULL;
+                                    if target_guid == self.player.guid {
+                                        events.extend(self.set_player_position(pos));
+                                    } else {
+                                        let old_lb = entity.position.landblock_id;
+                                        entity.position = pos;
                                         self.scene.remove_entity(entity.guid, old_lb);
                                     }
                                 }
@@ -892,9 +882,13 @@ impl WorldState {
                                     Some(data.value)
                                 };
                                 if data.value != Guid::NULL {
-                                    let old_lb = entity.position.landblock_id;
-                                    if old_lb != Guid::NULL {
-                                        entity.position.landblock_id = Guid::NULL;
+                                    let mut pos = entity.position;
+                                    pos.landblock_id = Guid::NULL;
+                                    if target_guid == self.player.guid {
+                                        events.extend(self.set_player_position(pos));
+                                    } else {
+                                        let old_lb = entity.position.landblock_id;
+                                        entity.position = pos;
                                         self.scene.remove_entity(entity.guid, old_lb);
                                     }
                                 }
@@ -927,9 +921,13 @@ impl WorldState {
                                     Some(data.value)
                                 };
                                 if data.value != Guid::NULL {
-                                    let old_lb = entity.position.landblock_id;
-                                    if old_lb != Guid::NULL {
-                                        entity.position.landblock_id = Guid::NULL;
+                                    let mut pos = entity.position;
+                                    pos.landblock_id = Guid::NULL;
+                                    if target_guid == self.player.guid {
+                                        events.extend(self.set_player_position(pos));
+                                    } else {
+                                        let old_lb = entity.position.landblock_id;
+                                        entity.position = pos;
                                         self.scene.remove_entity(entity.guid, old_lb);
                                     }
                                 }
@@ -941,9 +939,13 @@ impl WorldState {
                                     Some(data.value)
                                 };
                                 if data.value != Guid::NULL {
-                                    let old_lb = entity.position.landblock_id;
-                                    if old_lb != Guid::NULL {
-                                        entity.position.landblock_id = Guid::NULL;
+                                    let mut pos = entity.position;
+                                    pos.landblock_id = Guid::NULL;
+                                    if target_guid == self.player.guid {
+                                        events.extend(self.set_player_position(pos));
+                                    } else {
+                                        let old_lb = entity.position.landblock_id;
+                                        entity.position = pos;
                                         self.scene.remove_entity(entity.guid, old_lb);
                                     }
                                 }
@@ -1057,25 +1059,153 @@ impl WorldState {
         let next_coords = coords + step;
 
         if !self.is_colliding(&next_coords, lb, radius) {
-            if let Some(player_entity) = self.entities.get_mut(self.player.guid) {
-                player_entity.position.coords = next_coords;
-                self.player.position.coords = next_coords;
-                self.scene.update_entity(self.player.guid, lb, lb);
+            let mut next_pos = self.player.position;
+            next_pos.coords = next_coords;
+            events.extend(self.set_player_position(next_pos));
+        } else {
+            events.extend(self.set_player_velocity(Vector3::zero()));
+        }
 
-                events.push(WorldEvent::EntityMoved {
-                    guid: self.player.guid,
-                    pos: self.player.position,
-                });
-            }
-        } else if let Some(player_entity) = self.entities.get_mut(self.player.guid) {
-            player_entity.velocity = Vector3::zero();
+        events
+    }
 
+    /// Updates the player's position, ensuring the record in PlayerState,
+    /// the mirrored Entity, and the SpatialScene stay in sync.
+    pub fn set_player_position(&mut self, pos: WorldPosition) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return events;
+        }
+
+        let old_lb = self.player.position.landblock_id;
+        self.player.position = pos;
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.position = pos;
+        }
+        self.scene.update_entity(guid, old_lb, pos.landblock_id);
+
+        events.push(WorldEvent::EntityMoved { guid, pos });
+        events
+    }
+
+    /// Updates the player's velocity in both PlayerState (if mirrored) and the Entity map.
+    pub fn set_player_velocity(&mut self, velocity: Vector3) -> Vec<WorldEvent> {
+        let mut events = Vec::new();
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return events;
+        }
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.velocity = velocity;
             events.push(WorldEvent::EntityVectorUpdated {
-                guid: self.player.guid,
-                velocity: Vector3::zero(),
-                omega: Vector3::zero(), // TODO: Keep current omega?
+                guid,
+                velocity,
+                omega: Vector3::zero(), // Entities don't currently store omega
             });
         }
         events
+    }
+
+    /// Applies an authoritative server-side movement sync to the player.
+    pub fn apply_player_autonomous_position(
+        &mut self,
+        data: &ServerAutonomousPositionData,
+    ) -> Vec<WorldEvent> {
+        let events = self.set_player_position(data.position);
+
+        self.player.instance_sequence = data.instance_sequence;
+        self.player.server_control_sequence = data.server_control_sequence;
+        self.player.teleport_sequence = data.teleport_sequence;
+        self.player.force_position_sequence = data.force_position_sequence;
+
+        events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::position::WorldPosition;
+
+    #[test]
+    fn test_player_mirror_invariant_on_set_position() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+
+        // Register player as an entity too
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let new_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+
+        state.set_player_position(new_pos);
+
+        assert_eq!(state.player.position, new_pos);
+        assert_eq!(state.entities.get(player_guid).unwrap().position, new_pos);
+    }
+
+    #[test]
+    fn test_player_mirror_invariant_on_set_velocity() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition::default();
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let new_vel = Vector3::new(1.0, 2.0, 3.0);
+        state.set_player_velocity(new_vel);
+
+        assert_eq!(state.entities.get(player_guid).unwrap().velocity, new_vel);
+    }
+
+    #[test]
+    fn test_player_mirror_invariant_on_autonomous_sync() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition::default();
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let sync_data = ServerAutonomousPositionData {
+            guid: player_guid,
+            position: WorldPosition {
+                landblock_id: Guid(0x56780000),
+                coords: Vector3::new(1.0, 1.0, 1.0),
+                rotation: holtburger_common::math::Quaternion::identity(),
+            },
+            instance_sequence: 10,
+            server_control_sequence: 20,
+            teleport_sequence: 30,
+            force_position_sequence: 40,
+            contact_flags: 0,
+        };
+
+        state.apply_player_autonomous_position(&sync_data);
+
+        assert_eq!(state.player.position, sync_data.position);
+        assert_eq!(
+            state.entities.get(player_guid).unwrap().position,
+            sync_data.position
+        );
+        assert_eq!(state.player.instance_sequence, 10);
+        assert_eq!(state.player.server_control_sequence, 20);
     }
 }

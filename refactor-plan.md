@@ -312,37 +312,18 @@ Functions to move:
 
 **7a — `MovementSystem` struct:**
 
-- [ ] **7a.1** Define `MovementSystem` in `movement.rs`:
-  ```rust
-  pub(super) struct MovementSystem {
-      pub(super) move_target: Option<Guid>,
-      last_move_sync: Instant,
-      last_move_pos: WorldPosition,
-      last_move_pos_time: Instant,
-      last_sent_pos_seq: Option<u16>,
-  }
-  ```
-- [ ] **7a.2** Convert the `impl Client` methods in `movement.rs` to `impl MovementSystem`
+- [x] **7a.1** Define `MovementSystem` in `movement.rs`:
+- [x] **7a.2** Convert the `impl Client` methods in `movement.rs` to `impl MovementSystem`
   methods that receive shared state as parameters:
-  ```rust
-  impl MovementSystem {
-      pub(super) async fn handle_approach_task(
-          &mut self, target_guid: Guid, dt: f32,
-          world: &mut WorldState, session: &mut Session,
-          event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
-      ) -> Result<()> { ... }
-  }
-  ```
-- [ ] **7a.3** Update `Client` struct: remove the 5 movement fields, add
+- [x] **7a.3** Update `Client` struct: remove the 5 movement fields, add
   `movement: MovementSystem`.
-- [ ] **7a.4** Update `run()` to use destructuring for disjoint borrows:
-  ```rust
-  let Client { movement, world, session, event_tx, .. } = self;
-  movement.handle_approach_task(target_guid, dt, world, session, event_tx).await?;
-  ```
-- [ ] **7a.5** Update `builder.rs` to initialize `movement: MovementSystem::new()`.
-- [ ] **7a.6** `cargo build && cargo test` — green.
-- [ ] **7a.7** Commit: `refactor(client): extract MovementSystem struct`.
+- [x] **7a.4** Update `run()` to use destructuring for disjoint borrows:
+- [x] **7a.5** Update `builder.rs` to initialize `movement: MovementSystem::new()`.
+- [x] **7a.6** `cargo build && cargo test` — green.
+- [x] **7a.7** Commit: `refactor(client): extract MovementSystem struct`.
+
+**Notes:**
+- **Completed 2026-02-13:** Extracted `MovementSystem`. Fields are `pub(super)` for cross-file access within the `client` module. Used borrow splitting in `run()` and `messages.rs`.
 
 **7b — `AuthState` struct:**
 

@@ -13,6 +13,7 @@ mod movement;
 mod commands;
 mod messages;
 use types::*;
+use movement::MovementSystem;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
@@ -30,11 +31,7 @@ pub struct Client {
     connection_cookie: u64,
     pub message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
-    move_target: Option<Guid>,
-    last_move_sync: Instant,
-    last_move_pos: holtburger_common::position::WorldPosition,
-    last_move_pos_time: Instant,
-    last_sent_pos_seq: Option<u16>,
+    movement: MovementSystem,
 }
 
 impl Client {
@@ -78,9 +75,9 @@ impl Client {
 
                                         for event in world_events {
                                             if let WorldEvent::ForcedReposition { .. } = event
-                                                && self.move_target.is_some() {
+                                                && self.movement.move_target.is_some() {
                                                     log::warn!("Approach aborted: Forced reposition by server");
-                                                    self.move_target = None;
+                                                    self.movement.move_target = None;
                                                     if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
                                                         player.velocity = holtburger_common::Vector3::zero();
                                                     }
@@ -131,8 +128,9 @@ impl Client {
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
 
-                    if let Some(target_guid) = self.move_target {
-                        self.handle_approach_task(target_guid, dt).await?;
+                    if let Some(target_guid) = self.movement.move_target {
+                        let Client { movement, world, session, event_tx, .. } = self;
+                        movement.handle_approach_task(target_guid, dt, world, session, event_tx).await?;
                     }
 
                     // TODO: Use actual player radius from DAT/Properties

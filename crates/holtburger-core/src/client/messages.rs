@@ -54,7 +54,7 @@ impl Client {
                 if data.guid == self.world.player.guid {
                     let force_pos_seq = data.pos.force_position_sequence;
 
-                    if let Some(old_seq) = self.last_sent_pos_seq
+                    if let Some(old_seq) = self.movement.last_sent_pos_seq
                         && force_pos_seq > old_seq
                     {
                         log::warn!(
@@ -65,13 +65,14 @@ impl Client {
                         // We don't abort movement here, we just accept the new sequence
                         // WorldState already updated the position via delegation above
                     }
-                    self.last_sent_pos_seq = Some(force_pos_seq);
+                    self.movement.last_sent_pos_seq = Some(force_pos_seq);
                 }
                 Ok(())
             }
             GameMessage::UpdateMotion(data) => {
                 if data.guid == self.world.player.guid && !data.is_autonomous {
-                    self.handle_server_controlled_movement(*data).await?;
+                    let Client { movement, world, session, event_tx, .. } = self;
+                    movement.handle_server_controlled_movement(*data, world, session, event_tx).await?;
                 }
                 Ok(())
             }
@@ -87,7 +88,7 @@ impl Client {
                     self.world.player.server_control_sequence = data.server_control_sequence;
                     self.world.player.teleport_sequence = data.teleport_sequence;
                     self.world.player.force_position_sequence = data.force_position_sequence;
-                    self.last_sent_pos_seq = Some(data.force_position_sequence);
+                    self.movement.last_sent_pos_seq = Some(data.force_position_sequence);
 
                     if let Some(tx) = &self.event_tx {
                         let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::EntityMoved {

@@ -1,19 +1,47 @@
-use crate::client::{Client, ClientEvent};
-use crate::world::WorldEvent;
+use crate::client::ClientEvent;
+use crate::world::{WorldEvent, WorldState};
+use crate::session::Session;
 use anyhow::Result;
 use holtburger_common::{Guid, Quaternion};
+use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionFlags;
 use holtburger_protocol::messages::*;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 
-impl Client {
-    pub(super) async fn handle_approach_task(&mut self, target_guid: Guid, _dt: f32) -> Result<()> {
-        let player_pos = self.world.player.position.coords;
-        let target_pos = if let Some(target) = self.world.entities.get(target_guid) {
+pub(super) struct MovementSystem {
+    pub(super) move_target: Option<Guid>,
+    pub(super) last_move_sync: Instant,
+    pub(super) last_move_pos: WorldPosition,
+    pub(super) last_move_pos_time: Instant,
+    pub(super) last_sent_pos_seq: Option<u16>,
+}
+
+impl MovementSystem {
+    pub(super) fn new() -> Self {
+        Self {
+            move_target: None,
+            last_move_sync: Instant::now(),
+            last_move_pos: WorldPosition::default(),
+            last_move_pos_time: Instant::now(),
+            last_sent_pos_seq: None,
+        }
+    }
+
+    pub(super) async fn handle_approach_task(
+        &mut self,
+        target_guid: Guid,
+        _dt: f32,
+        world: &mut WorldState,
+        session: &mut Session,
+        _event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
+    ) -> Result<()> {
+        let player_pos = world.player.position.coords;
+        let target_pos = if let Some(target) = world.entities.get(target_guid) {
             target.position.coords
         } else {
             log::warn!("Approach aborted: Target 0x{:08X} not found", target_guid);
@@ -27,7 +55,7 @@ impl Client {
         if dist < 1.0 {
             log::info!("Arrived at target 0x{:08X}", target_guid);
             self.move_target = None;
-            if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
+            if let Some(player) = world.entities.get_mut(world.player.guid) {
                 player.velocity = holtburger_common::Vector3::zero();
             }
             return Ok(());
@@ -36,17 +64,16 @@ impl Client {
         // Stuck detection
         let now = Instant::now();
         if now.duration_since(self.last_move_pos_time) > Duration::from_millis(500) {
-            let dist_since_last =
-                (self.world.player.position.coords - self.last_move_pos.coords).length();
+            let dist_since_last = (world.player.position.coords - self.last_move_pos.coords).length();
             if dist_since_last < 0.1 {
                 log::warn!("Approach aborted: Player seems stuck");
                 self.move_target = None;
-                if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
+                if let Some(player) = world.entities.get_mut(world.player.guid) {
                     player.velocity = holtburger_common::Vector3::zero();
                 }
                 return Ok(());
             }
-            self.last_move_pos = self.world.player.position;
+            self.last_move_pos = world.player.position;
             self.last_move_pos_time = now;
         }
 
@@ -54,7 +81,7 @@ impl Client {
         let dir = diff / dist;
         let velocity = dir * 7.0;
 
-        if let Some(player) = self.world.entities.get_mut(self.world.player.guid) {
+        if let Some(player) = world.entities.get_mut(world.player.guid) {
             player.velocity = velocity;
         }
 
@@ -69,15 +96,15 @@ impl Client {
                     forward_speed: Some(7.0),
                     ..Default::default()
                 },
-                position: self.world.player.position,
-                instance_sequence: self.world.player.instance_sequence,
-                server_control_sequence: self.world.player.server_control_sequence,
-                teleport_sequence: self.world.player.teleport_sequence,
-                force_position_sequence: self.world.player.force_position_sequence,
+                position: world.player.position,
+                instance_sequence: world.player.instance_sequence,
+                server_control_sequence: world.player.server_control_sequence,
+                teleport_sequence: world.player.teleport_sequence,
+                force_position_sequence: world.player.force_position_sequence,
                 contact_long_jump: 1, // On Ground
             };
 
-            self.session
+            session
                 .send_action(GameAction::MoveToState(Box::new(data)))
                 .await?;
         }
@@ -85,14 +112,20 @@ impl Client {
         Ok(())
     }
 
-    pub(super) async fn handle_server_controlled_movement(&mut self, data: MovementEventData) -> Result<()> {
+    pub(super) async fn handle_server_controlled_movement(
+        &mut self,
+        data: MovementEventData,
+        world: &mut WorldState,
+        session: &mut Session,
+        event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
+    ) -> Result<()> {
         log::info!(
             ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
             data.movement_type,
             data.server_control_sequence
         );
 
-        let mut next_pos = self.world.player.position;
+        let mut next_pos = world.player.position;
 
         match &data.data {
             MovementTypeData::MoveToObject(mto) => {
@@ -104,8 +137,8 @@ impl Client {
                 let arrival_dist = mto.params.distance_to_object;
 
                 // Calculate arrival on the line between the player and the target
-                if self.world.player.position.landblock_id >> 16 == next_pos.landblock_id >> 16 {
-                    let to_player = self.world.player.position.coords - next_pos.coords;
+                if world.player.position.landblock_id >> 16 == next_pos.landblock_id >> 16 {
+                    let to_player = world.player.position.coords - next_pos.coords;
                     if to_player.length_squared() > 1e-6 {
                         next_pos.coords = next_pos.coords + (to_player.normalize() * arrival_dist);
 
@@ -141,7 +174,7 @@ impl Client {
                     next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
                 } else {
                     // Face the target position from our current position
-                    let diff = next_pos.coords - self.world.player.position.coords;
+                    let diff = next_pos.coords - world.player.position.coords;
                     if diff.length_squared() > 1e-6 {
                         let math_rad = f32::atan2(-diff.x, diff.y);
                         let mut heading_deg = 450.0 - math_rad.to_degrees();
@@ -160,7 +193,7 @@ impl Client {
                 // If the turn has a heading, use it. Some TurnToObjects have 0.0 which means "compute it".
                 if tto.desired_heading.abs() > 1e-6 {
                     next_pos.rotation = Quaternion::from_heading(tto.desired_heading);
-                } else if let Some(target) = self.world.entities.get(tto.target) {
+                } else if let Some(target) = world.entities.get(tto.target) {
                     // Try to compute heading to target (West = 0, North = 90, East = 180, South = 270)
                     // We only do this if they are in the same landblock for now.
                     if target.position.landblock_id == next_pos.landblock_id {
@@ -184,10 +217,10 @@ impl Client {
 
         // Update local world state (Teleport)
         // Check distance safely - ignore check if we are uninitialized (landblock 0) or just logging in
-        let distance = if self.world.player.position.landblock_id == Guid::NULL {
+        let distance = if world.player.position.landblock_id == Guid::NULL {
             0.0
         } else {
-            self.world.player.position.distance_to(&next_pos)
+            world.player.position.distance_to(&next_pos)
         };
 
         if distance > AUTO_MOVE_DISTANCE_LIMIT {
@@ -196,7 +229,7 @@ impl Client {
                 distance,
                 AUTO_MOVE_DISTANCE_LIMIT
             );
-            if let Some(tx) = &self.event_tx {
+            if let Some(tx) = event_tx {
                 let _ = tx.send(ClientEvent::ClientError(format!(
                     "Item is too far away ({:.1}m). Move closer!",
                     distance
@@ -205,12 +238,12 @@ impl Client {
             return Ok(());
         }
 
-        self.world.player.position = next_pos;
+        world.player.position = next_pos;
 
         // Emit event so TUI knows we "arrived"
-        if let Some(tx) = &self.event_tx {
+        if let Some(tx) = event_tx {
             let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::EntityMoved {
-                guid: self.world.player.guid,
+                guid: world.player.guid,
                 pos: next_pos,
             })));
         }
@@ -220,16 +253,16 @@ impl Client {
         // cancels server-side movement chains (like pickups) on the ACE server.
         let pulse = AutonomousPositionActionData {
             position: next_pos,
-            instance_sequence: self.world.player.instance_sequence,
-            server_control_sequence: self.world.player.server_control_sequence,
-            teleport_sequence: self.world.player.teleport_sequence,
-            force_position_sequence: self.world.player.force_position_sequence,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
             last_contact: 1, // Logged as 0x1 (Contact) in retail
         };
 
         log::debug!(
             ">>>> Sending AutonomousPosition heartbeat. ServerSeq: {}, Pos: {:?}",
-            self.world.player.server_control_sequence,
+            world.player.server_control_sequence,
             next_pos
         );
 
@@ -238,7 +271,7 @@ impl Client {
             action: GameAction::AutonomousPosition(Box::new(pulse)),
         };
 
-        self.session
+        session
             .send_message(&GameMessage::GameAction(Box::new(action)))
             .await?;
 

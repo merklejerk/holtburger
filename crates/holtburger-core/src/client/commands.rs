@@ -281,9 +281,9 @@ impl Client {
             }
             ClientCommand::MoveTo { target } => {
                 log::info!(">>> Starting approach to target: 0x{:08X}", target);
-                self.move_target = Some(target);
-                self.last_move_pos = self.world.player.position;
-                self.last_move_pos_time = Instant::now();
+                self.movement.move_target = Some(target);
+                self.movement.last_move_pos = self.world.player.position;
+                self.movement.last_move_pos_time = Instant::now();
                 Ok(())
             }
             ClientCommand::SyncPosition => {

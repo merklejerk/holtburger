@@ -88,3 +88,15 @@ Used in `ObjectCreate` and some other static contexts.
 | 20 | `float` | `QX` | Quaternion X. |
 | 24 | `float` | `QY` | Quaternion Y. |
 | 28 | `float` | `QZ` | Quaternion Z. |
+
+## 4. Distance Semantics (Client Libraries)
+
+For UI sorting and nearby-entity displays, `WorldPosition::distance_to` in `holtburger-common` uses a **global-space Euclidean distance**:
+
+- Convert each position to global meters using landblock offsets (`LandblockX/Y * 192 + local X/Y`).
+- Compute straight-line 3D distance from that global pair.
+- This applies even when one or both positions are indoors (matching ACE's `Position.DistanceTo` behavior).
+
+### Important Caveat
+
+This value is a **geometric approximation**, not a navigation/pathing distance. For indoor spaces (dungeons/buildings), walls, portals, and floor separation are not modeled by this metric.

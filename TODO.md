@@ -21,17 +21,18 @@
 [ ] All verbs should have synonymous slash chat commands.
 [ ] Spell IDs need to be converted to names in enchants lists.
 [x] Force Verb shortcuts to be unique at compile time.
-[ ] Equip verb.
+[ ] [E]quip verb.
 [ ] Missing many unit tests for protocol types (lost in the refactor?).
 [ ] [C]ombine verb (crafting).
 [ ] [T]arget verb (combat).
 [ ] [U]se for Mana charges.
 [x] Enter key for interaction target confirmation.
+[ ] In-world containers.
 
 ### High
 [ ] Vitae penalty not being tracked anymore?
 [x] Refactor client movement system (move to, nav).
-[ ] Distance calculation is wrong when in different landblocks.
+[x] Distance calculation is wrong when in different landblocks.
 [x] Add "active entity" system:
     [x] In entity lists, add [H]eal, [G]ive, [T]arget, [M]ove verbs.
     [x] Add a contextual "active entity" panel below dashboard and context panel.

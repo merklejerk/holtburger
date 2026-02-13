@@ -25,5 +25,7 @@ release-test/data/
 # Agent skills
 .github/skills
 
+!README.md
+
 # Machine-local references and working notes
 /local/

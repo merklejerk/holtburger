@@ -18,6 +18,11 @@ pub struct VitalBase {
     pub start: u32,
 }
 
+/// The localized state of the current player.
+///
+/// NOTE: This data is mirrored in the `WorldState.entities` map.
+/// Authorities should update player state via `WorldState` mutation methods
+/// to maintain the mirror invariant.
 #[derive(Debug, Clone)]
 pub struct PlayerState {
     pub guid: Guid,

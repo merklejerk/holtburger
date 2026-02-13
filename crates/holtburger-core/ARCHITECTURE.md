@@ -24,8 +24,12 @@ Handles the low-level AC protocol transport details:
 ## Internal Data Flow
 1. **Network**: `Session` receives raw UDP fragments.
 2. **Protocol**: `holtburger-protocol` unpacks them into `GameMessage` structs.
-3. **Engine**: `Client` processes the message, updating `WorldState`.
-4. **UI**: `Client` emits a `WorldEvent` or `ClientEvent` to the downstream consumer.
+3. **Engine**: `Client` processes the message and emits intents to `WorldState`.
+4. **Authority**: `WorldState` performs the actual mutation (position, velocity, etc.) and enforces data consistency.
+5. **UI**: `Client` emits a `WorldEvent` or `ClientEvent` to the downstream consumer.
+
+### Mutation Boundary
+Direct field mutation of the 3D world state from outside the `world/` module is strictly prohibited. `WorldState` provides a safe mutation API (e.g., `set_player_position`) that ensures mirrored data (like the player's entity record) stays in lockstep with session state.
 
 ## Dependencies
 - Uses `holtburger-common` for math and core types.

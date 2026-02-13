@@ -13,25 +13,6 @@ use tokio::sync::mpsc;
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 
-/// Calculates the AC heading (radians) required to face from a source position to a target position.
-fn calculate_heading_to(
-    source: holtburger_common::Vector3,
-    target: holtburger_common::Vector3,
-) -> f32 {
-    let diff = target - source;
-    if diff.length_squared() < 1e-6 {
-        return 0.0;
-    }
-    // math_rad = atan2(-dx, dy) where math 0 = North
-    let math_rad = f32::atan2(-diff.x, diff.y);
-    let mut heading_deg = 450.0 - math_rad.to_degrees();
-    heading_deg %= 360.0;
-    if heading_deg < 0.0 {
-        heading_deg += 360.0;
-    }
-    heading_deg.to_radians()
-}
-
 /// Computes the position a player should stop at when moving toward a target at a specific distance.
 fn calculate_arrival_position(
     source: &WorldPosition,
@@ -187,10 +168,9 @@ impl MovementSystem {
 
                     // If desired_heading is 0.0, face the target
                     if mto.params.desired_heading.abs() <= 1e-6 {
-                        next_pos.rotation = Quaternion::from_heading(calculate_heading_to(
-                            next_pos.coords,
-                            mto.origin.position,
-                        ));
+                        next_pos.rotation = Quaternion::from_heading(
+                            next_pos.coords.heading_to(&mto.origin.position),
+                        );
                     } else {
                         next_pos.rotation = Quaternion::from_heading(mto.params.desired_heading);
                     }
@@ -208,10 +188,9 @@ impl MovementSystem {
                     next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
                 } else {
                     // Face the target position from our current position
-                    next_pos.rotation = Quaternion::from_heading(calculate_heading_to(
-                        world.player.position.coords,
-                        next_pos.coords,
-                    ));
+                    next_pos.rotation = Quaternion::from_heading(
+                        world.player.position.coords.heading_to(&next_pos.coords),
+                    );
                 }
             }
             MovementTypeData::TurnToHeading(tth) => {
@@ -225,10 +204,9 @@ impl MovementSystem {
                     // Try to compute heading to target (West = 0, North = 90, East = 180, South = 270)
                     // We only do this if they are in the same landblock for now.
                     if target.position.landblock_id == next_pos.landblock_id {
-                        next_pos.rotation = Quaternion::from_heading(calculate_heading_to(
-                            next_pos.coords,
-                            target.position.coords,
-                        ));
+                        next_pos.rotation = Quaternion::from_heading(
+                            next_pos.coords.heading_to(&target.position.coords),
+                        );
                     }
                 }
             }
@@ -311,19 +289,19 @@ mod tests {
         // North (0, 1, 0) -> Math Rad: atan2(0, 1) = 0. Deg: 450 - 0 = 450 % 360 = 90 deg (1.57 rad)
         // Wait, let's verify AC heading convention.
         // My function says 90 deg for North.
-        let heading = calculate_heading_to(source, Vector3::new(0.0, 1.0, 0.0));
+        let heading = source.heading_to(&Vector3::new(0.0, 1.0, 0.0));
         assert!((heading.to_degrees() - 90.0).abs() < 1e-4);
 
         // West (-1, 0, 0) -> Math Rad: atan2(1, 0) = pi/2 (90 deg). Deg: 450 - 90 = 360 % 360 = 0 deg
-        let heading = calculate_heading_to(source, Vector3::new(-1.0, 0.0, 0.0));
+        let heading = source.heading_to(&Vector3::new(-1.0, 0.0, 0.0));
         assert!((heading.to_degrees() - 0.0).abs() < 1e-4);
 
         // East (1, 0, 0) -> Math Rad: atan2(-1, 0) = -pi/2 (-90 deg). Deg: 450 - (-90) = 540 % 360 = 180 deg
-        let heading = calculate_heading_to(source, Vector3::new(1.0, 0.0, 0.0));
+        let heading = source.heading_to(&Vector3::new(1.0, 0.0, 0.0));
         assert!((heading.to_degrees() - 180.0).abs() < 1e-4);
 
         // South (0, -1, 0) -> Math Rad: atan2(0, -1) = pi (180 deg). Deg: 450 - 180 = 270 deg
-        let heading = calculate_heading_to(source, Vector3::new(0.0, -1.0, 0.0));
+        let heading = source.heading_to(&Vector3::new(0.0, -1.0, 0.0));
         assert!((heading.to_degrees() - 270.0).abs() < 1e-4);
     }
 

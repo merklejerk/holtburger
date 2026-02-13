@@ -6,6 +6,7 @@
 [x] Compass radar in dynamic panel.
 [x] Dereth chronometer in dynamic panel.
 [ ] Chat tabs (Chat vs combat vs all).
+[ ] Just interleave bars in netpulse widget.
 
 ### Medium
 [x] Make net stats widget fixed width. Currently Seems to scale with terminal width.
@@ -29,7 +30,7 @@
 
 ### High
 [ ] Vitae penalty not being tracked anymore?
-[ ] Refactor client movement system (move to, nav). Probably part of refactoring Client and below.
+[x] Refactor client movement system (move to, nav).
 [ ] Distance calculation is wrong when in different landblocks.
 [x] Add "active entity" system:
     [x] In entity lists, add [H]eal, [G]ive, [T]arget, [M]ove verbs.

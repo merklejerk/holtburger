@@ -51,6 +51,23 @@ impl Vector3 {
         let len = self.length();
         if len > 0.0 { *self / len } else { *self }
     }
+
+    /// Calculates the AC heading (radians) required to face from this position to a target.
+    /// AC heading convention: 0 is West, 90 is North, 180 is East, 270 is South.
+    pub fn heading_to(&self, target: &Vector3) -> f32 {
+        let diff = *target - *self;
+        if diff.length_squared() < 1e-6 {
+            return 0.0;
+        }
+        // math_rad = atan2(-dx, dy) where math 0 = North
+        let math_rad = f32::atan2(-diff.x, diff.y);
+        let mut heading_deg = 450.0 - math_rad.to_degrees();
+        heading_deg %= 360.0;
+        if heading_deg < 0.0 {
+            heading_deg += 360.0;
+        }
+        heading_deg.to_radians()
+    }
 }
 
 impl std::ops::Add for Vector3 {

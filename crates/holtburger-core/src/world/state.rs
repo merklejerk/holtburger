@@ -19,6 +19,15 @@ pub struct ServerTimeSync {
     pub local_time: std::time::Instant,
 }
 
+/// The authoritative state of the game world.
+///
+/// NOTE: The player's state is partially mirrored between `self.player` (session sequence data)
+/// and the `Entity` map (physical landblock/coords/velocity).
+///
+/// !!! CRITICAL !!!
+/// ALWAYS use the `set_player_*` mutation methods to update player position or velocity.
+/// Hand-writing to `self.player.position` or `self.entities` directly will cause
+/// physics desyncs and is considered "highly sus" behavior.
 pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
@@ -322,14 +331,8 @@ impl WorldState {
                             } else if let Some((target_lb, target_coords)) = target_info
                                 && target_lb == entity.position.landblock_id
                             {
-                                let diff = target_coords - entity.position.coords;
-                                let math_rad = f32::atan2(-diff.x, diff.y);
-                                let mut heading_deg = 450.0 - math_rad.to_degrees();
-                                heading_deg %= 360.0;
-                                if heading_deg < 0.0 {
-                                    heading_deg += 360.0;
-                                }
-                                new_rot = Quaternion::from_heading(heading_deg.to_radians());
+                                let heading = entity.position.coords.heading_to(&target_coords);
+                                new_rot = Quaternion::from_heading(heading);
                             }
 
                             if guid == self.player.guid {
@@ -350,13 +353,17 @@ impl WorldState {
             }
             GameMessage::VectorUpdate(data) => {
                 let guid = data.guid;
-                // Note: We might want to store velocity/omega in the entity eventually
-                // for client-side interpolation. For now, just emit the event.
-                events.push(WorldEvent::EntityVectorUpdated {
-                    guid,
-                    velocity: data.velocity,
-                    omega: data.omega,
-                });
+
+                if guid == self.player.guid {
+                    events.extend(self.set_player_velocity(data.velocity));
+                } else if let Some(entity) = self.entities.get_mut(guid) {
+                    entity.velocity = data.velocity;
+                    events.push(WorldEvent::EntityVectorUpdated {
+                        guid,
+                        velocity: data.velocity,
+                        omega: data.omega,
+                    });
+                }
             }
             GameMessage::GameEvent(ev) => {
                 if let GameEvent::PlayerDescription(data) = &ev.event {
@@ -1115,5 +1122,90 @@ impl WorldState {
         self.player.force_position_sequence = data.force_position_sequence;
 
         events
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::position::WorldPosition;
+
+    #[test]
+    fn test_player_mirror_invariant_on_set_position() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+
+        // Register player as an entity too
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let new_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+
+        state.set_player_position(new_pos);
+
+        assert_eq!(state.player.position, new_pos);
+        assert_eq!(state.entities.get(player_guid).unwrap().position, new_pos);
+    }
+
+    #[test]
+    fn test_player_mirror_invariant_on_set_velocity() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition::default();
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let new_vel = Vector3::new(1.0, 2.0, 3.0);
+        state.set_player_velocity(new_vel);
+
+        assert_eq!(state.entities.get(player_guid).unwrap().velocity, new_vel);
+    }
+
+    #[test]
+    fn test_player_mirror_invariant_on_autonomous_sync() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition::default();
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let sync_data = ServerAutonomousPositionData {
+            guid: player_guid,
+            position: WorldPosition {
+                landblock_id: Guid(0x56780000),
+                coords: Vector3::new(1.0, 1.0, 1.0),
+                rotation: holtburger_common::math::Quaternion::identity(),
+            },
+            instance_sequence: 10,
+            server_control_sequence: 20,
+            teleport_sequence: 30,
+            force_position_sequence: 40,
+            contact_flags: 0,
+        };
+
+        state.apply_player_autonomous_position(&sync_data);
+
+        assert_eq!(state.player.position, sync_data.position);
+        assert_eq!(
+            state.entities.get(player_guid).unwrap().position,
+            sync_data.position
+        );
+        assert_eq!(state.player.instance_sequence, 10);
+        assert_eq!(state.player.server_control_sequence, 20);
     }
 }

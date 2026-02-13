@@ -61,6 +61,7 @@ pub struct AppState {
     pub core_state: ClientState,
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
+    pub player_spells: Vec<u32>,
     pub spell_names: HashMap<u32, String>,
     pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub entities: HashMap<Guid, Entity>,
@@ -186,6 +187,7 @@ impl AppState {
             )
             .len(),
             DashboardTab::Inventory => self.get_filtered_inventory_tab().len(),
+            DashboardTab::Spells => self.player_spells.len(),
             DashboardTab::Character => crate::ui::widgets::stats::get_stats_list_items(self).len(),
         }
     }

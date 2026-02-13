@@ -43,6 +43,7 @@ pub enum WorldEvent {
         vitals: Vec<stats::Vital>,
         skills: Vec<stats::Skill>,
         enchantments: Vec<Enchantment>,
+        spells: Vec<u32>,
         vitae: f32,
         skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
         spell_names: std::collections::HashMap<u32, String>,
@@ -58,6 +59,12 @@ pub enum WorldEvent {
     EnchantmentDispelled {
         spell_id: u16,
         layer: u16,
+    },
+    SpellUpdated {
+        spell_id: u32,
+    },
+    SpellRemoved {
+        spell_id: u32,
     },
     ServerTimeUpdate(f64),
     EnchantmentsPurged,

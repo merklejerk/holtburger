@@ -295,6 +295,10 @@ pub fn get_debug_info(
             lines.push(Line::from(format!("XP Cost:    {:?}", xp_cost)));
             lines.push(Line::from(format!("SP Cost:    {:?}", sp_cost)));
         }
+        CommandTarget::Spell(spell_id) => {
+            lines.push(Line::from(format!("DEBUG INFO: Spell {}", spell_id)));
+            lines.push(Line::from(format!("Spell ID:   {}", spell_id)));
+        }
         CommandTarget::None => {}
     }
 

@@ -1,5 +1,5 @@
-use crate::client::{Client, ClientState};
 use crate::client::types::ClientCommand;
+use crate::client::{Client, ClientState};
 use anyhow::Result;
 use holtburger_common::Quaternion;
 use holtburger_protocol::messages::game_action::*;
@@ -13,11 +13,20 @@ impl Client {
         match cmd {
             ClientCommand::Login(password) => {
                 log::info!("Attempting login...");
-                self.send_login_request(&password).await
+                self.auth
+                    .send_login_request(&password, &mut self.session)
+                    .await
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
-                self.select_character(id).await
+                let Client {
+                    auth,
+                    session,
+                    state,
+                    event_tx,
+                    ..
+                } = self;
+                auth.select_character(id, session, state, event_tx).await
             }
             ClientCommand::SelectCharacterByIndex(idx) => match &self.state {
                 ClientState::CharacterSelection(chars) if (1..=chars.len()).contains(&idx) => {
@@ -29,17 +38,33 @@ impl Client {
                         char_name,
                         char_guid
                     );
-                    self.select_character(char_guid).await
+                    let Client {
+                        auth,
+                        session,
+                        state,
+                        event_tx,
+                        ..
+                    } = self;
+                    auth.select_character(char_guid, session, state, event_tx)
+                        .await
                 }
                 _ => Ok(()),
             },
             ClientCommand::EnterWorld => {
-                if let Some(char_id) = self.character_id {
+                if let Some(char_id) = self.auth.character_id {
                     log::info!(
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
-                    self.select_character(char_id).await
+                    let Client {
+                        auth,
+                        session,
+                        state,
+                        event_tx,
+                        ..
+                    } = self;
+                    auth.select_character(char_id, session, state, event_tx)
+                        .await
                 } else {
                     Ok(())
                 }

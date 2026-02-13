@@ -1,9 +1,9 @@
 use crate::client::ClientEvent;
-use crate::world::{WorldEvent, WorldState};
 use crate::session::Session;
+use crate::world::{WorldEvent, WorldState};
 use anyhow::Result;
-use holtburger_common::{Guid, Quaternion};
 use holtburger_common::position::WorldPosition;
+use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionFlags;
 use holtburger_protocol::messages::*;
@@ -12,6 +12,50 @@ use tokio::sync::mpsc;
 
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
+
+/// Calculates the AC heading (radians) required to face from a source position to a target position.
+fn calculate_heading_to(
+    source: holtburger_common::Vector3,
+    target: holtburger_common::Vector3,
+) -> f32 {
+    let diff = target - source;
+    if diff.length_squared() < 1e-6 {
+        return 0.0;
+    }
+    // math_rad = atan2(-dx, dy) where math 0 = North
+    let math_rad = f32::atan2(-diff.x, diff.y);
+    let mut heading_deg = 450.0 - math_rad.to_degrees();
+    heading_deg %= 360.0;
+    if heading_deg < 0.0 {
+        heading_deg += 360.0;
+    }
+    heading_deg.to_radians()
+}
+
+/// Computes the position a player should stop at when moving toward a target at a specific distance.
+fn calculate_arrival_position(
+    source: &WorldPosition,
+    target_pos: &holtburger_common::Vector3,
+    distance: f32,
+) -> holtburger_common::Vector3 {
+    let to_player = source.coords - *target_pos;
+    if to_player.length_squared() > 1e-6 {
+        *target_pos + (to_player.normalize() * distance)
+    } else {
+        let mut fallback = *target_pos;
+        fallback.x += distance;
+        fallback
+    }
+}
+
+/// Heuristic to detect if a player is "stuck".
+fn is_stuck(
+    current_pos: &holtburger_common::Vector3,
+    last_pos: &holtburger_common::Vector3,
+    threshold: f32,
+) -> bool {
+    (*current_pos - *last_pos).length() < threshold
+}
 
 pub(super) struct MovementSystem {
     pub(super) move_target: Option<Guid>,
@@ -64,8 +108,11 @@ impl MovementSystem {
         // Stuck detection
         let now = Instant::now();
         if now.duration_since(self.last_move_pos_time) > Duration::from_millis(500) {
-            let dist_since_last = (world.player.position.coords - self.last_move_pos.coords).length();
-            if dist_since_last < 0.1 {
+            if is_stuck(
+                &world.player.position.coords,
+                &self.last_move_pos.coords,
+                0.1,
+            ) {
                 log::warn!("Approach aborted: Player seems stuck");
                 self.move_target = None;
                 if let Some(player) = world.entities.get_mut(world.player.guid) {
@@ -137,28 +184,21 @@ impl MovementSystem {
                 let arrival_dist = mto.params.distance_to_object;
 
                 // Calculate arrival on the line between the player and the target
-                if world.player.position.landblock_id >> 16 == next_pos.landblock_id >> 16 {
-                    let to_player = world.player.position.coords - next_pos.coords;
-                    if to_player.length_squared() > 1e-6 {
-                        next_pos.coords = next_pos.coords + (to_player.normalize() * arrival_dist);
+                if (world.player.position.landblock_id >> 16) == (next_pos.landblock_id >> 16) {
+                    next_pos.coords = calculate_arrival_position(
+                        &world.player.position,
+                        &next_pos.coords,
+                        arrival_dist,
+                    );
 
-                        // If desired_heading is 0.0, face the target
-                        if mto.params.desired_heading.abs() <= 1e-6 {
-                            // atan2(-dx, dy) returns math radians (0=North, pi/2=West, pi=South, 3pi/2=East)
-                            let math_rad = f32::atan2(-to_player.x, to_player.y);
-                            let mut heading_deg = 450.0 - math_rad.to_degrees();
-                            heading_deg %= 360.0;
-                            if heading_deg < 0.0 {
-                                heading_deg += 360.0;
-                            }
-                            next_pos.rotation = Quaternion::from_heading(heading_deg.to_radians());
-                        } else {
-                            next_pos.rotation =
-                                Quaternion::from_heading(mto.params.desired_heading);
-                        }
+                    // If desired_heading is 0.0, face the target
+                    if mto.params.desired_heading.abs() <= 1e-6 {
+                        next_pos.rotation = Quaternion::from_heading(calculate_heading_to(
+                            next_pos.coords,
+                            mto.origin.position,
+                        ));
                     } else {
-                        // If we are exactly on top, just offset X
-                        next_pos.coords.x += arrival_dist;
+                        next_pos.rotation = Quaternion::from_heading(mto.params.desired_heading);
                     }
                 } else {
                     // Different landblocks, fallback to simple offset
@@ -174,16 +214,10 @@ impl MovementSystem {
                     next_pos.rotation = Quaternion::from_heading(mtp.params.desired_heading);
                 } else {
                     // Face the target position from our current position
-                    let diff = next_pos.coords - world.player.position.coords;
-                    if diff.length_squared() > 1e-6 {
-                        let math_rad = f32::atan2(-diff.x, diff.y);
-                        let mut heading_deg = 450.0 - math_rad.to_degrees();
-                        heading_deg %= 360.0;
-                        if heading_deg < 0.0 {
-                            heading_deg += 360.0;
-                        }
-                        next_pos.rotation = Quaternion::from_heading(heading_deg.to_radians());
-                    }
+                    next_pos.rotation = Quaternion::from_heading(calculate_heading_to(
+                        world.player.position.coords,
+                        next_pos.coords,
+                    ));
                 }
             }
             MovementTypeData::TurnToHeading(tth) => {
@@ -197,16 +231,10 @@ impl MovementSystem {
                     // Try to compute heading to target (West = 0, North = 90, East = 180, South = 270)
                     // We only do this if they are in the same landblock for now.
                     if target.position.landblock_id == next_pos.landblock_id {
-                        let diff = target.position.coords - next_pos.coords;
-                        // atan2(-dx, dy) returns math radians (0=North, pi/2=West, pi=South, 3pi/2=East)
-                        let math_rad = f32::atan2(-diff.x, diff.y);
-                        let mut heading_deg = 450.0 - math_rad.to_degrees();
-                        heading_deg %= 360.0;
-                        if heading_deg < 0.0 {
-                            heading_deg += 360.0;
-                        }
-
-                        next_pos.rotation = Quaternion::from_heading(heading_deg.to_radians());
+                        next_pos.rotation = Quaternion::from_heading(calculate_heading_to(
+                            next_pos.coords,
+                            target.position.coords,
+                        ));
                     }
                 }
             }
@@ -276,5 +304,58 @@ impl MovementSystem {
             .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::Vector3;
+
+    #[test]
+    fn test_calculate_heading_to() {
+        let source = Vector3::new(0.0, 0.0, 0.0);
+        // North (0, 1, 0) -> Math Rad: atan2(0, 1) = 0. Deg: 450 - 0 = 450 % 360 = 90 deg (1.57 rad)
+        // Wait, let's verify AC heading convention.
+        // My function says 90 deg for North.
+        let heading = calculate_heading_to(source, Vector3::new(0.0, 1.0, 0.0));
+        assert!((heading.to_degrees() - 90.0).abs() < 1e-4);
+
+        // West (-1, 0, 0) -> Math Rad: atan2(1, 0) = pi/2 (90 deg). Deg: 450 - 90 = 360 % 360 = 0 deg
+        let heading = calculate_heading_to(source, Vector3::new(-1.0, 0.0, 0.0));
+        assert!((heading.to_degrees() - 0.0).abs() < 1e-4);
+
+        // East (1, 0, 0) -> Math Rad: atan2(-1, 0) = -pi/2 (-90 deg). Deg: 450 - (-90) = 540 % 360 = 180 deg
+        let heading = calculate_heading_to(source, Vector3::new(1.0, 0.0, 0.0));
+        assert!((heading.to_degrees() - 180.0).abs() < 1e-4);
+
+        // South (0, -1, 0) -> Math Rad: atan2(0, -1) = pi (180 deg). Deg: 450 - 180 = 270 deg
+        let heading = calculate_heading_to(source, Vector3::new(0.0, -1.0, 0.0));
+        assert!((heading.to_degrees() - 270.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_calculate_arrival_position() {
+        let source = WorldPosition {
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            ..Default::default()
+        };
+        let target_pos = Vector3::new(10.0, 0.0, 0.0);
+        let arrival_dist = 2.0;
+
+        // Should stop at (8, 0, 0)
+        let pos = calculate_arrival_position(&source, &target_pos, arrival_dist);
+        assert!((pos.x - 8.0).abs() < 1e-4);
+        assert!(pos.y.abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_is_stuck() {
+        let last = Vector3::new(0.0, 0.0, 0.0);
+        let current_stuck = Vector3::new(0.05, 0.0, 0.0);
+        let current_moving = Vector3::new(0.2, 0.0, 0.0);
+
+        assert!(is_stuck(&current_stuck, &last, 0.1));
+        assert!(!is_stuck(&current_moving, &last, 0.1));
     }
 }

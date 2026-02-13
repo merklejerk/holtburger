@@ -156,15 +156,6 @@ impl AuthState {
         Ok(())
     }
 
-    pub(super) async fn send_login_complete(&mut self, session: &mut Session) -> Result<()> {
-        let msg = GameMessage::GameAction(Box::new(GameActionMessage {
-            sequence: 0,
-            action: GameAction::LoginComplete(Box::new(LoginCompleteData)),
-        }));
-        session.send_message(&msg).await?;
-        Ok(())
-    }
-
     pub(super) async fn send_login_request(
         &mut self,
         password: &str,

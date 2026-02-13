@@ -1,8 +1,8 @@
 use super::{Client, types::*};
 use crate::world::WorldEvent;
 use anyhow::Result;
-use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::ProtocolUnpack;
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::*;
 
 impl Client {
@@ -218,7 +218,7 @@ impl Client {
                     });
                 }
 
-                self.auth.send_login_complete(&mut self.session).await?;
+                self.send_login_complete().await?;
                 self.state = ClientState::InWorld;
                 self.send_status_event();
                 Ok(())
@@ -228,7 +228,7 @@ impl Client {
                     "Portal transition started (seq: {})",
                     data.teleport_sequence
                 );
-                self.auth.send_login_complete(&mut self.session).await?;
+                self.send_login_complete().await?;
                 Ok(())
             }
             GameMessage::PrivateUpdatePropertyInt(_) | GameMessage::PublicUpdatePropertyInt(_) => {

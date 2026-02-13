@@ -753,7 +753,10 @@ impl PlayerState {
                             } else {
                                 self.enchantments.push(*enchantment);
                             }
-                            events.push(WorldEvent::EnchantmentUpdated(*enchantment));
+                            events.push(WorldEvent::EnchantmentUpdated {
+                                enchantment: *enchantment,
+                                spell_name: None,
+                            });
                             self.emit_derived_stats(events);
                             true
                         } else {
@@ -776,7 +779,10 @@ impl PlayerState {
                                 } else {
                                     self.enchantments.push(*enchantment);
                                 }
-                                events.push(WorldEvent::EnchantmentUpdated(*enchantment));
+                                events.push(WorldEvent::EnchantmentUpdated {
+                                    enchantment: *enchantment,
+                                    spell_name: None,
+                                });
                             }
                             self.emit_derived_stats(events);
                             true

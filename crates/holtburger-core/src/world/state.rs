@@ -9,7 +9,7 @@ use holtburger_common::properties::{
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
-use holtburger_dat::file_type::{SkillTable, XpTable};
+use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
 use holtburger_protocol::messages::*;
@@ -35,7 +35,8 @@ pub struct WorldState {
     pub portal_dat: Option<Arc<dyn ResourceProvider>>,
     pub cell_dat: Option<Arc<dyn ResourceProvider>>,
     pub xp_table: Option<XpTable>,
-    pub skill_table: Option<Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
+    pub skill_table: Option<Arc<SkillTable>>,
+    pub spell_table: Option<Arc<SpellTable>>,
     pub scene: SpatialScene,
 }
 
@@ -119,6 +120,34 @@ impl WorldState {
         }
     }
 
+    fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
+        let mut names = std::collections::HashMap::new();
+        if let Some(table) = &self.spell_table {
+            // Player's known spells
+            for spell_id in self.player.spells.keys() {
+                if let Some(spell) = table.spells.get(spell_id) {
+                    names.insert(*spell_id, spell.name.clone());
+                }
+            }
+            // Enchantments currently active on the player
+            for enc in &self.player.enchantments {
+                let spell_id = enc.spell_id as u32;
+                if let Some(spell) = table.spells.get(&spell_id) {
+                    names.insert(spell_id, spell.name.clone());
+                }
+            }
+        }
+        names
+    }
+
+    pub fn resolve_spell_name(&self, spell_id: u32) -> Option<String> {
+        self.spell_table
+            .as_ref()?
+            .spells
+            .get(&spell_id)
+            .map(|s| s.name.clone())
+    }
+
     fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
         if let Some(info) = self.get_level_info() {
             events.push(WorldEvent::LevelInfoUpdated(info));
@@ -131,6 +160,7 @@ impl WorldState {
     ) -> Self {
         let mut xp_table = None;
         let mut skill_table = None;
+        let mut spell_table = None;
         if let Some(db) = &portal_dat {
             // XP Table
             if let Ok(data) = db.get_file(XpTable::FILE_ID) {
@@ -146,6 +176,13 @@ impl WorldState {
                     skill_table = Some(Arc::new(table));
                 }
             }
+            // Spell Table
+            if let Ok(data) = db.get_file(SpellTable::FILE_ID) {
+                let mut cursor = std::io::Cursor::new(data);
+                if let Ok(table) = SpellTable::read(&mut cursor) {
+                    spell_table = Some(Arc::new(table));
+                }
+            }
         }
 
         Self {
@@ -156,6 +193,7 @@ impl WorldState {
             cell_dat,
             xp_table,
             skill_table,
+            spell_table,
             scene: SpatialScene::new(),
         }
     }
@@ -184,6 +222,18 @@ impl WorldState {
             .player
             .handle_message(msg, &mut events, self.xp_table.as_ref())
         {
+            // Enrich events with spell names if available
+            for ev in &mut events {
+                if let WorldEvent::EnchantmentUpdated {
+                    enchantment,
+                    spell_name,
+                } = ev
+                {
+                    if spell_name.is_none() {
+                        *spell_name = self.resolve_spell_name(enchantment.spell_id as u32);
+                    }
+                }
+            }
             return events;
         }
 
@@ -509,6 +559,7 @@ impl WorldState {
                         skills: skill_objs,
                         enchantments: self.player.enchantments.clone(),
                         skill_table: self.skill_table.clone(),
+                        spell_names: self.get_player_spell_names(),
                     });
 
                     self.emit_level_info(&mut events);
@@ -1172,6 +1223,30 @@ mod tests {
         state.set_player_velocity(new_vel);
 
         assert_eq!(state.entities.get(player_guid).unwrap().velocity, new_vel);
+    }
+
+    #[test]
+    fn test_spell_name_resolution() {
+        use holtburger_dat::file_type::spell_table::{SpellBase, SpellTable};
+
+        let mut state = WorldState::new(None, None);
+        let mut spells = std::collections::HashMap::new();
+        spells.insert(
+            1337,
+            SpellBase {
+                name: "L33t Spell".to_string(),
+                ..Default::default()
+            },
+        );
+
+        state.spell_table = Some(Arc::new(SpellTable {
+            id: SpellTable::FILE_ID,
+            spells,
+            spell_sets: std::collections::HashMap::new(),
+        }));
+
+        assert_eq!(state.resolve_spell_name(1337).unwrap(), "L33t Spell");
+        assert!(state.resolve_spell_name(999).is_none());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 pub mod entity;
+pub mod magic;
 pub mod physics_types;
 pub mod player;
 pub mod spatial;
@@ -43,8 +44,12 @@ pub enum WorldEvent {
         skills: Vec<stats::Skill>,
         enchantments: Vec<Enchantment>,
         skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
+        spell_names: std::collections::HashMap<u32, String>,
     },
-    EnchantmentUpdated(Enchantment),
+    EnchantmentUpdated {
+        enchantment: Enchantment,
+        spell_name: Option<String>,
+    },
     EnchantmentRemoved {
         spell_id: u16,
         layer: u16,

@@ -42,6 +42,7 @@ impl AppState {
                         skills,
                         enchantments,
                         skill_table,
+                        spell_names,
                     } => {
                         self.player_guid = Some(guid);
                         self.character_name = Some(name);
@@ -53,6 +54,7 @@ impl AppState {
                         self.vitals = vitals.into_iter().map(|v| (v.vital_type, v)).collect();
                         self.skills = skills.into_iter().map(|s| (s.skill_type, s)).collect();
                         self.player_enchantments = enchantments;
+                        self.spell_names = spell_names;
                         self.skill_table = skill_table;
                         self.refresh_context_buffer();
                     }
@@ -186,15 +188,19 @@ impl AppState {
                     }
                     // Handle inventory events if they exist in WorldEvent, otherwise skip
                     // For now, these were placeholders and need to match actual WorldEvent variants
-                    WorldEvent::EnchantmentUpdated(enchant) => {
-                        if let Some(existing) = self
-                            .player_enchantments
-                            .iter_mut()
-                            .find(|e| e.spell_id == enchant.spell_id && e.layer == enchant.layer)
-                        {
-                            *existing = enchant;
+                    WorldEvent::EnchantmentUpdated {
+                        enchantment,
+                        spell_name,
+                    } => {
+                        if let Some(name) = spell_name {
+                            self.spell_names.insert(enchantment.spell_id as u32, name);
+                        }
+                        if let Some(existing) = self.player_enchantments.iter_mut().find(|e| {
+                            e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
+                        }) {
+                            *existing = enchantment;
                         } else {
-                            self.player_enchantments.push(enchant);
+                            self.player_enchantments.push(enchantment);
                         }
                     }
                     WorldEvent::EnchantmentRemoved { spell_id, layer } => {

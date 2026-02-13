@@ -288,17 +288,20 @@ Functions to move:
 > - The `run()` event loop
 > - `set_event_tx()` / `set_command_rx()` / `send_status_event()` (tiny helpers)
 
-- [ ] **6.1** Audit `mod.rs` — confirm it is ≤ ~150 lines.
-- [ ] **6.2** Move constants (`AUTO_MOVE_DISTANCE_LIMIT`, `PHYSICS_TICK_MS`) to the files
+- [x] **6.1** Audit `mod.rs` — confirm it is ≤ ~150 lines.
+- [x] **6.2** Move constants (`AUTO_MOVE_DISTANCE_LIMIT`, `PHYSICS_TICK_MS`) to the files
   that use them: `PHYSICS_TICK_MS` stays in `mod.rs` (run-loop), `AUTO_MOVE_DISTANCE_LIMIT`
   moves to `movement.rs`.
-- [ ] **6.3** Ensure all `mod` declarations are present and ordered: `types`, `builder`,
+- [x] **6.3** Ensure all `mod` declarations are present and ordered: `types`, `builder`,
   `auth`, `commands`, `messages`, `movement`.
-- [ ] **6.4** Verify the public API surface hasn't changed: `Client`, `ClientState`,
+- [x] **6.4** Verify the public API surface hasn't changed: `Client`, `ClientState`,
   `ClientEvent`, `ClientCommand`, `RetryState` all accessible via `holtburger_core::*`.
-- [ ] **6.5** `cargo build && cargo test` — green.
-- [ ] **6.6** `cargo clippy` — no new warnings.
-- [ ] **6.7** Commit: `refactor(client): finalize mod.rs slim-down`.
+- [x] **6.5** `cargo build && cargo test` — green.
+- [x] **6.6** `cargo clippy` — no new warnings.
+- [x] **6.7** Commit: `refactor(client): finalize mod.rs slim-down`.
+
+**Notes:**
+- **Completed 2026-02-13:** `mod.rs` is now 151 lines. Constants moved where appropriate. Public API verified via exports in `lib.rs`.
 
 ---
 

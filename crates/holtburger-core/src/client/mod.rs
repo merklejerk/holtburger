@@ -2,7 +2,7 @@ use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
 use holtburger_common::Guid;
-use holtburger_protocol::messages::*;
+use holtburger_protocol::messages::CharacterEntry;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -13,9 +13,6 @@ mod movement;
 mod commands;
 mod messages;
 use types::*;
-
-/// Maximum distance (in meters) to allow an automated server-controlled teleport.
-pub(super) const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;

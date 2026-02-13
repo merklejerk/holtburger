@@ -1,4 +1,4 @@
-use crate::client::{Client, ClientEvent, AUTO_MOVE_DISTANCE_LIMIT};
+use crate::client::{Client, ClientEvent};
 use crate::world::WorldEvent;
 use anyhow::Result;
 use holtburger_common::{Guid, Quaternion};
@@ -6,6 +6,9 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionFlags;
 use holtburger_protocol::messages::*;
 use std::time::{Duration, Instant};
+
+/// Maximum distance (in meters) to allow an automated server-controlled teleport.
+const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 
 impl Client {
     pub(super) async fn handle_approach_task(&mut self, target_guid: Guid, _dt: f32) -> Result<()> {

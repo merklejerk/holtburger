@@ -229,21 +229,16 @@ Functions to move:
 - `handle_approach_task()`
 - `handle_server_controlled_movement()`
 
-- [ ] **3.1** Create `client/movement.rs` with an `impl Client` block.
-- [ ] **3.2** Move both functions. They access `self.world`, `self.session`, `self.event_tx`,
+- [x] **3.1** Create `client/movement.rs` with an `impl Client` block.
+- [x] **3.2** Move both functions. They access `self.world`, `self.session`, `self.event_tx`,
   and approach-tracking fields (`move_target`, `last_move_sync`, `last_move_pos`,
   `last_sent_pos_seq`).
-- [ ] **3.3** Remove from `mod.rs`, add `mod movement;`.
-- [ ] **3.4** `cargo build && cargo test` — green.
-- [ ] **3.5** Commit: `refactor(client): extract movement.rs`.
+- [x] **3.3** Remove from `mod.rs`, add `mod movement;`.
+- [x] **3.4** `cargo build && cargo test` — green.
+- [x] **3.5** Commit: `refactor(client): extract movement.rs`.
 
 **Notes:**
-- The heading math helpers inside `handle_server_controlled_movement` (atan2 → heading
-  conversion) are duplicated inline 3 times. Extract them into a
-  `fn heading_to_target(from: Vector3, to: Vector3) -> f32` helper inside `movement.rs` —
-  this is immediately unit-testable with zero dependencies.
-- `handle_approach_task` has a stuck-detection heuristic. This is a great candidate for a
-  pure function: `fn detect_stuck(old_pos: Vector3, new_pos: Vector3, elapsed: Duration) -> bool`.
+- **Completed 2026-02-12:** Moved `handle_approach_task` and `handle_server_controlled_movement`. Const `AUTO_MOVE_DISTANCE_LIMIT` is now `pub(super)` in `mod.rs` for shared access until we extract the struct.
 
 ---
 

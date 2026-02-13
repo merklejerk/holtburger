@@ -371,17 +371,13 @@ impl WorldPosition {
             return self.coords.distance(&other.coords);
         }
 
-        if self.is_indoors() || other.is_indoors() {
-            // Different indoor landblocks/cells - can't compute distance easily without map data.
-            // If they are the same dungeon cell, it would have caught in the same-id check above.
-            return 999.9;
-        }
-
-        // Outdoor distance calculation in meters
+        // Global-space distance in meters.
+        // Mirrors ACE Position.DistanceTo semantics, which use landblock offsets for
+        // both outdoor and indoor cells.
         let (lb_x1, lb_y1) = self.landblock_coords();
         let (lb_x2, lb_y2) = other.landblock_coords();
 
-        // Coordinates are 0-192 relative to the landblock.
+        // Coordinates are local to their current cell/landblock frame.
         let wx1 = (lb_x1 as f32 * 192.0) + self.coords.x;
         let wy1 = (lb_y1 as f32 * 192.0) + self.coords.y;
         let wx2 = (lb_x2 as f32 * 192.0) + other.coords.x;
@@ -490,9 +486,9 @@ mod tests {
     }
 
     #[test]
-    fn test_distance_indoors_returns_large() {
+    fn test_distance_indoor_uses_global_space() {
         let indoor = WorldPosition {
-            landblock_id: Guid(0x00000100),
+            landblock_id: Guid(0x01000100),
             coords: Vector3::zero(),
             rotation: Quaternion::identity(),
         };
@@ -502,7 +498,7 @@ mod tests {
             rotation: Quaternion::identity(),
         };
         let d = indoor.distance_to(&outdoor);
-        assert!((d - 999.9).abs() < 1e-6);
+        assert!((d - 192.0).abs() < 1e-6, "Distance was {}", d);
     }
 
     #[test]

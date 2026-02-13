@@ -65,21 +65,22 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(Paragraph::new(bars_line), vitals_layout[0]);
 
     if let Some(info) = &state.level_info {
-        let pct = if info.xp_for_next_level > 0 {
-            (info.xp_into_level as f64 / info.xp_for_next_level as f64) * 100.0
-        } else {
-            100.0
-        };
-        let level_line = Line::from(vec![
-            Span::styled(
-                format!("Lv {}", info.level),
+        let mut spans = vec![Span::styled(
+            format!("Lv {}", info.level),
+            Style::default().fg(Color::Cyan),
+        )];
+
+        if info.xp_for_next_level > 0 {
+            let pct = (info.xp_into_level as f64 / info.xp_for_next_level as f64) * 100.0;
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                format!("({:.2}%)", pct),
                 Style::default().fg(Color::Cyan),
-            ),
-            Span::raw(" "),
-            Span::styled(format!("({:.2}%)", pct), Style::default().fg(Color::Cyan)),
-        ]);
+            ));
+        }
+
         f.render_widget(
-            Paragraph::new(level_line).alignment(ratatui::layout::Alignment::Right),
+            Paragraph::new(Line::from(spans)).alignment(ratatui::layout::Alignment::Right),
             vitals_layout[1],
         );
     }
@@ -125,13 +126,24 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     };
 
     let current_char = state.character_name.as_deref().unwrap_or("Selecting...");
-    let info_line = format!(
-        "{}:{} <{}> {} {}",
-        state.account_name, current_char, pos_info, status_emoji, retry_info
-    );
+    let account_char = format!("{}:{}", state.account_name, current_char);
+    let other_info = format!("<{}> {} {}", pos_info, status_emoji, retry_info);
 
-    let info_para = Paragraph::new(info_line)
-        .block(Block::default().borders(Borders::ALL).title("Status"))
-        .alignment(ratatui::layout::Alignment::Right);
-    f.render_widget(info_para, chunks[1]);
+    let status_block = Block::default().borders(Borders::ALL).title("Status");
+    let inner_status_area = status_block.inner(chunks[1]);
+    f.render_widget(status_block, chunks[1]);
+
+    let status_layout = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(inner_status_area);
+
+    f.render_widget(
+        Paragraph::new(account_char).alignment(ratatui::layout::Alignment::Left),
+        status_layout[0],
+    );
+    f.render_widget(
+        Paragraph::new(other_info).alignment(ratatui::layout::Alignment::Right),
+        status_layout[1],
+    );
 }

@@ -5,7 +5,6 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use unicode_width::UnicodeWidthStr;
 
 const NETSTATS_WIDTH: u16 = 40;
 const SPARK_WIDTH: usize = 8;
@@ -97,44 +96,51 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         f.render_widget(Paragraph::new(Line::from(left_content)), chunks[0]);
 
         // --- Right Net Stats (Sparklines) ---
-        let render_spark = |history: &[u64], width: usize| {
-            if history.is_empty() {
-                return " ".repeat(width);
-            }
-            let history = if history.len() > width {
-                &history[history.len() - width..]
+        let mut net_spans = vec![Span::raw(" ↕ ")];
+
+        let history_in = &state.net_stats.history_in;
+        let history_out = &state.net_stats.history_out;
+
+        // Take at most SPARK_WIDTH elements
+        let take_in = history_in.len().min(SPARK_WIDTH);
+        let take_out = history_out.len().min(SPARK_WIDTH);
+
+        let sub_in = &history_in[history_in.len() - take_in..];
+        let sub_out = &history_out[history_out.len() - take_out..];
+
+        let max_in = sub_in.iter().max().cloned().unwrap_or(1).max(1);
+        let max_out = sub_out.iter().max().cloned().unwrap_or(1).max(1);
+
+        for i in 0..SPARK_WIDTH {
+            // Inbound (Green)
+            let in_idx_offset = SPARK_WIDTH - take_in;
+            if i >= in_idx_offset {
+                let val = sub_in[i - in_idx_offset];
+                let char_idx = (val * 7 / max_in) as usize;
+                net_spans.push(Span::styled(
+                    SPARK_CHARS[char_idx.min(7)],
+                    Style::default().fg(Color::Green),
+                ));
             } else {
-                history
-            };
-
-            let max = history.iter().max().cloned().unwrap_or(1).max(1);
-            let mut s = history
-                .iter()
-                .map(|&v| {
-                    let idx = (v * 7 / max) as usize;
-                    SPARK_CHARS[idx.min(SPARK_CHARS.len() - 1)]
-                })
-                .collect::<String>();
-
-            let current_width = s.width();
-            if current_width < width {
-                s = format!("{}{}", " ".repeat(width - current_width), s);
+                net_spans.push(Span::raw(" "));
             }
-            s
-        };
 
-        let spark_width = SPARK_WIDTH; // Fixed width for sparks
-        let in_spark = render_spark(&state.net_stats.history_in, spark_width);
-        let out_spark = render_spark(&state.net_stats.history_out, spark_width);
+            // Outbound (LightRed)
+            let out_idx_offset = SPARK_WIDTH - take_out;
+            if i >= out_idx_offset {
+                let val = sub_out[i - out_idx_offset];
+                let char_idx = (val * 7 / max_out) as usize;
+                net_spans.push(Span::styled(
+                    SPARK_CHARS[char_idx.min(7)],
+                    Style::default().fg(Color::LightRed),
+                ));
+            } else {
+                net_spans.push(Span::raw(" "));
+            }
+        }
 
-        let net_line = Line::from(vec![
-            Span::raw(" ↓ "),
-            Span::styled(in_spark, Style::default().fg(Color::Green)),
-            Span::raw(" ↑ "),
-            Span::styled(out_spark, Style::default().fg(Color::Blue)),
-        ]);
         f.render_widget(
-            Paragraph::new(net_line).alignment(ratatui::layout::Alignment::Right),
+            Paragraph::new(Line::from(net_spans)).alignment(ratatui::layout::Alignment::Right),
             chunks[1],
         );
     }

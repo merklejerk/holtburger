@@ -111,7 +111,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         let max_in = sub_in.iter().max().cloned().unwrap_or(1).max(1);
         let max_out = sub_out.iter().max().cloned().unwrap_or(1).max(1);
 
-        for i in 0..SPARK_WIDTH {
+        for i in (0..SPARK_WIDTH).rev() {
             // Inbound (Green)
             let in_idx_offset = SPARK_WIDTH - take_in;
             if i >= in_idx_offset {

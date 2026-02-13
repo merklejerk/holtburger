@@ -1,7 +1,7 @@
 use super::WorldEvent;
 use super::stats;
 use holtburger_common::Guid;
-use holtburger_common::properties::EnchantmentTypeFlags;
+use holtburger_common::properties::{EnchantmentTypeFlags, PropertyFloat, PropertyInt};
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::*;
@@ -39,6 +39,9 @@ pub struct PlayerState {
     pub skills: HashMap<stats::SkillType, stats::Skill>,
     /// Stores the raw ranks and init for skills so they can be recalculated
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
+    pub resistances: stats::Resistances,
+    pub armor: u32,
+    pub vitae: f32,
     pub position: WorldPosition,
     pub instance_sequence: u16,
     pub server_control_sequence: u16,
@@ -49,6 +52,13 @@ pub struct PlayerState {
     pub enchantments: Vec<Enchantment>,
     pub spells: BTreeMap<u32, f32>,
     pub spell_lists: Vec<Vec<u32>>,
+    pub int_properties: BTreeMap<u32, i32>,
+    pub int64_properties: BTreeMap<u32, i64>,
+    pub bool_properties: BTreeMap<u32, bool>,
+    pub float_properties: BTreeMap<u32, f64>,
+    pub string_properties: BTreeMap<u32, String>,
+    pub did_properties: BTreeMap<u32, Guid>,
+    pub iid_properties: BTreeMap<u32, Guid>,
 }
 
 impl Default for PlayerState {
@@ -71,6 +81,9 @@ impl PlayerState {
             vital_bases: HashMap::new(),
             skills: HashMap::new(),
             skill_bases: HashMap::new(),
+            resistances: stats::Resistances::default(),
+            armor: 0,
+            vitae: 1.0,
             position: WorldPosition::default(),
             instance_sequence: 0,
             server_control_sequence: 0,
@@ -81,6 +94,13 @@ impl PlayerState {
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
             spell_lists: vec![Vec::new(); 8],
+            int_properties: BTreeMap::new(),
+            int64_properties: BTreeMap::new(),
+            bool_properties: BTreeMap::new(),
+            float_properties: BTreeMap::new(),
+            string_properties: BTreeMap::new(),
+            did_properties: BTreeMap::new(),
+            iid_properties: BTreeMap::new(),
         }
     }
 
@@ -134,34 +154,19 @@ impl PlayerState {
     }
 
     pub fn get_attribute_multiplier(&self, attr: stats::AttributeType) -> f32 {
-        let active = self.get_active_enchantments();
-        let mut mult = 1.0;
-
-        for e in active {
-            let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags
-                .contains(EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::MULTIPLICATIVE)
-                && e.stat_mod_key == attr as u32
-            {
-                mult *= e.stat_mod_value;
-            }
-        }
-        mult
+        super::magic::get_enchantment_multiplier(
+            &self.enchantments,
+            EnchantmentTypeFlags::ATTRIBUTE.bits(),
+            attr as u32,
+        )
     }
 
     pub fn get_attribute_additive(&self, attr: stats::AttributeType) -> f32 {
-        let active = self.get_active_enchantments();
-        let mut add = 0.0;
-
-        for e in active {
-            let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags.contains(EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
-                && e.stat_mod_key == attr as u32
-            {
-                add += e.stat_mod_value;
-            }
-        }
-        add
+        super::magic::get_enchantment_additive(
+            &self.enchantments,
+            EnchantmentTypeFlags::ATTRIBUTE.bits(),
+            attr as u32,
+        )
     }
 
     pub fn get_attribute_base(&self, attr: stats::AttributeType) -> u32 {
@@ -199,36 +204,19 @@ impl PlayerState {
     }
 
     pub fn get_vital_multiplier(&self, vital: stats::VitalType) -> f32 {
-        let active = self.get_active_enchantments();
-        let mut mult = 1.0;
-        let world_id = vital as u32;
-
-        for e in active {
-            let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags
-                .contains(EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::MULTIPLICATIVE)
-                && e.stat_mod_key == world_id
-            {
-                mult *= e.stat_mod_value;
-            }
-        }
-        mult
+        super::magic::get_enchantment_multiplier(
+            &self.enchantments,
+            EnchantmentTypeFlags::SECOND_ATT.bits(),
+            vital as u32,
+        )
     }
 
     pub fn get_vital_additive(&self, vital: stats::VitalType) -> f32 {
-        let active = self.get_active_enchantments();
-        let mut add = 0.0;
-        let world_id = vital as u32;
-
-        for e in active {
-            let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags.contains(EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::ADDITIVE)
-                && e.stat_mod_key == world_id
-            {
-                add += e.stat_mod_value;
-            }
-        }
-        add
+        super::magic::get_enchantment_additive(
+            &self.enchantments,
+            EnchantmentTypeFlags::SECOND_ATT.bits(),
+            vital as u32,
+        )
     }
 
     pub fn calculate_vital_base(&self, vital_type: stats::VitalType) -> u32 {
@@ -259,33 +247,19 @@ impl PlayerState {
     }
 
     pub fn get_skill_multiplier(&self, skill: stats::SkillType) -> f32 {
-        let active = self.get_active_enchantments();
-        let mut mult = 1.0;
-
-        for e in active {
-            let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags.contains(EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::MULTIPLICATIVE)
-                && e.stat_mod_key == skill as u32
-            {
-                mult *= e.stat_mod_value;
-            }
-        }
-        mult
+        super::magic::get_enchantment_multiplier(
+            &self.enchantments,
+            EnchantmentTypeFlags::SKILL.bits(),
+            skill as u32,
+        )
     }
 
     pub fn get_skill_additive(&self, skill: stats::SkillType) -> f32 {
-        let active = self.get_active_enchantments();
-        let mut add = 0.0;
-
-        for e in active {
-            let flags = EnchantmentTypeFlags::from_bits_retain(e.stat_mod_type);
-            if flags.contains(EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::ADDITIVE)
-                && e.stat_mod_key == skill as u32
-            {
-                add += e.stat_mod_value;
-            }
-        }
-        add
+        super::magic::get_enchantment_additive(
+            &self.enchantments,
+            EnchantmentTypeFlags::SKILL.bits(),
+            skill as u32,
+        )
     }
 
     pub fn derive_skill_value(
@@ -396,10 +370,44 @@ impl PlayerState {
             }
         }
 
+        // Recalculate Armor
+        let base_armor = self
+            .int_properties
+            .get(&(PropertyInt::ArmorLevel as u32))
+            .cloned()
+            .unwrap_or(0);
+        self.armor = super::magic::get_enchanted_armor(base_armor, &self.enchantments) as u32;
+
+        // Recalculate Resistances
+        let get_r = |prop: PropertyFloat| {
+            let base = self
+                .float_properties
+                .get(&(prop as u32))
+                .cloned()
+                .unwrap_or(1.0);
+            super::magic::get_enchanted_resistance(base as f32, &self.enchantments, prop as u32)
+        };
+        self.resistances = stats::Resistances {
+            slash: get_r(PropertyFloat::ResistSlash),
+            pierce: get_r(PropertyFloat::ResistPierce),
+            bludgeon: get_r(PropertyFloat::ResistBludgeon),
+            fire: get_r(PropertyFloat::ResistFire),
+            cold: get_r(PropertyFloat::ResistCold),
+            acid: get_r(PropertyFloat::ResistAcid),
+            electric: get_r(PropertyFloat::ResistElectric),
+            nether: get_r(PropertyFloat::ResistNether),
+        };
+
+        // Recalculate Vitae
+        self.vitae = super::magic::get_total_vitae(&self.enchantments);
+
         events.push(WorldEvent::DerivedStatsUpdated {
             attributes: self.get_attributes(),
             vitals: self.get_vitals(),
             skills: self.get_skills(),
+            resistances: self.resistances.clone(),
+            armor: self.armor,
+            vitae: self.vitae,
         });
     }
 

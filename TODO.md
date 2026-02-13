@@ -7,7 +7,8 @@
 - [x] Dereth chronometer in dynamic panel.
 - [ ] Chat tabs (Chat vs combat vs all).
 - [x] Just interleave bars in netpulse widget.
-- [ ] Move vitae penalty to under "vitals" group.
+- [x] Move vitae penalty to under "vitals" group. (Done)
+- [ ] Reverse direction of netpulse animation.
 
 ### Medium
 - [ ] Noclip mode to disable collision during movement.
@@ -17,8 +18,8 @@
 - [ ] Approach verb is janky.
 - [ ] Augment entities spawned by `ObjectCreate` with weenie template properties.  
 - [ ] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable.
-- [ ] Char tab "resistances" section needs to be prettified. Armor buffs not correctly compounding.
-- [ ] Validate enchantment combining logic and order: floats are multiplicative and ints are additive?
+- [x] Char tab "resistances" section needs to be prettified. Armor buffs not correctly compounding.
+- [x] Validate enchantment combining logic and order: floats are multiplicative and ints are additive?
 - [x] [U]se and [H]eal action for healing kits.
 - [ ] All verbs should have synonymous slash chat commands.
 - [x] Spell IDs need to be converted to names in enchants lists. (Plan: [docs/plans/spell_name_resolution_plan.md](docs/plans/spell_name_resolution_plan.md))
@@ -30,8 +31,11 @@
 - [ ] [U]se for Mana charges.
 - [x] Enter key for interaction target confirmation.
 - [ ] In-world containers.
+- [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
+- [ ] Search/filter on list tabs.
 
 ### High
+- [ ] Items "wielded" by the player not showing up in their inventory.
 - [x] Refactor client movement system (move to, nav).
 - [x] Distance calculation is wrong when in different landblocks.
 - [x] Add "active entity" system:
@@ -41,7 +45,6 @@
             - [x] E.g., creatures display health (and enchantments, attack controls?).
     - [x] ESC key clears active entity.
 - [ ] Add "Spells" tab.
-    - [ ] Allow search/filter.
     - [ ] Add [C]ast verb on current active entity (if chosen) or self.
 
 ### Critical

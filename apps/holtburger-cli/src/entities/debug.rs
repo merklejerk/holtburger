@@ -2,9 +2,10 @@ use crate::entities::classification;
 use crate::ui::types::CommandTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
-    PropertyString,
+    EnchantmentTypeFlags, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
+    PropertyInt, PropertyInt64, PropertyString,
 };
+use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::text::Line;
 
 /// Generates a list of strings representing the debug information for a target.
@@ -246,14 +247,36 @@ pub fn get_debug_info(
                 "Stat Mod Type:  0x{:08X}",
                 enchant.stat_mod_type
             )));
-            lines.push(Line::from(format!(
-                "Stat Mod Key:   {}",
-                enchant.stat_mod_key
-            )));
+            let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
+            for (name, _) in flags.iter_names() {
+                lines.push(Line::from(format!("  [X] {}", name)));
+            }
+
+            let key_name = if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
+                AttributeType::from_repr(enchant.stat_mod_key).map(|a| a.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {
+                VitalType::from_id(enchant.stat_mod_key).map(|v| format!("Max {}", v))
+            } else if flags.contains(EnchantmentTypeFlags::SKILL) {
+                SkillType::from_repr(enchant.stat_mod_key).map(|s| s.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::INT) {
+                PropertyInt::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::FLOAT) {
+                PropertyFloat::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
+                Some("Armor".to_string())
+            } else {
+                None
+            };
+
+            let key_display = key_name.unwrap_or_else(|| format!("{}", enchant.stat_mod_key));
+            lines.push(Line::from(format!("Stat Mod Key:   {}", key_display)));
             lines.push(Line::from(format!(
                 "Stat Mod Value: {:.2}",
                 enchant.stat_mod_value
             )));
+            if let Some(set_id) = enchant.spell_set_id {
+                lines.push(Line::from(format!("Spell Set ID:   {}", set_id)));
+            }
             lines.push(Line::from(format!(
                 "Caster GUID:    {:08X}",
                 enchant.caster_guid

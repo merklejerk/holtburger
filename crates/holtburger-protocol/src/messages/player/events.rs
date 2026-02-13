@@ -80,41 +80,72 @@ bitflags! {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Attribute {
+    /// Experience-purchased ranks or base training.
     pub ranks: u32,
+    /// Starting value before experience (race/gender/template).
     pub start: u32,
+    /// Total experience points invested in this attribute.
     pub xp: u32,
+    /// Current temporary value (primarily used for Vitals like Health).
     pub current: Option<u32>, // Only for Vitals
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PlayerDescriptionData {
+    /// The player's unique identifier (GUID).
     pub guid: Guid,
+    /// Message sequence number used for ordering.
     pub sequence: u32,
+    /// The player's display name.
     pub name: String,
+    /// The weenie definition ID for the player's race/gender template.
     pub wee_type: u32,
+    /// The player's current world position (cell + coordinates).
     pub pos: Option<WorldPosition>,
+    /// Sparse integer properties (e.g. Strength, Level, Burden).
     pub properties_int: BTreeMap<u32, i32>,
+    /// Sparse 64-bit integer properties (e.g. Total XP, Luminance XP).
     pub properties_int64: BTreeMap<u32, i64>,
+    /// Sparse boolean properties (e.g. IsPK, IsMuted).
     pub properties_bool: BTreeMap<u32, bool>,
+    /// Sparse floating point properties (e.g. RunSpeed, Magic Resistance).
     pub properties_float: BTreeMap<u32, f64>,
+    /// Sparse string properties (e.g. Title, Account Name).
     pub properties_string: BTreeMap<u32, String>,
-    pub properties_did: BTreeMap<u32, u32>,
-    pub properties_iid: BTreeMap<u32, u32>,
+    /// Sparse Data ID properties (e.g. Icon, Sound, Surface Type).
+    pub properties_did: BTreeMap<u32, Guid>,
+    /// Sparse Instance ID properties (e.g. Container ID, Wielder ID).
+    pub properties_iid: BTreeMap<u32, Guid>,
+    /// Visual sub-positions for specific equipment slots or parts.
     pub positions: BTreeMap<u32, WorldPosition>,
+    /// Primary character attributes (Strength, Endurance, etc.).
     pub attributes: BTreeMap<u32, Attribute>,
+    /// Character skills (Melee Defense, War Magic, etc.).
     pub skills: BTreeMap<u32, CreatureSkill>,
+    /// Active enchantments, including both buffs and debuffs.
     pub enchantments: Vec<Enchantment>,
+    /// Known spells and their raw power/modifier levels.
     pub spells: BTreeMap<u32, f32>,
+    /// Presence flag for vital stats; usually true for players.
     pub has_health: bool,
+    /// Primary character options bitfield (see CharacterOptionDataFlag).
     pub options1: u32,
+    /// Secondary character options bitfield for later expansion.
     pub options2: u32,
+    /// List of user-defined shortcuts for the action bar.
     pub shortcuts: Vec<Shortcut>,
-    pub spell_lists: Vec<Vec<u32>>,     // 8 lists
-    pub desired_comps: Vec<(u32, u32)>, // (component_id, count)
+    /// List of multi-spell casting entries (up to 8 groups).
+    pub spell_lists: Vec<Vec<u32>>,
+    /// Material components required for spellcasting and their desired counts.
+    pub desired_comps: Vec<(u32, u32)>,
+    /// Bitfield identifying which spells should be hidden in UI.
     pub spellbook_filters: u32,
+    /// Encapsulated gameplay options (e.g. CombatMode, AutoDecay).
     pub gameplay_options: Vec<u8>,
-    pub inventory: Vec<(Guid, u32)>,             // (guid, type)
-    pub equipped_objects: Vec<(Guid, u32, u32)>, // (guid, loc, prio)
+    /// Complete list of items in the player's inventory (GUID + Weenie ID).
+    pub inventory: Vec<(Guid, u32)>,
+    /// Detailed mapping of equipped items to slots and layering priority.
+    pub equipped_objects: Vec<(Guid, u32, u32)>,
 }
 
 type InventoryVec = Vec<(Guid, u32)>;
@@ -309,8 +340,8 @@ impl PlayerDescriptionData {
                     return None;
                 }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-                *offset += 8;
+                *offset += 4;
+                let val = Guid::unpack(data, offset)?;
                 properties_did.insert(key, val);
             }
         }
@@ -325,8 +356,8 @@ impl PlayerDescriptionData {
                     return None;
                 }
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-                *offset += 8;
+                *offset += 4;
+                let val = Guid::unpack(data, offset)?;
                 properties_iid.insert(key, val);
             }
         }
@@ -721,7 +752,7 @@ impl ProtocolPack for PlayerDescriptionData {
             ac_hash_sort(&mut items, 32, |k| *k);
             for (k, v) in items {
                 buf.write_u32::<LittleEndian>(*k).unwrap();
-                buf.write_u32::<LittleEndian>(*v).unwrap();
+                v.pack(buf);
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_IID) {
@@ -732,7 +763,7 @@ impl ProtocolPack for PlayerDescriptionData {
             ac_hash_sort(&mut items, 32, |k| *k);
             for (k, v) in items {
                 buf.write_u32::<LittleEndian>(*k).unwrap();
-                buf.write_u32::<LittleEndian>(*v).unwrap();
+                v.pack(buf);
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::POSITION) {

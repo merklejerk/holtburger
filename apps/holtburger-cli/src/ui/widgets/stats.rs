@@ -3,7 +3,7 @@ use crate::ui::StatType;
 use crate::ui::types::{CommandTarget, DashboardTab};
 use crate::ui::utils::format_cost;
 use holtburger_common::properties::EnchantmentTypeFlags;
-use holtburger_common::properties::{PropertyFloat, PropertyInt};
+use holtburger_common::properties::PropertyFloat;
 use holtburger_core::world::magic::get_enchantment_name;
 use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
@@ -208,13 +208,16 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     let mut skill_enchants: HashMap<SkillType, Vec<Enchantment>> = HashMap::new();
     let mut float_enchants: HashMap<u32, Vec<Enchantment>> = HashMap::new();
     let mut armor_enchants: Vec<Enchantment> = Vec::new();
+    let mut vitae_enchants: Vec<Enchantment> = Vec::new();
     let mut misc_enchants: Vec<Enchantment> = Vec::new();
 
     for enchant in &state.player_enchantments {
         let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
         let mut categorized = true;
 
-        if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
+        if flags.contains(EnchantmentTypeFlags::VITAE) {
+            vitae_enchants.push(*enchant);
+        } else if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
             if let Some(at) = AttributeType::from_repr(enchant.stat_mod_key) {
                 attr_enchants.entry(at).or_default().push(*enchant);
             } else {
@@ -253,9 +256,7 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
             } else {
                 categorized = false;
             }
-        } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE)
-            && enchant.stat_mod_key == 0
-        {
+        } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
             armor_enchants.push(*enchant);
         } else {
             categorized = false;
@@ -282,6 +283,7 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         sort_enchants(v);
     }
     sort_enchants(&mut armor_enchants);
+    sort_enchants(&mut vitae_enchants);
 
     // Misc are sorted by name then ID
     let sort_by_name = |list: &mut Vec<Enchantment>| {
@@ -295,6 +297,22 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // 1. Vitals
     lines.push(CharTabLine::Header("VITALS"));
+
+    if state.vitae < 0.999 || !vitae_enchants.is_empty() {
+        let penalty_pct = (1.0 - state.vitae) * 100.0;
+        lines.push(CharTabLine::Stat {
+            label: "Vitae Penalty".to_string(),
+            value: format!("{:.0}%", penalty_pct),
+            xp_cost: None,
+            sp_cost: None,
+            stat_type: None,
+            training: None,
+        });
+        for &e in &vitae_enchants {
+            lines.push(CharTabLine::Enchantment(e));
+        }
+    }
+
     let mut vitals: Vec<_> = state.vitals.values().collect();
     vitals.sort_by(|a, b| a.vital_type.to_string().cmp(&b.vital_type.to_string()));
     for v in vitals {
@@ -417,16 +435,11 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // 4. Resistances
     lines.push(CharTabLine::Header("RESISTANCES"));
-    if let Some(player) = state.player_guid.and_then(|guid| state.entities.get(&guid)) {
+    if state.player_guid.is_some() {
         // Armor always first in Resistances
-        let armor = player
-            .int_properties
-            .get(&(PropertyInt::ArmorLevel as u32))
-            .cloned()
-            .unwrap_or(0);
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
-            value: armor.to_string(),
+            value: state.armor.to_string(),
             xp_cost: None,
             sp_cost: None,
             stat_type: None,
@@ -436,21 +449,22 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
             lines.push(CharTabLine::Enchantment(e));
         }
 
-        let mut resists = Vec::new();
-        for &prop in &resists_props {
-            resists.push((prop, prop.to_string()));
-        }
-        resists.sort_by(|a, b| a.1.cmp(&b.1));
+        let mut resists = vec![
+            (PropertyFloat::ResistSlash, state.resistances.slash),
+            (PropertyFloat::ResistPierce, state.resistances.pierce),
+            (PropertyFloat::ResistBludgeon, state.resistances.bludgeon),
+            (PropertyFloat::ResistFire, state.resistances.fire),
+            (PropertyFloat::ResistCold, state.resistances.cold),
+            (PropertyFloat::ResistAcid, state.resistances.acid),
+            (PropertyFloat::ResistElectric, state.resistances.electric),
+            (PropertyFloat::ResistNether, state.resistances.nether),
+        ];
+        resists.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));
 
-        for (prop, label) in resists {
-            let val = player
-                .float_properties
-                .get(&(prop as u32))
-                .cloned()
-                .unwrap_or(1.0);
+        for (prop, val) in resists {
             lines.push(CharTabLine::Stat {
-                label: label.to_string(),
-                value: format!("{:.1}", val),
+                label: prop.to_string(),
+                value: format!("{:.2}", val),
                 xp_cost: None,
                 sp_cost: None,
                 stat_type: None,

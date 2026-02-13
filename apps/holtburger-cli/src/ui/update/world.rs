@@ -41,6 +41,7 @@ impl AppState {
                         vitals,
                         skills,
                         enchantments,
+                        vitae,
                         skill_table,
                         spell_names,
                     } => {
@@ -54,6 +55,7 @@ impl AppState {
                         self.vitals = vitals.into_iter().map(|v| (v.vital_type, v)).collect();
                         self.skills = skills.into_iter().map(|s| (s.skill_type, s)).collect();
                         self.player_enchantments = enchantments;
+                        self.vitae = vitae;
                         self.spell_names = spell_names;
                         self.skill_table = skill_table;
                         self.refresh_context_buffer();
@@ -127,6 +129,9 @@ impl AppState {
                         attributes,
                         vitals,
                         skills,
+                        resistances,
+                        armor,
+                        vitae,
                     } => {
                         for attr in attributes {
                             self.attributes.insert(attr.attr_type, attr);
@@ -137,6 +142,9 @@ impl AppState {
                         for skill in skills {
                             self.skills.insert(skill.skill_type, skill);
                         }
+                        self.resistances = resistances;
+                        self.armor = armor;
+                        self.vitae = vitae;
                     }
                     WorldEvent::EntityMoved { guid, pos } => {
                         if Some(guid) == self.player_guid {

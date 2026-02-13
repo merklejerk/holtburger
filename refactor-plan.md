@@ -245,38 +245,34 @@ Functions to move:
 ### Phase 4 — Extract `commands.rs` (Command Dispatch)
 > Move `handle_command()` and its per-command helpers into `client/commands.rs`.
 
-- [ ] **4.1** Create `client/commands.rs` with an `impl Client` block containing
+- [x] **4.1** Create `client/commands.rs` with an `impl Client` block containing
   `handle_command()`.
-- [ ] **4.2** Move `send_talk()` and `disconnect()` alongside it (they are command-specific
+- [x] **4.2** Move `send_talk()` and `disconnect()` alongside it (they are command-specific
   helpers).
-- [ ] **4.3** Remove from `mod.rs`, add `mod commands;`.
-- [ ] **4.4** `cargo build && cargo test` — green.
-- [ ] **4.5** Commit: `refactor(client): extract commands.rs`.
+- [x] **4.3** Remove from `mod.rs`, add `mod commands;`.
+- [x] **4.4** `cargo build && cargo test` — green.
+- [x] **4.5** Commit: `refactor(client): extract commands.rs`.
 
 **Notes:**
-- Each match arm in `handle_command()` independently constructs a `GameMessage` and sends it.
-  Many arms can be simplified to use `Session::send_action()` which already exists. Flag
-  these for a cleanup pass.
-- `handle_command` is the single largest function. After extraction, consider splitting each
-  match arm into its own `async fn handle_cmd_talk()`, etc. Optional but would make each arm
-  independently testable.
+- **Completed 2026-02-13:** Extracted the massive `handle_command` match arm and its helpers. Cleaned up more imports in `mod.rs`.
 
 ---
 
 ### Phase 5 — Extract `messages.rs` (Inbound Message Dispatch)
 > Move `handle_message()` and its sub-handlers into `client/messages.rs`.
 
-- [ ] **5.1** Create `client/messages.rs` with an `impl Client` block containing
+- [x] **5.1** Create `client/messages.rs` with an `impl Client` block containing
   `handle_message()`.
-- [ ] **5.2** Move `handle_game_action()` alongside it.
-- [ ] **5.3** The `GameMessage::UpdateMotion` / `AutonomousPosition` arms that touch
+- [x] **5.2** Move `handle_game_action()` alongside it.
+- [x] **5.3** The `GameMessage::UpdateMotion` / `AutonomousPosition` arms that touch
   movement state call into `movement.rs` functions — verify cross-file method resolution
   works.
-- [ ] **5.4** Remove from `mod.rs`, add `mod messages;`.
-- [ ] **5.5** `cargo build && cargo test` — green.
-- [ ] **5.6** Commit: `refactor(client): extract messages.rs`.
+- [x] **5.4** Remove from `mod.rs`, add `mod messages;`.
+- [x] **5.5** `cargo build && cargo test` — green.
+- [x] **5.6** Commit: `refactor(client): extract messages.rs`.
 
 **Notes:**
+- **Completed 2026-02-13:** Extracted to `messages.rs`. Cleaned up `ProtocolUnpack` import in `mod.rs`.
 - `handle_message()` is the second-largest function. After extraction, consider grouping
   related match arms into sub-functions: `handle_chat_message()`, `handle_property_update()`,
   etc.

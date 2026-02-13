@@ -438,4 +438,13 @@ impl Client {
         self.session.send_message(&msg).await?;
         Ok(())
     }
+
+    pub(super) async fn send_login_complete(&mut self) -> Result<()> {
+        let msg = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 0,
+            action: GameAction::LoginComplete(Box::new(LoginCompleteData)),
+        }));
+        self.session.send_message(&msg).await?;
+        Ok(())
+    }
 }

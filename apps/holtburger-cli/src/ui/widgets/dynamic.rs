@@ -77,9 +77,11 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
             .as_ref()
             .map(|p| p.rotation.to_heading())
             .unwrap_or(0.0);
-        let heading_deg = heading_rad.to_degrees();
+        let mut heading_deg = heading_rad.to_degrees();
+
         // Normalize 0-360
-        let heading_deg = (heading_deg + DEGREES_IN_CIRCLE) % DEGREES_IN_CIRCLE;
+        heading_deg = (heading_deg % DEGREES_IN_CIRCLE + DEGREES_IN_CIRCLE) % DEGREES_IN_CIRCLE;
+
         let dir_idx =
             ((heading_deg + COMPASS_OFFSET) / DEGREES_PER_POINT) as usize % COMPASS_POINTS as usize;
 

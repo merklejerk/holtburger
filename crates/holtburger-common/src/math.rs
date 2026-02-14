@@ -257,4 +257,26 @@ mod tests {
         let q_s = Quaternion::from_heading(270.0f32.to_radians());
         assert!((q_s.to_heading().to_degrees() - 270.0).abs() < 1e-4);
     }
+
+    #[test]
+    fn test_to_heading_default() {
+        let q = Quaternion::default();
+        let h = q.to_heading();
+        assert!(
+            !h.is_nan(),
+            "Heading for default quaternion should not be NaN"
+        );
+    }
+
+    #[test]
+    fn test_to_heading_nan_input() {
+        let q = Quaternion {
+            w: f32::NAN,
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let h = q.to_heading();
+        assert!(h.is_nan());
+    }
 }

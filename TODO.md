@@ -34,10 +34,11 @@
 - [x] Enter key for interaction target confirmation.
 - [ ] In-world containers.
 - [ ] Search/filter on list tabs.
+- [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 
 ### High
 - [ ] Combat mode toggle.
-- [ ] Items "wielded" by the player not showing up in their inventory.
+- [x] Items "wielded" by the player not showing up in their inventory.
 - [x] Refactor client movement system (move to, nav).
 - [x] Distance calculation is wrong when in different landblocks.
 - [x] Add "active entity" system:

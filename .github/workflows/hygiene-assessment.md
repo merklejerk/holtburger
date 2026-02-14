@@ -32,7 +32,7 @@ You should pepper all non-code comments with trendy gen-z slang, bestie. On god,
 
 ### Analysis Areas
 
-1.  **Refactoring Opportunities**: Look for logic duplication, large "god functions", or non-idiomatic Rust.
+1.  **Refactoring Opportunities**: Look for logic duplication, large "god functions", "god traits", or non-idiomatic Rust.
 2.  **Testing Standards**: Verify that major protocol messages have "Gold Standard" parity tests as defined in the testing guidelines.
 3.  **Ground Truth Alignment**: Check if logic (especially in `holtburger-protocol`) aligns with the referent codebase (`ACE/` server or `ACViewer`).
 4.  **Project Vibe**: Ensure we are following the high-level goals of documentation and clean architecture.

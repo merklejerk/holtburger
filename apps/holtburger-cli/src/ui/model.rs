@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::ItemType;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Skill, SkillType, Vital, VitalType,
@@ -398,5 +399,17 @@ impl AppState {
         }
 
         self.log_chat(ChatMessageKind::System, "═══════════════════".to_string());
+    }
+
+    pub fn is_wielding_caster(&self) -> bool {
+        for guid in self.equipment.keys() {
+            if let Some(entity) = self.entities.get(guid)
+                && let Some(it) = entity.item_type
+                && it.intersects(ItemType::CASTER)
+            {
+                return true;
+            }
+        }
+        false
     }
 }

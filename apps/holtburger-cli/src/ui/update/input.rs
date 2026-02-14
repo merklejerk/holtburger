@@ -588,7 +588,41 @@ impl AppState {
                                     if let Some(handler) = handler {
                                         match handler {
                                             CommandHandler::Command(cmd) => {
-                                                commands.push(cmd);
+                                                if matches!(
+                                                    cmd,
+                                                    ClientCommand::CastTargetedSpell { .. }
+                                                        | ClientCommand::CastUntargetedSpell { .. }
+                                                ) {
+                                                    if !self.is_wielding_caster() {
+                                                        self.log_chat(
+                                                            ChatMessageKind::Error,
+                                                            "You must be wielding a caster to cast spells!"
+                                                                .to_string(),
+                                                        );
+                                                    } else {
+                                                        if self.combat_mode
+                                                            != holtburger_protocol::messages::combat::CombatMode::Magic
+                                                        {
+                                                            commands.push(
+                                                                ClientCommand::SetCombatMode(
+                                                                    holtburger_protocol::messages::combat::CombatMode::Magic,
+                                                                ),
+                                                            );
+                                                        }
+
+                                                        let final_cmd = if let ClientCommand::CastUntargetedSpell { spell_id } = cmd
+                                                            && let Some(guid) = self.player_guid
+                                                        {
+                                                            ClientCommand::CastTargetedSpell { target: guid, spell_id }
+                                                        } else {
+                                                            cmd
+                                                        };
+
+                                                        commands.push(final_cmd);
+                                                    }
+                                                } else {
+                                                    commands.push(cmd);
+                                                }
                                             }
                                             CommandHandler::ToggleDebug => {
                                                 self.current_debug_guid = target_guid;

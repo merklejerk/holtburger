@@ -35,6 +35,7 @@
 - [ ] In-world containers.
 - [ ] Search/filter on list tabs.
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
+- [ ] TUI gets really slow when chat buffer gets full.
 
 ### High
 - [ ] Combat mode toggle.

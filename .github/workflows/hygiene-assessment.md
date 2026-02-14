@@ -60,7 +60,7 @@ You must strictly follow these rules while assessing the codebase:
 
 ## Output Requirements
 
-Create a new GitHub Issue titled `Hygiene Assessment {DATE}` (e.g., `Hygiene Assessment 2026-02-14`).
+Create a new GitHub Issue titled `Daily Rizz Report {DATE}` (e.g., `Daily Rizz Report 2026-02-14`).
 
 The body of the issue should be a "Living Worksheet" containing:
 

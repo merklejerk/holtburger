@@ -20,4 +20,4 @@ This file documents bugs discovered in the ACE Server during development of Holt
 
 
 ## Notes
-- You can cast *Other and war spells on yourself (but war spells do no damage).
+- You can cast *Other, vuln, and war spells on yourself (but war spells do no damage).

@@ -1,6 +1,5 @@
 use super::WorldEvent;
 use super::entity::{Entity, EntityManager};
-use super::player::PlayerState;
 use super::spatial::SpatialScene;
 use super::stats;
 use binrw::BinRead;
@@ -12,6 +11,7 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
+use super::player::PlayerState;
 
 use holtburger_protocol::messages::*;
 

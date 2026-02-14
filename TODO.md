@@ -27,7 +27,7 @@
 - [ ] DC detection.
 - [ ] Approach verb is janky.
 - [ ] Augment entities spawned by `ObjectCreate` with weenie template properties.  
-- [ ] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable.
+- [x] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable. (Done)
 - [ ] All verbs should have synonymous slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] [C]ombine verb (crafting).

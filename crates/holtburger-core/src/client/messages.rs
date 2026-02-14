@@ -256,7 +256,7 @@ impl Client {
             GameMessage::CharacterError(data) => self
                 .auth
                 .handle_character_error(data.error_id, &self.event_tx),
-            GameMessage::BootAccount(data) => {
+            GameMessage::AccountBoot(data) => {
                 self.auth
                     .handle_boot_account(*data, &mut self.state, &self.event_tx)
             }

@@ -1,3 +1,6 @@
+// Comprehensive list of known game opcodes.
+// DO NOT UNCOMMENT OPCODES UNLESS YOU ARE PREPARED TO INTEGRATE THEM WITH COMPLETE UNIT TESTS.
+// DO NOT DELETE COMMENTED OUT OPCODES. WE KEEP THEM HERE FOR REFERENCE AND FUTURE WORK.
 use strum_macros::FromRepr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
@@ -214,7 +217,7 @@ pub enum GameOpcode {
     // AccountBanned = 0xF7C1,
     /// S2C: Kick player from server.
     /// Sent when the account is logged out or banned.
-    BootAccount = 0xF7DC,
+    AccountBoot = 0xF7DC,
     /// S2C: Server name information.
     /// Sent during login to inform the client which shard it has connected to.
     ServerName = 0xF7E1,

@@ -456,138 +456,10 @@ impl WorldState {
                     let name = &data.name;
                     let pos = &data.pos;
 
-                    self.player.guid = guid;
-                    self.player.name = name.clone();
-                    self.player.enchantments = data.enchantments.clone();
-                    self.player.int_properties = data.properties_int.clone();
-                    self.player.int64_properties = data.properties_int64.clone();
-                    self.player.bool_properties = data.properties_bool.clone();
-                    self.player.float_properties = data.properties_float.clone();
-                    self.player.string_properties = data.properties_string.clone();
-                    self.player.did_properties = data.properties_did.clone();
-                    self.player.iid_properties = data.properties_iid.clone();
-                    self.player.spells = data.spells.clone();
-
-                    // Update Experience and Level from properties
-                    if let Some(&xp) = data
-                        .properties_int64
-                        .get(&(PropertyInt64::TotalExperience as u32))
-                    {
-                        self.player.total_experience = xp as u64;
-                    }
-                    if let Some(&axp) = data
-                        .properties_int64
-                        .get(&(PropertyInt64::AvailableExperience as u32))
-                    {
-                        self.player.available_experience = axp as u64;
-                    }
-                    if let Some(&sp) = data
-                        .properties_int
-                        .get(&(PropertyInt::AvailableSkillCredits as u32))
-                    {
-                        self.player.unspent_skill_points = sp as u32;
-                    }
-                    if let Some(&level) = data.properties_int.get(&(PropertyInt::Level as u32)) {
-                        self.player.level = level as u32;
-                    }
-
                     // Ensure entity in our map has the correct name
                     if let Some(entity) = self.entities.get_mut(guid) {
                         entity.name = name.clone();
                     }
-
-                    let mut attr_objs = Vec::new();
-                    let mut vital_objs = Vec::new();
-
-                    self.player.attributes.clear();
-                    for (at_type, attr) in &data.attributes {
-                        let at_type = *at_type;
-                        let ranks = attr.ranks;
-                        let start = attr.start;
-                        let current = attr.current.unwrap_or(0);
-
-                        if at_type <= 6 {
-                            if let Some(attr_type) = stats::AttributeType::from_repr(at_type) {
-                                let base = ranks + start;
-                                let attr_obj = stats::Attribute {
-                                    attr_type,
-                                    ranks,
-                                    start,
-                                    spent_xp: attr.xp,
-                                    next_rank_xp: self.get_next_attribute_rank_xp(ranks),
-                                    base,
-                                    current: base,
-                                };
-                                self.player.attributes.insert(attr_type, attr_obj.clone());
-                                attr_objs.push(attr_obj);
-                            }
-                        } else if (7..=9).contains(&at_type) {
-                            let vital_type = match at_type {
-                                7 => stats::VitalType::Health,
-                                8 => stats::VitalType::Stamina,
-                                9 => stats::VitalType::Mana,
-                                _ => continue,
-                            };
-
-                            self.player
-                                .vital_bases
-                                .insert(vital_type, super::player::VitalBase { ranks, start });
-
-                            let base = self.player.calculate_vital_base(vital_type);
-                            let final_base = if base == 0 { current } else { base };
-
-                            let vital = stats::Vital {
-                                vital_type,
-                                ranks,
-                                start,
-                                spent_xp: attr.xp,
-                                next_rank_xp: self.get_next_vital_rank_xp(ranks),
-                                base: final_base,
-                                buffed_max: final_base,
-                                current,
-                            };
-                            self.player.vitals.insert(vital_type, vital.clone());
-                            vital_objs.push(vital);
-                        }
-                    }
-
-                    self.player.skills.clear();
-                    self.player.skill_bases.clear();
-                    let mut skill_objs = Vec::new();
-
-                    for (sk_type, s) in &data.skills {
-                        if let Some(skill_type) = stats::SkillType::from_repr(*sk_type) {
-                            let training = stats::TrainingLevel::from_repr(s.status)
-                                .unwrap_or(stats::TrainingLevel::Untrained);
-
-                            self.player.skill_bases.insert(
-                                skill_type,
-                                crate::world::player::SkillBase {
-                                    ranks: s.ranks,
-                                    init: s.init,
-                                },
-                            );
-
-                            let base_val = self
-                                .player
-                                .derive_skill_value(skill_type, s.ranks, s.init, false);
-                            let skill = stats::Skill {
-                                skill_type,
-                                ranks: s.ranks,
-                                init: s.init,
-                                spent_xp: s.xp,
-                                next_rank_xp: self.get_next_skill_rank_xp(s.ranks, training),
-                                base: base_val,
-                                current: base_val,
-                                training,
-                            };
-                            self.player.skills.insert(skill_type, skill.clone());
-                            skill_objs.push(skill);
-                        }
-                    }
-
-                    self.player.spells = data.spells.clone();
-                    self.player.hotbar_spells = data.hotbar_spells.clone();
 
                     if let Some(p) = pos {
                         events.extend(self.set_player_position(*p));
@@ -597,9 +469,9 @@ impl WorldState {
                         guid,
                         name: name.clone(),
                         pos: *pos,
-                        attributes: attr_objs,
-                        vitals: vital_objs,
-                        skills: skill_objs,
+                        attributes: self.player.get_attributes(),
+                        vitals: self.player.get_vitals(),
+                        skills: self.player.get_skills(),
                         enchantments: self.player.enchantments.clone(),
                         spells: self.player.spells.keys().cloned().collect(),
                         vitae: self.player.vitae,
@@ -608,7 +480,6 @@ impl WorldState {
                     });
 
                     self.emit_level_info(&mut events);
-                    self.player.emit_derived_stats(&mut events);
                 }
                 match &ev.event {
                     GameEvent::InventoryPutObjInContainer(data) => {
@@ -1401,5 +1272,196 @@ mod tests {
         );
         assert_eq!(state.player.instance_sequence, 10);
         assert_eq!(state.player.server_control_sequence, 20);
+    }
+
+    #[test]
+    fn test_inventory_put_obj_in_container() {
+        let mut state = WorldState::new(None, None);
+        let item_guid = Guid(0x1);
+        let container_guid = Guid(0x2);
+
+        // Add the item to entities
+        state.entities.insert(Entity::new(
+            item_guid,
+            "Item".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let data = InventoryPutObjInContainerData {
+            item_guid,
+            container_guid,
+            slot: 0,
+            container_type: 0,
+        };
+        let event = GameEvent::InventoryPutObjInContainer(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid::NULL,
+            sequence: 0,
+            event,
+        }));
+
+        let events = state.handle_message(&msg);
+
+        let entity = state.entities.get(item_guid).unwrap();
+        assert_eq!(entity.container_id, Some(container_guid));
+        assert_eq!(entity.position.landblock_id, Guid::NULL);
+
+        // Check for WorldEvent::PropertyUpdated
+        assert!(events.iter().any(|e| matches!(
+            e,
+            WorldEvent::PropertyUpdated {
+                guid,
+                property_id,
+                value: PropertyValue::IID(val),
+            } if *guid == item_guid && *property_id == PropertyInstanceId::Container as u32 && *val == container_guid
+        )));
+    }
+
+    #[test]
+    fn test_inventory_put_object_in_3d() {
+        let mut state = WorldState::new(None, None);
+        let obj_guid = Guid(0x1);
+
+        let mut item = Entity::new(obj_guid, "Item".to_string(), WorldPosition::default());
+        item.container_id = Some(Guid(0x2));
+        item.wielder_id = Some(Guid(0x3));
+        state.entities.insert(item);
+
+        let data = InventoryPutObjectIn3DData {
+            object_guid: obj_guid,
+        };
+        let event = GameEvent::InventoryPutObjectIn3D(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid::NULL,
+            sequence: 0,
+            event,
+        }));
+
+        let events = state.handle_message(&msg);
+
+        let entity = state.entities.get(obj_guid).unwrap();
+        assert_eq!(entity.container_id, None);
+        assert_eq!(entity.wielder_id, None);
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            WorldEvent::PropertyUpdated {
+                guid,
+                property_id,
+                value: PropertyValue::IID(val),
+            } if *guid == obj_guid && *property_id == PropertyInstanceId::Container as u32 && *val == Guid::NULL
+        )));
+    }
+
+    #[test]
+    fn test_wield_object() {
+        let mut state = WorldState::new(None, None);
+        let obj_guid = Guid(0x1);
+        let wielder_guid = Guid(0x50000001);
+
+        state.entities.insert(Entity::new(
+            obj_guid,
+            "Weapon".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let data = WieldObjectData {
+            object_guid: obj_guid,
+            equip_mask: EquipMask::from_bits_truncate(0),
+        };
+        let event = GameEvent::WieldObject(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: wielder_guid,
+            sequence: 0,
+            event,
+        }));
+
+        let events = state.handle_message(&msg);
+
+        let entity = state.entities.get(obj_guid).unwrap();
+        assert_eq!(entity.wielder_id, Some(wielder_guid));
+        assert_eq!(entity.container_id, None);
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            WorldEvent::PropertyUpdated {
+                guid,
+                property_id,
+                value: PropertyValue::IID(val),
+            } if *guid == obj_guid && *property_id == PropertyInstanceId::Wielder as u32 && *val == wielder_guid
+        )));
+    }
+
+    #[test]
+    fn test_inventory_remove_object() {
+        let mut state = WorldState::new(None, None);
+        let obj_guid = Guid(0x1);
+
+        state.entities.insert(Entity::new(
+            obj_guid,
+            "Item".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let data = InventoryRemoveObjectData {
+            object_guid: obj_guid,
+        };
+        let msg = GameMessage::InventoryRemoveObject(Box::new(data));
+
+        let events = state.handle_message(&msg);
+
+        assert!(state.entities.get(obj_guid).is_none());
+        assert!(events.iter().any(
+            |e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid)
+        ));
+    }
+
+    #[test]
+    fn test_player_description_initialization() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000001);
+        let player_name = "TestingPlayer".to_string();
+
+        let data = PlayerDescriptionData {
+            guid: player_guid,
+            sequence: 1,
+            name: player_name.clone(),
+            wee_type: 1,
+            pos: Some(WorldPosition::default()),
+            properties_int: std::collections::BTreeMap::new(),
+            properties_int64: std::collections::BTreeMap::new(),
+            properties_bool: std::collections::BTreeMap::new(),
+            properties_float: std::collections::BTreeMap::new(),
+            properties_string: std::collections::BTreeMap::new(),
+            properties_did: std::collections::BTreeMap::new(),
+            properties_iid: std::collections::BTreeMap::new(),
+            positions: std::collections::BTreeMap::new(),
+            attributes: std::collections::BTreeMap::new(),
+            skills: std::collections::BTreeMap::new(),
+            enchantments: Vec::new(),
+            spells: std::collections::BTreeMap::new(),
+            has_health: true,
+            options1: 0,
+            options2: 0,
+            shortcuts: Vec::new(),
+            hotbar_spells: Vec::new(),
+            desired_comps: Vec::new(),
+            spellbook_filters: 0,
+            gameplay_options: Vec::new(),
+            inventory: Vec::new(),
+            equipped_objects: Vec::new(),
+        };
+
+        let event = GameEvent::PlayerDescription(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player_guid,
+            sequence: 1,
+            event,
+        }));
+
+        state.handle_message(&msg);
+
+        assert_eq!(state.player.guid, player_guid);
+        assert_eq!(state.player.name, player_name);
     }
 }

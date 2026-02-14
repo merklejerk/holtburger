@@ -139,16 +139,16 @@
 ## 7. Living Worksheet
 
 ### 7.1 Task Checklist
-- [ ] **Phase 0**: Add baseline tests for inventory/equipment transition events.
-- [ ] **Phase 1**: Split `player.rs` into domain modules without behavior changes.
-- [ ] **Phase 2**: Add explicit inventory/equipment state to `PlayerState`.
-- [ ] **Phase 3**: Route world message handling through `PlayerState` ownership helpers.
+- [x] **Phase 0**: Add baseline tests for inventory/equipment transition events.
+- [x] **Phase 1**: Split `player.rs` into domain modules without behavior changes.
+- [x] **Phase 2**: Add explicit inventory/equipment state to `PlayerState`.
+- [x] **Phase 3**: Route world message handling through `PlayerState` ownership helpers.
 - [ ] **Phase 4**: Remove TUI ownership inference and consume core-owned state.
 - [ ] **Phase 5**: Cleanup, docs, and verification.
 
 ### 7.2 Decisions Log
-- [ ] Decide canonical equipped representation (item->slot, slot->item, or dual index).
-- [ ] Decide whether inventory/equipment updates need new `WorldEvent` variants or can reuse existing events.
+- [x] Decide canonical equipped representation: items index by GUID -> `EquipMask` bitfield.
+- [x] Decide whether inventory/equipment updates need new `WorldEvent` variants: Reused existing `PropertyUpdated` for now, but `PlayerState` is the source of truth.
 - [ ] Decide minimal public API surface for `PlayerState` ownership queries.
 
 ### 7.3 Verification Log

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
@@ -13,7 +13,7 @@ use holtburger_core::world::stats::{
 use holtburger_core::{ClientState, RetryState};
 use holtburger_protocol::messages::CharacterEntry;
 use holtburger_protocol::messages::combat::CombatMode;
-use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::{EquipMask, magic::Enchantment};
 
 use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
@@ -73,6 +73,8 @@ pub struct AppState {
     pub net_stats: NetStats,
     pub world_name: String,
     pub combat_mode: CombatMode,
+    pub inventory: HashSet<Guid>,
+    pub equipment: HashMap<Guid, EquipMask>,
 }
 
 pub struct NetStats {
@@ -96,6 +98,24 @@ impl Default for NetStats {
 }
 
 impl AppState {
+    pub(crate) fn update_inventory_recursive(&mut self, root: Guid, owned: bool) {
+        let mut stack = vec![root];
+        while let Some(current) = stack.pop() {
+            if owned {
+                self.inventory.insert(current);
+            } else {
+                self.inventory.remove(&current);
+                self.equipment.remove(&current);
+            }
+
+            // Find children in self.entities
+            for (&guid, entity) in &self.entities {
+                if entity.container_id == Some(current) {
+                    stack.push(guid);
+                }
+            }
+        }
+    }
     pub fn log_chat(&mut self, kind: ChatMessageKind, text: String) {
         if let Some(log_mutex) = &self.chat_log
             && let Ok(mut file) = log_mutex.lock()
@@ -184,6 +204,7 @@ impl AppState {
             DashboardTab::Entities => filter_entities(
                 &self.entities,
                 self.player_guid,
+                &self.inventory,
                 self.player_pos.as_ref(),
                 EntityFilter::World,
             )
@@ -198,6 +219,7 @@ impl AppState {
         filter_entities(
             &self.entities,
             self.player_guid,
+            &self.inventory,
             self.player_pos.as_ref(),
             EntityFilter::World,
         )
@@ -207,6 +229,7 @@ impl AppState {
         filter_entities(
             &self.entities,
             self.player_guid,
+            &self.inventory,
             self.player_pos.as_ref(),
             EntityFilter::Inventory,
         )

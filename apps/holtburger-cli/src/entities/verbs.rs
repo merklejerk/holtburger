@@ -1,11 +1,9 @@
 use crate::entities::classification::{self, EntityClass};
-use crate::entities::filter;
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_common::properties::{ObjectDescriptionFlag, PropertyInt};
 use holtburger_core::ClientCommand;
-use holtburger_core::world::entity::Entity;
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 macro_rules! define_verbs {
     // Internal helpers
@@ -259,8 +257,8 @@ impl EntityVerb {
 
 pub fn get_verbs_for_target(
     target: &CommandTarget,
-    entities: &HashMap<Guid, Entity>,
     player_guid: Option<Guid>,
+    inventory: &HashSet<Guid>,
     active_interaction: Option<ActiveInteraction>,
 ) -> Vec<EntityVerb> {
     if let CommandTarget::Spell(_) = target {
@@ -329,11 +327,7 @@ pub fn get_verbs_for_target(
             let flags = e.flags;
             let mut ent_verbs = vec![EntityVerb::Assess, EntityVerb::Target];
 
-            let is_inventory = if let Some(pguid) = player_guid {
-                filter::is_owned_by_player(e.guid, entities, pguid)
-            } else {
-                e.position.landblock_id == Guid::NULL
-            };
+            let is_inventory = inventory.contains(&e.guid);
 
             // Global approach for non-parented/world objects
             if !is_inventory && e.container_id.is_none() && e.wielder_id.is_none() {

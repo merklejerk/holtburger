@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use holtburger_protocol::messages::magic::Enchantment;
 use super::PlayerState;
+use holtburger_protocol::messages::magic::Enchantment;
+use std::collections::HashMap;
 
 impl PlayerState {
     /// Returns the current enchantments that are currently "winning" their categories.

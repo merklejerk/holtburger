@@ -41,9 +41,7 @@ impl ProtocolPack for CancelAttackData {
 mod tests {
     use super::*;
     use crate::messages::game_action::{GameAction, GameActionMessage};
-    use crate::test_fixtures as fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
-    use byteorder::{LittleEndian, WriteBytesExt};
 
     #[test]
     fn test_change_combat_mode_parity() {

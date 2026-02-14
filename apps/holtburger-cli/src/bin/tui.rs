@@ -237,6 +237,8 @@ async fn main() -> Result<()> {
         net_stats: ui::NetStats::default(),
         world_name: String::new(),
         combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+        inventory: std::collections::HashSet::new(),
+        equipment: std::collections::HashMap::new(),
     };
 
     app_state.refresh_context_buffer();

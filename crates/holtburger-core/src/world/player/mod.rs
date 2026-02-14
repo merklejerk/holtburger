@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::EquipMask;
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
 
 use super::stats;
@@ -14,8 +14,8 @@ pub mod movement;
 pub mod stats_calc;
 pub mod types;
 
-pub use types::{SkillBase, VitalBase};
 pub(crate) use types::LastSentStats;
+pub use types::{SkillBase, VitalBase};
 
 /// The localized state of the current player.
 ///

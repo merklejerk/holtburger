@@ -13,6 +13,33 @@ use holtburger_common::properties::PropertyValue;
 use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
+pub struct PlayerInfoData {
+    pub guid: Guid,
+    pub name: String,
+    pub pos: Option<WorldPosition>,
+    pub attributes: Vec<stats::Attribute>,
+    pub vitals: Vec<stats::Vital>,
+    pub skills: Vec<stats::Skill>,
+    pub enchantments: Vec<Enchantment>,
+    pub spells: Vec<u32>,
+    pub vitae: f32,
+    pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
+    pub spell_names: std::collections::HashMap<u32, String>,
+    pub inventory: std::collections::HashSet<Guid>,
+    pub equipment: std::collections::HashMap<Guid, holtburger_protocol::messages::EquipMask>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DerivedStatsData {
+    pub attributes: Vec<stats::Attribute>,
+    pub vitals: Vec<stats::Vital>,
+    pub skills: Vec<stats::Skill>,
+    pub resistances: stats::Resistances,
+    pub armor: u32,
+    pub vitae: f32,
+}
+
+#[derive(Debug, Clone)]
 pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityMoved {
@@ -35,19 +62,7 @@ pub enum WorldEvent {
         property_id: u32,
         value: PropertyValue,
     },
-    PlayerInfo {
-        guid: Guid,
-        name: String,
-        pos: Option<WorldPosition>,
-        attributes: Vec<stats::Attribute>,
-        vitals: Vec<stats::Vital>,
-        skills: Vec<stats::Skill>,
-        enchantments: Vec<Enchantment>,
-        spells: Vec<u32>,
-        vitae: f32,
-        skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
-        spell_names: std::collections::HashMap<u32, String>,
-    },
+    PlayerInfo(Box<PlayerInfoData>),
     EnchantmentUpdated {
         enchantment: Enchantment,
         spell_name: Option<String>,
@@ -69,14 +84,7 @@ pub enum WorldEvent {
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
     ServerTimeUpdate(f64),
     EnchantmentsPurged,
-    DerivedStatsUpdated {
-        attributes: Vec<stats::Attribute>,
-        vitals: Vec<stats::Vital>,
-        skills: Vec<stats::Skill>,
-        resistances: stats::Resistances,
-        armor: u32,
-        vitae: f32,
-    },
+    DerivedStatsUpdated(Box<DerivedStatsData>),
     EntityStateUpdated {
         guid: Guid,
         physics_state: holtburger_common::properties::PhysicsState,
@@ -114,7 +122,7 @@ impl holtburger_common::traits::Deduplicable for WorldEvent {
 
     fn dedupe_key(&self) -> Option<Self::Key> {
         match self {
-            WorldEvent::DerivedStatsUpdated { .. } => Some(EventDedupeKey::DerivedStats),
+            WorldEvent::DerivedStatsUpdated(_) => Some(EventDedupeKey::DerivedStats),
             WorldEvent::VitalUpdated(v) => Some(EventDedupeKey::Vital(v.vital_type)),
             WorldEvent::AttributeUpdated(a) => Some(EventDedupeKey::Attribute(a.attr_type)),
             WorldEvent::SkillUpdated(s) => Some(EventDedupeKey::Skill(s.skill_type)),

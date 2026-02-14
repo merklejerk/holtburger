@@ -79,48 +79,6 @@ impl WorldState {
         })
     }
 
-    fn get_next_attribute_rank_xp(&self, ranks: u32) -> Option<u32> {
-        let table = self.xp_table.as_ref()?;
-        let next_rank = (ranks + 1) as usize;
-        if next_rank < table.attribute_xp_list.len() {
-            Some(table.attribute_xp_list[next_rank])
-        } else {
-            None
-        }
-    }
-
-    fn get_next_vital_rank_xp(&self, ranks: u32) -> Option<u32> {
-        let table = self.xp_table.as_ref()?;
-        let next_rank = (ranks + 1) as usize;
-        if next_rank < table.vital_xp_list.len() {
-            Some(table.vital_xp_list[next_rank])
-        } else {
-            None
-        }
-    }
-
-    fn get_next_skill_rank_xp(&self, ranks: u32, training: stats::TrainingLevel) -> Option<u32> {
-        let table = self.xp_table.as_ref()?;
-        let next_rank = (ranks + 1) as usize;
-        match training {
-            stats::TrainingLevel::Trained | stats::TrainingLevel::Untrained => {
-                if next_rank < table.trained_skill_xp_list.len() {
-                    Some(table.trained_skill_xp_list[next_rank])
-                } else {
-                    None
-                }
-            }
-            stats::TrainingLevel::Specialized => {
-                if next_rank < table.specialized_skill_xp_list.len() {
-                    Some(table.specialized_skill_xp_list[next_rank])
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-
     fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
         let mut names = std::collections::HashMap::new();
         if let Some(table) = &self.spell_table {
@@ -250,6 +208,24 @@ impl WorldState {
         }
     }
 
+    fn update_player_inventory_recursive(&mut self, root: Guid, owned: bool) {
+        let mut stack = vec![root];
+        while let Some(current) = stack.pop() {
+            if owned {
+                self.player.add_to_inventory(current);
+            } else {
+                self.player.remove_from_inventory(current);
+            }
+
+            // Find children in self.entities
+            for (&guid, entity) in &self.entities.entities {
+                if entity.container_id == Some(current) {
+                    stack.push(guid);
+                }
+            }
+        }
+    }
+
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
         let mut events = Vec::new();
 
@@ -285,11 +261,27 @@ impl WorldState {
                 entity.container_id = data.container_id;
                 entity.wielder_id = data.wielder_id;
 
+                // Update inventory tracking for new objects appearing in containers
+                if let Some(cid) = data.container_id
+                    && (cid == self.player.guid || self.player.inventory.contains(&cid))
+                {
+                    self.player.add_to_inventory(data.guid);
+                }
+                if let Some(wid) = data.wielder_id
+                    && wid == self.player.guid
+                {
+                    self.player.add_to_inventory(data.guid);
+                }
+
                 self.add_entity(entity.clone());
                 events.push(WorldEvent::EntitySpawned(Box::new(entity)));
             }
             GameMessage::ObjectDelete(data) => {
                 let guid = data.guid;
+
+                // Sync inventory recursively before removing
+                self.update_player_inventory_recursive(guid, false);
+
                 if let Some(_entity) = self.remove_entity(guid) {
                     events.push(WorldEvent::EntityDespawned(guid));
                 }
@@ -465,19 +457,23 @@ impl WorldState {
                         events.extend(self.set_player_position(*p));
                     }
 
-                    events.push(WorldEvent::PlayerInfo {
-                        guid,
-                        name: name.clone(),
-                        pos: *pos,
-                        attributes: self.player.get_attributes(),
-                        vitals: self.player.get_vitals(),
-                        skills: self.player.get_skills(),
-                        enchantments: self.player.enchantments.clone(),
-                        spells: self.player.spells.keys().cloned().collect(),
-                        vitae: self.player.vitae,
-                        skill_table: self.skill_table.clone(),
-                        spell_names: self.get_player_spell_names(),
-                    });
+                    events.push(WorldEvent::PlayerInfo(Box::new(
+                        crate::world::PlayerInfoData {
+                            guid,
+                            name: name.clone(),
+                            pos: *pos,
+                            attributes: self.player.get_attributes(),
+                            vitals: self.player.get_vitals(),
+                            skills: self.player.get_skills(),
+                            enchantments: self.player.enchantments.clone(),
+                            spells: self.player.spells.keys().cloned().collect(),
+                            vitae: self.player.vitae,
+                            skill_table: self.skill_table.clone(),
+                            spell_names: self.get_player_spell_names(),
+                            inventory: self.player.inventory.clone(),
+                            equipment: self.player.equipment.clone(),
+                        },
+                    )));
 
                     self.emit_level_info(&mut events);
                 }
@@ -486,6 +482,11 @@ impl WorldState {
                         if let Some(entity) = self.entities.get_mut(data.item_guid) {
                             entity.container_id = Some(data.container_guid);
                             entity.position.landblock_id = Guid::NULL;
+
+                            // Update player inventory set recursively
+                            let is_owned = data.container_guid == self.player.guid
+                                || self.player.inventory.contains(&data.container_guid);
+                            self.update_player_inventory_recursive(data.item_guid, is_owned);
 
                             events.push(WorldEvent::PropertyUpdated {
                                 guid: data.item_guid,
@@ -498,6 +499,9 @@ impl WorldState {
                         if let Some(entity) = self.entities.get_mut(data.object_guid) {
                             entity.container_id = None;
                             entity.wielder_id = None;
+
+                            // Recursively remove from inventory tracking
+                            self.update_player_inventory_recursive(data.object_guid, false);
 
                             events.push(WorldEvent::PropertyUpdated {
                                 guid: data.object_guid,
@@ -512,6 +516,10 @@ impl WorldState {
                             entity.wielder_id = Some(ev.target);
                             entity.container_id = None;
                             entity.position.landblock_id = Guid::NULL;
+
+                            if ev.target == self.player.guid {
+                                self.player.wield_item(data.object_guid, data.equip_mask);
+                            }
 
                             events.push(WorldEvent::PropertyUpdated {
                                 guid: data.object_guid,
@@ -571,6 +579,10 @@ impl WorldState {
             }
             GameMessage::InventoryRemoveObject(data) => {
                 let guid = data.object_guid;
+
+                // Recursively remove from inventory tracking before deleting the entity
+                self.update_player_inventory_recursive(guid, false);
+
                 if let Some(_entity) = self.remove_entity(guid) {
                     events.push(WorldEvent::EntityDespawned(guid));
                 }
@@ -1411,9 +1423,11 @@ mod tests {
         let events = state.handle_message(&msg);
 
         assert!(state.entities.get(obj_guid).is_none());
-        assert!(events.iter().any(
-            |e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid)
-        ));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid))
+        );
     }
 
     #[test]

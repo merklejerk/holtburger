@@ -360,10 +360,10 @@ pub enum GameActionOpcode {
     CastTargetedSpell = 0x004A,
     /// C2S: Cast a spell without a target (e.g. self-buff).
     CastUntargetedSpell = 0x0048,
-    // /// C2S: Cycle through combat modes (Peace, Melee, Missile, Magic).
-    // ChangeCombatMode = 0x0053,
-    // /// C2S: Cancel the current combat attack sequence.
-    // CancelAttack = 0x01B7,
+    /// C2S: Cycle through combat modes (Peace, Melee, Missile, Magic).
+    ChangeCombatMode = 0x0053,
+    /// C2S: Cancel the current combat attack sequence.
+    CancelAttack = 0x01B7,
     // /// C2S: Remove a spell from the character's spellbook.
     // RemoveSpellC2S = 0x01A8,
     // /// C2S: Mark a spell as a favorite in the spellbook.

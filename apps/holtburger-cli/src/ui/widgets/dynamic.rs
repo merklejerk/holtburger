@@ -55,12 +55,23 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Min(0),                 // 1. Consolidated Info (Compass + Chrono)
-                Constraint::Length(NETSTATS_WIDTH), // 2. Net Stats (Fixed width, right aligned)
+                Constraint::Min(0),                 // 1. World Name
+                Constraint::Length(16),             // 2. Compass
+                Constraint::Length(12),             // 3. Chronometer
+                Constraint::Length(14),             // 4. Combat Mode Indicator
+                Constraint::Length(NETSTATS_WIDTH), // 5. Net Stats
             ])
             .split(inner);
 
-        // --- Left Consolidated Info ---
+        // --- 1. World Name ---
+        let world_content = if !state.world_name.is_empty() {
+            vec![Span::raw(format!(" {} ", state.world_name))]
+        } else {
+            vec![]
+        };
+        f.render_widget(Paragraph::new(Line::from(world_content)), chunks[0]);
+
+        // --- 2. Compass ---
         let heading_rad = state
             .player_pos
             .as_ref()
@@ -72,6 +83,13 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         let dir_idx =
             ((heading_deg + COMPASS_OFFSET) / DEGREES_PER_POINT) as usize % COMPASS_POINTS as usize;
 
+        let compass_str = format!(
+            " 🧭 {:03.0}° [{}] ",
+            heading_deg, COMPASS_DIRECTIONS[dir_idx]
+        );
+        f.render_widget(Paragraph::new(compass_str), chunks[1]);
+
+        // --- 3. Chronometer ---
         let time_str = if let Some((st, inst)) = state.server_time {
             let current_server_time = st + inst.elapsed().as_secs_f64();
             let dereth_hour = (current_server_time / DERETH_TIME_DIVISOR) % 24.0;
@@ -81,22 +99,30 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         } else {
             " ⏳ --:-- ".to_string()
         };
+        f.render_widget(Paragraph::new(time_str), chunks[2]);
 
-        let mut left_content = vec![
-            Span::raw(format!(
-                " 🧭 {:03.0}° [{}] ",
-                heading_deg, COMPASS_DIRECTIONS[dir_idx]
-            )),
-            Span::raw(time_str),
-        ];
+        // --- 4. Combat Mode Indicator ---
+        let combat_span = match state.combat_mode {
+            holtburger_protocol::messages::combat::CombatMode::NonCombat
+            | holtburger_protocol::messages::combat::CombatMode::Undef => {
+                Span::styled(" 🛡️ PEACE ", Style::default().fg(Color::Green))
+            }
+            holtburger_protocol::messages::combat::CombatMode::Melee => {
+                Span::styled(" ⚔️ MELEE ", Style::default().fg(Color::Red))
+            }
+            holtburger_protocol::messages::combat::CombatMode::Missile => {
+                Span::styled(" 🏹 MISSILE ", Style::default().fg(Color::Red))
+            }
+            holtburger_protocol::messages::combat::CombatMode::Magic => {
+                Span::styled(" ✨ MAGIC ", Style::default().fg(Color::Cyan))
+            }
+        };
+        f.render_widget(
+            Paragraph::new(Line::from(vec![combat_span, Span::raw(" ")])),
+            chunks[3],
+        );
 
-        if !state.world_name.is_empty() {
-            left_content.push(Span::raw(format!("| {} ", state.world_name)));
-        }
-
-        f.render_widget(Paragraph::new(Line::from(left_content)), chunks[0]);
-
-        // --- Right Net Stats (Sparklines) ---
+        // --- 5. Right Net Stats (Sparklines) ---
         let mut net_spans = vec![Span::raw(" ↕ ")];
 
         let history_in = &state.net_stats.history_in;
@@ -142,7 +168,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
 
         f.render_widget(
             Paragraph::new(Line::from(net_spans)).alignment(ratatui::layout::Alignment::Right),
-            chunks[1],
+            chunks[4],
         );
     }
 }

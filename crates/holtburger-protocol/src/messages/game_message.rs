@@ -1,5 +1,6 @@
 pub use crate::messages::character::types::*;
 pub use crate::messages::chat::types::*;
+pub use crate::messages::combat::types::*;
 pub use crate::messages::effects::types::*;
 pub use crate::messages::inventory::types::*;
 pub use crate::messages::misc::types::*;
@@ -871,5 +872,24 @@ mod tests {
         assert_dispatch_match(test_fixtures::UPDATE_PROPERTY_INT, |msg| {
             matches!(msg, GameMessage::GameEvent(_))
         });
+    }
+
+    #[test]
+    fn test_private_update_combat_mode_parity() {
+        let fixture = hex::decode("CD0200000C2800000002000000").unwrap();
+        let mut offset = 0;
+        let msg = GameMessage::unpack(&fixture, &mut offset).expect("failed to unpack GameMessage");
+
+        if let GameMessage::PrivateUpdatePropertyInt(ref data) = msg {
+            assert_eq!(data.sequence, 0x0C);
+            assert_eq!(data.property, 40); // CombatMode
+            assert_eq!(data.value, 2); // Melee
+        } else {
+            panic!("expected PrivateUpdatePropertyInt, got {:?}", msg);
+        }
+
+        let mut packed = Vec::new();
+        msg.pack(&mut packed);
+        assert_eq!(packed, fixture);
     }
 }

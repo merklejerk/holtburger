@@ -12,6 +12,7 @@ use holtburger_core::world::stats::{
 };
 use holtburger_core::{ClientState, RetryState};
 use holtburger_protocol::messages::CharacterEntry;
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
 
 use super::types::{
@@ -71,6 +72,7 @@ pub struct AppState {
     pub verbosity: u8,
     pub net_stats: NetStats,
     pub world_name: String,
+    pub combat_mode: CombatMode,
 }
 
 pub struct NetStats {

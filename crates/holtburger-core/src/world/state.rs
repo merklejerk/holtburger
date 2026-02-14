@@ -752,6 +752,16 @@ impl WorldState {
                             self.player.unspent_skill_points = data.value as u32;
                             self.emit_level_info(&mut events);
                         }
+                        p if p == PropertyInt::CombatMode as u32 => {
+                            if let Some(mode) =
+                                holtburger_protocol::messages::combat::CombatMode::from_repr(
+                                    data.value as u32,
+                                )
+                            {
+                                self.player.combat_mode = mode;
+                                events.push(WorldEvent::CombatModeUpdated(mode));
+                            }
+                        }
                         _ => {}
                     }
                     self.player.emit_derived_stats(&mut events);
@@ -773,6 +783,17 @@ impl WorldState {
                 }
                 if target_guid == self.player.guid {
                     self.player.int_properties.insert(data.property, data.value);
+                    if data.property == PropertyInt::CombatMode as u32 {
+                        let maybe_mode =
+                            holtburger_protocol::messages::combat::CombatMode::from_repr(
+                                data.value as u32,
+                            );
+
+                        if let Some(mode) = maybe_mode {
+                            self.player.combat_mode = mode;
+                            events.push(WorldEvent::CombatModeUpdated(mode));
+                        }
+                    }
                     self.player.emit_derived_stats(&mut events);
                 }
                 events.push(WorldEvent::PropertyUpdated {

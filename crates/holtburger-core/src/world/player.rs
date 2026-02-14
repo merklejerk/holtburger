@@ -19,6 +19,16 @@ pub struct VitalBase {
     pub start: u32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct LastSentStats {
+    attributes: Vec<stats::Attribute>,
+    vitals: Vec<stats::Vital>,
+    skills: Vec<stats::Skill>,
+    resistances: stats::Resistances,
+    armor: u32,
+    vitae: f32,
+}
+
 /// The localized state of the current player.
 ///
 /// NOTE: This data is mirrored in the `WorldState.entities` map.
@@ -59,6 +69,10 @@ pub struct PlayerState {
     pub string_properties: BTreeMap<u32, String>,
     pub did_properties: BTreeMap<u32, Guid>,
     pub iid_properties: BTreeMap<u32, Guid>,
+    pub combat_mode: holtburger_protocol::messages::combat::CombatMode,
+
+    /// Dirty tracking for events
+    last_sent_stats: Option<LastSentStats>,
 }
 
 impl Default for PlayerState {
@@ -101,6 +115,8 @@ impl PlayerState {
             string_properties: BTreeMap::new(),
             did_properties: BTreeMap::new(),
             iid_properties: BTreeMap::new(),
+            combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+            last_sent_stats: None,
         }
     }
 
@@ -401,13 +417,28 @@ impl PlayerState {
         // Recalculate Vitae
         self.vitae = super::magic::get_total_vitae(&self.enchantments);
 
-        events.push(WorldEvent::DerivedStatsUpdated {
+        let current = LastSentStats {
             attributes: self.get_attributes(),
             vitals: self.get_vitals(),
             skills: self.get_skills(),
             resistances: self.resistances.clone(),
             armor: self.armor,
             vitae: self.vitae,
+        };
+
+        if self.last_sent_stats.as_ref() == Some(&current) {
+            return;
+        }
+
+        self.last_sent_stats = Some(current.clone());
+
+        events.push(WorldEvent::DerivedStatsUpdated {
+            attributes: current.attributes,
+            vitals: current.vitals,
+            skills: current.skills,
+            resistances: current.resistances,
+            armor: current.armor,
+            vitae: current.vitae,
         });
     }
 

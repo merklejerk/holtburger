@@ -44,6 +44,10 @@ impl Client {
 
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);
+
+        // Deduplicate events that are snapshots/derived
+        let world_events = crate::world::dedupe_world_events(world_events);
+
         for event in world_events.iter() {
             if let Some(tx) = &self.event_tx {
                 let _ = tx.send(ClientEvent::World(Box::new(event.clone())));

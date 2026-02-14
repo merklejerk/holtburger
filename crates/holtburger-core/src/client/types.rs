@@ -128,6 +128,8 @@ pub enum ClientCommand {
     CastUntargetedSpell {
         spell_id: u32,
     },
+    SetCombatMode(holtburger_protocol::messages::combat::CombatMode),
+    CancelAttack,
     SyncPosition,
     Quit,
 }

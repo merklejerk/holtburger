@@ -37,7 +37,7 @@ impl VitalType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Attribute {
     pub attr_type: AttributeType,
     pub ranks: u32,
@@ -48,7 +48,7 @@ pub struct Attribute {
     pub current: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Vital {
     pub vital_type: VitalType,
     pub ranks: u32,
@@ -194,7 +194,7 @@ impl SkillType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Skill {
     pub skill_type: SkillType,
     pub ranks: u32,
@@ -206,7 +206,7 @@ pub struct Skill {
     pub training: TrainingLevel,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Resistances {
     pub slash: f32,
     pub pierce: f32,
@@ -218,7 +218,7 @@ pub struct Resistances {
     pub nether: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CharacterLevelInfo {
     pub level: u32,
     pub current_xp: u64,

@@ -55,7 +55,7 @@ You must strictly follow these rules while assessing the codebase:
 - **No Guessing**: If code looks like it's based on a "hunch" rather than `ACE` source, flag it as a risk.
 
 ### 3. Excluded Scope
-- You can ignore anything inside `/docs` because that directory is ephemeral.
+- You can ignore anything inside `/docs` because that directory is ephemeral. Same goes for the `TODO.md` file.
 
 ## Output Requirements
 

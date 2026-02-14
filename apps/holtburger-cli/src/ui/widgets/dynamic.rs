@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 const COMPASS_WIDTH: u16 = 11;
-const CHRONO_WIDTH: u16 = 8;
+const CHRONO_WIDTH: u16 = 9;
 const COMBAT_WIDTH: u16 = 11;
 const NETSTATS_WIDTH: u16 = 11;
 const SPARK_WIDTH: usize = 8;
@@ -110,9 +110,9 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         let minute = ((chrono_ticks % ticks_per_hour_24) / (ticks_per_hour_24 / 60.0)) as u32;
 
         let icon = if (6..18).contains(&hour) {
-            "☀️"
+            "☀️ "
         } else {
-            "🌙"
+            "🌙 "
         };
         format!("{}{:02}:{:02} ", icon, hour, minute)
     } else {

@@ -52,6 +52,23 @@ pub enum ClientEvent {
     },
     RawMessage(Vec<u8>),
     LogMessage(String),
+    UseDone {
+        error_id: u32,
+    },
+    ResourcesResolved(Vec<ResolvedResource>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ResourceDescriptor {
+    Spell(u32),
+}
+
+#[derive(Debug, Clone)]
+pub enum ResolvedResource {
+    Spell {
+        spell_id: u32,
+        info: Box<holtburger_dat::file_type::spell_table::SpellBase>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +105,6 @@ pub enum ClientCommand {
         extent: f32,
         velocity: Vector3,
     },
-    SetAutonomyLevel(u32),
     SetState(u32),
     TurnTo {
         heading: f32,
@@ -121,6 +137,17 @@ pub enum ClientCommand {
         item: Guid,
         target: Guid,
     },
+    CastTargetedSpell {
+        target: Guid,
+        spell_id: u32,
+    },
+    CastUntargetedSpell {
+        spell_id: u32,
+    },
+    ResolveResources(Vec<ResourceDescriptor>),
+    SetCombatMode(holtburger_protocol::messages::combat::CombatMode),
+    SetNoClip(bool),
+    CancelAttack,
     SyncPosition,
     Quit,
 }

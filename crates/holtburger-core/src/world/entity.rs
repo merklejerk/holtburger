@@ -2,7 +2,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, PhysicsState};
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::object::types::{ArmorProfile, CreatureProfile, WeaponProfile};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone)]
 pub struct Entity {
@@ -20,13 +20,13 @@ pub struct Entity {
     pub container_id: Option<Guid>,
     pub wielder_id: Option<Guid>,
 
-    pub int_properties: HashMap<u32, i32>,
-    pub int64_properties: HashMap<u32, i64>,
-    pub bool_properties: HashMap<u32, bool>,
-    pub float_properties: HashMap<u32, f64>,
-    pub string_properties: HashMap<u32, String>,
-    pub did_properties: HashMap<u32, Guid>,
-    pub iid_properties: HashMap<u32, Guid>,
+    pub int_properties: BTreeMap<u32, i32>,
+    pub int64_properties: BTreeMap<u32, i64>,
+    pub bool_properties: BTreeMap<u32, bool>,
+    pub float_properties: BTreeMap<u32, f64>,
+    pub string_properties: BTreeMap<u32, String>,
+    pub did_properties: BTreeMap<u32, Guid>,
+    pub iid_properties: BTreeMap<u32, Guid>,
 
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
@@ -52,13 +52,13 @@ impl Entity {
             physics_parent_id: None,
             container_id: None,
             wielder_id: None,
-            int_properties: HashMap::new(),
-            int64_properties: HashMap::new(),
-            bool_properties: HashMap::new(),
-            float_properties: HashMap::new(),
-            string_properties: HashMap::new(),
-            did_properties: HashMap::new(),
-            iid_properties: HashMap::new(),
+            int_properties: BTreeMap::new(),
+            int64_properties: BTreeMap::new(),
+            bool_properties: BTreeMap::new(),
+            float_properties: BTreeMap::new(),
+            string_properties: BTreeMap::new(),
+            did_properties: BTreeMap::new(),
+            iid_properties: BTreeMap::new(),
             armor_profile: None,
             creature_profile: None,
             weapon_profile: None,

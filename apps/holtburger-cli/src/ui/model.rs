@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
@@ -6,13 +6,15 @@ use std::time::Instant;
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::ItemType;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Skill, SkillType, Vital, VitalType,
 };
 use holtburger_core::{ClientState, RetryState};
 use holtburger_protocol::messages::CharacterEntry;
-use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::{EquipMask, magic::Enchantment};
 
 use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
@@ -29,6 +31,9 @@ pub struct AppState {
     pub attributes: HashMap<AttributeType, Attribute>,
     pub vitals: HashMap<VitalType, Vital>,
     pub skills: HashMap<SkillType, Skill>,
+    pub resistances: holtburger_core::world::stats::Resistances,
+    pub armor: i32,
+    pub vitae: f32,
     pub messages: Vec<ChatMessage>,
     pub input: String,
     pub input_history: Vec<String>,
@@ -58,6 +63,9 @@ pub struct AppState {
     pub core_state: ClientState,
     pub player_pos: Option<WorldPosition>,
     pub player_enchantments: Vec<Enchantment>,
+    pub player_spells: Vec<u32>,
+    pub spell_names: HashMap<u32, String>,
+    pub spell_info: HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
     pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub entities: HashMap<Guid, Entity>,
     pub server_time: Option<(f64, Instant)>,
@@ -66,6 +74,10 @@ pub struct AppState {
     pub verbosity: u8,
     pub net_stats: NetStats,
     pub world_name: String,
+    pub combat_mode: CombatMode,
+    pub noclip: bool,
+    pub inventory: HashSet<Guid>,
+    pub equipment: HashMap<Guid, EquipMask>,
 }
 
 pub struct NetStats {
@@ -89,6 +101,24 @@ impl Default for NetStats {
 }
 
 impl AppState {
+    pub(crate) fn update_inventory_recursive(&mut self, root: Guid, owned: bool) {
+        let mut stack = vec![root];
+        while let Some(current) = stack.pop() {
+            if owned {
+                self.inventory.insert(current);
+            } else {
+                self.inventory.remove(&current);
+                self.equipment.remove(&current);
+            }
+
+            // Find children in self.entities
+            for (&guid, entity) in &self.entities {
+                if entity.container_id == Some(current) {
+                    stack.push(guid);
+                }
+            }
+        }
+    }
     pub fn log_chat(&mut self, kind: ChatMessageKind, text: String) {
         if let Some(log_mutex) = &self.chat_log
             && let Ok(mut file) = log_mutex.lock()
@@ -137,21 +167,33 @@ impl AppState {
                     let player_guid = self.player_guid;
                     let entities_ref = &self.entities;
 
-                    self.context_buffer = crate::entities::debug::get_debug_info(&target, |id| {
-                        entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
-                            if Some(id) == player_guid {
-                                Some("You".to_string())
-                            } else {
-                                None
-                            }
-                        })
-                    });
+                    self.context_buffer = crate::entities::debug::get_debug_info(
+                        &target,
+                        |id| {
+                            entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
+                                if Some(id) == player_guid {
+                                    Some("You".to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                        },
+                        Some(&self.spell_info),
+                    );
                 }
             }
             ContextView::Assess(guid) => {
                 if let Some(entity) = self.entities.get(&guid) {
                     self.context_buffer = crate::entities::assess::get_assess_info(entity);
                 }
+            }
+            ContextView::Spell(spell_id) => {
+                let target = crate::ui::types::CommandTarget::Spell(spell_id);
+                self.context_buffer = crate::entities::debug::get_debug_info(
+                    &target,
+                    |_| None,
+                    Some(&self.spell_info),
+                );
             }
             ContextView::Default => {
                 self.context_buffer.clear();
@@ -177,11 +219,13 @@ impl AppState {
             DashboardTab::Entities => filter_entities(
                 &self.entities,
                 self.player_guid,
+                &self.inventory,
                 self.player_pos.as_ref(),
                 EntityFilter::World,
             )
             .len(),
             DashboardTab::Inventory => self.get_filtered_inventory_tab().len(),
+            DashboardTab::Spells => self.player_spells.len(),
             DashboardTab::Character => crate::ui::widgets::stats::get_stats_list_items(self).len(),
         }
     }
@@ -190,6 +234,7 @@ impl AppState {
         filter_entities(
             &self.entities,
             self.player_guid,
+            &self.inventory,
             self.player_pos.as_ref(),
             EntityFilter::World,
         )
@@ -199,6 +244,7 @@ impl AppState {
         filter_entities(
             &self.entities,
             self.player_guid,
+            &self.inventory,
             self.player_pos.as_ref(),
             EntityFilter::Inventory,
         )
@@ -219,8 +265,10 @@ impl AppState {
 
         // Sort categories by the winner's mod name
         categories.sort_by(|(_, a_list), (_, b_list)| {
-            let a_name = crate::ui::widgets::stats::get_enchantment_name(a_list[0]);
-            let b_name = crate::ui::widgets::stats::get_enchantment_name(b_list[0]);
+            let a_name =
+                holtburger_core::world::magic::get_enchantment_name(a_list[0], &self.spell_names);
+            let b_name =
+                holtburger_core::world::magic::get_enchantment_name(b_list[0], &self.spell_names);
             a_name.cmp(&b_name)
         });
 
@@ -365,5 +413,17 @@ impl AppState {
         }
 
         self.log_chat(ChatMessageKind::System, "═══════════════════".to_string());
+    }
+
+    pub fn is_wielding_caster(&self) -> bool {
+        for guid in self.equipment.keys() {
+            if let Some(entity) = self.entities.get(guid)
+                && let Some(it) = entity.item_type
+                && it.intersects(ItemType::CASTER)
+            {
+                return true;
+            }
+        }
+        false
     }
 }

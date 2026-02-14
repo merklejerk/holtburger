@@ -67,6 +67,20 @@ pub fn read_pstring<R: Read + Seek>(
     Ok(res.into_owned())
 }
 
+pub fn read_obfuscated_string<R: Read + Seek>(reader: &mut R) -> binrw::BinResult<String> {
+    let length = u16::read_le(reader)? as usize;
+    let mut buffer = vec![0u8; length];
+    reader.read_exact(&mut buffer)?;
+
+    for byte in &mut buffer {
+        // flip the bytes in the string to undo the obfuscation: i.e. 0xAB => 0xBA
+        *byte = byte.rotate_left(4);
+    }
+
+    let (res, _, _) = encoding_rs::WINDOWS_1252.decode(&buffer);
+    Ok(res.into_owned())
+}
+
 pub fn align_boundary<R: Read + Seek>(reader: &mut R, boundary: u32) -> binrw::BinResult<()> {
     let pos = reader.stream_position()?;
     let delta = pos % boundary as u64;

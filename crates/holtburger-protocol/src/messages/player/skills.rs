@@ -4,12 +4,19 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct CreatureSkill {
+    /// The unique skill ID (e.g. Melee Defense, War Magic).
     pub sk_type: u32,
+    /// Number of ranks purchased via XP or granted by level.
     pub ranks: u32,
+    /// Skill status: 0=Undef, 1=Innate, 2=Trained, 3=Specialized.
     pub status: u32,
+    /// Total experience points invested in this skill.
     pub xp: u32,
+    /// Initial value before investment (e.g. formula based on attributes).
     pub init: u32,
+    /// Resistance factor for specific skill-based attacks.
     pub resistance: u32,
+    /// World time when the skill was last actively exercised.
     pub last_used: f64,
 }
 

@@ -5,11 +5,12 @@ use super::spatial::SpatialScene;
 use super::stats;
 use binrw::BinRead;
 use holtburger_common::properties::{
-    ItemType, PropertyInstanceId, PropertyInt, PropertyInt64, PropertyValue,
+    EnchantmentTypeFlags, ItemType, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyValue,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
-use holtburger_dat::file_type::{SkillTable, XpTable};
+use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
 use holtburger_protocol::messages::*;
@@ -35,7 +36,8 @@ pub struct WorldState {
     pub portal_dat: Option<Arc<dyn ResourceProvider>>,
     pub cell_dat: Option<Arc<dyn ResourceProvider>>,
     pub xp_table: Option<XpTable>,
-    pub skill_table: Option<Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
+    pub skill_table: Option<Arc<SkillTable>>,
+    pub spell_table: Option<Arc<SpellTable>>,
     pub scene: SpatialScene,
 }
 
@@ -77,46 +79,74 @@ impl WorldState {
         })
     }
 
-    fn get_next_attribute_rank_xp(&self, ranks: u32) -> Option<u32> {
-        let table = self.xp_table.as_ref()?;
-        let next_rank = (ranks + 1) as usize;
-        if next_rank < table.attribute_xp_list.len() {
-            Some(table.attribute_xp_list[next_rank])
+    fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
+        let mut names = std::collections::HashMap::new();
+        if let Some(table) = &self.spell_table {
+            // Player's known spells
+            for spell_id in self.player.spells.keys() {
+                if let Some(spell) = table.spells.get(spell_id) {
+                    names.insert(*spell_id, spell.name.clone());
+                }
+            }
+            // Enchantments currently active on the player
+            for enc in &self.player.enchantments {
+                let spell_id = enc.spell_id as u32;
+                if let Some(spell) = table.spells.get(&spell_id) {
+                    names.insert(spell_id, spell.name.clone());
+                }
+            }
+        }
+        names
+    }
+
+    pub fn resolve_spell_name(&self, spell_id: u32) -> Option<String> {
+        self.spell_table
+            .as_ref()?
+            .spells
+            .get(&spell_id)
+            .map(|s| s.name.clone())
+    }
+
+    pub fn resolve_spell_info(
+        &self,
+        spell_id: u32,
+    ) -> Option<holtburger_dat::file_type::spell_table::SpellBase> {
+        self.spell_table.as_ref()?.spells.get(&spell_id).cloned()
+    }
+
+    pub fn get_player_enchanted_int(&self, key: PropertyInt) -> i32 {
+        let base = self
+            .entities
+            .get(self.player.guid)
+            .and_then(|e| e.int_properties.get(&(key as u32)).cloned())
+            .unwrap_or(0);
+
+        if key == PropertyInt::ArmorLevel {
+            super::magic::get_enchanted_armor(base, &self.player.enchantments)
         } else {
-            None
+            let mult = super::magic::get_enchantment_multiplier(
+                &self.player.enchantments,
+                EnchantmentTypeFlags::INT.bits(),
+                key as u32,
+            );
+            let add = super::magic::get_enchantment_additive(
+                &self.player.enchantments,
+                EnchantmentTypeFlags::INT.bits(),
+                key as u32,
+            );
+            ((base as f32 * mult) + add).round() as i32
         }
     }
 
-    fn get_next_vital_rank_xp(&self, ranks: u32) -> Option<u32> {
-        let table = self.xp_table.as_ref()?;
-        let next_rank = (ranks + 1) as usize;
-        if next_rank < table.vital_xp_list.len() {
-            Some(table.vital_xp_list[next_rank])
-        } else {
-            None
-        }
-    }
+    pub fn get_player_enchanted_float(&self, key: PropertyFloat) -> f32 {
+        let base = self
+            .entities
+            .get(self.player.guid)
+            .and_then(|e| e.float_properties.get(&(key as u32)).cloned())
+            .map(|f| f as f32)
+            .unwrap_or(1.0);
 
-    fn get_next_skill_rank_xp(&self, ranks: u32, training: stats::TrainingLevel) -> Option<u32> {
-        let table = self.xp_table.as_ref()?;
-        let next_rank = (ranks + 1) as usize;
-        match training {
-            stats::TrainingLevel::Trained | stats::TrainingLevel::Untrained => {
-                if next_rank < table.trained_skill_xp_list.len() {
-                    Some(table.trained_skill_xp_list[next_rank])
-                } else {
-                    None
-                }
-            }
-            stats::TrainingLevel::Specialized => {
-                if next_rank < table.specialized_skill_xp_list.len() {
-                    Some(table.specialized_skill_xp_list[next_rank])
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
+        super::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
     }
 
     fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
@@ -131,6 +161,7 @@ impl WorldState {
     ) -> Self {
         let mut xp_table = None;
         let mut skill_table = None;
+        let mut spell_table = None;
         if let Some(db) = &portal_dat {
             // XP Table
             if let Ok(data) = db.get_file(XpTable::FILE_ID) {
@@ -146,6 +177,13 @@ impl WorldState {
                     skill_table = Some(Arc::new(table));
                 }
             }
+            // Spell Table
+            if let Ok(data) = db.get_file(SpellTable::FILE_ID) {
+                let mut cursor = std::io::Cursor::new(data);
+                if let Ok(table) = SpellTable::read(&mut cursor) {
+                    spell_table = Some(Arc::new(table));
+                }
+            }
         }
 
         Self {
@@ -156,6 +194,7 @@ impl WorldState {
             cell_dat,
             xp_table,
             skill_table,
+            spell_table,
             scene: SpatialScene::new(),
         }
     }
@@ -176,6 +215,24 @@ impl WorldState {
         }
     }
 
+    fn update_player_inventory_recursive(&mut self, root: Guid, owned: bool) {
+        let mut stack = vec![root];
+        while let Some(current) = stack.pop() {
+            if owned {
+                self.player.add_to_inventory(current);
+            } else {
+                self.player.remove_from_inventory(current);
+            }
+
+            // Find children in self.entities
+            for (&guid, entity) in &self.entities.entities {
+                if entity.container_id == Some(current) {
+                    stack.push(guid);
+                }
+            }
+        }
+    }
+
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
         let mut events = Vec::new();
 
@@ -184,6 +241,21 @@ impl WorldState {
             .player
             .handle_message(msg, &mut events, self.xp_table.as_ref())
         {
+            // Enrich events with spell names if available
+            for ev in &mut events {
+                match ev {
+                    WorldEvent::EnchantmentUpdated {
+                        enchantment,
+                        spell_name,
+                    } if spell_name.is_none() => {
+                        *spell_name = self.resolve_spell_name(enchantment.spell_id as u32);
+                    }
+                    WorldEvent::SpellUpdated { spell_id, name } if name.is_none() => {
+                        *name = self.resolve_spell_name(*spell_id);
+                    }
+                    _ => {}
+                }
+            }
             return events;
         }
 
@@ -200,11 +272,27 @@ impl WorldState {
                 entity.container_id = data.container_id;
                 entity.wielder_id = data.wielder_id;
 
+                // Update inventory tracking for new objects appearing in containers
+                if let Some(cid) = data.container_id
+                    && (cid == self.player.guid || self.player.inventory.contains(&cid))
+                {
+                    self.player.add_to_inventory(data.guid);
+                }
+                if let Some(wid) = data.wielder_id
+                    && wid == self.player.guid
+                {
+                    self.player.add_to_inventory(data.guid);
+                }
+
                 self.add_entity(entity.clone());
                 events.push(WorldEvent::EntitySpawned(Box::new(entity)));
             }
             GameMessage::ObjectDelete(data) => {
                 let guid = data.guid;
+
+                // Sync inventory recursively before removing
+                self.update_player_inventory_recursive(guid, false);
+
                 if let Some(_entity) = self.remove_entity(guid) {
                     events.push(WorldEvent::EntityDespawned(guid));
                 }
@@ -310,23 +398,26 @@ impl WorldState {
 
                     match &data.data {
                         MovementTypeData::TurnToHeading(turn) => {
-                            let new_rot = Quaternion::from_heading(turn.params.desired_heading);
-                            if guid == self.player.guid {
-                                let mut pos = self.player.position;
-                                pos.rotation = new_rot;
-                                events.extend(self.set_player_position(pos));
-                            } else {
-                                entity.position.rotation = new_rot;
-                                events.push(WorldEvent::EntityMoved {
-                                    guid,
-                                    pos: entity.position,
-                                });
+                            if turn.params.desired_heading.is_finite() {
+                                let new_rot = Quaternion::from_heading(turn.params.desired_heading);
+                                if guid == self.player.guid {
+                                    let mut pos = self.player.position;
+                                    pos.rotation = new_rot;
+                                    events.extend(self.set_player_position(pos));
+                                } else {
+                                    entity.position.rotation = new_rot;
+                                    events.push(WorldEvent::EntityMoved {
+                                        guid,
+                                        pos: entity.position,
+                                    });
+                                }
                             }
                         }
                         MovementTypeData::TurnToObject(turn) => {
                             let mut new_rot = entity.position.rotation;
 
-                            if turn.desired_heading.abs() > 1e-6 {
+                            if turn.desired_heading.is_finite() && turn.desired_heading.abs() > 1e-6
+                            {
                                 new_rot = Quaternion::from_heading(turn.desired_heading);
                             } else if let Some((target_lb, target_coords)) = target_info
                                 && target_lb == entity.position.landblock_id
@@ -371,154 +462,45 @@ impl WorldState {
                     let name = &data.name;
                     let pos = &data.pos;
 
-                    self.player.guid = guid;
-                    self.player.name = name.clone();
-                    self.player.enchantments = data.enchantments.clone();
-
-                    // Update Experience and Level from properties
-                    if let Some(&xp) = data
-                        .properties_int64
-                        .get(&(PropertyInt64::TotalExperience as u32))
-                    {
-                        self.player.total_experience = xp as u64;
-                    }
-                    if let Some(&axp) = data
-                        .properties_int64
-                        .get(&(PropertyInt64::AvailableExperience as u32))
-                    {
-                        self.player.available_experience = axp as u64;
-                    }
-                    if let Some(&sp) = data
-                        .properties_int
-                        .get(&(PropertyInt::AvailableSkillCredits as u32))
-                    {
-                        self.player.unspent_skill_points = sp as u32;
-                    }
-                    if let Some(&level) = data.properties_int.get(&(PropertyInt::Level as u32)) {
-                        self.player.level = level as u32;
-                    }
-
                     // Ensure entity in our map has the correct name
                     if let Some(entity) = self.entities.get_mut(guid) {
                         entity.name = name.clone();
                     }
 
-                    let mut attr_objs = Vec::new();
-                    let mut vital_objs = Vec::new();
-
-                    self.player.attributes.clear();
-                    for (at_type, attr) in &data.attributes {
-                        let at_type = *at_type;
-                        let ranks = attr.ranks;
-                        let start = attr.start;
-                        let current = attr.current.unwrap_or(0);
-
-                        if at_type <= 6 {
-                            if let Some(attr_type) = stats::AttributeType::from_repr(at_type) {
-                                let base = ranks + start;
-                                let attr_obj = stats::Attribute {
-                                    attr_type,
-                                    ranks,
-                                    start,
-                                    spent_xp: attr.xp,
-                                    next_rank_xp: self.get_next_attribute_rank_xp(ranks),
-                                    base,
-                                    current: base,
-                                };
-                                self.player.attributes.insert(attr_type, attr_obj.clone());
-                                attr_objs.push(attr_obj);
-                            }
-                        } else if (7..=9).contains(&at_type) {
-                            let vital_type = match at_type {
-                                7 => stats::VitalType::Health,
-                                8 => stats::VitalType::Stamina,
-                                9 => stats::VitalType::Mana,
-                                _ => continue,
-                            };
-
-                            self.player
-                                .vital_bases
-                                .insert(vital_type, super::player::VitalBase { ranks, start });
-
-                            let base = self.player.calculate_vital_base(vital_type);
-                            let final_base = if base == 0 { current } else { base };
-
-                            let vital = stats::Vital {
-                                vital_type,
-                                ranks,
-                                start,
-                                spent_xp: attr.xp,
-                                next_rank_xp: self.get_next_vital_rank_xp(ranks),
-                                base: final_base,
-                                buffed_max: final_base,
-                                current,
-                            };
-                            self.player.vitals.insert(vital_type, vital.clone());
-                            vital_objs.push(vital);
-                        }
-                    }
-
-                    self.player.skills.clear();
-                    self.player.skill_bases.clear();
-                    let mut skill_objs = Vec::new();
-
-                    for (sk_type, s) in &data.skills {
-                        if let Some(skill_type) = stats::SkillType::from_repr(*sk_type) {
-                            let training = stats::TrainingLevel::from_repr(s.status)
-                                .unwrap_or(stats::TrainingLevel::Untrained);
-
-                            self.player.skill_bases.insert(
-                                skill_type,
-                                crate::world::player::SkillBase {
-                                    ranks: s.ranks,
-                                    init: s.init,
-                                },
-                            );
-
-                            let base_val = self
-                                .player
-                                .derive_skill_value(skill_type, s.ranks, s.init, false);
-                            let skill = stats::Skill {
-                                skill_type,
-                                ranks: s.ranks,
-                                init: s.init,
-                                spent_xp: s.xp,
-                                next_rank_xp: self.get_next_skill_rank_xp(s.ranks, training),
-                                base: base_val,
-                                current: base_val,
-                                training,
-                            };
-                            self.player.skills.insert(skill_type, skill.clone());
-                            skill_objs.push(skill);
-                        }
-                    }
-
-                    self.player.spells = data.spells.clone();
-                    self.player.spell_lists = data.spell_lists.clone();
-
                     if let Some(p) = pos {
                         events.extend(self.set_player_position(*p));
                     }
 
-                    events.push(WorldEvent::PlayerInfo {
-                        guid,
-                        name: name.clone(),
-                        pos: *pos,
-                        attributes: attr_objs,
-                        vitals: vital_objs,
-                        skills: skill_objs,
-                        enchantments: self.player.enchantments.clone(),
-                        skill_table: self.skill_table.clone(),
-                    });
+                    events.push(WorldEvent::PlayerInfo(Box::new(
+                        crate::world::PlayerInfoData {
+                            guid,
+                            name: name.clone(),
+                            pos: *pos,
+                            attributes: self.player.get_attributes(),
+                            vitals: self.player.get_vitals(),
+                            skills: self.player.get_skills(),
+                            enchantments: self.player.enchantments.clone(),
+                            spells: self.player.spells.keys().cloned().collect(),
+                            vitae: self.player.vitae,
+                            skill_table: self.skill_table.clone(),
+                            spell_names: self.get_player_spell_names(),
+                            inventory: self.player.inventory.clone(),
+                            equipment: self.player.equipment.clone(),
+                        },
+                    )));
 
                     self.emit_level_info(&mut events);
-                    self.player.emit_derived_stats(&mut events);
                 }
                 match &ev.event {
                     GameEvent::InventoryPutObjInContainer(data) => {
                         if let Some(entity) = self.entities.get_mut(data.item_guid) {
                             entity.container_id = Some(data.container_guid);
                             entity.position.landblock_id = Guid::NULL;
+
+                            // Update player inventory set recursively
+                            let is_owned = data.container_guid == self.player.guid
+                                || self.player.inventory.contains(&data.container_guid);
+                            self.update_player_inventory_recursive(data.item_guid, is_owned);
 
                             events.push(WorldEvent::PropertyUpdated {
                                 guid: data.item_guid,
@@ -531,6 +513,9 @@ impl WorldState {
                         if let Some(entity) = self.entities.get_mut(data.object_guid) {
                             entity.container_id = None;
                             entity.wielder_id = None;
+
+                            // Recursively remove from inventory tracking
+                            self.update_player_inventory_recursive(data.object_guid, false);
 
                             events.push(WorldEvent::PropertyUpdated {
                                 guid: data.object_guid,
@@ -545,6 +530,10 @@ impl WorldState {
                             entity.wielder_id = Some(ev.target);
                             entity.container_id = None;
                             entity.position.landblock_id = Guid::NULL;
+
+                            if ev.target == self.player.guid {
+                                self.player.wield_item(data.object_guid, data.equip_mask);
+                            }
 
                             events.push(WorldEvent::PropertyUpdated {
                                 guid: data.object_guid,
@@ -562,6 +551,11 @@ impl WorldState {
                         events.push(WorldEvent::WeenieErrorWithString {
                             error_id: data.error_id,
                             message: data.message.clone(),
+                        });
+                    }
+                    GameEvent::UseDone(data) => {
+                        events.push(WorldEvent::UseDone {
+                            error_id: data.error_id,
                         });
                     }
                     GameEvent::IdentifyObjectResponse(data) => {
@@ -583,7 +577,7 @@ impl WorldState {
                                 entity.string_properties.insert(*k, v.clone());
                             }
                             for (&k, &v) in &data.did_stats {
-                                entity.did_properties.insert(k, Guid(v));
+                                entity.did_properties.insert(k, v);
                             }
 
                             if data.armor_profile.is_some() {
@@ -604,6 +598,10 @@ impl WorldState {
             }
             GameMessage::InventoryRemoveObject(data) => {
                 let guid = data.object_guid;
+
+                // Recursively remove from inventory tracking before deleting the entity
+                self.update_player_inventory_recursive(guid, false);
+
                 if let Some(_entity) = self.remove_entity(guid) {
                     events.push(WorldEvent::EntityDespawned(guid));
                 }
@@ -646,6 +644,7 @@ impl WorldState {
                     entity.int_properties.insert(data.property, data.value);
                 }
                 if target_guid == self.player.guid {
+                    self.player.int_properties.insert(data.property, data.value);
                     match data.property {
                         p if p == PropertyInt::Level as u32 => {
                             self.player.level = data.value as u32;
@@ -655,8 +654,19 @@ impl WorldState {
                             self.player.unspent_skill_points = data.value as u32;
                             self.emit_level_info(&mut events);
                         }
+                        p if p == PropertyInt::CombatMode as u32 => {
+                            if let Some(mode) =
+                                holtburger_protocol::messages::combat::CombatMode::from_repr(
+                                    data.value as u32,
+                                )
+                            {
+                                self.player.combat_mode = mode;
+                                events.push(WorldEvent::CombatModeUpdated(mode));
+                            }
+                        }
                         _ => {}
                     }
+                    self.player.emit_derived_stats(&mut events);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -672,6 +682,21 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.int_properties.insert(data.property, data.value);
+                }
+                if target_guid == self.player.guid {
+                    self.player.int_properties.insert(data.property, data.value);
+                    if data.property == PropertyInt::CombatMode as u32 {
+                        let maybe_mode =
+                            holtburger_protocol::messages::combat::CombatMode::from_repr(
+                                data.value as u32,
+                            );
+
+                        if let Some(mode) = maybe_mode {
+                            self.player.combat_mode = mode;
+                            events.push(WorldEvent::CombatModeUpdated(mode));
+                        }
+                    }
+                    self.player.emit_derived_stats(&mut events);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -689,6 +714,9 @@ impl WorldState {
                     entity.int64_properties.insert(data.property, data.value);
                 }
                 if target_guid == self.player.guid {
+                    self.player
+                        .int64_properties
+                        .insert(data.property, data.value);
                     match data.property {
                         p if p == PropertyInt64::TotalExperience as u32 => {
                             self.player.total_experience = data.value as u64;
@@ -731,6 +759,11 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.bool_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .bool_properties
+                        .insert(data.property, data.value);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -745,6 +778,11 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.bool_properties.insert(data.property, data.value);
+                }
+                if target_guid == self.player.guid {
+                    self.player
+                        .bool_properties
+                        .insert(data.property, data.value);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -761,6 +799,12 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.float_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .float_properties
+                        .insert(data.property, data.value);
+                    self.player.emit_derived_stats(&mut events);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -776,6 +820,12 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.float_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .float_properties
+                        .insert(data.property, data.value);
+                    self.player.emit_derived_stats(&mut events);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -790,6 +840,11 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity
+                        .string_properties
+                        .insert(data.property, data.value.clone());
+                }
+                if target_guid == self.player.guid {
+                    self.player
                         .string_properties
                         .insert(data.property, data.value.clone());
                 }
@@ -810,6 +865,11 @@ impl WorldState {
                         .string_properties
                         .insert(data.property, data.value.clone());
                 }
+                if target_guid == self.player.guid {
+                    self.player
+                        .string_properties
+                        .insert(data.property, data.value.clone());
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -824,6 +884,9 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.did_properties.insert(data.property, data.value);
+                }
+                if target_guid == self.player.guid {
+                    self.player.did_properties.insert(data.property, data.value);
                 }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
@@ -840,6 +903,9 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.did_properties.insert(data.property, data.value);
                 }
+                if target_guid == self.player.guid {
+                    self.player.did_properties.insert(data.property, data.value);
+                }
                 events.push(WorldEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
@@ -854,6 +920,9 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.iid_properties.insert(data.property, data.value);
+                    if target_guid == self.player.guid {
+                        self.player.iid_properties.insert(data.property, data.value);
+                    }
 
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {
@@ -911,6 +980,9 @@ impl WorldState {
                 };
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.iid_properties.insert(data.property, data.value);
+                    if target_guid == self.player.guid {
+                        self.player.iid_properties.insert(data.property, data.value);
+                    }
 
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {
@@ -1058,7 +1130,7 @@ impl WorldState {
         let step = vel * dt;
         let next_coords = coords + step;
 
-        if !self.is_colliding(&next_coords, lb, radius) {
+        if self.player.noclip || !self.is_colliding(&next_coords, lb, radius) {
             let mut next_pos = self.player.position;
             next_pos.coords = next_coords;
             events.extend(self.set_player_position(next_pos));
@@ -1071,11 +1143,19 @@ impl WorldState {
 
     /// Updates the player's position, ensuring the record in PlayerState,
     /// the mirrored Entity, and the SpatialScene stay in sync.
-    pub fn set_player_position(&mut self, pos: WorldPosition) -> Vec<WorldEvent> {
+    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
             return events;
+        }
+
+        if !pos.rotation.w.is_finite()
+            || !pos.rotation.x.is_finite()
+            || !pos.rotation.y.is_finite()
+            || !pos.rotation.z.is_finite()
+        {
+            pos.rotation = self.player.position.rotation;
         }
 
         let old_lb = self.player.position.landblock_id;
@@ -1175,6 +1255,69 @@ mod tests {
     }
 
     #[test]
+    fn test_set_player_position_sanitizes_nan_rotation() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+        state.player.position = initial_pos;
+
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let nan_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: holtburger_common::math::Quaternion {
+                w: f32::NAN,
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+
+        state.set_player_position(nan_pos);
+
+        assert_eq!(
+            state.player.position.rotation,
+            holtburger_common::math::Quaternion::identity()
+        );
+        assert_eq!(
+            state.entities.get(player_guid).unwrap().position.rotation,
+            holtburger_common::math::Quaternion::identity()
+        );
+    }
+
+    #[test]
+    fn test_spell_name_resolution() {
+        use holtburger_dat::file_type::spell_table::{SpellBase, SpellTable};
+
+        let mut state = WorldState::new(None, None);
+        let mut spells = std::collections::HashMap::new();
+        spells.insert(
+            1337,
+            SpellBase {
+                name: "L33t Spell".to_string(),
+                ..Default::default()
+            },
+        );
+
+        state.spell_table = Some(Arc::new(SpellTable {
+            id: SpellTable::FILE_ID,
+            spells,
+            spell_sets: std::collections::HashMap::new(),
+        }));
+
+        assert_eq!(state.resolve_spell_name(1337).unwrap(), "L33t Spell");
+        assert!(state.resolve_spell_name(999).is_none());
+    }
+
+    #[test]
     fn test_player_mirror_invariant_on_autonomous_sync() {
         let mut state = WorldState::new(None, None);
         let player_guid = Guid(0x50000123);
@@ -1207,5 +1350,198 @@ mod tests {
         );
         assert_eq!(state.player.instance_sequence, 10);
         assert_eq!(state.player.server_control_sequence, 20);
+    }
+
+    #[test]
+    fn test_inventory_put_obj_in_container() {
+        let mut state = WorldState::new(None, None);
+        let item_guid = Guid(0x1);
+        let container_guid = Guid(0x2);
+
+        // Add the item to entities
+        state.entities.insert(Entity::new(
+            item_guid,
+            "Item".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let data = InventoryPutObjInContainerData {
+            item_guid,
+            container_guid,
+            slot: 0,
+            container_type: 0,
+        };
+        let event = GameEvent::InventoryPutObjInContainer(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid::NULL,
+            sequence: 0,
+            event,
+        }));
+
+        let events = state.handle_message(&msg);
+
+        let entity = state.entities.get(item_guid).unwrap();
+        assert_eq!(entity.container_id, Some(container_guid));
+        assert_eq!(entity.position.landblock_id, Guid::NULL);
+
+        // Check for WorldEvent::PropertyUpdated
+        assert!(events.iter().any(|e| matches!(
+            e,
+            WorldEvent::PropertyUpdated {
+                guid,
+                property_id,
+                value: PropertyValue::IID(val),
+            } if *guid == item_guid && *property_id == PropertyInstanceId::Container as u32 && *val == container_guid
+        )));
+    }
+
+    #[test]
+    fn test_inventory_put_object_in_3d() {
+        let mut state = WorldState::new(None, None);
+        let obj_guid = Guid(0x1);
+
+        let mut item = Entity::new(obj_guid, "Item".to_string(), WorldPosition::default());
+        item.container_id = Some(Guid(0x2));
+        item.wielder_id = Some(Guid(0x3));
+        state.entities.insert(item);
+
+        let data = InventoryPutObjectIn3DData {
+            object_guid: obj_guid,
+        };
+        let event = GameEvent::InventoryPutObjectIn3D(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid::NULL,
+            sequence: 0,
+            event,
+        }));
+
+        let events = state.handle_message(&msg);
+
+        let entity = state.entities.get(obj_guid).unwrap();
+        assert_eq!(entity.container_id, None);
+        assert_eq!(entity.wielder_id, None);
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            WorldEvent::PropertyUpdated {
+                guid,
+                property_id,
+                value: PropertyValue::IID(val),
+            } if *guid == obj_guid && *property_id == PropertyInstanceId::Container as u32 && *val == Guid::NULL
+        )));
+    }
+
+    #[test]
+    fn test_wield_object() {
+        let mut state = WorldState::new(None, None);
+        let obj_guid = Guid(0x1);
+        let wielder_guid = Guid(0x50000001);
+
+        state.entities.insert(Entity::new(
+            obj_guid,
+            "Weapon".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let data = WieldObjectData {
+            object_guid: obj_guid,
+            equip_mask: EquipMask::from_bits_truncate(0),
+        };
+        let event = GameEvent::WieldObject(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: wielder_guid,
+            sequence: 0,
+            event,
+        }));
+
+        let events = state.handle_message(&msg);
+
+        let entity = state.entities.get(obj_guid).unwrap();
+        assert_eq!(entity.wielder_id, Some(wielder_guid));
+        assert_eq!(entity.container_id, None);
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            WorldEvent::PropertyUpdated {
+                guid,
+                property_id,
+                value: PropertyValue::IID(val),
+            } if *guid == obj_guid && *property_id == PropertyInstanceId::Wielder as u32 && *val == wielder_guid
+        )));
+    }
+
+    #[test]
+    fn test_inventory_remove_object() {
+        let mut state = WorldState::new(None, None);
+        let obj_guid = Guid(0x1);
+
+        state.entities.insert(Entity::new(
+            obj_guid,
+            "Item".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let data = InventoryRemoveObjectData {
+            object_guid: obj_guid,
+        };
+        let msg = GameMessage::InventoryRemoveObject(Box::new(data));
+
+        let events = state.handle_message(&msg);
+
+        assert!(state.entities.get(obj_guid).is_none());
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid))
+        );
+    }
+
+    #[test]
+    fn test_player_description_initialization() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000001);
+        let player_name = "TestingPlayer".to_string();
+
+        let data = PlayerDescriptionData {
+            guid: player_guid,
+            sequence: 1,
+            name: player_name.clone(),
+            wee_type: 1,
+            pos: Some(WorldPosition::default()),
+            properties_int: std::collections::BTreeMap::new(),
+            properties_int64: std::collections::BTreeMap::new(),
+            properties_bool: std::collections::BTreeMap::new(),
+            properties_float: std::collections::BTreeMap::new(),
+            properties_string: std::collections::BTreeMap::new(),
+            properties_did: std::collections::BTreeMap::new(),
+            properties_iid: std::collections::BTreeMap::new(),
+            positions: std::collections::BTreeMap::new(),
+            attributes: std::collections::BTreeMap::new(),
+            skills: std::collections::BTreeMap::new(),
+            enchantments: Vec::new(),
+            spells: std::collections::BTreeMap::new(),
+            has_health: true,
+            options1: 0,
+            options2: 0,
+            shortcuts: Vec::new(),
+            hotbar_spells: Vec::new(),
+            desired_comps: Vec::new(),
+            spellbook_filters: 0,
+            gameplay_options: Vec::new(),
+            inventory: Vec::new(),
+            equipped_objects: Vec::new(),
+        };
+
+        let event = GameEvent::PlayerDescription(Box::new(data));
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player_guid,
+            sequence: 1,
+            event,
+        }));
+
+        state.handle_message(&msg);
+
+        assert_eq!(state.player.guid, player_guid);
+        assert_eq!(state.player.name, player_name);
     }
 }

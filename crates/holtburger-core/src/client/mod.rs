@@ -133,6 +133,7 @@ impl Client {
 
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);
+                    let physics_events = crate::world::dedupe_world_events(physics_events);
                     for event in physics_events {
                         if let Some(tx) = &self.event_tx {
                             let _ = tx.send(ClientEvent::World(Box::new(event)));

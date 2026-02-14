@@ -27,6 +27,7 @@ impl AppState {
             }
             AppAction::ReceivedEvent(event) => {
                 self.handle_received_event(event);
+                self.refresh_context_buffer();
             }
         }
 
@@ -43,6 +44,18 @@ impl AppState {
     fn update_tick(&mut self, elapsed: f64) -> Vec<ClientCommand> {
         let mut commands = Vec::new();
         let now = std::time::Instant::now();
+
+        // Request spell info for spells we don't have info for yet
+        let mut missing_spells = Vec::new();
+        for &spell_id in &self.player_spells {
+            if !self.spell_info.contains_key(&spell_id) {
+                missing_spells.push(holtburger_core::ResourceDescriptor::Spell(spell_id));
+            }
+        }
+
+        if !missing_spells.is_empty() {
+            commands.push(ClientCommand::ResolveResources(missing_spells));
+        }
 
         // Update net stats
         let last_update = self.net_stats.last_update.get_or_insert(now);

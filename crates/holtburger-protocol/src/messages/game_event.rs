@@ -35,6 +35,8 @@ pub enum GameEvent {
     MagicRemoveMultipleEnchantments(Box<MagicRemoveMultipleEnchantmentsData>),
     MagicPurgeEnchantments(Box<MagicPurgeEnchantmentsData>),
     MagicPurgeBadEnchantments(Box<MagicPurgeBadEnchantmentsData>),
+    MagicUpdateSpell(Box<MagicUpdateSpellData>),
+    MagicRemoveSpell(Box<MagicRemoveSpellData>),
     MagicDispelEnchantment(Box<MagicDispelEnchantmentData>),
     MagicDispelMultipleEnchantments(Box<MagicDispelMultipleEnchantmentsData>),
     WeenieError(Box<WeenieErrorData>),
@@ -121,6 +123,12 @@ impl ProtocolUnpack for GameEventMessage {
                     d.sequence = sequence;
                     GameEvent::MagicPurgeBadEnchantments(Box::new(d))
                 }
+                GameEventOpcode::MagicUpdateSpell => GameEvent::MagicUpdateSpell(Box::new(
+                    MagicUpdateSpellData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::MagicRemoveSpell => GameEvent::MagicRemoveSpell(Box::new(
+                    MagicRemoveSpellData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::MagicDispelEnchantment => {
                     let mut d = MagicDispelEnchantmentData::unpack(data, offset)?;
                     d.target = target;
@@ -254,6 +262,16 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::MagicPurgeBadEnchantments(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::MagicPurgeBadEnchantments as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::MagicUpdateSpell(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::MagicUpdateSpell as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::MagicRemoveSpell(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::MagicRemoveSpell as u32)
                     .unwrap();
                 data.pack(buf);
             }

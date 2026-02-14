@@ -1,5 +1,6 @@
-use crate::client::types::{ClientCommand, ClientEvent};
+use crate::client::types::{ClientCommand, ClientEvent, ResolvedResource, ResourceDescriptor};
 use crate::client::{Client, ClientState};
+use crate::world::WorldEvent;
 use anyhow::Result;
 use holtburger_common::Quaternion;
 use holtburger_protocol::messages::game_action::*;
@@ -134,14 +135,6 @@ impl Client {
                     })))
                     .await
             }
-            ClientCommand::SetAutonomyLevel(level) => {
-                log::info!(">>> Setting Autonomy Level: {}", level);
-                self.session
-                    .send_message(&GameMessage::AutonomyLevel(Box::new(AutonomyLevelData {
-                        level,
-                    })))
-                    .await
-            }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
                 self.session
@@ -162,6 +155,50 @@ impl Client {
                         })),
                     })))
                     .await
+            }
+            ClientCommand::CastTargetedSpell { target, spell_id } => {
+                log::info!(">>> Casting spell {} on 0x{:08X}", spell_id, target.0);
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::CastTargetedSpell(Box::new(CastTargetedSpellData {
+                            target,
+                            spell_id,
+                        })),
+                    })))
+                    .await
+            }
+            ClientCommand::CastUntargetedSpell { spell_id } => {
+                log::info!(">>> Casting spell {}", spell_id);
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::CastUntargetedSpell(Box::new(
+                            CastUntargetedSpellData { spell_id },
+                        )),
+                    })))
+                    .await
+            }
+            ClientCommand::ResolveResources(descriptors) => {
+                if let Some(tx) = &self.event_tx {
+                    let mut results = Vec::new();
+                    for descriptor in descriptors {
+                        match descriptor {
+                            ResourceDescriptor::Spell(spell_id) => {
+                                if let Some(info) = self.world.resolve_spell_info(spell_id) {
+                                    results.push(ResolvedResource::Spell {
+                                        spell_id,
+                                        info: Box::new(info),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if !results.is_empty() {
+                        let _ = tx.send(ClientEvent::ResourcesResolved(results));
+                    }
+                }
+                Ok(())
             }
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
@@ -331,6 +368,36 @@ impl Client {
 
                 self.session
                     .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
+                    .await
+            }
+            ClientCommand::SetCombatMode(mode) => {
+                log::info!(">>> Changing combat mode to: {:?}", mode);
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::ChangeCombatMode(Box::new(ChangeCombatModeData {
+                            mode,
+                        })),
+                    })))
+                    .await
+            }
+            ClientCommand::SetNoClip(enabled) => {
+                log::info!(">>> NoClip set to: {}", enabled);
+                self.world.player.noclip = enabled;
+                if let Some(tx) = &self.event_tx {
+                    let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::NoClipUpdated(
+                        enabled,
+                    ))));
+                }
+                Ok(())
+            }
+            ClientCommand::CancelAttack => {
+                log::info!(">>> Canceling attack");
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::CancelAttack(Box::new(CancelAttackData {})),
+                    })))
                     .await
             }
             ClientCommand::RaiseAttribute {

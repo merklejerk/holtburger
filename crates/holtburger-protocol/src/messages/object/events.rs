@@ -45,7 +45,7 @@ pub struct IdentifyObjectResponseData {
     pub bool_stats: BTreeMap<u32, bool>,
     pub float_stats: BTreeMap<u32, f64>,
     pub string_stats: BTreeMap<u32, String>,
-    pub did_stats: BTreeMap<u32, u32>,
+    pub did_stats: BTreeMap<u32, Guid>,
     pub spell_book: Vec<u32>,
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
@@ -132,8 +132,8 @@ impl ProtocolUnpack for IdentifyObjectResponseData {
             let (count, _) = read_hashtable_header(data, offset)?;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                let value = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-                *offset += 8;
+                *offset += 4;
+                let value = Guid::unpack(data, offset)?;
                 did_stats.insert(key, value);
             }
         }
@@ -295,7 +295,7 @@ impl ProtocolPack for IdentifyObjectResponseData {
             write_hashtable_header(buf, self.did_stats.len(), 8);
             for (key, value) in &self.did_stats {
                 buf.write_u32::<LittleEndian>(*key).unwrap();
-                buf.write_u32::<LittleEndian>(*value).unwrap();
+                value.pack(buf);
             }
         }
         if self.flags.contains(IdentifyResponseFlags::SPELL_BOOK) {

@@ -27,7 +27,6 @@
 - [ ] Augment entities spawned by `ObjectCreate` with weenie template properties.  
 - [ ] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable.
 - [ ] All verbs should have synonymous slash chat commands.
-- [ ] [E]quip verb.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] [C]ombine verb (crafting).
 - [x] [T]arget verb (combat).
@@ -55,6 +54,11 @@
     - [x] ESC key clears active entity.
 - [x] Add "Spells" tab.
     - [x] Add [C]ast verb on current active entity (if chosen) or self.
+- [ ] Combat.
+- [ ] Equipment management.
+    - [ ] Populate all entities with weenie data.
+    - [ ] Use armor weenie equipment slots to determine equip mask.
+    - [ ] Make equipped items more obvious.
 
 ### Critical
 

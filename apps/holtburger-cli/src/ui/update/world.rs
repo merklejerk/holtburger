@@ -305,9 +305,12 @@ impl AppState {
                     WorldEvent::EnchantmentsPurged => {
                         self.player_enchantments.clear();
                     }
-                    WorldEvent::SpellUpdated { spell_id } => {
+                    WorldEvent::SpellUpdated { spell_id, name } => {
                         if !self.player_spells.contains(&spell_id) {
                             self.player_spells.push(spell_id);
+                        }
+                        if let Some(n) = name {
+                            self.spell_names.insert(spell_id, n);
                         }
                     }
                     WorldEvent::SpellRemoved { spell_id } => {

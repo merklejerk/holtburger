@@ -651,7 +651,10 @@ impl PlayerState {
                     GameEvent::MagicUpdateSpell(data) => {
                         let spell_id = data.spell_id as u32;
                         self.spells.insert(spell_id, 0.0);
-                        events.push(WorldEvent::SpellUpdated { spell_id });
+                        events.push(WorldEvent::SpellUpdated {
+                            spell_id,
+                            name: None,
+                        });
                         true
                     }
                     GameEvent::MagicRemoveSpell(data) => {

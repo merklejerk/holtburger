@@ -77,6 +77,7 @@ pub enum WorldEvent {
     },
     SpellUpdated {
         spell_id: u32,
+        name: Option<String>,
     },
     SpellRemoved {
         spell_id: u32,

@@ -191,6 +191,7 @@ mod tests {
     use super::*;
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
+    use crate::test_helpers::assert_pack_unpack_parity;
     use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
     #[test]
@@ -199,17 +200,8 @@ mod tests {
         let mut offset = 0;
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack character list");
 
-        if let GameMessage::CharacterList(_list) = &msg {
-            // Check some basics if known, or just parity
-            // Let's assume the fixture has at least one character or specific account name if possible
-            // But parity is safest first step
-        } else {
-            panic!("Wrong message type: {:?}", msg);
-        }
-
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, data);
+        assert!(matches!(msg, GameMessage::CharacterList(_)));
+        assert_pack_unpack_parity(data, &msg);
     }
 
     #[test]
@@ -219,10 +211,7 @@ mod tests {
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack enter world req");
 
         assert!(matches!(msg, GameMessage::CharacterEnterWorldRequest(_)));
-
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, data);
+        assert_pack_unpack_parity(data, &msg);
     }
 
     #[test]
@@ -232,10 +221,7 @@ mod tests {
         let msg = GameMessage::unpack(data, &mut offset).expect("Failed to unpack enter world");
 
         assert!(matches!(msg, GameMessage::CharacterEnterWorld(_)));
-
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, data);
+        assert_pack_unpack_parity(data, &msg);
     }
 
     #[test]
@@ -247,9 +233,7 @@ mod tests {
         };
         let mut buf = Vec::new();
         expected.pack(&mut buf);
-        let mut offset = 0;
-        let unpacked = ServerNameData::unpack(&buf, &mut offset).unwrap();
-        assert_eq!(unpacked, expected);
+        assert_pack_unpack_parity(&buf, &expected);
     }
 
     #[test]

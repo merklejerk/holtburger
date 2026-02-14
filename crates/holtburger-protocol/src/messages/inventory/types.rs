@@ -104,6 +104,7 @@ impl ProtocolPack for InventoryRemoveObjectData {
 mod tests {
     use super::*;
     use crate::messages::game_message::GameMessage;
+    use crate::test_helpers::assert_pack_unpack_parity;
 
     #[test]
     fn test_inventory_remove_object_fixture() {
@@ -119,9 +120,7 @@ mod tests {
             panic!("expected GameMessage::InventoryRemoveObject, got {:?}", msg);
         }
 
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, fixture);
+        assert_pack_unpack_parity(&fixture, &msg);
     }
 
     #[test]
@@ -141,8 +140,6 @@ mod tests {
             panic!("expected GameMessage::SetStackSize, got {:?}", msg);
         }
 
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, fixture);
+        assert_pack_unpack_parity(&fixture, &msg);
     }
 }

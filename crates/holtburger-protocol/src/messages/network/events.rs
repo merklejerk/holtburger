@@ -22,6 +22,7 @@ mod tests {
     use crate::messages::game_event::GameEvent;
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
+    use crate::test_helpers::assert_pack_unpack_parity;
     use holtburger_common::Guid;
 
     #[test]
@@ -38,8 +39,6 @@ mod tests {
             panic!("expected GameMessage::GameEvent, got {:?}", msg);
         }
 
-        let mut packed = Vec::new();
-        msg.pack(&mut packed);
-        assert_eq!(packed, fixture);
+        assert_pack_unpack_parity(fixture, &msg);
     }
 }

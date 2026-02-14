@@ -290,7 +290,7 @@ impl Client {
                     amount,
                     equip_mask
                 );
-                // Sequence will be handled by send_game_action
+
                 self.send_game_action(GameAction::StackableSplitToWield(Box::new(
                     StackableSplitToWieldData {
                         stack_guid: item,

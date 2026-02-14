@@ -175,23 +175,23 @@ These findings mean Issue #18 remains actionable without major re-triage; only c
 - [x] Verify functional correctness (dispatch works) despite repack gap.
 
 #### Phase 2
-- [ ] Convert character parity outliers to shared helper.
-- [ ] Convert network parity outliers to shared helper.
-- [ ] Convert inventory parity outliers to shared helper.
-- [ ] Keep only additive semantic asserts where needed.
+- [x] Convert character parity outliers to shared helper.
+- [x] Convert network parity outliers to shared helper.
+- [x] Convert inventory parity outliers to shared helper.
+- [x] Keep only additive semantic asserts where needed.
 
 #### Phase 3
-- [ ] Split `object/messages.rs` into focused modules.
-- [ ] Split `movement/messages.rs` into focused modules.
-- [ ] Split `game_message.rs` into focused modules.
-- [ ] Confirm public API and behavior stability.
+- [x] Split `object/messages.rs` into focused modules.
+- [x] Split `movement/messages.rs` into focused modules.
+- [x] Split `game_message.rs` into focused modules.
+- [x] Confirm public API and behavior stability.
 
 #### Phase 4
-- [ ] Draft fixture provenance SOP (single canonical doc).
-- [ ] Align fixture path conventions in protocol/core docs.
-- [ ] Remove `/docs` references from persistent files.
-- [ ] Add regeneration instructions with one worked example.
-- [ ] Validate docs by following instructions end-to-end.
+- [x] Draft fixture provenance SOP (single canonical doc).
+- [x] Align fixture path conventions in protocol/core docs.
+- [x] Remove `/docs` references from persistent files.
+- [x] Add regeneration instructions with one worked example.
+- [x] Validate docs by following instructions end-to-end.
 
 ### B) Decision Log
 

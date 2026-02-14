@@ -26,7 +26,7 @@ So server-side code does not provide an authoritative internal structure; it onl
 
 ## Observed internal structure (fixture: 2026-02-07)
 
-From fixture `crates/holtburger-core/tests/fixtures/gameplay_options_tui_2026_02_07.bin`:
+From fixture `crates/holtburger-protocol/tests/fixtures/gameplay_options_tui_2026_02_07.bin`:
 
 - Total length: **876 bytes**
 - 4-byte aligned: **yes**

@@ -30,7 +30,13 @@ impl PlayerState {
         let mult = self.get_attribute_multiplier(attr);
         let add = self.get_attribute_additive(attr);
 
-        ((base * mult) + add).round() as u32
+        let total = (base * mult) + add;
+
+        // ACE: attributes cannot be debuffed below 10 normally,
+        // or 1 for creatures with very low starting attributes
+        let min_attr = if base >= 10.0 { 10.0 } else { 1.0 };
+
+        total.round().max(min_attr) as u32
     }
 
     pub fn calculate_vital_attribute_contribution(
@@ -95,7 +101,13 @@ impl PlayerState {
         let mult = self.get_vital_multiplier(vital_type);
         let add = self.get_vital_additive(vital_type);
 
-        ((total_base * mult) + add).round() as u32
+        let total = (total_base * mult) + add;
+
+        // ACE: a creature cannot fall below 5 MaxVital from enchantments / vitae normally,
+        // or 1 MaxVital for creatures with very low starting vitals
+        let min_vital = if total_base >= 5.0 { 5.0 } else { 1.0 };
+
+        total.round().max(min_vital) as u32
     }
 
     pub fn get_skill_multiplier(&self, skill: stats::SkillType) -> f32 {
@@ -174,7 +186,7 @@ impl PlayerState {
         if use_current {
             let mult = self.get_skill_multiplier(skill_type);
             let add = self.get_skill_additive(skill_type);
-            ((total_base * mult) + add).round() as u32
+            ((total_base * mult) + add).round().max(0.0) as u32
         } else {
             total_base as u32
         }
@@ -228,8 +240,10 @@ impl PlayerState {
             .get(&(PropertyInt::ArmorLevel as u32))
             .cloned()
             .unwrap_or(0);
-        self.armor =
-            crate::world::magic::get_enchanted_armor(base_armor, &self.enchantments) as u32;
+        self.armor = i32::max(
+            -400, // Reasonable floor for degenerate cases
+            crate::world::magic::get_enchanted_armor(base_armor, &self.enchantments),
+        );
 
         // Recalculate Resistances
         let get_r = |prop: PropertyFloat| {

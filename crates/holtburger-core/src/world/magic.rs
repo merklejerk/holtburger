@@ -119,7 +119,7 @@ pub fn get_enchanted_resistance(
         resistance_key,
     );
 
-    (base_resistance * mult) + add
+    ((base_resistance * mult) + add).clamp(-2.0, 2.0)
 }
 
 pub fn get_enchanted_armor(base_armor: i32, enchantments: &[Enchantment]) -> i32 {

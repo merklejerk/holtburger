@@ -80,9 +80,6 @@ impl AppState {
                             format!(">> NoClip is now {}", status),
                         );
                     }
-                    WorldEvent::SpellInfo { spell_id, info } => {
-                        self.spell_info.insert(spell_id, info);
-                    }
                     WorldEvent::PropertyUpdated {
                         guid,
                         property_id,
@@ -354,6 +351,15 @@ impl AppState {
                         }
                     }
                     _ => {}
+                }
+            }
+            ClientEvent::ResourcesResolved(resources) => {
+                for resource in resources {
+                    match resource {
+                        holtburger_core::ResolvedResource::Spell { spell_id, info } => {
+                            self.spell_info.insert(spell_id, info);
+                        }
+                    }
                 }
             }
             ClientEvent::StatusUpdate { state } => {

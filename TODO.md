@@ -10,22 +10,23 @@
 - [x] Reverse direction of netpulse animation.
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
+- [ ] Add and resolve `SpellCategory` enum.
 
 ### Medium
-- [ ] Chronometer tells the wrong time.
 - [x] Noclip mode to disable collision during movement.
 - [x] Make net stats widget fixed width. Currently Seems to scale with terminal width.
 - [x] Tab cycle order is wrong in landscape mode.
+- [x] Char tab "resistances" section needs to be prettified. Armor buffs not correctly compounding.
+- [x] Validate enchantment combining logic and order: floats are multiplicative and ints are additive?
+- [x] [U]se and [H]eal action for healing kits.
+- [x] Spell IDs need to be converted to names in enchants lists. (Plan: [docs/plans/spell_name_resolution_plan.md](docs/plans/spell_name_resolution_plan.md))
+- [x] Force Verb shortcuts to be unique at compile time.
+- [x] Chronometer tells the wrong time.
 - [ ] DC detection.
 - [ ] Approach verb is janky.
 - [ ] Augment entities spawned by `ObjectCreate` with weenie template properties.  
 - [ ] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable.
-- [x] Char tab "resistances" section needs to be prettified. Armor buffs not correctly compounding.
-- [x] Validate enchantment combining logic and order: floats are multiplicative and ints are additive?
-- [x] [U]se and [H]eal action for healing kits.
 - [ ] All verbs should have synonymous slash chat commands.
-- [x] Spell IDs need to be converted to names in enchants lists. (Plan: [docs/plans/spell_name_resolution_plan.md](docs/plans/spell_name_resolution_plan.md))
-- [x] Force Verb shortcuts to be unique at compile time.
 - [ ] [E]quip verb.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] [C]ombine verb (crafting).
@@ -41,7 +42,7 @@
 - [ ] Implement actual collisions.
 
 ### High
-- [ ] Fail when spell/attack distance is too far.
+- [x] Fail when spell/attack distance is too far.
 - [x] Just learned spells show up as "unknown spell" in spellbok. Requires restart.
 - [x] Items "wielded" by the player not showing up in their inventory.
 - [x] Refactor client movement system (move to, nav).

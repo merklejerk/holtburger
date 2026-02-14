@@ -290,12 +290,6 @@ pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 false
             };
 
-            // This is a bit of a hack to ensure we have spell info for everything in the list
-            // without needing a separate pre-fetch step.
-            // Note: Since this is in the render loop, it only requests if not present.
-            // ClientCommand handling is async so it won't block render.
-            // Actually, we should really do this in handle_action or update_tick.
-
             let style = if is_selected {
                 Style::default()
                     .fg(Color::Cyan)
@@ -309,9 +303,9 @@ pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 Span::raw(" "),
                 Span::styled(
                     if let Some(info) = state.spell_info.get(&spell_id) {
-                        format!("Lvl: {}", info.power)
+                        format!("Power: {}", info.power)
                     } else {
-                        format!("ID: {:#06X}", spell_id)
+                        "".to_string()
                     },
                     Style::default().fg(Color::DarkGray),
                 ),

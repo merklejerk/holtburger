@@ -1,14 +1,14 @@
-use holtburger_common::Guid;
-use holtburger_common::sequence::is_newer_u16;
-use holtburger_protocol::messages::*;
-use crate::world::WorldEvent;
-use crate::world::stats;
 use super::PlayerState;
 use super::types::SkillBase;
 use super::types::VitalBase;
+use crate::world::WorldEvent;
+use crate::world::stats;
+use holtburger_common::Guid;
+use holtburger_common::sequence::is_newer_u16;
+use holtburger_protocol::messages::*;
 
-use holtburger_protocol::messages::EquipMask;
 use holtburger_common::properties::{PropertyInt, PropertyInt64};
+use holtburger_protocol::messages::EquipMask;
 
 impl PlayerState {
     pub fn handle_message(
@@ -380,7 +380,8 @@ impl PlayerState {
                         {
                             self.unspent_skill_points = sp as u32;
                         }
-                        if let Some(&level) = data.properties_int.get(&(PropertyInt::Level as u32)) {
+                        if let Some(&level) = data.properties_int.get(&(PropertyInt::Level as u32))
+                        {
                             self.level = level as u32;
                         }
 
@@ -417,7 +418,8 @@ impl PlayerState {
                                     _ => continue,
                                 };
 
-                                self.vital_bases.insert(vital_type, VitalBase { ranks, start });
+                                self.vital_bases
+                                    .insert(vital_type, VitalBase { ranks, start });
 
                                 let base = self.calculate_vital_base(vital_type);
                                 let current = attr.current.unwrap_or(0);

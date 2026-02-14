@@ -101,8 +101,8 @@ impl AppState {
                         let player_guid = self.player_guid;
                         let entity_verbs = verbs::get_verbs_for_target(
                             &target,
-                            &self.entities,
                             player_guid,
+                            &self.inventory,
                             self.active_interaction,
                         );
 
@@ -540,8 +540,8 @@ impl AppState {
                                         let player_guid = self.player_guid;
                                         let entity_verbs = verbs::get_verbs_for_target(
                                             &target,
-                                            &self.entities,
                                             player_guid,
+                                            &self.inventory,
                                             self.active_interaction,
                                         );
                                         let handler = entity_verbs

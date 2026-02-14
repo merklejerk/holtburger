@@ -12,35 +12,10 @@ pub enum EntityFilter {
     Inventory,
 }
 
-pub fn is_owned_by_player(
-    entity_guid: Guid,
-    entities: &HashMap<Guid, Entity>,
-    player_guid: Guid,
-) -> bool {
-    let mut current_guid = entity_guid;
-    let mut visited = HashSet::new();
-    while visited.insert(current_guid) {
-        if current_guid == player_guid {
-            return true;
-        }
-        if let Some(ent) = entities.get(&current_guid) {
-            if let Some(cid) = ent.container_id {
-                current_guid = cid;
-            } else if let Some(wid) = ent.wielder_id {
-                current_guid = wid;
-            } else {
-                break;
-            }
-        } else {
-            break;
-        }
-    }
-    false
-}
-
 pub fn filter_entities<'a>(
     entities: &'a HashMap<Guid, Entity>,
     player_guid: Option<Guid>,
+    inventory: &HashSet<Guid>,
     player_pos: Option<&'a WorldPosition>,
     filter: EntityFilter,
 ) -> Vec<(&'a Entity, f32, usize)> {
@@ -48,24 +23,17 @@ pub fn filter_entities<'a>(
         .values()
         .filter(|e| match filter {
             EntityFilter::World => {
+                if inventory.contains(&e.guid) {
+                    return false;
+                }
                 if let Some(pguid) = player_guid
-                    && e.guid != pguid
-                    && is_owned_by_player(e.guid, entities, pguid)
+                    && e.guid == pguid
                 {
                     return false;
                 }
                 classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
             }
-            EntityFilter::Inventory => {
-                if e.position.landblock_id != Guid::NULL || e.name.is_empty() {
-                    return false;
-                }
-                if let Some(pguid) = player_guid {
-                    is_owned_by_player(e.guid, entities, pguid)
-                } else {
-                    false
-                }
-            }
+            EntityFilter::Inventory => inventory.contains(&e.guid) && !e.name.is_empty(),
         })
         .collect();
 

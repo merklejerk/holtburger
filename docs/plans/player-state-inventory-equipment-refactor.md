@@ -129,12 +129,12 @@
   - *Mitigation*: validate against ACE event/data structures before finalizing model fields.
 
 ## 6. Definition of Done (DoD)
-- [ ] `PlayerState` explicitly tracks inventory/equipment ownership.
-- [ ] Core (`WorldState` + `PlayerState`) is source-of-truth for ownership transitions.
-- [ ] TUI no longer contains primary ownership derivation logic.
-- [ ] Refactor reduces `player.rs` complexity into intuitive modules.
-- [ ] Targeted tests cover ownership transition paths.
-- [ ] `cargo check`, `cargo test`, `cargo fmt`, and strict `clippy` pass.
+- [x] `PlayerState` explicitly tracks inventory/equipment ownership.
+- [x] Core (`WorldState` + `PlayerState`) is source-of-truth for ownership transitions.
+- [x] TUI no longer contains primary ownership derivation logic.
+- [x] Refactor reduces `player.rs` complexity into intuitive modules.
+- [x] Targeted tests cover ownership transition paths.
+- [x] `cargo check`, `cargo test`, `cargo fmt`, and strict `clippy` pass.
 
 ## 7. Living Worksheet
 
@@ -143,22 +143,25 @@
 - [x] **Phase 1**: Split `player.rs` into domain modules without behavior changes.
 - [x] **Phase 2**: Add explicit inventory/equipment state to `PlayerState`.
 - [x] **Phase 3**: Route world message handling through `PlayerState` ownership helpers.
-- [ ] **Phase 4**: Remove TUI ownership inference and consume core-owned state.
-- [ ] **Phase 5**: Cleanup, docs, and verification.
+- [x] **Phase 4**: Remove TUI ownership inference and consume core-owned state.
+- [x] **Phase 5**: Cleanup, docs, and verification.
+- [x] **Phase 6**: Regression Fix (Recursive Tracking).
 
 ### 7.2 Decisions Log
 - [x] Decide canonical equipped representation: items index by GUID -> `EquipMask` bitfield.
 - [x] Decide whether inventory/equipment updates need new `WorldEvent` variants: Reused existing `PropertyUpdated` for now, but `PlayerState` is the source of truth.
-- [ ] Decide minimal public API surface for `PlayerState` ownership queries.
+- [x] Decide minimal public API surface for `PlayerState` ownership queries: Exposed via `PlayerInfoData` snapshot and specialized routing in `WorldState`.
 
 ### 7.3 Verification Log
-- _(To be filled during implementation)_
-- [ ] Phase 0 baseline tests added and passing.
-- [ ] Phase 1 refactor is behavior-neutral (all checks green).
-- [ ] Phase 2/3 ownership transitions validated via tests.
-- [ ] Phase 4 TUI parity verified.
+- [x] Phase 0 baseline tests added and passing: Verified in `crates/holtburger-core/src/world/state.rs`.
+- [x] Phase 1 refactor is behavior-neutral (all checks green): Verified with `cargo test` and zero functional changes.
+- [x] Phase 2/3 ownership transitions validated via tests: Added `test_wield_object`, `test_inventory_put_obj_in_container`, etc.
+- [x] Phase 4 TUI parity verified: Manual verification in CLI and `cargo check` alignment.
 
 ### 7.4 Open Questions
-1. Should equipped state be represented by canonical equipment slots now, or just mirror packet tuples first and normalize later?
-2. Do we want `WorldEvent::PlayerInfo` to include owned inventory/equipment snapshots directly, or keep that for incremental events only?
-3. For migration safety, should we keep temporary TUI fallback heuristics behind a debug flag for one cycle?
+1. **Should equipped state be represented by canonical equipment slots now, or just mirror packet tuples first and normalize later?**
+   - *Decision*: Mirrored packet tuples (`EquipMask`) to maintain bit-perfect parity with protocol for now.
+2. **Do we want `WorldEvent::PlayerInfo` to include owned inventory/equipment snapshots directly, or keep that for incremental events only?**
+   - *Decision*: Included snapshots in `PlayerInfoData` for reliable UI initialization and full-state resyncs.
+3. **For migration safety, should we keep temporary TUI fallback heuristics behind a debug flag for one cycle?**
+   - *Decision*: No. The core truth is stable enough that removing heuristics immediately (smashing the monolith) was safer for long-term health.

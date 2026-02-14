@@ -1,8 +1,8 @@
 use super::PlayerState;
 use crate::world::WorldEvent;
+use crate::world::player::types::LastSentStats;
 use crate::world::stats;
 use holtburger_common::properties::{EnchantmentTypeFlags, PropertyFloat, PropertyInt};
-use crate::world::player::types::LastSentStats;
 
 impl PlayerState {
     pub fn get_attribute_multiplier(&self, attr: stats::AttributeType) -> f32 {
@@ -228,7 +228,8 @@ impl PlayerState {
             .get(&(PropertyInt::ArmorLevel as u32))
             .cloned()
             .unwrap_or(0);
-        self.armor = crate::world::magic::get_enchanted_armor(base_armor, &self.enchantments) as u32;
+        self.armor =
+            crate::world::magic::get_enchanted_armor(base_armor, &self.enchantments) as u32;
 
         // Recalculate Resistances
         let get_r = |prop: PropertyFloat| {
@@ -237,7 +238,11 @@ impl PlayerState {
                 .get(&(prop as u32))
                 .cloned()
                 .unwrap_or(1.0);
-            crate::world::magic::get_enchanted_resistance(base as f32, &self.enchantments, prop as u32)
+            crate::world::magic::get_enchanted_resistance(
+                base as f32,
+                &self.enchantments,
+                prop as u32,
+            )
         };
         self.resistances = stats::Resistances {
             slash: get_r(PropertyFloat::ResistSlash),
@@ -268,13 +273,15 @@ impl PlayerState {
 
         self.last_sent_stats = Some(current.clone());
 
-        events.push(WorldEvent::DerivedStatsUpdated {
-            attributes: current.attributes,
-            vitals: current.vitals,
-            skills: current.skills,
-            resistances: current.resistances,
-            armor: current.armor,
-            vitae: current.vitae,
-        });
+        events.push(WorldEvent::DerivedStatsUpdated(Box::new(
+            crate::world::DerivedStatsData {
+                attributes: current.attributes,
+                vitals: current.vitals,
+                skills: current.skills,
+                resistances: current.resistances,
+                armor: current.armor,
+                vitae: current.vitae,
+            },
+        )));
     }
 }

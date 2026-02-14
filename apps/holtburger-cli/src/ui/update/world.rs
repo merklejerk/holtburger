@@ -1,8 +1,10 @@
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, ContextView, UIState};
 use holtburger_common::Guid;
+use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientEvent;
-use holtburger_core::world::WorldEvent;
+use holtburger_core::world::{DerivedStatsData, PlayerInfoData, WorldEvent};
+use holtburger_protocol::messages::EquipMask;
 
 impl AppState {
     pub(super) fn handle_received_event(&mut self, event: ClientEvent) {
@@ -33,19 +35,22 @@ impl AppState {
             }
             ClientEvent::World(world_event) => {
                 match *world_event {
-                    WorldEvent::PlayerInfo {
-                        guid,
-                        name,
-                        pos,
-                        attributes,
-                        vitals,
-                        skills,
-                        enchantments,
-                        spells,
-                        vitae,
-                        skill_table,
-                        spell_names,
-                    } => {
+                    WorldEvent::PlayerInfo(data) => {
+                        let PlayerInfoData {
+                            guid,
+                            name,
+                            pos,
+                            attributes,
+                            vitals,
+                            skills,
+                            enchantments,
+                            spells,
+                            vitae,
+                            skill_table,
+                            spell_names,
+                            inventory,
+                            equipment,
+                        } = *data;
                         self.player_guid = Some(guid);
                         self.character_name = Some(name);
                         if let Some(p) = pos {
@@ -60,6 +65,8 @@ impl AppState {
                         self.vitae = vitae;
                         self.spell_names = spell_names;
                         self.skill_table = skill_table;
+                        self.inventory = inventory;
+                        self.equipment = equipment;
                         self.refresh_context_buffer();
                     }
                     WorldEvent::CombatModeUpdated(mode) => {
@@ -77,6 +84,17 @@ impl AppState {
                             match value {
                                 PropertyValue::Int(v) => {
                                     entity.int_properties.insert(property_id, v);
+
+                                    if let Some(PropertyInt::CurrentWieldedLocation) =
+                                        PropertyInt::from_repr(property_id)
+                                    {
+                                        let mask = EquipMask::from_bits_truncate(v as u32);
+                                        if mask.is_empty() {
+                                            self.equipment.remove(&guid);
+                                        } else {
+                                            self.equipment.insert(guid, mask);
+                                        }
+                                    }
                                 }
                                 PropertyValue::Int64(v) => {
                                     entity.int64_properties.insert(property_id, v);
@@ -103,12 +121,23 @@ impl AppState {
                                                 if v != Guid::NULL {
                                                     entity.position.landblock_id = Guid::NULL;
                                                 }
+
+                                                if let Some(pguid) = self.player_guid {
+                                                    let is_owned =
+                                                        v == pguid || self.inventory.contains(&v);
+                                                    self.update_inventory_recursive(guid, is_owned);
+                                                }
                                             }
                                             PropertyInstanceId::Wielder => {
                                                 entity.wielder_id =
                                                     if v == Guid::NULL { None } else { Some(v) };
                                                 if v != Guid::NULL {
                                                     entity.position.landblock_id = Guid::NULL;
+                                                }
+
+                                                if let Some(pguid) = self.player_guid {
+                                                    let is_owned = v == pguid;
+                                                    self.update_inventory_recursive(guid, is_owned);
                                                 }
                                             }
                                             _ => {}
@@ -130,14 +159,15 @@ impl AppState {
                     WorldEvent::LevelInfoUpdated(info) => {
                         self.level_info = Some(info);
                     }
-                    WorldEvent::DerivedStatsUpdated {
-                        attributes,
-                        vitals,
-                        skills,
-                        resistances,
-                        armor,
-                        vitae,
-                    } => {
+                    WorldEvent::DerivedStatsUpdated(data) => {
+                        let DerivedStatsData {
+                            attributes,
+                            vitals,
+                            skills,
+                            resistances,
+                            armor,
+                            vitae,
+                        } = *data;
                         for attr in attributes {
                             self.attributes.insert(attr.attr_type, attr);
                         }
@@ -191,12 +221,32 @@ impl AppState {
                         // but we handle it to avoid the wildcard match.
                     }
                     WorldEvent::EntitySpawned(entity) => {
-                        if Some(entity.guid) == self.player_guid {
+                        let guid = entity.guid;
+                        let container_id = entity.container_id;
+                        let wielder_id = entity.wielder_id;
+
+                        if Some(guid) == self.player_guid {
                             self.player_pos = Some(entity.position);
                         }
-                        self.entities.insert(entity.guid, *entity);
+
+                        // Update inventory tracking for new entities spawned inside containers
+                        if let Some(pguid) = self.player_guid {
+                            if let Some(cid) = container_id
+                                && (cid == pguid || self.inventory.contains(&cid))
+                            {
+                                self.inventory.insert(guid);
+                            }
+                            if let Some(wid) = wielder_id
+                                && wid == pguid
+                            {
+                                self.inventory.insert(guid);
+                            }
+                        }
+
+                        self.entities.insert(guid, *entity);
                     }
                     WorldEvent::EntityDespawned(guid) => {
+                        self.update_inventory_recursive(guid, false);
                         self.entities.remove(&guid);
                     }
                     // Handle inventory events if they exist in WorldEvent, otherwise skip

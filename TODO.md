@@ -64,6 +64,9 @@
 
 ### Critical
 
+### Stretch
+- [ ] Integrate `deno-core` for scripting.
+
 ### Investigate
 - [ ] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes?
 

@@ -39,7 +39,6 @@
 
 ### High
 - [ ] Just learned spells show up as "unknown spell" in spellbok. Requires restart.
-- [ ] Max vitals caculation is wrong (63/127/132 vs 60/125/121)
 - [ ] Combat mode toggle.
 - [x] Items "wielded" by the player not showing up in their inventory.
 - [x] Refactor client movement system (move to, nav).
@@ -54,3 +53,7 @@
     - [ ] Add [C]ast verb on current active entity (if chosen) or self.
 
 ### Critical
+
+### Investigate
+- [ ] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes?
+

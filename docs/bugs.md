@@ -18,6 +18,8 @@ This file documents bugs discovered in the ACE Server during development of Holt
 - **Fix (Proposed):** 
   In `HandleCastSpell`, if `target` is null but `targetCreature` is not, use `targetCreature` for the `DoSpellEffects` call.
 
+### Fix PR
+[https://github.com/ACEmulator/ACE/pull/4411/changes](https://github.com/ACEmulator/ACE/pull/4411/changes)
 
 ## Notes
 - You can cast *Other, vuln, and war spells on yourself (but war spells do no damage).

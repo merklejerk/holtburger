@@ -49,7 +49,7 @@ pub struct PlayerState {
     /// Elemental and physical damage resistances computed from properties and enchantments.
     pub resistances: stats::Resistances,
     /// Total armor level (AL) computed from equipped items and buffs.
-    pub armor: u32,
+    pub armor: i32,
     /// Current "Vitae" penalty/bonus multiplier (0.0 to 1.0+).
     pub vitae: f32,
     /// Current position in the world (Landcell + local coordinates).
@@ -189,6 +189,7 @@ impl PlayerState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::properties::{EnchantmentTypeFlags, PropertyInt};
 
     fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
         player.attributes.insert(
@@ -250,6 +251,156 @@ mod tests {
             player.derive_skill_value(stats::SkillType::Run, 5, 0, false),
             105
         );
+    }
+
+    #[test]
+    fn test_stat_floors() {
+        let mut player = PlayerState::new();
+
+        // 1. Attribute floor check
+        // Base 100, debuff by 200 -> should floor at 10 (since base >= 10)
+        set_attr(&mut player, stats::AttributeType::StrengthAttr, 100);
+        player.enchantments.push(Enchantment {
+            spell_id: 1,
+            layer: 1,
+            spell_category: 1,
+            has_spell_set_id: 0,
+            power_level: 1,
+            start_time: 0.0,
+            duration: 1000.0,
+            caster_guid: Guid(50000001),
+            degrade_modifier: 0.0,
+            degrade_limit: -666.0,
+            last_time_degraded: 0.0,
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
+            stat_mod_key: stats::AttributeType::StrengthAttr as u32,
+            stat_mod_value: -200.0,
+            spell_set_id: None,
+        });
+        assert_eq!(
+            player.get_attribute_current(stats::AttributeType::StrengthAttr),
+            10
+        );
+
+        // Attribute base 5, debuff by 10 -> should floor at 1
+        set_attr(&mut player, stats::AttributeType::EnduranceAttr, 5);
+        player.enchantments.push(Enchantment {
+            spell_id: 2,
+            layer: 1,
+            spell_category: 2,
+            has_spell_set_id: 0,
+            power_level: 1,
+            start_time: 0.0,
+            duration: 1000.0,
+            caster_guid: Guid(50000001),
+            degrade_modifier: 0.0,
+            degrade_limit: -666.0,
+            last_time_degraded: 0.0,
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
+            stat_mod_key: stats::AttributeType::EnduranceAttr as u32,
+            stat_mod_value: -100.0,
+            spell_set_id: None,
+        });
+        assert_eq!(
+            player.get_attribute_current(stats::AttributeType::EnduranceAttr),
+            1
+        );
+
+        // 2. Vital floor check
+        // Base 100, debuff by 200 -> should floor at 5
+        player.vital_bases.insert(
+            stats::VitalType::Health,
+            VitalBase {
+                ranks: 0,
+                start: 100,
+            },
+        );
+        // Attribute contribution for health is Str/2. Str is 10 (buffed)
+        // Total base = 100 (base) + 5 (attr bonus) = 105.
+        // Debuff by 200.
+        player.enchantments.push(Enchantment {
+            spell_id: 3,
+            layer: 1,
+            spell_category: 3,
+            has_spell_set_id: 0,
+            power_level: 1,
+            start_time: 0.0,
+            duration: 1000.0,
+            caster_guid: Guid(50000001),
+            degrade_modifier: 0.0,
+            degrade_limit: -666.0,
+            last_time_degraded: 0.0,
+            stat_mod_type: (EnchantmentTypeFlags::SECOND_ATT | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
+            stat_mod_key: stats::VitalType::Health as u32,
+            stat_mod_value: -200.0,
+            spell_set_id: None,
+        });
+        assert_eq!(player.calculate_vital_current(stats::VitalType::Health), 5);
+
+        // 3. Skill floor check (0)
+        player.skill_bases.insert(
+            stats::SkillType::MeleeDefense,
+            SkillBase {
+                ranks: 100,
+                init: 0,
+            },
+        );
+        // Skill formula for MeleeDefense is (Quick + Coord) / 3.
+        // Str is 10, End is 1. (These are unrelated but Quick/Coord are default 0 if not set)
+        set_attr(&mut player, stats::AttributeType::QuicknessAttr, 10);
+        set_attr(&mut player, stats::AttributeType::CoordinationAttr, 10);
+        // (10+10)/3 = 7. Total base = 7 + 100 = 107.
+        player.enchantments.push(Enchantment {
+            spell_id: 4,
+            layer: 1,
+            spell_category: 4,
+            has_spell_set_id: 0,
+            power_level: 1,
+            start_time: 0.0,
+            duration: 1000.0,
+            caster_guid: Guid(50000001),
+            degrade_modifier: 0.0,
+            degrade_limit: -666.0,
+            last_time_degraded: 0.0,
+            stat_mod_type: (EnchantmentTypeFlags::SKILL | EnchantmentTypeFlags::ADDITIVE).bits(),
+            stat_mod_key: stats::SkillType::MeleeDefense as u32,
+            stat_mod_value: -200.0,
+            spell_set_id: None,
+        });
+        assert_eq!(
+            player.derive_skill_value(stats::SkillType::MeleeDefense, 100, 0, true),
+            0
+        );
+
+        // 4. Armor level check (can stay negative for Armor Self / Imperil logic)
+        player
+            .int_properties
+            .insert(PropertyInt::ArmorLevel as u32, 10);
+        player.enchantments.push(Enchantment {
+            spell_id: 5,
+            layer: 1,
+            spell_category: 5,
+            has_spell_set_id: 0,
+            power_level: 1,
+            start_time: 0.0,
+            duration: 1000.0,
+            caster_guid: Guid(50000001),
+            degrade_modifier: 0.0,
+            degrade_limit: -666.0,
+            last_time_degraded: 0.0,
+            stat_mod_type: (EnchantmentTypeFlags::BODY_ARMOR_VALUE
+                | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
+            stat_mod_key: 0,
+            stat_mod_value: -20.0,
+            spell_set_id: None,
+        });
+        player.emit_derived_stats(&mut Vec::new());
+        // 10 - 20 = -10.
+        assert_eq!(player.armor, -10);
     }
 
     #[test]

@@ -32,7 +32,7 @@ pub struct AppState {
     pub vitals: HashMap<VitalType, Vital>,
     pub skills: HashMap<SkillType, Skill>,
     pub resistances: holtburger_core::world::stats::Resistances,
-    pub armor: u32,
+    pub armor: i32,
     pub vitae: f32,
     pub messages: Vec<ChatMessage>,
     pub input: String,

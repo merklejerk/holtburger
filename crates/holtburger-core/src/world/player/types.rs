@@ -19,6 +19,6 @@ pub(crate) struct LastSentStats {
     pub vitals: Vec<stats::Vital>,
     pub skills: Vec<stats::Skill>,
     pub resistances: stats::Resistances,
-    pub armor: u32,
+    pub armor: i32,
     pub vitae: f32,
 }

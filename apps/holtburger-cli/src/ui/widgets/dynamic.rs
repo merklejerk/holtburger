@@ -142,7 +142,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     );
 
     // --- 5. Right Net Stats (Sparklines) ---
-    let mut net_spans = vec![Span::raw("📈")];
+    let mut net_spans = vec![Span::raw("📈 ")];
 
     let history_in = &state.net_stats.history_in;
     let history_out = &state.net_stats.history_out;

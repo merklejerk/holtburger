@@ -67,6 +67,12 @@ pub struct UseDoneData {
     pub error_id: u32,
 }
 
+impl UseDoneData {
+    pub fn error(&self) -> Option<WeenieError> {
+        WeenieError::from_repr(self.error_id)
+    }
+}
+
 impl ProtocolUnpack for UseDoneData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {

@@ -194,6 +194,9 @@ async fn main() -> Result<()> {
         attributes: std::collections::HashMap::new(),
         vitals: std::collections::HashMap::new(),
         skills: std::collections::HashMap::new(),
+        resistances: holtburger_core::world::stats::Resistances::default(),
+        armor: 0,
+        vitae: 1.0,
         messages: Vec::new(),
         input: String::new(),
         input_history: Vec::new(),
@@ -223,6 +226,9 @@ async fn main() -> Result<()> {
         core_state: ClientState::Connected,
         player_pos: None,
         player_enchantments: Vec::new(),
+        player_spells: Vec::new(),
+        spell_names: std::collections::HashMap::new(),
+        spell_info: std::collections::HashMap::new(),
         skill_table: None,
         entities: std::collections::HashMap::new(),
         server_time: None,
@@ -231,6 +237,10 @@ async fn main() -> Result<()> {
         verbosity: args.verbose,
         net_stats: ui::NetStats::default(),
         world_name: String::new(),
+        combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+        noclip: false,
+        inventory: std::collections::HashSet::new(),
+        equipment: std::collections::HashMap::new(),
     };
 
     app_state.refresh_context_buffer();

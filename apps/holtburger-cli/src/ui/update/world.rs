@@ -1,8 +1,10 @@
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, ContextView, UIState};
 use holtburger_common::Guid;
+use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientEvent;
-use holtburger_core::world::WorldEvent;
+use holtburger_core::world::{DerivedStatsData, PlayerInfoData, WorldEvent};
+use holtburger_protocol::messages::EquipMask;
 
 impl AppState {
     pub(super) fn handle_received_event(&mut self, event: ClientEvent) {
@@ -33,16 +35,22 @@ impl AppState {
             }
             ClientEvent::World(world_event) => {
                 match *world_event {
-                    WorldEvent::PlayerInfo {
-                        guid,
-                        name,
-                        pos,
-                        attributes,
-                        vitals,
-                        skills,
-                        enchantments,
-                        skill_table,
-                    } => {
+                    WorldEvent::PlayerInfo(data) => {
+                        let PlayerInfoData {
+                            guid,
+                            name,
+                            pos,
+                            attributes,
+                            vitals,
+                            skills,
+                            enchantments,
+                            spells,
+                            vitae,
+                            skill_table,
+                            spell_names,
+                            inventory,
+                            equipment,
+                        } = *data;
                         self.player_guid = Some(guid);
                         self.character_name = Some(name);
                         if let Some(p) = pos {
@@ -53,8 +61,24 @@ impl AppState {
                         self.vitals = vitals.into_iter().map(|v| (v.vital_type, v)).collect();
                         self.skills = skills.into_iter().map(|s| (s.skill_type, s)).collect();
                         self.player_enchantments = enchantments;
+                        self.player_spells = spells;
+                        self.vitae = vitae;
+                        self.spell_names = spell_names;
                         self.skill_table = skill_table;
+                        self.inventory = inventory;
+                        self.equipment = equipment;
                         self.refresh_context_buffer();
+                    }
+                    WorldEvent::CombatModeUpdated(mode) => {
+                        self.combat_mode = mode;
+                    }
+                    WorldEvent::NoClipUpdated(enabled) => {
+                        self.noclip = enabled;
+                        let status = if enabled { "ENABLED" } else { "DISABLED" };
+                        self.log_chat(
+                            ChatMessageKind::System,
+                            format!(">> NoClip is now {}", status),
+                        );
                     }
                     WorldEvent::PropertyUpdated {
                         guid,
@@ -68,6 +92,17 @@ impl AppState {
                             match value {
                                 PropertyValue::Int(v) => {
                                     entity.int_properties.insert(property_id, v);
+
+                                    if let Some(PropertyInt::CurrentWieldedLocation) =
+                                        PropertyInt::from_repr(property_id)
+                                    {
+                                        let mask = EquipMask::from_bits_truncate(v as u32);
+                                        if mask.is_empty() {
+                                            self.equipment.remove(&guid);
+                                        } else {
+                                            self.equipment.insert(guid, mask);
+                                        }
+                                    }
                                 }
                                 PropertyValue::Int64(v) => {
                                     entity.int64_properties.insert(property_id, v);
@@ -94,12 +129,23 @@ impl AppState {
                                                 if v != Guid::NULL {
                                                     entity.position.landblock_id = Guid::NULL;
                                                 }
+
+                                                if let Some(pguid) = self.player_guid {
+                                                    let is_owned =
+                                                        v == pguid || self.inventory.contains(&v);
+                                                    self.update_inventory_recursive(guid, is_owned);
+                                                }
                                             }
                                             PropertyInstanceId::Wielder => {
                                                 entity.wielder_id =
                                                     if v == Guid::NULL { None } else { Some(v) };
                                                 if v != Guid::NULL {
                                                     entity.position.landblock_id = Guid::NULL;
+                                                }
+
+                                                if let Some(pguid) = self.player_guid {
+                                                    let is_owned = v == pguid;
+                                                    self.update_inventory_recursive(guid, is_owned);
                                                 }
                                             }
                                             _ => {}
@@ -121,11 +167,15 @@ impl AppState {
                     WorldEvent::LevelInfoUpdated(info) => {
                         self.level_info = Some(info);
                     }
-                    WorldEvent::DerivedStatsUpdated {
-                        attributes,
-                        vitals,
-                        skills,
-                    } => {
+                    WorldEvent::DerivedStatsUpdated(data) => {
+                        let DerivedStatsData {
+                            attributes,
+                            vitals,
+                            skills,
+                            resistances,
+                            armor,
+                            vitae,
+                        } = *data;
                         for attr in attributes {
                             self.attributes.insert(attr.attr_type, attr);
                         }
@@ -135,6 +185,9 @@ impl AppState {
                         for skill in skills {
                             self.skills.insert(skill.skill_type, skill);
                         }
+                        self.resistances = resistances;
+                        self.armor = armor;
+                        self.vitae = vitae;
                     }
                     WorldEvent::EntityMoved { guid, pos } => {
                         if Some(guid) == self.player_guid {
@@ -176,25 +229,49 @@ impl AppState {
                         // but we handle it to avoid the wildcard match.
                     }
                     WorldEvent::EntitySpawned(entity) => {
-                        if Some(entity.guid) == self.player_guid {
+                        let guid = entity.guid;
+                        let container_id = entity.container_id;
+                        let wielder_id = entity.wielder_id;
+
+                        if Some(guid) == self.player_guid {
                             self.player_pos = Some(entity.position);
                         }
-                        self.entities.insert(entity.guid, *entity);
+
+                        // Update inventory tracking for new entities spawned inside containers
+                        if let Some(pguid) = self.player_guid {
+                            if let Some(cid) = container_id
+                                && (cid == pguid || self.inventory.contains(&cid))
+                            {
+                                self.inventory.insert(guid);
+                            }
+                            if let Some(wid) = wielder_id
+                                && wid == pguid
+                            {
+                                self.inventory.insert(guid);
+                            }
+                        }
+
+                        self.entities.insert(guid, *entity);
                     }
                     WorldEvent::EntityDespawned(guid) => {
+                        self.update_inventory_recursive(guid, false);
                         self.entities.remove(&guid);
                     }
                     // Handle inventory events if they exist in WorldEvent, otherwise skip
                     // For now, these were placeholders and need to match actual WorldEvent variants
-                    WorldEvent::EnchantmentUpdated(enchant) => {
-                        if let Some(existing) = self
-                            .player_enchantments
-                            .iter_mut()
-                            .find(|e| e.spell_id == enchant.spell_id && e.layer == enchant.layer)
-                        {
-                            *existing = enchant;
+                    WorldEvent::EnchantmentUpdated {
+                        enchantment,
+                        spell_name,
+                    } => {
+                        if let Some(name) = spell_name {
+                            self.spell_names.insert(enchantment.spell_id as u32, name);
+                        }
+                        if let Some(existing) = self.player_enchantments.iter_mut().find(|e| {
+                            e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
+                        }) {
+                            *existing = enchantment;
                         } else {
-                            self.player_enchantments.push(enchant);
+                            self.player_enchantments.push(enchantment);
                         }
                     }
                     WorldEvent::EnchantmentRemoved { spell_id, layer } => {
@@ -236,13 +313,24 @@ impl AppState {
                     WorldEvent::EnchantmentsPurged => {
                         self.player_enchantments.clear();
                     }
+                    WorldEvent::SpellUpdated { spell_id, name } => {
+                        if !self.player_spells.contains(&spell_id) {
+                            self.player_spells.push(spell_id);
+                        }
+                        if let Some(n) = name {
+                            self.spell_names.insert(spell_id, n);
+                        }
+                    }
+                    WorldEvent::SpellRemoved { spell_id } => {
+                        self.player_spells.retain(|&s| s != spell_id);
+                    }
                     WorldEvent::ServerTimeUpdate(time) => {
                         self.server_time = Some((time, std::time::Instant::now()));
                     }
                     WorldEvent::WeenieError { error_id } => {
                         use holtburger_protocol::errors::WeenieError;
                         let error = WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
-                        if self.verbosity >= 1 && error != WeenieError::None {
+                        if error != WeenieError::None {
                             self.log_chat(
                                 ChatMessageKind::Warning,
                                 format!("[!] Weenie Error: {:?} (0x{:08X})", error, error_id),
@@ -252,7 +340,7 @@ impl AppState {
                     WorldEvent::WeenieErrorWithString { error_id, message } => {
                         use holtburger_protocol::errors::WeenieError;
                         let error = WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
-                        if self.verbosity >= 1 && error != WeenieError::None {
+                        if error != WeenieError::None {
                             self.log_chat(
                                 ChatMessageKind::Warning,
                                 format!(
@@ -263,6 +351,15 @@ impl AppState {
                         }
                     }
                     _ => {}
+                }
+            }
+            ClientEvent::ResourcesResolved(resources) => {
+                for resource in resources {
+                    match resource {
+                        holtburger_core::ResolvedResource::Spell { spell_id, info } => {
+                            self.spell_info.insert(spell_id, info);
+                        }
+                    }
                 }
             }
             ClientEvent::StatusUpdate { state } => {

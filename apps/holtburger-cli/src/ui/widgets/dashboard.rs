@@ -23,6 +23,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         (DashboardTab::Entities, "1", "Near"),
         (DashboardTab::Inventory, "2", "Inv"),
         (DashboardTab::Character, "3", "Char"),
+        (DashboardTab::Spells, "4", "Spells"),
     ];
 
     let mut spans = Vec::new();
@@ -156,11 +157,12 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 );
             }
         }
-        DashboardTab::Entities | DashboardTab::Inventory => {
+        DashboardTab::Entities | DashboardTab::Inventory | DashboardTab::Spells => {
             // These tabs currently all use a List view
             let items = match state.dashboard_tab {
                 DashboardTab::Entities => get_nearby_list_items(state),
                 DashboardTab::Inventory => get_inventory_list_items(state),
+                DashboardTab::Spells => get_spells_list_items(state),
                 _ => unreachable!(),
             };
 
@@ -215,8 +217,8 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             let target = CommandTarget::Entity(e);
             let has_verbs = !get_verbs_for_target(
                 &target,
-                &state.entities,
                 state.player_guid,
+                &state.inventory,
                 state.active_interaction,
             )
             .is_empty();
@@ -241,12 +243,12 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             let target = CommandTarget::Entity(e);
             let has_verbs = !get_verbs_for_target(
                 &target,
-                &state.entities,
                 state.player_guid,
+                &state.inventory,
                 state.active_interaction,
             )
             .is_empty();
-            let is_equipped = state.player_guid.is_some() && e.wielder_id == state.player_guid;
+            let is_equipped = state.equipment.contains_key(&e.guid);
             render_entity_list_item(
                 e,
                 None,
@@ -255,6 +257,59 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 state.use_emojis,
                 is_equipped,
             )
+        })
+        .collect()
+}
+
+pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
+    let mut spells = state.player_spells.clone();
+    spells.sort_by_key(|&sid| {
+        state
+            .spell_names
+            .get(&sid)
+            .cloned()
+            .unwrap_or_else(|| "".to_string())
+    });
+
+    spells
+        .iter()
+        .map(|&spell_id| {
+            let name = state
+                .spell_names
+                .get(&spell_id)
+                .cloned()
+                .unwrap_or_else(|| format!("Unknown Spell {}", spell_id));
+
+            let is_selected = if let Some(idx) = state.dashboard_list_state.selected() {
+                state.selected_dashboard_index == idx
+                    && state
+                        .player_spells
+                        .get(state.selected_dashboard_index)
+                        .is_some_and(|&s| s == spell_id)
+            } else {
+                false
+            };
+
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<30}", name), style),
+                Span::raw(" "),
+                Span::styled(
+                    if let Some(info) = state.spell_info.get(&spell_id) {
+                        format!("Power: {}", info.power)
+                    } else {
+                        "".to_string()
+                    },
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]))
         })
         .collect()
 }

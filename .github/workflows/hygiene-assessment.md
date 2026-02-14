@@ -12,6 +12,10 @@ safe-outputs:
     max: 1
     close-older-issues: true
     labels: ['ai']
+engine:
+  id: "copilot"
+  model: "gpt-5.3-codex"
+
 ---
 
 # Hygiene Assessment

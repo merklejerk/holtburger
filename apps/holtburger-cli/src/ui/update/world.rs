@@ -62,6 +62,9 @@ impl AppState {
                         self.skill_table = skill_table;
                         self.refresh_context_buffer();
                     }
+                    WorldEvent::CombatModeUpdated(mode) => {
+                        self.combat_mode = mode;
+                    }
                     WorldEvent::PropertyUpdated {
                         guid,
                         property_id,

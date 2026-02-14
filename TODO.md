@@ -36,6 +36,7 @@
 - [ ] Search/filter on list tabs.
 
 ### High
+- [ ] Combat mode toggle.
 - [ ] Items "wielded" by the player not showing up in their inventory.
 - [x] Refactor client movement system (move to, nav).
 - [x] Distance calculation is wrong when in different landblocks.

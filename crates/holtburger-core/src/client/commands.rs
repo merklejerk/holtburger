@@ -356,6 +356,26 @@ impl Client {
                     .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
                     .await
             }
+            ClientCommand::SetCombatMode(mode) => {
+                log::info!(">>> Changing combat mode to: {:?}", mode);
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::ChangeCombatMode(Box::new(ChangeCombatModeData {
+                            mode,
+                        })),
+                    })))
+                    .await
+            }
+            ClientCommand::CancelAttack => {
+                log::info!(">>> Canceling attack");
+                self.session
+                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
+                        sequence: 0,
+                        action: GameAction::CancelAttack(Box::new(CancelAttackData {})),
+                    })))
+                    .await
+            }
             ClientCommand::RaiseAttribute {
                 attribute,
                 xp_spent,

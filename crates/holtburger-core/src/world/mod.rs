@@ -66,6 +66,7 @@ pub enum WorldEvent {
     SpellRemoved {
         spell_id: u32,
     },
+    CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
     ServerTimeUpdate(f64),
     EnchantmentsPurged,
     DerivedStatsUpdated {
@@ -92,6 +93,46 @@ pub enum WorldEvent {
         error_id: u32,
         message: String,
     },
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum EventDedupeKey {
+    DerivedStats,
+    Vital(stats::VitalType),
+    Attribute(stats::AttributeType),
+    Skill(stats::SkillType),
+    CombatMode,
+    LevelInfo,
+    ServerTime,
+    EntityPosition(Guid),
+    EntityVector(Guid),
+    EntityState(Guid),
+}
+
+impl holtburger_common::traits::Deduplicable for WorldEvent {
+    type Key = EventDedupeKey;
+
+    fn dedupe_key(&self) -> Option<Self::Key> {
+        match self {
+            WorldEvent::DerivedStatsUpdated { .. } => Some(EventDedupeKey::DerivedStats),
+            WorldEvent::VitalUpdated(v) => Some(EventDedupeKey::Vital(v.vital_type)),
+            WorldEvent::AttributeUpdated(a) => Some(EventDedupeKey::Attribute(a.attr_type)),
+            WorldEvent::SkillUpdated(s) => Some(EventDedupeKey::Skill(s.skill_type)),
+            WorldEvent::CombatModeUpdated(_) => Some(EventDedupeKey::CombatMode),
+            WorldEvent::LevelInfoUpdated(_) => Some(EventDedupeKey::LevelInfo),
+            WorldEvent::ServerTimeUpdate(_) => Some(EventDedupeKey::ServerTime),
+            WorldEvent::EntityMoved { guid, .. } => Some(EventDedupeKey::EntityPosition(*guid)),
+            WorldEvent::EntityVectorUpdated { guid, .. } => {
+                Some(EventDedupeKey::EntityVector(*guid))
+            }
+            WorldEvent::EntityStateUpdated { guid, .. } => Some(EventDedupeKey::EntityState(*guid)),
+            _ => None,
+        }
+    }
+}
+
+pub fn dedupe_world_events(events: Vec<WorldEvent>) -> Vec<WorldEvent> {
+    holtburger_common::traits::dedupe_events(events)
 }
 
 pub use self::state::WorldState;

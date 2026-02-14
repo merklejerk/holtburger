@@ -236,6 +236,7 @@ async fn main() -> Result<()> {
         verbosity: args.verbose,
         net_stats: ui::NetStats::default(),
         world_name: String::new(),
+        combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
     };
 
     app_state.refresh_context_buffer();

@@ -228,6 +228,7 @@ async fn main() -> Result<()> {
         player_enchantments: Vec::new(),
         player_spells: Vec::new(),
         spell_names: std::collections::HashMap::new(),
+        spell_info: std::collections::HashMap::new(),
         skill_table: None,
         entities: std::collections::HashMap::new(),
         server_time: None,
@@ -237,6 +238,7 @@ async fn main() -> Result<()> {
         net_stats: ui::NetStats::default(),
         world_name: String::new(),
         combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+        noclip: false,
         inventory: std::collections::HashSet::new(),
         equipment: std::collections::HashMap::new(),
     };

@@ -112,4 +112,5 @@ pub enum ContextView {
     Default,
     Custom,
     Assess(Guid),
+    Spell(u32),
 }

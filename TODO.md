@@ -1,7 +1,6 @@
 ### Low
 - [x] Left align `account:name` in status panel.
 - [x] Add heading (e.g., `120° E-SE`) to status panel.
-- [ ] Add jump for fun.
 - [x] Network traffic visualizer in dynamic panel when otherwise empty.
 - [x] Compass radar in dynamic panel.
 - [x] Dereth chronometer in dynamic panel.
@@ -10,10 +9,11 @@
 - [x] Move vitae penalty to under "vitals" group. (Done)
 - [x] Reverse direction of netpulse animation.
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
+- [ ] Jump doesn't work.
 
 ### Medium
 - [ ] Chronometer tells the wrong time.
-- [ ] Noclip mode to disable collision during movement.
+- [x] Noclip mode to disable collision during movement.
 - [x] Make net stats widget fixed width. Currently Seems to scale with terminal width.
 - [x] Tab cycle order is wrong in landscape mode.
 - [ ] DC detection.
@@ -29,17 +29,20 @@
 - [ ] [E]quip verb.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] [C]ombine verb (crafting).
-- [ ] [T]arget verb (combat).
+- [x] [T]arget verb (combat).
 - [ ] [U]se for Mana charges.
 - [x] Enter key for interaction target confirmation.
-- [ ] In-world containers.
+- [ ] Manage in-world containers.
 - [ ] Search/filter on list tabs.
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 - [ ] TUI gets really slow when chat buffer gets full.
+- [ ] TUI client needs major refactors.
+- [x] Combat mode toggle.
+- [ ] Implement actual collisions.
 
 ### High
-- [ ] Just learned spells show up as "unknown spell" in spellbok. Requires restart.
-- [ ] Combat mode toggle.
+- [ ] Fail when spell/attack distance is too far.
+- [x] Just learned spells show up as "unknown spell" in spellbok. Requires restart.
 - [x] Items "wielded" by the player not showing up in their inventory.
 - [x] Refactor client movement system (move to, nav).
 - [x] Distance calculation is wrong when in different landblocks.
@@ -49,8 +52,8 @@
         - [x] Title and content changes depending on entity and verb.
             - [x] E.g., creatures display health (and enchantments, attack controls?).
     - [x] ESC key clears active entity.
-- [ ] Add "Spells" tab.
-    - [ ] Add [C]ast verb on current active entity (if chosen) or self.
+- [x] Add "Spells" tab.
+    - [x] Add [C]ast verb on current active entity (if chosen) or self.
 
 ### Critical
 

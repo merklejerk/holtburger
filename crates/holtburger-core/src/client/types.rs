@@ -52,6 +52,9 @@ pub enum ClientEvent {
     },
     RawMessage(Vec<u8>),
     LogMessage(String),
+    UseDone {
+        error_id: u32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -88,7 +91,6 @@ pub enum ClientCommand {
         extent: f32,
         velocity: Vector3,
     },
-    SetAutonomyLevel(u32),
     SetState(u32),
     TurnTo {
         heading: f32,
@@ -128,7 +130,9 @@ pub enum ClientCommand {
     CastUntargetedSpell {
         spell_id: u32,
     },
+    RequestSpellInfo(u32),
     SetCombatMode(holtburger_protocol::messages::combat::CombatMode),
+    SetNoClip(bool),
     CancelAttack,
     SyncPosition,
     Quit,

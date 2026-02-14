@@ -89,6 +89,9 @@ pub struct PlayerState {
     /// Current stance (Peace, Melee, Missile, Magic).
     pub combat_mode: CombatMode,
 
+    /// Whether collision detection is disabled for movement.
+    pub noclip: bool,
+
     /// Flat set of all item GUIDs currently owned by the player (in pack or containers).
     pub inventory: HashSet<Guid>,
     /// Items currently equipped, mapped by their primary slot mask.
@@ -139,6 +142,7 @@ impl PlayerState {
             did_properties: BTreeMap::new(),
             iid_properties: BTreeMap::new(),
             combat_mode: CombatMode::NonCombat,
+            noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
             last_sent_stats: None,

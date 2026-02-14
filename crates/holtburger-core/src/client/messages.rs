@@ -189,6 +189,14 @@ impl Client {
                     }
                     Ok(())
                 }
+                GameEvent::UseDone(data) => {
+                    if let Some(tx) = &self.event_tx {
+                        let _ = tx.send(ClientEvent::UseDone {
+                            error_id: data.error_id,
+                        });
+                    }
+                    Ok(())
+                }
                 _ => Ok(()),
             },
             GameMessage::PlayerCreate(data) => {

@@ -58,7 +58,7 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let bars_line = Line::from(vec![
         Span::styled(health_str, Style::default().fg(Color::Red)),
         Span::raw(" "),
-        Span::styled(stamina_str, Style::default().fg(Color::Yellow)),
+        Span::styled(stamina_str, Style::default().fg(Color::LightGreen)),
         Span::raw(" "),
         Span::styled(mana_str, Style::default().fg(Color::Blue)),
     ]);

@@ -2,15 +2,19 @@ use crate::entities::classification;
 use crate::ui::types::CommandTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
-    PropertyString,
+    EnchantmentTypeFlags, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
+    PropertyInt, PropertyInt64, PropertyString,
 };
+use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::text::Line;
 
 /// Generates a list of strings representing the debug information for a target.
 pub fn get_debug_info(
     target: &CommandTarget,
     name_lookup: impl Fn(Guid) -> Option<String>,
+    spell_lookup: Option<
+        &std::collections::HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
+    >,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -246,14 +250,36 @@ pub fn get_debug_info(
                 "Stat Mod Type:  0x{:08X}",
                 enchant.stat_mod_type
             )));
-            lines.push(Line::from(format!(
-                "Stat Mod Key:   {}",
-                enchant.stat_mod_key
-            )));
+            let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
+            for (name, _) in flags.iter_names() {
+                lines.push(Line::from(format!("  [X] {}", name)));
+            }
+
+            let key_name = if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
+                AttributeType::from_repr(enchant.stat_mod_key).map(|a| a.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {
+                VitalType::from_id(enchant.stat_mod_key).map(|v| format!("Max {}", v))
+            } else if flags.contains(EnchantmentTypeFlags::SKILL) {
+                SkillType::from_repr(enchant.stat_mod_key).map(|s| s.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::INT) {
+                PropertyInt::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::FLOAT) {
+                PropertyFloat::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
+            } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
+                Some("Armor".to_string())
+            } else {
+                None
+            };
+
+            let key_display = key_name.unwrap_or_else(|| format!("{}", enchant.stat_mod_key));
+            lines.push(Line::from(format!("Stat Mod Key:   {}", key_display)));
             lines.push(Line::from(format!(
                 "Stat Mod Value: {:.2}",
                 enchant.stat_mod_value
             )));
+            if let Some(set_id) = enchant.spell_set_id {
+                lines.push(Line::from(format!("Spell Set ID:   {}", set_id)));
+            }
             lines.push(Line::from(format!(
                 "Caster GUID:    {:08X}",
                 enchant.caster_guid
@@ -271,6 +297,33 @@ pub fn get_debug_info(
             lines.push(Line::from(format!("DEBUG INFO: {:?}", st)));
             lines.push(Line::from(format!("XP Cost:    {:?}", xp_cost)));
             lines.push(Line::from(format!("SP Cost:    {:?}", sp_cost)));
+        }
+        CommandTarget::Spell(spell_id) => {
+            lines.push(Line::from(format!("DEBUG INFO: Spell {}", spell_id)));
+            lines.push(Line::from(format!("Spell ID:   {}", spell_id)));
+
+            if let Some(info) = spell_lookup.and_then(|m| m.get(spell_id)) {
+                lines.push(Line::from(format!("Name:       {}", info.name)));
+                lines.push(Line::from(format!("Level:      {}", info.power)));
+                lines.push(Line::from(format!("Mana:       {}", info.base_mana)));
+                lines.push(Line::from(format!("School:     {:?}", info.school)));
+                lines.push(Line::from(format!("Category:   {}", info.category)));
+                lines.push(Line::from(format!("Desc:       {}", info.description)));
+                lines.push(Line::from(format!("Mana Mod:   {}", info.mana_mod)));
+
+                // Formula Version: 1=I, 2=II, etc.
+                lines.push(Line::from(format!("Formula V:  {}", info.formula_version)));
+
+                // Components (8 slots)
+                let comps: Vec<String> = info
+                    .raw_components
+                    .iter()
+                    .map(|id| format!("{:#X}", id))
+                    .collect();
+                lines.push(Line::from(format!("Comps:      {}", comps.join(", "))));
+            } else {
+                lines.push(Line::from("Info:       (Loading...)".to_string()));
+            }
         }
         CommandTarget::None => {}
     }

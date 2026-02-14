@@ -5,20 +5,35 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq)]
 pub struct Enchantment {
+    /// The DataID of the spell casting this enchantment.
     pub spell_id: u16,
+    /// Rotation index for stacking multiple instances of the same spell.
     pub layer: u16,
+    /// Category used for stacking (only one spell per category is active).
     pub spell_category: u16,
+    /// Flag indicating if this enchantment belongs to a spell set.
     pub has_spell_set_id: u16,
+    /// Relative power; higher power wins ties in the same category.
     pub power_level: u32,
+    /// World time when the effect became active.
     pub start_time: f64,
+    /// Total lifetime of the enchantment in seconds.
     pub duration: f64,
+    /// GUID of the entity that cast the spell.
     pub caster_guid: Guid,
+    /// Rate at which the enchantment's power decays over time.
     pub degrade_modifier: f32,
+    /// Minimum power level below which the enchantment expires.
     pub degrade_limit: f32,
+    /// Last time the power level was recalculated for decay.
     pub last_time_degraded: f64,
+    /// Type of stat modification (e.g. Multiplicative, Additive).
     pub stat_mod_type: u32,
+    /// The specific property ID or attribute being modified.
     pub stat_mod_key: u32,
+    /// The magnitude of the effect.
     pub stat_mod_value: f32,
+    /// Optional ID of the spell set (e.g. for set bonuses).
     pub spell_set_id: Option<u32>,
 }
 

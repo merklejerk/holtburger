@@ -140,6 +140,7 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         ContextView::Default => "Context Information",
         ContextView::Custom => "Debug Information",
         ContextView::Assess(_) => "Object Appraisal",
+        ContextView::Spell(_) => "Spell Details",
     };
 
     let ctx_title = if state.focused_pane == FocusedPane::Context {

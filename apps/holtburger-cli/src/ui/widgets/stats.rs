@@ -3,7 +3,8 @@ use crate::ui::StatType;
 use crate::ui::types::{CommandTarget, DashboardTab};
 use crate::ui::utils::format_cost;
 use holtburger_common::properties::EnchantmentTypeFlags;
-use holtburger_common::properties::{PropertyFloat, PropertyInt};
+use holtburger_common::properties::PropertyFloat;
+use holtburger_core::world::magic::get_enchantment_name;
 use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::style::{Color, Modifier, Style};
@@ -110,17 +111,23 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 let val_color = if highlight { Color::Cyan } else { color };
                 let time_str = format_duration(enchant.start_time, enchant.duration);
 
+                let spell_name = state
+                    .spell_names
+                    .get(&(enchant.spell_id as u32))
+                    .cloned()
+                    .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
+
                 list_items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw("    "),
                         Span::styled(
-                            format!("Spell #{} ", enchant.spell_id),
+                            format!("{} ", spell_name),
                             Style::default()
                                 .fg(highlight_fg)
                                 .add_modifier(Modifier::ITALIC),
                         ),
                         Span::styled(
-                            format!("{:<+6} ", enchant.stat_mod_value),
+                            format!("{:+}", enchant.stat_mod_value),
                             Style::default().fg(val_color),
                         ),
                         Span::styled(
@@ -137,14 +144,14 @@ pub fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 } else {
                     Color::DarkGray
                 };
-                let name = get_enchantment_name(enchant);
+                let name = get_enchantment_name(enchant, &state.spell_names);
                 let time_str = format_duration(enchant.start_time, enchant.duration);
                 list_items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw("  "),
                         Span::styled(format!("{:<15} ", name), Style::default().fg(Color::Yellow)),
                         Span::styled(
-                            format!("{:<+6}", enchant.stat_mod_value),
+                            format!("{:+}", enchant.stat_mod_value),
                             Style::default().fg(Color::Cyan),
                         ),
                         Span::styled(
@@ -201,13 +208,16 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     let mut skill_enchants: HashMap<SkillType, Vec<Enchantment>> = HashMap::new();
     let mut float_enchants: HashMap<u32, Vec<Enchantment>> = HashMap::new();
     let mut armor_enchants: Vec<Enchantment> = Vec::new();
+    let mut vitae_enchants: Vec<Enchantment> = Vec::new();
     let mut misc_enchants: Vec<Enchantment> = Vec::new();
 
     for enchant in &state.player_enchantments {
         let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
         let mut categorized = true;
 
-        if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
+        if flags.contains(EnchantmentTypeFlags::VITAE) {
+            vitae_enchants.push(*enchant);
+        } else if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
             if let Some(at) = AttributeType::from_repr(enchant.stat_mod_key) {
                 attr_enchants.entry(at).or_default().push(*enchant);
             } else {
@@ -246,9 +256,7 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
             } else {
                 categorized = false;
             }
-        } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE)
-            && enchant.stat_mod_key == 0
-        {
+        } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
             armor_enchants.push(*enchant);
         } else {
             categorized = false;
@@ -275,12 +283,13 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         sort_enchants(v);
     }
     sort_enchants(&mut armor_enchants);
+    sort_enchants(&mut vitae_enchants);
 
     // Misc are sorted by name then ID
     let sort_by_name = |list: &mut Vec<Enchantment>| {
         list.sort_by(|a, b| {
-            let na = get_enchantment_name(a);
-            let nb = get_enchantment_name(b);
+            let na = get_enchantment_name(a, &state.spell_names);
+            let nb = get_enchantment_name(b, &state.spell_names);
             na.cmp(&nb).then(a.spell_id.cmp(&b.spell_id))
         });
     };
@@ -288,6 +297,22 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // 1. Vitals
     lines.push(CharTabLine::Header("VITALS"));
+
+    if state.vitae < 0.999 || !vitae_enchants.is_empty() {
+        let penalty_pct = (1.0 - state.vitae) * 100.0;
+        lines.push(CharTabLine::Stat {
+            label: "Vitae Penalty".to_string(),
+            value: format!("{:.0}%", penalty_pct),
+            xp_cost: None,
+            sp_cost: None,
+            stat_type: None,
+            training: None,
+        });
+        for &e in &vitae_enchants {
+            lines.push(CharTabLine::Enchantment(e));
+        }
+    }
+
     let mut vitals: Vec<_> = state.vitals.values().collect();
     vitals.sort_by(|a, b| a.vital_type.to_string().cmp(&b.vital_type.to_string()));
     for v in vitals {
@@ -410,16 +435,11 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // 4. Resistances
     lines.push(CharTabLine::Header("RESISTANCES"));
-    if let Some(player) = state.player_guid.and_then(|guid| state.entities.get(&guid)) {
+    if state.player_guid.is_some() {
         // Armor always first in Resistances
-        let armor = player
-            .int_properties
-            .get(&(PropertyInt::ArmorLevel as u32))
-            .cloned()
-            .unwrap_or(0);
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
-            value: armor.to_string(),
+            value: state.armor.to_string(),
             xp_cost: None,
             sp_cost: None,
             stat_type: None,
@@ -429,21 +449,22 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
             lines.push(CharTabLine::Enchantment(e));
         }
 
-        let mut resists = Vec::new();
-        for &prop in &resists_props {
-            resists.push((prop, prop.to_string()));
-        }
-        resists.sort_by(|a, b| a.1.cmp(&b.1));
+        let mut resists = vec![
+            (PropertyFloat::ResistSlash, state.resistances.slash),
+            (PropertyFloat::ResistPierce, state.resistances.pierce),
+            (PropertyFloat::ResistBludgeon, state.resistances.bludgeon),
+            (PropertyFloat::ResistFire, state.resistances.fire),
+            (PropertyFloat::ResistCold, state.resistances.cold),
+            (PropertyFloat::ResistAcid, state.resistances.acid),
+            (PropertyFloat::ResistElectric, state.resistances.electric),
+            (PropertyFloat::ResistNether, state.resistances.nether),
+        ];
+        resists.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));
 
-        for (prop, label) in resists {
-            let val = player
-                .float_properties
-                .get(&(prop as u32))
-                .cloned()
-                .unwrap_or(1.0);
+        for (prop, val) in resists {
             lines.push(CharTabLine::Stat {
-                label: label.to_string(),
-                value: format!("{:.1}", val),
+                label: prop.to_string(),
+                value: format!("{:.2}", val),
                 xp_cost: None,
                 sp_cost: None,
                 stat_type: None,
@@ -514,42 +535,5 @@ fn format_duration(start: f64, duration: f64) -> String {
         } else {
             format!("{}s", remain as u32)
         }
-    }
-}
-
-pub fn get_enchantment_name(enchant: &holtburger_protocol::messages::magic::Enchantment) -> String {
-    if (enchant.stat_mod_type & EnchantmentTypeFlags::ATTRIBUTE.bits()) != 0 {
-        AttributeType::from_repr(enchant.stat_mod_key)
-            .map(|a| a.to_string())
-            .unwrap_or_else(|| format!("Attr #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SKILL.bits()) != 0 {
-        SkillType::from_repr(enchant.stat_mod_key)
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("Skill #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::SECOND_ATT.bits()) != 0 {
-        match enchant.stat_mod_key {
-            1 | 2 => "Max Health".to_string(),
-            3 | 4 => "Max Stamina".to_string(),
-            5 | 6 => "Max Mana".to_string(),
-            _ => format!("Vital #{}", enchant.stat_mod_key),
-        }
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::INT.bits()) != 0 {
-        PropertyInt::from_repr(enchant.stat_mod_key)
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| format!("Int #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::FLOAT.bits()) != 0 {
-        PropertyFloat::from_repr(enchant.stat_mod_key)
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| format!("Float #{}", enchant.stat_mod_key))
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_ARMOR_VALUE.bits()) != 0 {
-        "Armor".to_string()
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_DAMAGE_VALUE.bits()) != 0 {
-        "Damage".to_string()
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::BODY_DAMAGE_VARIANCE.bits()) != 0 {
-        "Variance".to_string()
-    } else if (enchant.stat_mod_type & EnchantmentTypeFlags::VITAE.bits()) != 0 {
-        "Vitae".to_string()
-    } else {
-        format!("Mod #{}", enchant.stat_mod_key)
     }
 }

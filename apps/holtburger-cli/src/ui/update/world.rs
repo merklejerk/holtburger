@@ -9,7 +9,8 @@ use holtburger_protocol::messages::EquipMask;
 impl AppState {
     pub(super) fn handle_received_event(&mut self, event: ClientEvent) {
         match event {
-            ClientEvent::CharacterList(chars) => {
+            ClientEvent::CharacterList(mut chars) => {
+                chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                 self.characters = chars;
                 self.state = UIState::CharacterSelection;
                 self.selected_character_index = 0;

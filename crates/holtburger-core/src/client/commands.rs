@@ -272,7 +272,7 @@ impl Client {
                     item,
                     equip_mask
                 );
-                // Sequence will be handled by send_game_action in Phase 3 goal fulfillment
+                // Sequencing is handled automatically by the send_game_action helper.
                 self.send_game_action(GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
                     item_guid: item,
                     equip_mask: EquipMask::from_bits_truncate(equip_mask),

@@ -728,8 +728,10 @@ mod tests {
 
     #[test]
     fn test_dispatch_game_event_player_description() {
-        // KNOWN PARITY GAP: player description packing is currently lossy in some
-        // structures, so we keep dispatch coverage without asserting full repack parity.
+        // KNOWN PARITY GAP: PlayerDescription is currently a special case from the Gold Standard
+        // because it contains complex nested structures (like EnchantmentRegistry) that we
+        // haven't fully implemented bit-perfect packing for yet. Additionally, GameplayOptions
+        // are extracted via a heuristic which can lead to repacking drift.
         assert_dispatch_match_no_parity(test_fixtures::PLAYER_DESCRIPTION, |msg| {
             matches!(msg, GameMessage::GameEvent(_))
         });

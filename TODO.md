@@ -41,6 +41,7 @@
 - [ ] TUI client needs major refactors.
 - [x] Combat mode toggle.
 - [ ] Implement actual collisions.
+- [ ] Use sibling files for tests.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -61,6 +62,7 @@
     - [ ] Populate all entities with weenie data.
     - [ ] Use armor weenie equipment slots to determine equip mask.
     - [ ] Make equipped items more obvious.
+- [ ] Vitae debuff requires restart to show up? Or if you have one then you die, it seems to get hidden?
 
 ### Critical
 

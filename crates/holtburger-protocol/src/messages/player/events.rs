@@ -931,9 +931,7 @@ impl ProtocolUnpack for PlayerDescriptionData {
 
 #[cfg(test)]
 mod tests {
-    use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
-    use holtburger_common::traits::ProtocolUnpack;
 
     #[test]
     fn test_gameplay_options_fixture_basic_shape() {

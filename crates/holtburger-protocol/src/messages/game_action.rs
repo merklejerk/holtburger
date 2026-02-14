@@ -276,15 +276,18 @@ mod tests {
 
     fn assert_action_parity(fixture: &[u8], expected_sequence: u32) {
         let mut offset = 0;
-        
+
         // Some fixtures have the GameMessage header (0xF7B1), some don't.
         let msg = if fixture.len() >= 4 && fixture[0..2] == [0xB1, 0xF7] {
             GameMessage::unpack(fixture, &mut offset).expect("failed to unpack GameMessage")
         } else {
             // Raw GameActionMessage
-            GameMessage::GameAction(Box::new(GameActionMessage::unpack(fixture, &mut offset).expect("failed to unpack GameActionMessage")))
+            GameMessage::GameAction(Box::new(
+                GameActionMessage::unpack(fixture, &mut offset)
+                    .expect("failed to unpack GameActionMessage"),
+            ))
         };
-        
+
         if let GameMessage::GameAction(action_msg) = &msg {
             assert_eq!(action_msg.sequence, expected_sequence);
         } else {
@@ -293,7 +296,7 @@ mod tests {
 
         let mut packed = Vec::new();
         msg.pack(&mut packed);
-        
+
         // If the fixture didn't have the GameMessage header, we only expect the GameActionMessage part to match
         if fixture.len() >= 4 && fixture[0..2] == [0xB1, 0xF7] {
             assert_eq!(packed, fixture);

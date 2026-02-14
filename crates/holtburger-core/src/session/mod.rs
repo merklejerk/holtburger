@@ -452,14 +452,14 @@ impl Session {
         }
 
         // 3. Check for TimeSync
+        #[allow(clippy::collapsible_if)]
         if header.flags & packet_flags::TIME_SYNC != 0 {
-            if let Some(offset) =
-                OptionalHeaderCursor::new(&data, header.flags).find_flag_offset(packet_flags::TIME_SYNC)
+            if let Some(offset) = OptionalHeaderCursor::new(&data, header.flags)
+                .find_flag_offset(packet_flags::TIME_SYNC)
+                .filter(|&offset| offset + 8 <= data.len())
             {
-                if offset + 8 <= data.len() {
-                    let server_time = LittleEndian::read_f64(&data[offset..offset + 8]);
-                    events.push(SessionEvent::TimeSync(server_time));
-                }
+                let server_time = LittleEndian::read_f64(&data[offset..offset + 8]);
+                events.push(SessionEvent::TimeSync(server_time));
             }
         }
 

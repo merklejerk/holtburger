@@ -727,6 +727,15 @@ mod tests {
     }
 
     #[test]
+    fn test_dispatch_game_event_player_description() {
+        // KNOWN PARITY GAP: player description packing is currently lossy in some
+        // structures, so we keep dispatch coverage without asserting full repack parity.
+        assert_dispatch_match_no_parity(test_fixtures::PLAYER_DESCRIPTION, |msg| {
+            matches!(msg, GameMessage::GameEvent(_))
+        });
+    }
+
+    #[test]
     fn test_dispatch_action_talk() {
         assert_dispatch_match(test_fixtures::ACTION_TALK, |msg| {
             matches!(msg, GameMessage::GameAction(_))

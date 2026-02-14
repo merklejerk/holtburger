@@ -2,7 +2,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use holtburger_protocol::messages::transport::{self, packet_flags};
 
 /// A helper to navigate the optional header section of an Asheron's Call transport packet.
-/// 
+///
 /// The optional headers follow a specific sequence defined by the `packet_flags`.
 /// Some headers have fixed sizes, while others (like retransmission requests) have variable sizes.
 pub struct OptionalHeaderCursor<'a> {
@@ -79,34 +79,33 @@ impl<'a> OptionalHeaderCursor<'a> {
         check_flag!(packet_flags::SERVER_SWITCH, transport::SERVER_SWITCH_SIZE);
 
         // 2. Request Retransmit (4 + n*4 bytes)
-        if self.flags & packet_flags::REQUEST_RETRANSMIT != 0 {
-            if offset + 4 <= self.data.len() {
-                let count = LittleEndian::read_u32(&self.data[offset..offset + 4]) as usize;
-                let size = 4 + (count * 4);
-                if !f(packet_flags::REQUEST_RETRANSMIT, size, offset) {
-                    return;
-                }
-                offset += size;
+        if self.flags & packet_flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= self.data.len() {
+            let count = LittleEndian::read_u32(&self.data[offset..offset + 4]) as usize;
+            let size = 4 + (count * 4);
+            if !f(packet_flags::REQUEST_RETRANSMIT, size, offset) {
+                return;
             }
+            offset += size;
         }
 
         // 3. Reject Retransmit (4 + n*4 bytes)
-        if self.flags & packet_flags::REJECT_RETRANSMIT != 0 {
-            if offset + 4 <= self.data.len() {
-                let count = LittleEndian::read_u32(&self.data[offset..offset + 4]) as usize;
-                let size = 4 + (count * 4);
-                if !f(packet_flags::REJECT_RETRANSMIT, size, offset) {
-                    return;
-                }
-                offset += size;
+        if self.flags & packet_flags::REJECT_RETRANSMIT != 0 && offset + 4 <= self.data.len() {
+            let count = LittleEndian::read_u32(&self.data[offset..offset + 4]) as usize;
+            let size = 4 + (count * 4);
+            if !f(packet_flags::REJECT_RETRANSMIT, size, offset) {
+                return;
             }
+            offset += size;
         }
 
         // 4. Ack Sequence (4 bytes)
         check_flag!(packet_flags::ACK_SEQUENCE, transport::ACK_SEQUENCE_SIZE);
 
         // 5. Connect Request (32 bytes)
-        check_flag!(packet_flags::CONNECT_REQUEST, transport::CONNECT_REQUEST_SIZE);
+        check_flag!(
+            packet_flags::CONNECT_REQUEST,
+            transport::CONNECT_REQUEST_SIZE
+        );
 
         // 6. Login Request (rest of packet)
         if self.flags & packet_flags::LOGIN_REQUEST != 0 {
@@ -118,7 +117,10 @@ impl<'a> OptionalHeaderCursor<'a> {
         }
 
         // 7. Connect Response (8 bytes)
-        check_flag!(packet_flags::CONNECT_RESPONSE, transport::CONNECT_RESPONSE_SIZE);
+        check_flag!(
+            packet_flags::CONNECT_RESPONSE,
+            transport::CONNECT_RESPONSE_SIZE
+        );
 
         // 8. CICMD (8 bytes)
         check_flag!(packet_flags::CICMD, transport::CICMD_SIZE);
@@ -149,8 +151,9 @@ mod tests {
         let mut data = vec![0u8; 100];
         // RequestRetransmit (4 + 2*4) = 12 bytes
         LittleEndian::write_u32(&mut data[0..4], 2);
-        
-        let flags = packet_flags::REQUEST_RETRANSMIT | packet_flags::ACK_SEQUENCE | packet_flags::TIME_SYNC;
+
+        let flags =
+            packet_flags::REQUEST_RETRANSMIT | packet_flags::ACK_SEQUENCE | packet_flags::TIME_SYNC;
         let cursor = OptionalHeaderCursor::new(&data, flags);
 
         // REQUEST_RETRANSMIT (12) + ACK_SEQUENCE (4) + TIME_SYNC (8) = 24
@@ -174,7 +177,10 @@ mod tests {
         let cursor = OptionalHeaderCursor::new(&data, flags);
 
         assert_eq!(cursor.find_flag_offset(packet_flags::TIME_SYNC), Some(8));
-        assert_eq!(cursor.find_flag_offset(packet_flags::SERVER_SWITCH), Some(0));
+        assert_eq!(
+            cursor.find_flag_offset(packet_flags::SERVER_SWITCH),
+            Some(0)
+        );
         assert_eq!(cursor.find_flag_offset(packet_flags::FLOW), None);
     }
 }

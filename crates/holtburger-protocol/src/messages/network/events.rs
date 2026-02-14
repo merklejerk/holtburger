@@ -19,8 +19,8 @@ impl ProtocolPack for PingResponseData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::game_message::GameMessage;
     use crate::messages::game_event::GameEvent;
+    use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
     use holtburger_common::Guid;
 
@@ -29,7 +29,7 @@ mod tests {
         let fixture = test_fixtures::PING_RESPONSE;
         let mut offset = 0;
         let msg = GameMessage::unpack(fixture, &mut offset).expect("failed to unpack GameMessage");
-        
+
         if let GameMessage::GameEvent(event_msg) = &msg {
             assert_eq!(event_msg.target, Guid(0));
             assert_eq!(event_msg.sequence, 1);

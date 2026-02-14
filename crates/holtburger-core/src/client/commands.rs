@@ -153,7 +153,10 @@ impl Client {
                 if matches!(self.state, ClientState::InWorld) {
                     log::info!(">>> You tell {}, \"{}\"", target, message);
                     return self
-                        .send_game_action(GameAction::Tell(Box::new(TellActionData { target, message })))
+                        .send_game_action(GameAction::Tell(Box::new(TellActionData {
+                            target,
+                            message,
+                        })))
                         .await;
                 }
                 Ok(())
@@ -166,8 +169,10 @@ impl Client {
         match cmd {
             ClientCommand::Identify(guid) => {
                 log::info!(">>> Identifying: 0x{:08X}", guid);
-                self.send_game_action(GameAction::IdentifyObject(Box::new(IdentifyObjectData { guid })))
-                    .await
+                self.send_game_action(GameAction::IdentifyObject(Box::new(IdentifyObjectData {
+                    guid,
+                })))
+                .await
             }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
@@ -184,10 +189,9 @@ impl Client {
             }
             ClientCommand::CastTargetedSpell { target, spell_id } => {
                 log::info!(">>> Casting spell {} on 0x{:08X}", spell_id, target.0);
-                self.send_game_action(GameAction::CastTargetedSpell(Box::new(CastTargetedSpellData {
-                    target,
-                    spell_id,
-                })))
+                self.send_game_action(GameAction::CastTargetedSpell(Box::new(
+                    CastTargetedSpellData { target, spell_id },
+                )))
                 .await
             }
             ClientCommand::CastUntargetedSpell { spell_id } => {
@@ -226,16 +230,20 @@ impl Client {
         match cmd {
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
-                self.send_game_action(GameAction::DropItem(Box::new(DropItemData { item_guid: guid })))
-                    .await
+                self.send_game_action(GameAction::DropItem(Box::new(DropItemData {
+                    item_guid: guid,
+                })))
+                .await
             }
             ClientCommand::Get(guid) => {
                 log::info!(">>> Getting: 0x{:08X}", guid);
-                self.send_game_action(GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
-                    item_guid: guid,
-                    container_guid: self.world.player.guid,
-                    placement: 0,
-                })))
+                self.send_game_action(GameAction::PutItemInContainer(Box::new(
+                    PutItemInContainerData {
+                        item_guid: guid,
+                        container_guid: self.world.player.guid,
+                        placement: 0,
+                    },
+                )))
                 .await
             }
             ClientCommand::MoveItem {
@@ -249,11 +257,13 @@ impl Client {
                     container,
                     placement
                 );
-                self.send_game_action(GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
-                    item_guid: item,
-                    container_guid: container,
-                    placement,
-                })))
+                self.send_game_action(GameAction::PutItemInContainer(Box::new(
+                    PutItemInContainerData {
+                        item_guid: item,
+                        container_guid: container,
+                        placement,
+                    },
+                )))
                 .await
             }
             ClientCommand::GetAndWield { item, equip_mask } => {
@@ -444,9 +454,9 @@ impl Client {
             }
             ClientCommand::SetCombatMode(mode) => {
                 log::info!(">>> Changing combat mode to: {:?}", mode);
-                self.send_game_action(GameAction::ChangeCombatMode(Box::new(ChangeCombatModeData {
-                    mode,
-                })))
+                self.send_game_action(GameAction::ChangeCombatMode(Box::new(
+                    ChangeCombatModeData { mode },
+                )))
                 .await
             }
             ClientCommand::SetNoClip(enabled) => {

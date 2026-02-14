@@ -36,42 +36,72 @@ struct LastSentStats {
 /// to maintain the mirror invariant.
 #[derive(Debug, Clone)]
 pub struct PlayerState {
+    /// Unique identifier for the player's character.
     pub guid: Guid,
+    /// The character's display name.
     pub name: String,
+    /// Current character level.
     pub level: u32,
+    /// Total experience points earned over the character's lifetime.
     pub total_experience: u64,
+    /// Experience points currently available for spending on attributes/skills/vitals.
     pub available_experience: u64,
+    /// Current pool of unspent skill points.
     pub unspent_skill_points: u32,
+    /// Computed attribute values (Strength, Endurance, etc.) including buffs.
     pub attributes: HashMap<stats::AttributeType, stats::Attribute>,
+    /// Computed vital values (Health, Stamina, Mana) including current/max/buffed states.
     pub vitals: HashMap<stats::VitalType, stats::Vital>,
-    /// Stores the raw ranks and start for vitals so they can be recalculated
+    /// Stores the raw ranks and start for vitals so they can be recalculated during stat updates.
     pub vital_bases: HashMap<stats::VitalType, VitalBase>,
+    /// Computed skill values (Melee Defense, War Magic, etc.) including training level and buffs.
     pub skills: HashMap<stats::SkillType, stats::Skill>,
-    /// Stores the raw ranks and init for skills so they can be recalculated
+    /// Stores the raw ranks and init for skills so they can be recalculated during stat updates.
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
+    /// Elemental and physical damage resistances computed from properties and enchantments.
     pub resistances: stats::Resistances,
+    /// Total armor level (AL) computed from equipped items and buffs.
     pub armor: u32,
+    /// Current "Vitae" penalty/bonus multiplier (0.0 to 1.0+).
     pub vitae: f32,
+    /// Current position in the world (Landcell + local coordinates).
     pub position: WorldPosition,
+    /// Sequence for object instantiation/removal.
     pub instance_sequence: u16,
+    /// Sequence for server-controlled movement/actions.
     pub server_control_sequence: u16,
+    /// Sequence for teleportation events to ignore stale position updates.
     pub teleport_sequence: u16,
+    /// Sequence for server-forced repositions (e.g. rubberbanding or physics corrections).
     pub force_position_sequence: u16,
+    /// Sequence for client-initiated position updates.
     pub position_sequence: u16,
+    /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
+    /// List of all active enchantments (buffs/debuffs) currently affecting the player.
     pub enchantments: Vec<Enchantment>,
+    /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
     pub spells: BTreeMap<u32, f32>,
-    pub spell_lists: Vec<Vec<u32>>,
+    /// Content of the 8 spellbook hotbars (Organization). Each inner vec corresponds to a UI hotbar.
+    pub hotbar_spells: Vec<Vec<u32>>,
+    /// Sparse mapping of integer properties (from `PropertyInt`).
     pub int_properties: BTreeMap<u32, i32>,
+    /// Sparse mapping of 64-bit integer properties (from `PropertyInt64`).
     pub int64_properties: BTreeMap<u32, i64>,
+    /// Sparse mapping of boolean properties (from `PropertyBool`).
     pub bool_properties: BTreeMap<u32, bool>,
+    /// Sparse mapping of floating point properties (from `PropertyFloat`).
     pub float_properties: BTreeMap<u32, f64>,
+    /// Sparse mapping of string properties (from `PropertyString`).
     pub string_properties: BTreeMap<u32, String>,
+    /// Sparse mapping of Data ID properties (from `PropertyDataId`).
     pub did_properties: BTreeMap<u32, Guid>,
+    /// Sparse mapping of Instance ID properties (from `PropertyInstanceId`).
     pub iid_properties: BTreeMap<u32, Guid>,
+    /// Current stance (Peace, Melee, Missile, Magic).
     pub combat_mode: holtburger_protocol::messages::combat::CombatMode,
 
-    /// Dirty tracking for events
+    /// Dirty tracking for events to minimize redundant UI updates.
     last_sent_stats: Option<LastSentStats>,
 }
 
@@ -107,7 +137,7 @@ impl PlayerState {
             movement_sequence: 0,
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
-            spell_lists: vec![Vec::new(); 8],
+            hotbar_spells: vec![Vec::new(); 8],
             int_properties: BTreeMap::new(),
             int64_properties: BTreeMap::new(),
             bool_properties: BTreeMap::new(),

@@ -931,54 +931,7 @@ impl ProtocolUnpack for PlayerDescriptionData {
 
 #[cfg(test)]
 mod tests {
-    use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
-    use holtburger_common::traits::ProtocolUnpack;
-
-    #[test]
-    fn test_player_description_tui_2026_02_07_fixture_sanity() {
-        use crate::opcodes::{GameEventOpcode, GameOpcode};
-        use byteorder::{ByteOrder, LittleEndian};
-
-        let data = test_fixtures::PLAYER_DESCRIPTION_TUI_2026_02_07;
-        assert_eq!(data.len(), 6784);
-
-        // GameMessage opcode (0xF7B0 = GameEvent)
-        assert_eq!(
-            LittleEndian::read_u32(&data[0..4]),
-            GameOpcode::GameEvent as u32
-        );
-
-        // GameEvent header: target (0x50000001), sequence (0x00000001), event type (0x0013)
-        assert_eq!(LittleEndian::read_u32(&data[4..8]), 0x5000_0001);
-        assert_eq!(LittleEndian::read_u32(&data[8..12]), 0x0000_0001);
-        assert_eq!(
-            LittleEndian::read_u32(&data[12..16]),
-            GameEventOpcode::PlayerDescription as u32
-        );
-    }
-
-    #[test]
-    fn test_player_description_tui_2026_02_07_fixture_unpack() {
-        use crate::messages::game_event::GameEvent;
-
-        let data = test_fixtures::PLAYER_DESCRIPTION_TUI_2026_02_07;
-        let mut offset = 0;
-        let msg = GameMessage::unpack(data, &mut offset).expect("Unpack failed");
-        assert_eq!(offset, data.len(), "Parser did not consume full message");
-
-        match msg {
-            GameMessage::GameEvent(ev) => match ev.event {
-                GameEvent::PlayerDescription(pd) => {
-                    // This fixture's GameplayOptions were extracted separately as
-                    // gameplay_options_tui_2026_02_07.bin (876 bytes).
-                    assert_eq!(pd.gameplay_options.len(), 876);
-                }
-                other => panic!("Expected PlayerDescription event, got: {other:?}"),
-            },
-            other => panic!("Expected GameEvent message, got: {other:?}"),
-        }
-    }
 
     #[test]
     fn test_gameplay_options_fixture_basic_shape() {

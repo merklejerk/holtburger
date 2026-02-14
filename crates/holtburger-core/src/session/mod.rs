@@ -1,6 +1,8 @@
 pub mod capture;
+pub mod optional_header;
 
 use crate::session::capture::{CaptureWriter, Direction};
+use crate::session::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
 pub use async_trait::async_trait;
 use byteorder::{ByteOrder, LittleEndian};
@@ -141,61 +143,10 @@ impl Session {
     /// Calculates the payload checksum used by ACE: Sum of hashes for each component.
     fn calculate_payload_hash(&self, flags: u32, payload: &[u8]) -> Result<u32> {
         let mut total_payload_checksum: u32 = 0;
-        let mut offset = 0;
 
         // 1. Optional Headers Section (Follows ACE PacketHeaderOptional sequence)
-        let mut header_optional_bytes = Vec::new();
-
-        if flags & packet_flags::SERVER_SWITCH != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
-            offset += 8;
-        }
-        if flags & packet_flags::REQUEST_RETRANSMIT != 0 {
-            let count = LittleEndian::read_u32(&payload[offset..offset + 4]) as usize;
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 4 + (count * 4)]);
-            offset += 4 + (count * 4);
-        }
-        if flags & packet_flags::REJECT_RETRANSMIT != 0 {
-            let count = LittleEndian::read_u32(&payload[offset..offset + 4]) as usize;
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 4 + (count * 4)]);
-            offset += 4 + (count * 4);
-        }
-        if flags & packet_flags::ACK_SEQUENCE != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 4]);
-            offset += 4;
-        }
-        if flags & packet_flags::CONNECT_REQUEST != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 32]);
-            offset += 32;
-        }
-        if flags & packet_flags::LOGIN_REQUEST != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..]);
-            offset = payload.len();
-        }
-        if flags & packet_flags::CONNECT_RESPONSE != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
-            offset += 8;
-        }
-        if flags & packet_flags::CICMD != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
-            offset += 8;
-        }
-        if flags & packet_flags::TIME_SYNC != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
-            offset += 8;
-        }
-        if flags & packet_flags::ECHO_REQUEST != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 4]);
-            offset += 4;
-        }
-        if flags & packet_flags::ECHO_RESPONSE != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 8]);
-            offset += 8;
-        }
-        if flags & packet_flags::FLOW != 0 {
-            header_optional_bytes.extend_from_slice(&payload[offset..offset + 6]);
-            offset += 6;
-        }
+        let cursor = OptionalHeaderCursor::new(payload, flags);
+        let header_optional_bytes = cursor.hash_bytes();
 
         if !header_optional_bytes.is_empty() {
             let h = holtburger_protocol::crypto::Hash32::compute(&header_optional_bytes);
@@ -204,6 +155,7 @@ impl Session {
 
         // 2. Fragments Section
         if flags & packet_flags::BLOB_FRAGMENTS != 0 {
+            let mut offset = cursor.payload_offset();
             while offset < payload.len() {
                 if offset + FRAGMENT_HEADER_SIZE > payload.len() {
                     break;
@@ -466,40 +418,7 @@ impl Session {
     }
 
     pub fn get_payload_offset(&self, flags: u32, data: &[u8]) -> usize {
-        let mut offset = 0;
-        if flags & packet_flags::SERVER_SWITCH != 0 {
-            offset += transport::SERVER_SWITCH_SIZE;
-        }
-        if flags & packet_flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
-            let count = LittleEndian::read_u32(&data[offset..offset + 4]);
-            offset += 4 + (count as usize * 4);
-        }
-        if flags & packet_flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
-            let count = LittleEndian::read_u32(&data[offset..offset + 4]);
-            offset += 4 + (count as usize * 4);
-        }
-        if flags & packet_flags::ACK_SEQUENCE != 0 {
-            offset += transport::ACK_SEQUENCE_SIZE;
-        }
-        if flags & packet_flags::CONNECT_RESPONSE != 0 {
-            offset += transport::CONNECT_RESPONSE_SIZE;
-        }
-        if flags & packet_flags::CICMD != 0 {
-            offset += transport::CICMD_SIZE;
-        }
-        if flags & packet_flags::TIME_SYNC != 0 {
-            offset += transport::TIME_SYNC_SIZE;
-        }
-        if flags & packet_flags::ECHO_REQUEST != 0 {
-            offset += transport::ECHO_REQUEST_SIZE;
-        }
-        if flags & packet_flags::ECHO_RESPONSE != 0 {
-            offset += transport::ECHO_RESPONSE_SIZE;
-        }
-        if flags & packet_flags::FLOW != 0 {
-            offset += transport::FLOW_SIZE;
-        }
-        offset
+        OptionalHeaderCursor::new(data, flags).payload_offset()
     }
 
     /// Higher-level receiver that handles fragmentation and returns complete message payloads or handshake events.
@@ -533,32 +452,12 @@ impl Session {
         }
 
         // 3. Check for TimeSync
+        #[allow(clippy::collapsible_if)]
         if header.flags & packet_flags::TIME_SYNC != 0 {
-            let mut offset = 0;
-            // TimeSync is an optional header. We need to find its specific offset.
-            // PacketHeaderOptional sequence:
-            // SERVER_SWITCH (8), REQUEST_RETRANSMIT (4+4*n), REJECT_RETRANSMIT (4+4*n), ACK_SEQUENCE (4), CONNECT_RESPONSE (8), CICMD (8), TIME_SYNC (8)
-            if header.flags & packet_flags::SERVER_SWITCH != 0 {
-                offset += 8;
-            }
-            if header.flags & packet_flags::REQUEST_RETRANSMIT != 0 && offset + 4 <= data.len() {
-                let count = LittleEndian::read_u32(&data[offset..offset + 4]);
-                offset += 4 + (count as usize * 4);
-            }
-            if header.flags & packet_flags::REJECT_RETRANSMIT != 0 && offset + 4 <= data.len() {
-                let count = LittleEndian::read_u32(&data[offset..offset + 4]);
-                offset += 4 + (count as usize * 4);
-            }
-            if header.flags & packet_flags::ACK_SEQUENCE != 0 {
-                offset += 4;
-            }
-            if header.flags & packet_flags::CONNECT_RESPONSE != 0 {
-                offset += 8;
-            }
-            if header.flags & packet_flags::CICMD != 0 {
-                offset += 8;
-            }
-            if header.flags & packet_flags::TIME_SYNC != 0 && offset + 8 <= data.len() {
+            if let Some(offset) = OptionalHeaderCursor::new(&data, header.flags)
+                .find_flag_offset(packet_flags::TIME_SYNC)
+                .filter(|&offset| offset + 8 <= data.len())
+            {
                 let server_time = LittleEndian::read_f64(&data[offset..offset + 8]);
                 events.push(SessionEvent::TimeSync(server_time));
             }

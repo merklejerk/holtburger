@@ -29,7 +29,7 @@ pub enum GameMessage {
     DddInterrogation,
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),
-    BootAccount(Box<BootAccountData>),
+    AccountBoot(Box<BootAccountData>),
     CharacterLogOff, // 0xF653
     GameAction(Box<GameActionMessage>),
     GameEvent(Box<GameEventMessage>),
@@ -137,7 +137,7 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::CharacterError => Some(GameMessage::CharacterError(Box::new(
                 CharacterErrorData::unpack(data, offset)?,
             ))),
-            GameOpcode::BootAccount => Some(GameMessage::BootAccount(Box::new(
+            GameOpcode::AccountBoot => Some(GameMessage::AccountBoot(Box::new(
                 BootAccountData::unpack(data, offset)?,
             ))),
             GameOpcode::CharacterLogOff => Some(GameMessage::CharacterLogOff),
@@ -352,8 +352,8 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameMessage::BootAccount(data) => {
-                buf.write_u32::<LittleEndian>(GameOpcode::BootAccount as u32)
+            GameMessage::AccountBoot(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::AccountBoot as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -728,8 +728,9 @@ mod tests {
 
     #[test]
     fn test_dispatch_game_event_player_description() {
-        // Skip parity check for complex player description
-        assert_dispatch_match_no_parity(test_fixtures::PLAYER_DESCRIPTION_TUI_2026_02_07, |msg| {
+        // KNOWN PARITY GAP: player description packing is currently lossy in some
+        // structures, so we keep dispatch coverage without asserting full repack parity.
+        assert_dispatch_match_no_parity(test_fixtures::PLAYER_DESCRIPTION, |msg| {
             matches!(msg, GameMessage::GameEvent(_))
         });
     }

@@ -587,7 +587,7 @@ impl WorldState {
                     }
 
                     self.player.spells = data.spells.clone();
-                    self.player.spell_lists = data.spell_lists.clone();
+                    self.player.hotbar_spells = data.hotbar_spells.clone();
 
                     if let Some(p) = pos {
                         events.extend(self.set_player_position(*p));

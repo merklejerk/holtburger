@@ -134,8 +134,8 @@ pub struct PlayerDescriptionData {
     pub options2: u32,
     /// List of user-defined shortcuts for the action bar.
     pub shortcuts: Vec<Shortcut>,
-    /// List of multi-spell casting entries (up to 8 groups).
-    pub spell_lists: Vec<Vec<u32>>,
+    /// List of spells assigned to the 8 magic hotbars.
+    pub hotbar_spells: Vec<Vec<u32>>,
     /// Material components required for spellcasting and their desired counts.
     pub desired_comps: Vec<(u32, u32)>,
     /// Bitfield identifying which spells should be hidden in UI.
@@ -538,7 +538,7 @@ impl PlayerDescriptionData {
             }
         }
 
-        let mut spell_lists = Vec::new();
+        let mut hotbar_spells = Vec::new();
         if option_flags.contains(CharacterOptionDataFlag::SPELL_LISTS8) {
             for _ in 0..8 {
                 if *offset + 4 > data.len() {
@@ -554,7 +554,7 @@ impl PlayerDescriptionData {
                     list.push(LittleEndian::read_u32(&data[*offset..*offset + 4]));
                     *offset += 4;
                 }
-                spell_lists.push(list);
+                hotbar_spells.push(list);
             }
         } else if *offset + 4 <= data.len() {
             let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
@@ -567,7 +567,7 @@ impl PlayerDescriptionData {
                 list.push(LittleEndian::read_u32(&data[*offset..*offset + 4]));
                 *offset += 4;
             }
-            spell_lists.push(list);
+            hotbar_spells.push(list);
         }
 
         let mut desired_comps = Vec::new();
@@ -647,7 +647,7 @@ impl PlayerDescriptionData {
             options1,
             options2,
             shortcuts,
-            spell_lists,
+            hotbar_spells,
             desired_comps,
             spellbook_filters,
             gameplay_options,
@@ -845,9 +845,9 @@ impl ProtocolPack for PlayerDescriptionData {
         if !self.shortcuts.is_empty() {
             o_flags.insert(CharacterOptionDataFlag::SHORTCUT);
         }
-        if self.spell_lists.len() == 8 {
+        if self.hotbar_spells.len() == 8 {
             o_flags.insert(CharacterOptionDataFlag::SPELL_LISTS8);
-        } else if !self.spell_lists.is_empty() {
+        } else if !self.hotbar_spells.is_empty() {
             o_flags.insert(CharacterOptionDataFlag::MULTI_SPELL_LIST);
         }
         if !self.desired_comps.is_empty() {
@@ -872,14 +872,14 @@ impl ProtocolPack for PlayerDescriptionData {
             }
         }
         if o_flags.contains(CharacterOptionDataFlag::SPELL_LISTS8) {
-            for list in &self.spell_lists {
+            for list in &self.hotbar_spells {
                 buf.write_u32::<LittleEndian>(list.len() as u32).unwrap();
                 for &sid in list {
                     buf.write_u32::<LittleEndian>(sid).unwrap();
                 }
             }
         } else if o_flags.contains(CharacterOptionDataFlag::MULTI_SPELL_LIST) {
-            if let Some(list) = self.spell_lists.first() {
+            if let Some(list) = self.hotbar_spells.first() {
                 buf.write_u32::<LittleEndian>(list.len() as u32).unwrap();
                 for &sid in list {
                     buf.write_u32::<LittleEndian>(sid).unwrap();

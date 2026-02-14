@@ -142,7 +142,7 @@ Add/expand tests nearest source modules (`#[cfg(test)]` colocated):
 If ACE synthetic fixture support is needed for protocol truth:
 
 - [ ] Add synthetic protocol test in `ACE.Server.Tests/SyntheticProtocolTests.cs`.
-- [ ] Generate fixture binary under `crates/holtburger-core/tests/fixtures/`.
+- [ ] Generate fixture binary under `crates/holtburger-protocol/tests/fixtures/`.
 - [ ] Use fixture-driven unpack/update test in Rust.
 
 **Exit criteria**

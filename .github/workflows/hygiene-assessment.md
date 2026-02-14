@@ -51,8 +51,9 @@ You must strictly follow these rules while assessing the codebase:
 ### 2. Protocol Testing Guidelines (The Gold Standard)
 - **Binary Parity**: We aim for 100% bit-parity with the ACE Server.
 - **Parity Tests**: Check if `assert_pack_unpack_parity` is used for protocol structures.
-- **Fixtures**: Verify that large fixtures are stored in `crates/holtburger-core/tests/fixtures/`.
+- **Fixtures**: Verify that large fixtures are stored in `crates/holtburger-protocol/tests/fixtures/`.
 - **No Guessing**: If code looks like it's based on a "hunch" rather than `ACE` source, flag it as a risk.
+- **Accepted Exceptions Policy**: Do **not** raise a new hygiene issue for an intentional no-parity test if it is explicitly documented under `crates/holtburger-protocol/FIXTURES.md` "Known Parity Gaps" (with rationale) and covered by an existing tracked checklist item. Treat it as an accepted exception unless the documentation is missing or contradictory.
 
 ### 3. Excluded Scope
 - You can ignore anything inside `/docs` because that directory is ephemeral. Same goes for the `TODO.md` file.
@@ -72,6 +73,8 @@ List specific areas for improvement. For each item:
 - **Problem**: Why is this "mid"? (e.g., "Duplicate logic found in X and Y", "Missing parity test for Z").
 - **Recommendation**: How can we fix it? (Keep it small and focused).
 - **Reference**: If applicable, mention the specific `ACE` server file that should be used as ground truth.
+
+Only include active, non-accepted issues here. If something is an accepted exception per the policy above, mention it (if needed) in a short "Known Accepted Exceptions" note, not as a new hygiene issue.
 
 ### 🗺️ Proposed Phased Plan
 If you find a major refactor needed, break it down into multiple, incremental phases. Each phase should aim to leave the codebase buildable. Test coverage should not decline with each phase. Emphasize regression testing to ensure correctness during the refactoring process. Be detailed.

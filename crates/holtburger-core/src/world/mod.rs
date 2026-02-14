@@ -67,10 +67,6 @@ pub enum WorldEvent {
         enchantment: Enchantment,
         spell_name: Option<String>,
     },
-    SpellInfo {
-        spell_id: u32,
-        info: Box<holtburger_dat::file_type::spell_table::SpellBase>,
-    },
     EnchantmentRemoved {
         spell_id: u16,
         layer: u16,

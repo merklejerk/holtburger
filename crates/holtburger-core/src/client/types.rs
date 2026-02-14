@@ -55,6 +55,20 @@ pub enum ClientEvent {
     UseDone {
         error_id: u32,
     },
+    ResourcesResolved(Vec<ResolvedResource>),
+}
+
+#[derive(Debug, Clone)]
+pub enum ResourceDescriptor {
+    Spell(u32),
+}
+
+#[derive(Debug, Clone)]
+pub enum ResolvedResource {
+    Spell {
+        spell_id: u32,
+        info: Box<holtburger_dat::file_type::spell_table::SpellBase>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -130,7 +144,7 @@ pub enum ClientCommand {
     CastUntargetedSpell {
         spell_id: u32,
     },
-    RequestSpellInfo(u32),
+    ResolveResources(Vec<ResourceDescriptor>),
     SetCombatMode(holtburger_protocol::messages::combat::CombatMode),
     SetNoClip(bool),
     CancelAttack,

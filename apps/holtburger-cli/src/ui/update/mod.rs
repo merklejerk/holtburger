@@ -46,10 +46,15 @@ impl AppState {
         let now = std::time::Instant::now();
 
         // Request spell info for spells we don't have info for yet
+        let mut missing_spells = Vec::new();
         for &spell_id in &self.player_spells {
             if !self.spell_info.contains_key(&spell_id) {
-                commands.push(ClientCommand::RequestSpellInfo(spell_id));
+                missing_spells.push(holtburger_core::ResourceDescriptor::Spell(spell_id));
             }
+        }
+
+        if !missing_spells.is_empty() {
+            commands.push(ClientCommand::ResolveResources(missing_spells));
         }
 
         // Update net stats

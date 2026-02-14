@@ -1,5 +1,6 @@
 use crate::ui::AppState;
 use crate::ui::types::{FocusedPane, InteractionMode};
+use holtburger_common::time::*;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -24,7 +25,6 @@ const DEGREES_PER_POINT: f32 = DEGREES_IN_CIRCLE / COMPASS_POINTS; // 22.5° per
 const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the label
 
 // Environment Constants
-const DERETH_TIME_DIVISOR: f64 = 150.0;
 
 pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     let style = if state.focused_pane == FocusedPane::Dynamic {
@@ -102,10 +102,19 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     // --- 3. Chronometer ---
     let time_str = if let Some((st, inst)) = state.server_time {
         let current_server_time = st + inst.elapsed().as_secs_f64();
-        let dereth_hour = (current_server_time / DERETH_TIME_DIVISOR) % 24.0;
-        let hour = dereth_hour as u32;
-        let minute = ((dereth_hour - hour as f64) * 60.0) as u32;
-        format!("⏳{:02}:{:02} ", hour, minute)
+        let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);
+
+        // Normalize 16-hour Dereth day to 24-hour "human" display
+        let ticks_per_hour_24 = DERETH_DAY_LENGTH / 24.0;
+        let hour = (chrono_ticks / ticks_per_hour_24) as u32;
+        let minute = ((chrono_ticks % ticks_per_hour_24) / (ticks_per_hour_24 / 60.0)) as u32;
+
+        let icon = if (6..18).contains(&hour) {
+            "☀️"
+        } else {
+            "🌙"
+        };
+        format!("{}{:02}:{:02} ", icon, hour, minute)
     } else {
         " ⏳ --:-- ".to_string()
     };

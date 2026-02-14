@@ -1,4 +1,4 @@
-use crate::client::types::{ClientCommand, ClientEvent};
+use crate::client::types::{ClientCommand, ClientEvent, ResolvedResource, ResourceDescriptor};
 use crate::client::{Client, ClientState};
 use crate::world::WorldEvent;
 use anyhow::Result;
@@ -179,14 +179,24 @@ impl Client {
                     })))
                     .await
             }
-            ClientCommand::RequestSpellInfo(spell_id) => {
-                if let Some(info) = self.world.resolve_spell_info(spell_id)
-                    && let Some(tx) = &self.event_tx
-                {
-                    let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::SpellInfo {
-                        spell_id,
-                        info: Box::new(info),
-                    })));
+            ClientCommand::ResolveResources(descriptors) => {
+                if let Some(tx) = &self.event_tx {
+                    let mut results = Vec::new();
+                    for descriptor in descriptors {
+                        match descriptor {
+                            ResourceDescriptor::Spell(spell_id) => {
+                                if let Some(info) = self.world.resolve_spell_info(spell_id) {
+                                    results.push(ResolvedResource::Spell {
+                                        spell_id,
+                                        info: Box::new(info),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if !results.is_empty() {
+                        let _ = tx.send(ClientEvent::ResourcesResolved(results));
+                    }
                 }
                 Ok(())
             }

@@ -54,9 +54,8 @@ You must strictly follow these rules while assessing the codebase:
 - **Fixtures**: Verify that large fixtures are stored in `crates/holtburger-core/tests/fixtures/`.
 - **No Guessing**: If code looks like it's based on a "hunch" rather than `ACE` source, flag it as a risk.
 
-### 3. Planning & Documentation
-- **Phased Implementation**: Look for complex features that lack a phased plan or a "Living Worksheet".
-- **Ground Truth First**: Ensure logic references `ACE` server paths where possible.
+### 3. Excluded Scope
+- You can ignore anything inside `/docs` because that directory is ephemeral.
 
 ## Output Requirements
 
@@ -75,7 +74,7 @@ List specific areas for improvement. For each item:
 - **Reference**: If applicable, mention the specific `ACE` server file that should be used as ground truth.
 
 ### 🗺️ Proposed Phased Plan
-If you find a major refactor needed, break it down into multiple, incremental phases. Each phase should aim to leave the codebase buildable. Test coverage should not decline with each phase. Emphasize regression testing to ensure correctness during the refactoring process.
+If you find a major refactor needed, break it down into multiple, incremental phases. Each phase should aim to leave the codebase buildable. Test coverage should not decline with each phase. Emphasize regression testing to ensure correctness during the refactoring process. Be detailed.
 
 You are allowed to break APIs if it provides a meaningful benefit to code quality or test coverage.
 

@@ -1,5 +1,6 @@
 use super::WorldEvent;
 use super::entity::{Entity, EntityManager};
+use super::player::PlayerState;
 use super::spatial::SpatialScene;
 use super::stats;
 use binrw::BinRead;
@@ -11,7 +12,6 @@ use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
-use super::player::PlayerState;
 
 use holtburger_protocol::messages::*;
 
@@ -387,23 +387,26 @@ impl WorldState {
 
                     match &data.data {
                         MovementTypeData::TurnToHeading(turn) => {
-                            let new_rot = Quaternion::from_heading(turn.params.desired_heading);
-                            if guid == self.player.guid {
-                                let mut pos = self.player.position;
-                                pos.rotation = new_rot;
-                                events.extend(self.set_player_position(pos));
-                            } else {
-                                entity.position.rotation = new_rot;
-                                events.push(WorldEvent::EntityMoved {
-                                    guid,
-                                    pos: entity.position,
-                                });
+                            if turn.params.desired_heading.is_finite() {
+                                let new_rot = Quaternion::from_heading(turn.params.desired_heading);
+                                if guid == self.player.guid {
+                                    let mut pos = self.player.position;
+                                    pos.rotation = new_rot;
+                                    events.extend(self.set_player_position(pos));
+                                } else {
+                                    entity.position.rotation = new_rot;
+                                    events.push(WorldEvent::EntityMoved {
+                                        guid,
+                                        pos: entity.position,
+                                    });
+                                }
                             }
                         }
                         MovementTypeData::TurnToObject(turn) => {
                             let mut new_rot = entity.position.rotation;
 
-                            if turn.desired_heading.abs() > 1e-6 {
+                            if turn.desired_heading.is_finite() && turn.desired_heading.abs() > 1e-6
+                            {
                                 new_rot = Quaternion::from_heading(turn.desired_heading);
                             } else if let Some((target_lb, target_coords)) = target_info
                                 && target_lb == entity.position.landblock_id
@@ -1124,11 +1127,19 @@ impl WorldState {
 
     /// Updates the player's position, ensuring the record in PlayerState,
     /// the mirrored Entity, and the SpatialScene stay in sync.
-    pub fn set_player_position(&mut self, pos: WorldPosition) -> Vec<WorldEvent> {
+    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
             return events;
+        }
+
+        if !pos.rotation.w.is_finite()
+            || !pos.rotation.x.is_finite()
+            || !pos.rotation.y.is_finite()
+            || !pos.rotation.z.is_finite()
+        {
+            pos.rotation = self.player.position.rotation;
         }
 
         let old_lb = self.player.position.landblock_id;
@@ -1225,6 +1236,45 @@ mod tests {
         state.set_player_velocity(new_vel);
 
         assert_eq!(state.entities.get(player_guid).unwrap().velocity, new_vel);
+    }
+
+    #[test]
+    fn test_set_player_position_sanitizes_nan_rotation() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        state.player.guid = player_guid;
+
+        let initial_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+        state.player.position = initial_pos;
+
+        let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+        state.entities.insert(player_entity);
+
+        let nan_pos = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 30.0),
+            rotation: holtburger_common::math::Quaternion {
+                w: f32::NAN,
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+
+        state.set_player_position(nan_pos);
+
+        assert_eq!(
+            state.player.position.rotation,
+            holtburger_common::math::Quaternion::identity()
+        );
+        assert_eq!(
+            state.entities.get(player_guid).unwrap().position.rotation,
+            holtburger_common::math::Quaternion::identity()
+        );
     }
 
     #[test]

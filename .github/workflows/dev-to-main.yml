@@ -34,20 +34,10 @@ jobs:
           # cause a non-zero exit code even if content is resolved.
           git merge dev --no-commit --no-ff -X theirs || echo "Structural conflicts detected, resolving... 🛠️"
           
-          # Force add to resolve the conflict state before purging
-          git add .
-          
           # THE PURGE 🧹
           echo "Purging the clutter... 🤫"
-          rm -rf ACE/
-          rm -rf ACViewer/
-          rm -rf docs/
-          rm -rf ace-root/
-          rm -rf release-test/
-          rm -rf crates/holtburger-debug-harness/
-          rm -f .gitmodules
-          rm -f TODO.md
-          rm -f AGENTS.md
+          # Use git rm to resolve conflict state and remove unwanted paths in one go
+          git rm -rf --ignore-unmatch ACE/ ACViewer/ docs/ ace-root/ release-test/ crates/holtburger-debug-harness/ .gitmodules TODO.md AGENTS.md
           
           # Scrub Cargo.toml (remove the harness member)
           # We use a pattern that matches the specific line with its trailing comma if present
@@ -55,10 +45,7 @@ jobs:
           # Also match it if it's the last item without a comma
           sed -i '/"crates\/holtburger-debug-harness"/d' Cargo.toml
           
-          # Clean up any potential empty lines left in Cargo.toml members array
-          # (Optional, but keeps it looking fresh)
-          
-          # Stage the cleanup
+          # Final add to stage Cargo.toml changes and any updates from dev
           git add .
           
           # Only commit and push if there are actual changes

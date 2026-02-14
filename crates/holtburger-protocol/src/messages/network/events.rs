@@ -15,3 +15,31 @@ impl ProtocolPack for PingResponseData {
         // No payload
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messages::game_message::GameMessage;
+    use crate::messages::game_event::GameEvent;
+    use crate::test_fixtures;
+    use holtburger_common::Guid;
+
+    #[test]
+    fn test_ping_response_parity() {
+        let fixture = test_fixtures::PING_RESPONSE;
+        let mut offset = 0;
+        let msg = GameMessage::unpack(fixture, &mut offset).expect("failed to unpack GameMessage");
+        
+        if let GameMessage::GameEvent(event_msg) = &msg {
+            assert_eq!(event_msg.target, Guid(0));
+            assert_eq!(event_msg.sequence, 1);
+            assert!(matches!(event_msg.event, GameEvent::PingResponse(_)));
+        } else {
+            panic!("expected GameMessage::GameEvent, got {:?}", msg);
+        }
+
+        let mut packed = Vec::new();
+        msg.pack(&mut packed);
+        assert_eq!(packed, fixture);
+    }
+}

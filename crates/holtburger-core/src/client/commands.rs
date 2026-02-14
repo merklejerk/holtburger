@@ -12,6 +12,72 @@ use std::time::Instant;
 impl Client {
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
+            ClientCommand::Login(_)
+            | ClientCommand::SelectCharacter(_)
+            | ClientCommand::SelectCharacterByIndex(_)
+            | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
+
+            ClientCommand::Talk(_) | ClientCommand::Tell { .. } => {
+                self.handle_chat_command(cmd).await
+            }
+
+            ClientCommand::Identify(_)
+            | ClientCommand::Use(_)
+            | ClientCommand::UseWithTarget { .. }
+            | ClientCommand::CastTargetedSpell { .. }
+            | ClientCommand::CastUntargetedSpell { .. }
+            | ClientCommand::ResolveResources(_) => self.handle_interaction_command(cmd).await,
+
+            ClientCommand::Drop(_)
+            | ClientCommand::Get(_)
+            | ClientCommand::MoveItem { .. }
+            | ClientCommand::GetAndWield { .. }
+            | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
+
+            ClientCommand::Jump { .. }
+            | ClientCommand::SetState(_)
+            | ClientCommand::TurnTo { .. }
+            | ClientCommand::MoveTo { .. }
+            | ClientCommand::SyncPosition => self.handle_movement_command(cmd).await,
+
+            ClientCommand::RaiseAttribute { .. }
+            | ClientCommand::RaiseVital { .. }
+            | ClientCommand::RaiseSkill { .. }
+            | ClientCommand::TrainSkill { .. } => self.handle_progression_command(cmd).await,
+
+            ClientCommand::Ping
+            | ClientCommand::SetCombatMode(_)
+            | ClientCommand::SetNoClip(_)
+            | ClientCommand::CancelAttack
+            | ClientCommand::GiveObjectRequest { .. }
+            | ClientCommand::Quit => self.handle_system_command(cmd).await,
+        }
+    }
+
+    pub(super) async fn disconnect(&mut self) -> Result<()> {
+        let header = PacketHeader {
+            flags: packet_flags::DISCONNECT,
+            sequence: self.session.packet_sequence,
+            id: 0,
+            ..Default::default()
+        };
+        self.session.packet_sequence += 1;
+        self.session
+            .send_packet_to_addr(header, &[], self.session.server_addr)
+            .await?;
+
+        self.state = ClientState::Disconnected;
+        self.send_status_event();
+
+        Ok(())
+    }
+
+    async fn send_game_action(&mut self, action: GameAction) -> Result<()> {
+        self.session.send_action(action).await
+    }
+
+    async fn handle_auth_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
             ClientCommand::Login(password) => {
                 log::info!("Attempting login...");
                 self.auth
@@ -70,6 +136,12 @@ impl Client {
                     Ok(())
                 }
             }
+            _ => unreachable!(),
+        }
+    }
+
+    async fn handle_chat_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
             ClientCommand::Talk(text) => {
                 if matches!(self.state, ClientState::InWorld) {
                     log::info!(">>> You say: \"{}\"", text);
@@ -81,103 +153,49 @@ impl Client {
                 if matches!(self.state, ClientState::InWorld) {
                     log::info!(">>> You tell {}, \"{}\"", target, message);
                     return self
-                        .session
-                        .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                            sequence: 0,
-                            action: GameAction::Tell(Box::new(TellActionData { target, message })),
-                        })))
+                        .send_game_action(GameAction::Tell(Box::new(TellActionData { target, message })))
                         .await;
                 }
                 Ok(())
             }
-            ClientCommand::Ping => {
-                log::info!(">>> Sending Ping");
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::PingRequest(Box::new(PingRequestData)),
-                    })))
-                    .await
-            }
+            _ => unreachable!(),
+        }
+    }
+
+    async fn handle_interaction_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
             ClientCommand::Identify(guid) => {
                 log::info!(">>> Identifying: 0x{:08X}", guid);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::IdentifyObject(Box::new(IdentifyObjectData { guid })),
-                    })))
-                    .await
-            }
-            ClientCommand::Jump {
-                extent,
-                velocity: _,
-            } => {
-                log::info!(">>> Jumping: extent={}", extent);
-                let obj_inst = self.world.player.instance_sequence;
-                let srv_seq = self.world.player.server_control_sequence;
-                let tele_seq = self.world.player.teleport_sequence;
-                let force_seq = self.world.player.force_position_sequence;
-
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0, // GameAction sequence is different?
-
-                        action: GameAction::Jump(Box::new(JumpData {
-                            extent,
-                            velocity: Default::default(),
-                            instance_sequence: obj_inst,
-                            server_control_sequence: srv_seq,
-                            teleport_sequence: tele_seq,
-                            force_position_sequence: force_seq,
-                            object_guid: self.world.player.guid,
-                            spell_id: 0,
-                        })),
-                    })))
+                self.send_game_action(GameAction::IdentifyObject(Box::new(IdentifyObjectData { guid })))
                     .await
             }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::Use(Box::new(UseData { guid })),
-                    })))
+                self.send_game_action(GameAction::Use(Box::new(UseData { guid })))
                     .await
             }
             ClientCommand::UseWithTarget { item, target } => {
                 log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::UseWithTarget(Box::new(UseWithTargetData {
-                            item_guid: item,
-                            target_guid: target,
-                        })),
-                    })))
-                    .await
+                self.send_game_action(GameAction::UseWithTarget(Box::new(UseWithTargetData {
+                    item_guid: item,
+                    target_guid: target,
+                })))
+                .await
             }
             ClientCommand::CastTargetedSpell { target, spell_id } => {
                 log::info!(">>> Casting spell {} on 0x{:08X}", spell_id, target.0);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::CastTargetedSpell(Box::new(CastTargetedSpellData {
-                            target,
-                            spell_id,
-                        })),
-                    })))
-                    .await
+                self.send_game_action(GameAction::CastTargetedSpell(Box::new(CastTargetedSpellData {
+                    target,
+                    spell_id,
+                })))
+                .await
             }
             ClientCommand::CastUntargetedSpell { spell_id } => {
                 log::info!(">>> Casting spell {}", spell_id);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::CastUntargetedSpell(Box::new(
-                            CastUntargetedSpellData { spell_id },
-                        )),
-                    })))
-                    .await
+                self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
+                    CastUntargetedSpellData { spell_id },
+                )))
+                .await
             }
             ClientCommand::ResolveResources(descriptors) => {
                 if let Some(tx) = &self.event_tx {
@@ -200,27 +218,25 @@ impl Client {
                 }
                 Ok(())
             }
+            _ => unreachable!(),
+        }
+    }
+
+    async fn handle_inventory_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::DropItem(Box::new(DropItemData { item_guid: guid })),
-                    })))
+                self.send_game_action(GameAction::DropItem(Box::new(DropItemData { item_guid: guid })))
                     .await
             }
             ClientCommand::Get(guid) => {
                 log::info!(">>> Getting: 0x{:08X}", guid);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
-                            item_guid: guid,
-                            container_guid: self.world.player.guid,
-                            placement: 0,
-                        })),
-                    })))
-                    .await
+                self.send_game_action(GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
+                    item_guid: guid,
+                    container_guid: self.world.player.guid,
+                    placement: 0,
+                })))
+                .await
             }
             ClientCommand::MoveItem {
                 item,
@@ -233,16 +249,12 @@ impl Client {
                     container,
                     placement
                 );
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
-                            item_guid: item,
-                            container_guid: container,
-                            placement,
-                        })),
-                    })))
-                    .await
+                self.send_game_action(GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
+                    item_guid: item,
+                    container_guid: container,
+                    placement,
+                })))
+                .await
             }
             ClientCommand::GetAndWield { item, equip_mask } => {
                 log::info!(
@@ -250,17 +262,12 @@ impl Client {
                     item,
                     equip_mask
                 );
-                let sequence = 0; // TODO
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence,
-
-                        action: GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
-                            item_guid: item,
-                            equip_mask: EquipMask::from_bits_truncate(equip_mask),
-                        })),
-                    })))
-                    .await
+                // Sequence will be handled by send_game_action in Phase 3 goal fulfillment
+                self.send_game_action(GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
+                    item_guid: item,
+                    equip_mask: EquipMask::from_bits_truncate(equip_mask),
+                })))
+                .await
             }
             ClientCommand::SplitToWield {
                 item,
@@ -273,20 +280,84 @@ impl Client {
                     amount,
                     equip_mask
                 );
-                let sequence = 0; // TODO
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence,
+                // Sequence will be handled by send_game_action
+                self.send_game_action(GameAction::StackableSplitToWield(Box::new(
+                    StackableSplitToWieldData {
+                        stack_guid: item,
+                        amount: amount as i32,
+                        equip_mask: EquipMask::from_bits_truncate(equip_mask),
+                    },
+                )))
+                .await
+            }
+            _ => unreachable!(),
+        }
+    }
 
-                        action: GameAction::StackableSplitToWield(Box::new(
-                            StackableSplitToWieldData {
-                                stack_guid: item,
-                                amount: amount as i32,
-                                equip_mask: EquipMask::from_bits_truncate(equip_mask),
-                            },
-                        )),
-                    })))
-                    .await
+    async fn handle_progression_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
+            ClientCommand::RaiseAttribute {
+                attribute,
+                xp_spent,
+            } => {
+                log::info!(">>> Raising Attribute: {:?} (XP: {})", attribute, xp_spent);
+                self.send_game_action(GameAction::RaiseAttribute(Box::new(RaiseAttributeData {
+                    attribute_type: attribute as u32,
+                    xp_spent,
+                })))
+                .await
+            }
+            ClientCommand::RaiseVital { vital, xp_spent } => {
+                log::info!(">>> Raising Vital: {:?} (XP: {})", vital, xp_spent);
+                self.send_game_action(GameAction::RaiseVital(Box::new(RaiseVitalData {
+                    vital_type: vital as u32,
+                    xp_spent,
+                })))
+                .await
+            }
+            ClientCommand::RaiseSkill { skill, xp_spent } => {
+                log::info!(">>> Raising Skill: {:?} (XP: {})", skill, xp_spent);
+                self.send_game_action(GameAction::RaiseSkill(Box::new(RaiseSkillData {
+                    skill_type: skill as u32,
+                    xp_spent,
+                })))
+                .await
+            }
+            ClientCommand::TrainSkill { skill, credits } => {
+                log::info!(">>> Training Skill: {:?} (Credits: {})", skill, credits);
+                self.send_game_action(GameAction::TrainSkill(Box::new(TrainSkillData {
+                    skill_type: skill as u32,
+                    credits_spent: credits as i32,
+                })))
+                .await
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
+            ClientCommand::Jump {
+                extent,
+                velocity: _,
+            } => {
+                log::info!(">>> Jumping: extent={}", extent);
+                let obj_inst = self.world.player.instance_sequence;
+                let srv_seq = self.world.player.server_control_sequence;
+                let tele_seq = self.world.player.teleport_sequence;
+                let force_seq = self.world.player.force_position_sequence;
+
+                self.send_game_action(GameAction::Jump(Box::new(JumpData {
+                    extent,
+                    velocity: Default::default(),
+                    instance_sequence: obj_inst,
+                    server_control_sequence: srv_seq,
+                    teleport_sequence: tele_seq,
+                    force_position_sequence: force_seq,
+                    object_guid: self.world.player.guid,
+                    spell_id: 0,
+                })))
+                .await
             }
             ClientCommand::SetState(state_opcode) => {
                 log::info!(">>> Setting state: 0x{:08X}", state_opcode);
@@ -295,25 +366,20 @@ impl Client {
                 let tele_seq = self.world.player.teleport_sequence;
                 let force_seq = self.world.player.force_position_sequence;
 
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-
-                        action: GameAction::MoveToState(Box::new(MoveToStateData {
-                            raw_motion_state: RawMotionState {
-                                flags: RawMotionFlags::CURRENT_STYLE,
-                                current_style: Some(state_opcode),
-                                ..Default::default()
-                            },
-                            position: self.world.player.position,
-                            instance_sequence: obj_inst,
-                            server_control_sequence: srv_seq,
-                            teleport_sequence: tele_seq,
-                            force_position_sequence: force_seq,
-                            contact_long_jump: 0,
-                        })),
-                    })))
-                    .await
+                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateData {
+                    raw_motion_state: RawMotionState {
+                        flags: RawMotionFlags::CURRENT_STYLE,
+                        current_style: Some(state_opcode),
+                        ..Default::default()
+                    },
+                    position: self.world.player.position,
+                    instance_sequence: obj_inst,
+                    server_control_sequence: srv_seq,
+                    teleport_sequence: tele_seq,
+                    force_position_sequence: force_seq,
+                    contact_long_jump: 0,
+                })))
+                .await
             }
             ClientCommand::TurnTo { heading } => {
                 log::info!(">>> Turning to heading: {}", heading);
@@ -333,20 +399,16 @@ impl Client {
                 let tele_seq = self.world.player.teleport_sequence;
                 let force_seq = self.world.player.force_position_sequence;
 
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::MoveToState(Box::new(MoveToStateData {
-                            raw_motion_state: RawMotionState::default(),
-                            position: self.world.player.position,
-                            instance_sequence: obj_inst,
-                            server_control_sequence: srv_seq,
-                            teleport_sequence: tele_seq,
-                            force_position_sequence: force_seq,
-                            contact_long_jump: 1, // Assume contact
-                        })),
-                    })))
-                    .await
+                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateData {
+                    raw_motion_state: RawMotionState::default(),
+                    position: self.world.player.position,
+                    instance_sequence: obj_inst,
+                    server_control_sequence: srv_seq,
+                    teleport_sequence: tele_seq,
+                    force_position_sequence: force_seq,
+                    contact_long_jump: 1, // Assume contact
+                })))
+                .await
             }
             ClientCommand::MoveTo { target } => {
                 log::info!(">>> Starting approach to target: 0x{:08X}", target);
@@ -366,20 +428,26 @@ impl Client {
                     last_contact: 1,
                 };
 
-                self.session
-                    .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
+                self.send_game_action(GameAction::AutonomousPosition(Box::new(pulse)))
+                    .await
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    async fn handle_system_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        match cmd {
+            ClientCommand::Ping => {
+                log::info!(">>> Sending Ping");
+                self.send_game_action(GameAction::PingRequest(Box::new(PingRequestData)))
                     .await
             }
             ClientCommand::SetCombatMode(mode) => {
                 log::info!(">>> Changing combat mode to: {:?}", mode);
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::ChangeCombatMode(Box::new(ChangeCombatModeData {
-                            mode,
-                        })),
-                    })))
-                    .await
+                self.send_game_action(GameAction::ChangeCombatMode(Box::new(ChangeCombatModeData {
+                    mode,
+                })))
+                .await
             }
             ClientCommand::SetNoClip(enabled) => {
                 log::info!(">>> NoClip set to: {}", enabled);
@@ -393,50 +461,7 @@ impl Client {
             }
             ClientCommand::CancelAttack => {
                 log::info!(">>> Canceling attack");
-                self.session
-                    .send_message(&GameMessage::GameAction(Box::new(GameActionMessage {
-                        sequence: 0,
-                        action: GameAction::CancelAttack(Box::new(CancelAttackData {})),
-                    })))
-                    .await
-            }
-            ClientCommand::RaiseAttribute {
-                attribute,
-                xp_spent,
-            } => {
-                log::info!(">>> Raising Attribute: {:?} (XP: {})", attribute, xp_spent);
-                self.session
-                    .send_action(GameAction::RaiseAttribute(Box::new(RaiseAttributeData {
-                        attribute_type: attribute as u32,
-                        xp_spent,
-                    })))
-                    .await
-            }
-            ClientCommand::RaiseVital { vital, xp_spent } => {
-                log::info!(">>> Raising Vital: {:?} (XP: {})", vital, xp_spent);
-                self.session
-                    .send_action(GameAction::RaiseVital(Box::new(RaiseVitalData {
-                        vital_type: vital as u32,
-                        xp_spent,
-                    })))
-                    .await
-            }
-            ClientCommand::RaiseSkill { skill, xp_spent } => {
-                log::info!(">>> Raising Skill: {:?} (XP: {})", skill, xp_spent);
-                self.session
-                    .send_action(GameAction::RaiseSkill(Box::new(RaiseSkillData {
-                        skill_type: skill as u32,
-                        xp_spent,
-                    })))
-                    .await
-            }
-            ClientCommand::TrainSkill { skill, credits } => {
-                log::info!(">>> Training Skill: {:?} (Credits: {})", skill, credits);
-                self.session
-                    .send_action(GameAction::TrainSkill(Box::new(TrainSkillData {
-                        skill_type: skill as u32,
-                        credits_spent: credits as i32,
-                    })))
+                self.send_game_action(GameAction::CancelAttack(Box::new(CancelAttackData {})))
                     .await
             }
             ClientCommand::GiveObjectRequest {
@@ -450,15 +475,14 @@ impl Client {
                     target,
                     amount
                 );
-                self.session
-                    .send_action(GameAction::GiveObjectRequest(Box::new(
-                        GiveObjectRequestData {
-                            target_guid: target,
-                            item_guid: item,
-                            amount,
-                        },
-                    )))
-                    .await
+                self.send_game_action(GameAction::GiveObjectRequest(Box::new(
+                    GiveObjectRequestData {
+                        target_guid: target,
+                        item_guid: item,
+                        amount,
+                    },
+                )))
+                .await
             }
             ClientCommand::Quit => {
                 log::info!("Disconnecting...");
@@ -474,44 +498,19 @@ impl Client {
                 self.disconnect().await?;
                 Ok(())
             }
+            _ => unreachable!(),
         }
     }
 
-    pub(super) async fn disconnect(&mut self) -> Result<()> {
-        let header = PacketHeader {
-            flags: packet_flags::DISCONNECT,
-            sequence: self.session.packet_sequence,
-            id: 0,
-            ..Default::default()
-        };
-        self.session.packet_sequence += 1;
-        self.session
-            .send_packet_to_addr(header, &[], self.session.server_addr)
-            .await?;
-
-        self.state = ClientState::Disconnected;
-        self.send_status_event();
-
-        Ok(())
-    }
-
     pub(super) async fn send_talk(&mut self, text: &str) -> Result<()> {
-        let msg = GameMessage::GameAction(Box::new(GameActionMessage {
-            sequence: 0,
-            action: GameAction::Talk(Box::new(TalkData {
-                message: text.to_string(),
-            })),
-        }));
-        self.session.send_message(&msg).await?;
-        Ok(())
+        self.send_game_action(GameAction::Talk(Box::new(TalkData {
+            message: text.to_string(),
+        })))
+        .await
     }
 
     pub(super) async fn send_login_complete(&mut self) -> Result<()> {
-        let msg = GameMessage::GameAction(Box::new(GameActionMessage {
-            sequence: 0,
-            action: GameAction::LoginComplete(Box::new(LoginCompleteData)),
-        }));
-        self.session.send_message(&msg).await?;
-        Ok(())
+        self.send_game_action(GameAction::LoginComplete(Box::new(LoginCompleteData)))
+            .await
     }
 }

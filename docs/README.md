@@ -17,6 +17,13 @@ The protocol is structured in layers, operating over **UDP**:
 
 ---
 
+## Testing & Fixtures
+
+We use "Gold Standard" fixture-driven testing to ensure bit-perfect parity with the protocol.
+- **[Fixture Policy](fixture_policy.md):** Defines how to generate, store, and use binary protocol fixtures.
+
+---
+
 ## Quick Start for Scratch Implementation
 
 If you are implementing a client from scratch:

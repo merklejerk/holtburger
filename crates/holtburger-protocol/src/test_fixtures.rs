@@ -44,8 +44,6 @@ pub const VIEW_CONTENTS: &[u8] = include_bytes!("../tests/fixtures/view_contents
 pub const ACTION_DROP_ITEM: &[u8] = include_bytes!("../tests/fixtures/action_drop_item.bin");
 pub const ACTION_PUT_ITEM: &[u8] = include_bytes!("../tests/fixtures/action_put_item.bin");
 pub const ACTION_USE: &[u8] = include_bytes!("../tests/fixtures/action_use.bin");
-pub const PLAYER_DESCRIPTION_TUI_2026_02_07: &[u8] =
-    include_bytes!("../tests/fixtures/player_description_tui_2026_02_07.bin");
 pub const GAMEPLAY_OPTIONS_TUI_2026_02_07: &[u8] =
     include_bytes!("../tests/fixtures/gameplay_options_tui_2026_02_07.bin");
 pub const ENCHANTMENT_SIMPLE: &[u8] = include_bytes!("../tests/fixtures/enchantment_simple.bin");
@@ -81,6 +79,7 @@ pub const UPDATE_VITAL_CURRENT_PRIVATE: &[u8] =
 pub const PLAYER_CREATE: &[u8] = include_bytes!("../tests/fixtures/player_create.bin");
 pub const OBJ_DESC_EVENT_DROP: &[u8] = include_bytes!("../tests/fixtures/obj_desc_event_drop.bin");
 
+pub const PING_RESPONSE: &[u8] = include_bytes!("../tests/fixtures/ping_response.bin");
 pub const ARMOR_PROFILE: &[u8] = include_bytes!("../tests/fixtures/armor_profile.bin");
 pub const CREATURE_PROFILE: &[u8] = include_bytes!("../tests/fixtures/creature_profile.bin");
 pub const WEAPON_PROFILE: &[u8] = include_bytes!("../tests/fixtures/weapon_profile.bin");

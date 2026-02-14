@@ -197,29 +197,29 @@ Resolve the six hygiene findings from issue #16 while preserving protocol correc
 - [x] Add/update transport parsing tests.
 
 #### Phase 2
-- [ ] Add Phase 2 helper method skeletons and route command groups to them.
-- [ ] Move auth/chat/system command logic into dedicated helpers (no behavior changes).
-- [ ] Move interaction/inventory/progression command logic into dedicated helpers.
-- [ ] Move movement/combat command logic into dedicated helpers, preserving prediction updates.
-- [ ] Add `send_game_action(...)` helper and replace inline GameAction envelope boilerplate.
-- [ ] Run `cargo check -p holtburger-core` and targeted tests for command paths.
-- [ ] Do a manual diff review of `Quit`, `SetNoClip`, and `MoveTo` side effects.
+- [x] Add Phase 2 helper method skeletons and route command groups to them.
+- [x] Move auth/chat/system command logic into dedicated helpers (no behavior changes).
+- [x] Move interaction/inventory/progression command logic into dedicated helpers.
+- [x] Move movement/combat command logic into dedicated helpers, preserving prediction updates.
+- [x] Add `send_game_action(...)` helper and replace inline GameAction envelope boilerplate.
+- [x] Run `cargo check -p holtburger-core` and targeted tests for command paths.
+- [x] Do a manual diff review of `Quit`, `SetNoClip`, and `MoveTo` side effects.
 
 #### Phase 3
-- [ ] Remove placeholder sequence assignments.
-- [ ] Route all affected action sequencing through central path.
-- [ ] Add/adjust tests for `GetAndWield` and `SplitToWield` sequencing.
+- [x] Remove placeholder sequence assignments.
+- [x] Route all affected action sequencing through central path.
+- [x] Add/adjust tests for `GetAndWield` and `SplitToWield` sequencing.
 
 #### Phase 4
-- [ ] Add/expand parity tests in `game_action.rs`.
-- [ ] Add/expand parity tests in `network/events.rs`.
-- [ ] Re-enable/modernize parity tests in `inventory/types.rs`.
-- [ ] Generate any new fixture bytes via ACE synthetic tests.
+- [x] Add/expand parity tests in `game_action.rs`.
+- [x] Add/expand parity tests in `network/events.rs`.
+- [x] Re-enable/modernize parity tests in `inventory/types.rs`.
+- [x] Generate any new fixture bytes via ACE synthetic tests.
 
 #### Phase 5
-- [ ] Investigate `PLAYER_DESCRIPTION_TUI_2026_02_07` no-parity path.
-- [ ] Resolve parity or document explicit bounded exception.
-- [ ] Publish canonical fixture policy in docs.
+- [x] Investigate `PLAYER_DESCRIPTION_TUI_2026_02_07` no-parity path.
+- [x] Resolve parity or document explicit bounded exception.
+- [x] Publish canonical fixture policy in docs.
 
 ---
 
@@ -230,8 +230,8 @@ Resolve the six hygiene findings from issue #16 while preserving protocol correc
 | 2026-02-14 | Plan organized into 5 phases mapped 1:1 to issue findings | Keeps execution traceable to issue #16 | Easier progress/risk tracking |
 | 2026-02-14 | Extracted `OptionalHeaderCursor` to its own module | Keep `session/mod.rs` from bloating and improve testability of parsing logic | High reuse for hash/offset/extraction |
 | 2026-02-14 | Keep sequencing semantics split across phases (abstraction in Phase 2, correctness switch in Phase 3) | Avoid mixing large refactor with protocol-sensitive sequence behavior changes | Smaller blast radius and cleaner validation |
-| TBD | Canonical fixture directory policy | Remove contributor confusion and drift | Affects fixture placement + docs |
-| TBD | `PLAYER_DESCRIPTION_TUI_2026_02_07` parity disposition | Clarify whether this is fixable or intentional | Affects test guarantees |
+| 2026-02-14 | Canonical fixture directory policy | Remove contributor confusion and drift | Consolidated in `docs/fixture_policy.md`. |
+| 2026-02-14 | `PLAYER_DESCRIPTION_TUI_2026_02_07` parity disposition | Clarify whether this is fixable or intentional | Documented as exception in `docs/fixture_policy.md` due to lossy enchantment bucket representation. |
 
 ---
 
@@ -242,11 +242,10 @@ Resolve the six hygiene findings from issue #16 while preserving protocol correc
 | 2026-02-14 | Planning-only: no code changes executed yet | ✅ | Next step is implementation phase-by-phase |
 | 2026-02-14 | `cargo test -p holtburger-core session` | ✅ | Phase 1 refactoring verified with existing and new tests |
 | 2026-02-14 | Phase 2 planning deep-dive against current `client/commands.rs` | ✅ | Helper boundaries and verification matrix added before implementation |
+| 2026-02-14 | `cargo test --all` | ✅ | Final project-wide validation of all phases and parity sweep |
 
 ---
 
-### D) Open Questions
+## 7) Summary of Completion
 
-1. Should fixture policy be split by ownership (`holtburger-protocol` fixtures for message codec tests, `holtburger-core` fixtures for core integration), or fully consolidated into one location?
-2. Is there known non-determinism behind `PLAYER_DESCRIPTION_TUI_2026_02_07`, or is this purely an implementation gap?
-3. Preferred implementation order after Phase 1: command decomposition first or parity gap closure first?
+All hygiene findings from Issue #16 have been resolved. The transport parsing is deduplicated, the command handler is modular, action sequencing is centralized, and protocol parity is verified with documented policies. No cap, the project is looking mint.

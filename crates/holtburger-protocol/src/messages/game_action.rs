@@ -267,3 +267,94 @@ impl ProtocolPack for GameActionMessage {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::messages::game_message::GameMessage;
+    use crate::test_fixtures;
+
+    fn assert_action_parity(fixture: &[u8], expected_sequence: u32) {
+        let mut offset = 0;
+        
+        // Some fixtures have the GameMessage header (0xF7B1), some don't.
+        let msg = if fixture.len() >= 4 && fixture[0..2] == [0xB1, 0xF7] {
+            GameMessage::unpack(fixture, &mut offset).expect("failed to unpack GameMessage")
+        } else {
+            // Raw GameActionMessage
+            GameMessage::GameAction(Box::new(GameActionMessage::unpack(fixture, &mut offset).expect("failed to unpack GameActionMessage")))
+        };
+        
+        if let GameMessage::GameAction(action_msg) = &msg {
+            assert_eq!(action_msg.sequence, expected_sequence);
+        } else {
+            panic!("expected GameMessage::GameAction, got {:?}", msg);
+        }
+
+        let mut packed = Vec::new();
+        msg.pack(&mut packed);
+        
+        // If the fixture didn't have the GameMessage header, we only expect the GameActionMessage part to match
+        if fixture.len() >= 4 && fixture[0..2] == [0xB1, 0xF7] {
+            assert_eq!(packed, fixture);
+        } else {
+            // packed will have 0xF7B1 prefix, fixture doesn't
+            assert_eq!(&packed[4..], fixture);
+        }
+    }
+
+    #[test]
+    fn test_action_talk_parity() {
+        assert_action_parity(test_fixtures::ACTION_TALK, 1);
+    }
+
+    #[test]
+    fn test_action_tell_parity() {
+        assert_action_parity(test_fixtures::ACTION_TELL, 2);
+    }
+
+    #[test]
+    fn test_action_ping_request_parity() {
+        assert_action_parity(test_fixtures::ACTION_PING_REQUEST, 3);
+    }
+
+    #[test]
+    fn test_action_login_complete_parity() {
+        assert_action_parity(test_fixtures::ACTION_LOGIN_COMPLETE, 8);
+    }
+
+    #[test]
+    fn test_action_identify_parity() {
+        assert_action_parity(test_fixtures::ACTION_IDENTIFY, 7);
+    }
+
+    #[test]
+    fn test_action_use_parity() {
+        assert_action_parity(test_fixtures::ACTION_USE, 6);
+    }
+
+    #[test]
+    fn test_action_drop_item_parity() {
+        assert_action_parity(test_fixtures::ACTION_DROP_ITEM, 4);
+    }
+
+    #[test]
+    fn test_action_put_item_parity() {
+        assert_action_parity(test_fixtures::ACTION_PUT_ITEM, 5);
+    }
+
+    #[test]
+    fn test_action_raise_attribute_parity() {
+        assert_action_parity(test_fixtures::ACTION_RAISE_ATTRIBUTE, 85);
+    }
+
+    #[test]
+    fn test_action_raise_skill_parity() {
+        assert_action_parity(test_fixtures::ACTION_RAISE_SKILL, 119);
+    }
+
+    #[test]
+    fn test_action_raise_vital_parity() {
+        assert_action_parity(test_fixtures::ACTION_RAISE_VITAL, 102);
+    }
+}

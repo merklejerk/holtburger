@@ -67,6 +67,10 @@ pub enum WorldEvent {
         enchantment: Enchantment,
         spell_name: Option<String>,
     },
+    SpellInfo {
+        spell_id: u32,
+        info: Box<holtburger_dat::file_type::spell_table::SpellBase>,
+    },
     EnchantmentRemoved {
         spell_id: u16,
         layer: u16,
@@ -83,6 +87,7 @@ pub enum WorldEvent {
         spell_id: u32,
     },
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
+    NoClipUpdated(bool),
     ServerTimeUpdate(f64),
     EnchantmentsPurged,
     DerivedStatsUpdated(Box<DerivedStatsData>),
@@ -101,6 +106,9 @@ pub enum WorldEvent {
     WeenieErrorWithString {
         error_id: u32,
         message: String,
+    },
+    UseDone {
+        error_id: u32,
     },
 }
 

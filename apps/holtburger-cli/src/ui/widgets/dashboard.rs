@@ -273,15 +273,28 @@ pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
     spells
         .iter()
-        .enumerate()
-        .map(|(i, &spell_id)| {
+        .map(|&spell_id| {
             let name = state
                 .spell_names
                 .get(&spell_id)
                 .cloned()
                 .unwrap_or_else(|| format!("Unknown Spell {}", spell_id));
 
-            let is_selected = i == state.selected_dashboard_index;
+            let is_selected = if let Some(idx) = state.dashboard_list_state.selected() {
+                state.selected_dashboard_index == idx
+                    && state
+                        .player_spells
+                        .get(state.selected_dashboard_index)
+                        .is_some_and(|&s| s == spell_id)
+            } else {
+                false
+            };
+
+            // This is a bit of a hack to ensure we have spell info for everything in the list
+            // without needing a separate pre-fetch step.
+            // Note: Since this is in the render loop, it only requests if not present.
+            // ClientCommand handling is async so it won't block render.
+            // Actually, we should really do this in handle_action or update_tick.
 
             let style = if is_selected {
                 Style::default()
@@ -295,7 +308,11 @@ pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 Span::styled(format!("{:<30}", name), style),
                 Span::raw(" "),
                 Span::styled(
-                    format!("ID: {:#06X}", spell_id),
+                    if let Some(info) = state.spell_info.get(&spell_id) {
+                        format!("Lvl: {}", info.power)
+                    } else {
+                        format!("ID: {:#06X}", spell_id)
+                    },
                     Style::default().fg(Color::DarkGray),
                 ),
             ]))

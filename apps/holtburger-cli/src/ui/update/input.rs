@@ -172,10 +172,6 @@ impl AppState {
                             commands.push(ClientCommand::Quit);
                             return commands;
                         }
-                        if input == "/logout" {
-                            commands.push(ClientCommand::Quit); // For now, treat as quit
-                            return commands;
-                        }
                         if input == "/clear" {
                             self.messages.clear();
                             self.input.clear();
@@ -234,17 +230,33 @@ impl AppState {
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
-                        if let Some(args) = input.strip_prefix("/autonomy ") {
-                            if let Ok(level) = args.parse::<u32>() {
-                                commands.push(ClientCommand::SetAutonomyLevel(level));
-                            }
+                        if input == "/sync" {
+                            commands.push(ClientCommand::SyncPosition);
                             self.input_history.push(input.clone());
                             self.history_index = None;
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
-                        if input == "/sync" {
-                            commands.push(ClientCommand::SyncPosition);
+                        if input == "/peace" {
+                            use holtburger_protocol::messages::combat::CombatMode;
+                            commands.push(ClientCommand::SetCombatMode(CombatMode::NonCombat));
+                            self.input_history.push(input.clone());
+                            self.history_index = None;
+                            self.focused_pane = self.previous_focused_pane;
+                            return commands;
+                        }
+                        if input == "/noclip" || input.starts_with("/noclip ") {
+                            let enabled = if input == "/noclip" {
+                                !self.noclip
+                            } else {
+                                match input.strip_prefix("/noclip ").unwrap_or("").trim() {
+                                    "on" => true,
+                                    "off" => false,
+                                    _ => !self.noclip,
+                                }
+                            };
+                            commands.push(ClientCommand::SetNoClip(enabled));
+                            self.noclip = enabled;
                             self.input_history.push(input.clone());
                             self.history_index = None;
                             self.focused_pane = self.previous_focused_pane;
@@ -260,7 +272,7 @@ impl AppState {
                         if input == "/help" {
                             self.log_chat(
                                 ChatMessageKind::System,
-                                "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /autonomy <n>, /sync"
+                                "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /peace, /noclip <on|off>"
                                     .to_string(),
                             );
                             self.log_chat(
@@ -498,7 +510,7 @@ impl AppState {
                                 }
                                 _ => {
                                     // Action processing
-                                    let (handler, debug_lines, target_guid) = {
+                                    let (handler, debug_lines, target_guid, is_spell_id) = {
                                         let target = match self.dashboard_tab {
                                             DashboardTab::Entities => {
                                                 let entities = self.get_filtered_nearby_tab();
@@ -557,32 +569,37 @@ impl AppState {
                                                 )
                                             });
 
-                                        let (debug_lines, guid) =
+                                        let (debug_lines, guid, is_spell_id) =
                                             if let Some(CommandHandler::ToggleDebug) = &handler {
-                                                let guid = if let CommandTarget::Entity(e) = target
-                                                {
-                                                    Some(e.guid)
-                                                } else {
-                                                    None
+                                                let (guid, spell_id) = match &target {
+                                                    CommandTarget::Entity(e) => {
+                                                        (Some(e.guid), None)
+                                                    }
+                                                    CommandTarget::Spell(id) => (None, Some(*id)),
+                                                    _ => (None, None),
                                                 };
-                                                let lines = debug::get_debug_info(&target, |id| {
-                                                    self.entities
-                                                        .get(&id)
-                                                        .map(|e| e.name.clone())
-                                                        .or_else(|| {
-                                                            if Some(id) == player_guid {
-                                                                Some("You".to_string())
-                                                            } else {
-                                                                None
-                                                            }
-                                                        })
-                                                });
-                                                (Some(lines), guid)
+                                                let lines = debug::get_debug_info(
+                                                    &target,
+                                                    |id| {
+                                                        self.entities
+                                                            .get(&id)
+                                                            .map(|e| e.name.clone())
+                                                            .or_else(|| {
+                                                                if Some(id) == player_guid {
+                                                                    Some("You".to_string())
+                                                                } else {
+                                                                    None
+                                                                }
+                                                            })
+                                                    },
+                                                    Some(&self.spell_info),
+                                                );
+                                                (Some(lines), guid, spell_id)
                                             } else {
-                                                (None, None)
+                                                (None, None, None)
                                             };
 
-                                        (handler, debug_lines, guid)
+                                        (handler, debug_lines, guid, is_spell_id)
                                     };
 
                                     if let Some(handler) = handler {
@@ -625,11 +642,18 @@ impl AppState {
                                                 }
                                             }
                                             CommandHandler::ToggleDebug => {
-                                                self.current_debug_guid = target_guid;
-                                                if let Some(lines) = debug_lines {
-                                                    self.context_view = ContextView::Custom;
-                                                    self.context_buffer = lines;
+                                                if let Some(spell_id) = is_spell_id {
+                                                    self.context_view =
+                                                        ContextView::Spell(spell_id);
                                                     self.context_scroll_offset = 0;
+                                                    self.refresh_context_buffer();
+                                                } else {
+                                                    self.current_debug_guid = target_guid;
+                                                    if let Some(lines) = debug_lines {
+                                                        self.context_view = ContextView::Custom;
+                                                        self.context_buffer = lines;
+                                                        self.context_scroll_offset = 0;
+                                                    }
                                                 }
                                             }
                                             CommandHandler::Move(guid) => {

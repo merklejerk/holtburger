@@ -21,5 +21,7 @@ This file documents bugs discovered in the ACE Server during development of Holt
 ### Fix PR
 [https://github.com/ACEmulator/ACE/pull/4411/changes](https://github.com/ACEmulator/ACE/pull/4411/changes)
 
-## Notes
+## Misc
 - You can cast *Other, vuln, and war spells on yourself (but war spells do no damage).
+- You don't have to face the target of your spells.
+- You can cast Infuse Mana Other on yourself. Breaks even at Level 3.

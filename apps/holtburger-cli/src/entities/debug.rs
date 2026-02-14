@@ -12,6 +12,9 @@ use ratatui::text::Line;
 pub fn get_debug_info(
     target: &CommandTarget,
     name_lookup: impl Fn(Guid) -> Option<String>,
+    spell_lookup: Option<
+        &std::collections::HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
+    >,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -298,6 +301,29 @@ pub fn get_debug_info(
         CommandTarget::Spell(spell_id) => {
             lines.push(Line::from(format!("DEBUG INFO: Spell {}", spell_id)));
             lines.push(Line::from(format!("Spell ID:   {}", spell_id)));
+
+            if let Some(info) = spell_lookup.and_then(|m| m.get(spell_id)) {
+                lines.push(Line::from(format!("Name:       {}", info.name)));
+                lines.push(Line::from(format!("Level:      {}", info.power)));
+                lines.push(Line::from(format!("Mana:       {}", info.base_mana)));
+                lines.push(Line::from(format!("School:     {:?}", info.school)));
+                lines.push(Line::from(format!("Category:   {}", info.category)));
+                lines.push(Line::from(format!("Desc:       {}", info.description)));
+                lines.push(Line::from(format!("Mana Mod:   {}", info.mana_mod)));
+
+                // Formula Version: 1=I, 2=II, etc.
+                lines.push(Line::from(format!("Formula V:  {}", info.formula_version)));
+
+                // Components (8 slots)
+                let comps: Vec<String> = info
+                    .raw_components
+                    .iter()
+                    .map(|id| format!("{:#X}", id))
+                    .collect();
+                lines.push(Line::from(format!("Comps:      {}", comps.join(", "))));
+            } else {
+                lines.push(Line::from("Info:       (Loading...)".to_string()));
+            }
         }
         CommandTarget::None => {}
     }

@@ -72,6 +72,17 @@ impl AppState {
                     WorldEvent::CombatModeUpdated(mode) => {
                         self.combat_mode = mode;
                     }
+                    WorldEvent::NoClipUpdated(enabled) => {
+                        self.noclip = enabled;
+                        let status = if enabled { "ENABLED" } else { "DISABLED" };
+                        self.log_chat(
+                            ChatMessageKind::System,
+                            format!(">> NoClip is now {}", status),
+                        );
+                    }
+                    WorldEvent::SpellInfo { spell_id, info } => {
+                        self.spell_info.insert(spell_id, info);
+                    }
                     WorldEvent::PropertyUpdated {
                         guid,
                         property_id,

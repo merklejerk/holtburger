@@ -107,6 +107,13 @@ impl WorldState {
             .map(|s| s.name.clone())
     }
 
+    pub fn resolve_spell_info(
+        &self,
+        spell_id: u32,
+    ) -> Option<holtburger_dat::file_type::spell_table::SpellBase> {
+        self.spell_table.as_ref()?.spells.get(&spell_id).cloned()
+    }
+
     pub fn get_player_enchanted_int(&self, key: PropertyInt) -> i32 {
         let base = self
             .entities
@@ -544,6 +551,11 @@ impl WorldState {
                         events.push(WorldEvent::WeenieErrorWithString {
                             error_id: data.error_id,
                             message: data.message.clone(),
+                        });
+                    }
+                    GameEvent::UseDone(data) => {
+                        events.push(WorldEvent::UseDone {
+                            error_id: data.error_id,
                         });
                     }
                     GameEvent::IdentifyObjectResponse(data) => {
@@ -1118,7 +1130,7 @@ impl WorldState {
         let step = vel * dt;
         let next_coords = coords + step;
 
-        if !self.is_colliding(&next_coords, lb, radius) {
+        if self.player.noclip || !self.is_colliding(&next_coords, lb, radius) {
             let mut next_pos = self.player.position;
             next_pos.coords = next_coords;
             events.extend(self.set_player_position(next_pos));

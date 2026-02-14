@@ -1,5 +1,6 @@
 use crate::client::types::{ClientCommand, ClientEvent};
 use crate::client::{Client, ClientState};
+use crate::world::WorldEvent;
 use anyhow::Result;
 use holtburger_common::Quaternion;
 use holtburger_protocol::messages::game_action::*;
@@ -134,14 +135,6 @@ impl Client {
                     })))
                     .await
             }
-            ClientCommand::SetAutonomyLevel(level) => {
-                log::info!(">>> Setting Autonomy Level: {}", level);
-                self.session
-                    .send_message(&GameMessage::AutonomyLevel(Box::new(AutonomyLevelData {
-                        level,
-                    })))
-                    .await
-            }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
                 self.session
@@ -185,6 +178,17 @@ impl Client {
                         )),
                     })))
                     .await
+            }
+            ClientCommand::RequestSpellInfo(spell_id) => {
+                if let Some(info) = self.world.resolve_spell_info(spell_id)
+                    && let Some(tx) = &self.event_tx
+                {
+                    let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::SpellInfo {
+                        spell_id,
+                        info: Box::new(info),
+                    })));
+                }
+                Ok(())
             }
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
@@ -366,6 +370,16 @@ impl Client {
                         })),
                     })))
                     .await
+            }
+            ClientCommand::SetNoClip(enabled) => {
+                log::info!(">>> NoClip set to: {}", enabled);
+                self.world.player.noclip = enabled;
+                if let Some(tx) = &self.event_tx {
+                    let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::NoClipUpdated(
+                        enabled,
+                    ))));
+                }
+                Ok(())
             }
             ClientCommand::CancelAttack => {
                 log::info!(">>> Canceling attack");

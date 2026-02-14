@@ -65,6 +65,7 @@ pub struct AppState {
     pub player_enchantments: Vec<Enchantment>,
     pub player_spells: Vec<u32>,
     pub spell_names: HashMap<u32, String>,
+    pub spell_info: HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
     pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub entities: HashMap<Guid, Entity>,
     pub server_time: Option<(f64, Instant)>,
@@ -74,6 +75,7 @@ pub struct AppState {
     pub net_stats: NetStats,
     pub world_name: String,
     pub combat_mode: CombatMode,
+    pub noclip: bool,
     pub inventory: HashSet<Guid>,
     pub equipment: HashMap<Guid, EquipMask>,
 }
@@ -165,21 +167,33 @@ impl AppState {
                     let player_guid = self.player_guid;
                     let entities_ref = &self.entities;
 
-                    self.context_buffer = crate::entities::debug::get_debug_info(&target, |id| {
-                        entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
-                            if Some(id) == player_guid {
-                                Some("You".to_string())
-                            } else {
-                                None
-                            }
-                        })
-                    });
+                    self.context_buffer = crate::entities::debug::get_debug_info(
+                        &target,
+                        |id| {
+                            entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
+                                if Some(id) == player_guid {
+                                    Some("You".to_string())
+                                } else {
+                                    None
+                                }
+                            })
+                        },
+                        Some(&self.spell_info),
+                    );
                 }
             }
             ContextView::Assess(guid) => {
                 if let Some(entity) = self.entities.get(&guid) {
                     self.context_buffer = crate::entities::assess::get_assess_info(entity);
                 }
+            }
+            ContextView::Spell(spell_id) => {
+                let target = crate::ui::types::CommandTarget::Spell(spell_id);
+                self.context_buffer = crate::entities::debug::get_debug_info(
+                    &target,
+                    |_| None,
+                    Some(&self.spell_info),
+                );
             }
             ContextView::Default => {
                 self.context_buffer.clear();

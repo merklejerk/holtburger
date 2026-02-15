@@ -98,7 +98,7 @@ async fn main() -> Result<()> {
     let mut wire_rx = client.subscribe_wire_events();
     let _state_rx = client.subscribe_state_events();
     let loop_tx = event_tx.clone();
-    
+
     // Bridge broadcast to legacy MPSC channel
     tokio::spawn(async move {
         while let Ok(msg) = wire_rx.recv().await {

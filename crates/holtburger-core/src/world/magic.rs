@@ -208,8 +208,10 @@ mod tests {
         let mut names = HashMap::new();
         names.insert(1234, "Fire Bolt".to_string());
 
-        let mut enc = Enchantment::default();
-        enc.spell_id = 1234;
+        let mut enc = Enchantment {
+            spell_id: 1234,
+            ..Default::default()
+        };
 
         // Test resolved name
         assert_eq!(get_enchantment_name(&enc, &names), "Fire Bolt");

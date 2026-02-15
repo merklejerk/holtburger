@@ -1,5 +1,5 @@
 use crossterm::event::{KeyEvent, MouseEvent};
-use holtburger_core::{WireEvent, StateEvent, ClientViewEvent};
+use holtburger_core::{ClientViewEvent, StateEvent, WireEvent};
 use ratatui::layout::Rect;
 
 #[derive(Debug)]

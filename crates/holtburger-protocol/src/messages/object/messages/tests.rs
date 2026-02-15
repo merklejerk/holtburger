@@ -1,21 +1,17 @@
-#[cfg(test)]
-mod tests {
-    use crate::messages::game_message::GameMessage;
-    use crate::messages::object::messages::*;
-    use crate::test_fixtures;
-    use crate::test_helpers::assert_pack_unpack_parity;
-    use byteorder::{LittleEndian, WriteBytesExt};
-    use holtburger_common::Guid;
-    use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{
-        ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
-    };
-    use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
+use crate::messages::game_message::GameMessage;
+use crate::messages::object::messages::*;
+use crate::test_fixtures;
+use crate::test_helpers::assert_pack_unpack_parity;
+use byteorder::{LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::{PhysicsDescriptionFlag, PhysicsState};
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
-    pub use crate::messages::object::types::{ModelChange, ModelData, SubPalette, TextureChange};
+pub use crate::messages::object::types::{ModelChange, ModelData, SubPalette, TextureChange};
 
-    #[test]
-    fn test_create_object_minimal() {
+#[test]
+fn test_create_object_minimal() {
         let body = test_fixtures::OBJECT_CREATE_MINIMAL;
         let mut data = Vec::new();
         data.write_u32::<LittleEndian>(0xF745).unwrap();
@@ -188,4 +184,3 @@ mod tests {
         }));
         assert_pack_unpack_parity(test_fixtures::OBJ_DESC_EVENT, &expected);
     }
-}

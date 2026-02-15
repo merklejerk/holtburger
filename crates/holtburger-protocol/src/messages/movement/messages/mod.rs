@@ -1,6 +1,7 @@
 pub mod motion;
 pub mod position;
 pub mod teleport;
+#[cfg(test)]
 mod tests;
 pub mod vector;
 

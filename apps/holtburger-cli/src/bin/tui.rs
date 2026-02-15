@@ -7,7 +7,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::ui::{self, AppState, ChatMessageKind};
-use holtburger_core::{Client, ClientCommand, WireEvent, ClientState};
+use holtburger_core::{Client, ClientCommand, ClientState, WireEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};

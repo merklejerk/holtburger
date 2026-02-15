@@ -10,7 +10,7 @@ The top-level entry point. It manages the `Session` (networking), the `WorldStat
 #### Event Streams
 We use a 3-layer event model to separate protocol fidelity from UI ergonomics:
 1. **`WireEvent`** (Protocol): 1:1 raw packet semantics. Use for debugging/replay.
-2. **`WorldEvent`** (State): Authoritative state mutations in core (e.g., `EntityMoved`, `VitalUpdated`).
+2. **`StateEvent`** (State): Authoritative state mutations in core (e.g., `EntityMoved`, `VitalUpdated`).
 3. **`ClientViewEvent`** ([src/client/types.rs](src/client/types.rs)): Ergonomic snapshots specifically modeled for UI consumption (e.g., `PlayerStatsSkillsUpdated`, `PlayerEnchantmentsUpdated`).
 
 #### Interaction
@@ -45,7 +45,7 @@ sequenceDiagram
     Sess->>Proto: Reassembled Payloads
     Proto->>Core: GameMessage (Discrete)
     Core->>World: Authoritative Mutation
-    World->>Core: WorldEvent (Delta/Signal)
+    World->>Core: StateEvent (Delta/Signal)
     Core->>View: translate_to_snapshot()
     View->>UI: ClientViewEvent (Ergonomic Snapshot)
 ```
@@ -53,8 +53,8 @@ sequenceDiagram
 1. **Network**: `Session` receives raw UDP fragments.
 2. **Protocol**: `holtburger-protocol` unpacks them into `GameMessage` structs.
 3. **Engine**: `Client` processes the message and emits intents to `WorldState`.
-4. **Authority**: `WorldState` performs the actual mutation and emits a `WorldEvent`.
-5. **Projection**: `Client` translates/normalizes `WorldEvent` signals into an authoritative **`ClientViewEvent`** snapshot.
+4. **Authority**: `WorldState` performs the actual mutation and emits a `StateEvent`.
+5. **Projection**: `Client` translates/normalizes `StateEvent` signals into an authoritative **`ClientViewEvent`** snapshot.
 6. **UI**: Consumers receive the stable, projection-based event via the broadcast subscription.
 
 ### Mutation Boundary

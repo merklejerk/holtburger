@@ -1,20 +1,20 @@
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, UIState};
 use holtburger_common::properties::PropertyInt;
-use holtburger_core::ClientEvent;
+use holtburger_core::WireEvent;
 use holtburger_protocol::messages::EquipMask;
 
 impl AppState {
-    pub(super) fn handle_received_event(&mut self, event: ClientEvent) {
+    pub(super) fn handle_received_event(&mut self, event: WireEvent) {
         match event {
-            ClientEvent::CharacterList(mut chars) => {
+            WireEvent::CharacterList(mut chars) => {
                 chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                 self.characters = chars;
                 self.state = UIState::CharacterSelection;
                 self.selected_character_index = 0;
                 self.logon_retry.reset();
             }
-            ClientEvent::LogMessage(msg) => {
+            WireEvent::LogMessage(msg) => {
                 let kind = if msg.contains("[ERROR]") {
                     ChatMessageKind::Error
                 } else if msg.contains("[WARN]") {
@@ -28,14 +28,11 @@ impl AppState {
                 };
                 self.log_chat(kind, msg);
             }
-            ClientEvent::PlayerEntered { guid, name } => {
+            WireEvent::PlayerEntered { guid, name } => {
                 self.player_guid = Some(guid);
                 self.character_name = Some(name);
             }
-            ClientEvent::World(_) => {
-                // All stateful WorldEvents are now handled via ClientViewEvent projection
-            }
-            ClientEvent::ResourcesResolved(resources) => {
+            WireEvent::ResourcesResolved(resources) => {
                 for resource in resources {
                     match resource {
                         holtburger_core::ResolvedResource::Spell { spell_id, info } => {
@@ -44,19 +41,19 @@ impl AppState {
                     }
                 }
             }
-            ClientEvent::ServerMessage(message) => {
+            WireEvent::ServerMessage(message) => {
                 self.log_chat(ChatMessageKind::System, message);
             }
-            ClientEvent::Chat { sender, message } => {
+            WireEvent::Chat { sender, message } => {
                 self.log_chat(ChatMessageKind::Chat, format!("{}: {}", sender, message));
             }
-            ClientEvent::Emote { sender, text } => {
+            WireEvent::Emote { sender, text } => {
                 self.log_chat(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
-            ClientEvent::PingResponse => {
+            WireEvent::PingResponse => {
                 self.log_chat(ChatMessageKind::System, "Pong!".to_string());
             }
-            ClientEvent::RawMessage(data) => {
+            WireEvent::RawMessage(data) => {
                 self.net_stats.bytes_in += data.len() as u64;
             }
             _ => {}

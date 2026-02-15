@@ -1,4 +1,3 @@
-use crate::world::WorldEvent;
 use crate::world::entity::Entity;
 use crate::world::stats::{Resistances, Vital};
 use holtburger_common::{Guid, Vector3};
@@ -7,6 +6,8 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+pub use crate::world::StateEvent;
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub enum ErrorSource {
@@ -33,7 +34,7 @@ pub enum ClientState {
 }
 
 #[derive(Debug, Clone)]
-pub enum ClientEvent {
+pub enum WireEvent {
     CharacterList(Vec<CharacterEntry>),
     PlayerEntered {
         guid: Guid,
@@ -54,7 +55,6 @@ pub enum ClientEvent {
         error: holtburger_protocol::errors::WeenieError,
     },
     BootAccount(String),
-    World(Box<WorldEvent>),
     GameMessage(Box<GameMessage>),
     Chat {
         sender: String,

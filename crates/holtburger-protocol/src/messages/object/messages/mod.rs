@@ -5,6 +5,7 @@ pub mod attribute;
 pub mod description;
 pub mod properties;
 pub mod sound;
+#[cfg(test)]
 mod tests;
 
 pub use self::attribute::*;

@@ -2,6 +2,7 @@ use crate::session::Session;
 use crate::world::WorldState;
 use anyhow::Result;
 use std::net::SocketAddr;
+use tokio::sync::broadcast;
 
 use super::{Client, ClientState, auth::AuthState, movement::MovementSystem};
 
@@ -70,11 +71,17 @@ impl Client {
             ));
         }
 
+        let (wire_event_tx, _) = broadcast::channel(1024);
+        let (state_event_tx, _) = broadcast::channel(512);
+        let (client_view_event_tx, _) = broadcast::channel(256);
+
         Ok(Client {
             session,
             world: WorldState::new(portal_dat, cell_dat),
             state: ClientState::Connected,
-            event_tx: None,
+            wire_event_tx,
+            state_event_tx,
+            client_view_event_tx,
             command_rx: None,
             message_dump_dir: None,
             message_counter: 0,

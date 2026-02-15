@@ -1,22 +1,20 @@
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, ContextView, UIState};
-use holtburger_common::Guid;
 use holtburger_common::properties::PropertyInt;
-use holtburger_core::ClientEvent;
-use holtburger_core::world::{DerivedStatsData, PlayerInfoData, WorldEvent};
+use holtburger_core::{StateEvent, WireEvent};
 use holtburger_protocol::messages::EquipMask;
 
 impl AppState {
-    pub(super) fn handle_received_event(&mut self, event: ClientEvent) {
+    pub(super) fn handle_received_event(&mut self, event: WireEvent) {
         match event {
-            ClientEvent::CharacterList(mut chars) => {
+            WireEvent::CharacterList(mut chars) => {
                 chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                 self.characters = chars;
                 self.state = UIState::CharacterSelection;
                 self.selected_character_index = 0;
                 self.logon_retry.reset();
             }
-            ClientEvent::LogMessage(msg) => {
+            WireEvent::LogMessage(msg) => {
                 let kind = if msg.contains("[ERROR]") {
                     ChatMessageKind::Error
                 } else if msg.contains("[WARN]") {
@@ -30,278 +28,11 @@ impl AppState {
                 };
                 self.log_chat(kind, msg);
             }
-            ClientEvent::PlayerEntered { guid, name } => {
+            WireEvent::PlayerEntered { guid, name } => {
                 self.player_guid = Some(guid);
                 self.character_name = Some(name);
             }
-            ClientEvent::World(world_event) => {
-                match *world_event {
-                    WorldEvent::PlayerInfo(data) => {
-                        let PlayerInfoData {
-                            guid,
-                            name,
-                            pos,
-                            attributes,
-                            vitals,
-                            skills,
-                            enchantments,
-                            spells,
-                            vitae,
-                            skill_table,
-                            spell_names,
-                            inventory,
-                            equipment,
-                        } = *data;
-                        self.player_guid = Some(guid);
-                        self.character_name = Some(name);
-                        if let Some(p) = pos {
-                            self.player_pos = Some(p);
-                        }
-                        self.attributes =
-                            attributes.into_iter().map(|a| (a.attr_type, a)).collect();
-                        self.vitals = vitals.into_iter().map(|v| (v.vital_type, v)).collect();
-                        self.skills = skills.into_iter().map(|s| (s.skill_type, s)).collect();
-                        self.player_enchantments = enchantments;
-                        self.player_spells = spells;
-                        self.vitae = vitae;
-                        self.spell_names = spell_names;
-                        self.skill_table = skill_table;
-                        self.inventory = inventory;
-                        self.equipment = equipment;
-                        self.refresh_context_buffer();
-                    }
-                    WorldEvent::CombatModeUpdated(mode) => {
-                        self.combat_mode = mode;
-                    }
-                    WorldEvent::NoClipUpdated(enabled) => {
-                        self.noclip = enabled;
-                        let status = if enabled { "ENABLED" } else { "DISABLED" };
-                        self.log_chat(
-                            ChatMessageKind::System,
-                            format!(">> NoClip is now {}", status),
-                        );
-                    }
-                    WorldEvent::PropertyUpdated {
-                        guid,
-                        property_id,
-                        value,
-                    } => {
-                        use holtburger_common::properties::PropertyInstanceId;
-                        use holtburger_common::properties::PropertyValue;
-
-                        if let Some(entity) = self.entities.get_mut(&guid) {
-                            match value {
-                                PropertyValue::Int(v) => {
-                                    entity.int_properties.insert(property_id, v);
-
-                                    if let Some(PropertyInt::CurrentWieldedLocation) =
-                                        PropertyInt::from_repr(property_id)
-                                    {
-                                        let mask = EquipMask::from_bits_truncate(v as u32);
-                                        if mask.is_empty() {
-                                            self.equipment.remove(&guid);
-                                        } else {
-                                            self.equipment.insert(guid, mask);
-                                        }
-                                    }
-                                }
-                                PropertyValue::Int64(v) => {
-                                    entity.int64_properties.insert(property_id, v);
-                                }
-                                PropertyValue::Bool(v) => {
-                                    entity.bool_properties.insert(property_id, v);
-                                }
-                                PropertyValue::Float(v) => {
-                                    entity.float_properties.insert(property_id, v);
-                                }
-                                PropertyValue::String(v) => {
-                                    entity.string_properties.insert(property_id, v);
-                                }
-                                PropertyValue::DID(v) => {
-                                    entity.did_properties.insert(property_id, v);
-                                }
-                                PropertyValue::IID(v) => {
-                                    entity.iid_properties.insert(property_id, v);
-                                    if let Some(prop) = PropertyInstanceId::from_repr(property_id) {
-                                        match prop {
-                                            PropertyInstanceId::Container => {
-                                                entity.container_id =
-                                                    if v == Guid::NULL { None } else { Some(v) };
-                                                if v != Guid::NULL {
-                                                    entity.position.landblock_id = Guid::NULL;
-                                                }
-
-                                                if let Some(pguid) = self.player_guid {
-                                                    let is_owned =
-                                                        v == pguid || self.inventory.contains(&v);
-                                                    self.update_inventory_recursive(guid, is_owned);
-                                                }
-                                            }
-                                            PropertyInstanceId::Wielder => {
-                                                entity.wielder_id =
-                                                    if v == Guid::NULL { None } else { Some(v) };
-                                                if v != Guid::NULL {
-                                                    entity.position.landblock_id = Guid::NULL;
-                                                }
-
-                                                if let Some(pguid) = self.player_guid {
-                                                    let is_owned = v == pguid;
-                                                    self.update_inventory_recursive(guid, is_owned);
-                                                }
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    WorldEvent::AttributeUpdated(attr) => {
-                        self.attributes.insert(attr.attr_type, attr);
-                    }
-                    WorldEvent::VitalUpdated(vital) => {
-                        self.vitals.insert(vital.vital_type, vital);
-                    }
-                    WorldEvent::SkillUpdated(skill) => {
-                        self.skills.insert(skill.skill_type, skill);
-                    }
-                    WorldEvent::LevelInfoUpdated(info) => {
-                        self.level_info = Some(info);
-                    }
-                    WorldEvent::DerivedStatsUpdated(data) => {
-                        let DerivedStatsData {
-                            attributes,
-                            vitals,
-                            skills,
-                            resistances,
-                            armor,
-                            vitae,
-                        } = *data;
-                        for attr in attributes {
-                            self.attributes.insert(attr.attr_type, attr);
-                        }
-                        for vital in vitals {
-                            self.vitals.insert(vital.vital_type, vital);
-                        }
-                        for skill in skills {
-                            self.skills.insert(skill.skill_type, skill);
-                        }
-                        self.resistances = resistances;
-                        self.armor = armor;
-                        self.vitae = vitae;
-                    }
-                    WorldEvent::EntityMoved { guid, pos } => {
-                        if Some(guid) == self.player_guid {
-                            self.player_pos = Some(pos);
-                        }
-                        if let Some(entity) = self.entities.get_mut(&guid) {
-                            entity.position = pos;
-                        }
-                    }
-                    WorldEvent::ForcedReposition { guid, pos, .. } => {
-                        if Some(guid) == self.player_guid {
-                            self.player_pos = Some(pos);
-                        }
-                        if let Some(entity) = self.entities.get_mut(&guid) {
-                            entity.position = pos;
-                        }
-                    }
-                    WorldEvent::EntityIdentified(entity) => {
-                        let guid = entity.guid;
-                        self.log_chat(
-                            ChatMessageKind::System,
-                            format!("Identified: {}", entity.name),
-                        );
-                        self.entities.insert(guid, *entity);
-
-                        // If we are currently debugging this entity, keep it in debug view.
-                        // Otherwise, switch to Assess view for the newly identified entity.
-                        if self.current_debug_guid == Some(guid)
-                            && self.context_view == ContextView::Custom
-                        {
-                            self.refresh_context_buffer();
-                        } else {
-                            self.context_view = ContextView::Assess(guid);
-                            self.refresh_context_buffer();
-                        }
-                    }
-                    WorldEvent::EntityVectorUpdated { .. } => {
-                        // For now we don't do anything with vectors in the CLI,
-                        // but we handle it to avoid the wildcard match.
-                    }
-                    WorldEvent::EntitySpawned(entity) => {
-                        let guid = entity.guid;
-                        let container_id = entity.container_id;
-                        let wielder_id = entity.wielder_id;
-
-                        if Some(guid) == self.player_guid {
-                            self.player_pos = Some(entity.position);
-                        }
-
-                        // Update inventory tracking for new entities spawned inside containers
-                        if let Some(pguid) = self.player_guid {
-                            if let Some(cid) = container_id
-                                && (cid == pguid || self.inventory.contains(&cid))
-                            {
-                                self.inventory.insert(guid);
-                            }
-                            if let Some(wid) = wielder_id
-                                && wid == pguid
-                            {
-                                self.inventory.insert(guid);
-                            }
-                        }
-
-                        self.entities.insert(guid, *entity);
-                    }
-                    WorldEvent::EntityDespawned(guid) => {
-                        self.update_inventory_recursive(guid, false);
-                        self.entities.remove(&guid);
-                    }
-                    WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
-                        self.player_enchantments = enchantments;
-                    }
-                    WorldEvent::SpellUpdated { spell_id, name } => {
-                        if !self.player_spells.contains(&spell_id) {
-                            self.player_spells.push(spell_id);
-                        }
-                        if let Some(n) = name {
-                            self.spell_names.insert(spell_id, n);
-                        }
-                    }
-                    WorldEvent::SpellRemoved { spell_id } => {
-                        self.player_spells.retain(|&s| s != spell_id);
-                    }
-                    WorldEvent::ServerTimeUpdate(time) => {
-                        self.server_time = Some((time, std::time::Instant::now()));
-                    }
-                    WorldEvent::WeenieError { error_id } => {
-                        use holtburger_protocol::errors::WeenieError;
-                        let error = WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
-                        if error != WeenieError::None {
-                            self.log_chat(
-                                ChatMessageKind::Warning,
-                                format!("[!] Weenie Error: {:?} (0x{:08X})", error, error_id),
-                            );
-                        }
-                    }
-                    WorldEvent::WeenieErrorWithString { error_id, message } => {
-                        use holtburger_protocol::errors::WeenieError;
-                        let error = WeenieError::from_repr(error_id).unwrap_or(WeenieError::None);
-                        if error != WeenieError::None {
-                            self.log_chat(
-                                ChatMessageKind::Warning,
-                                format!(
-                                    "[!] Weenie Error: {:?} (0x{:08X}) - {}",
-                                    error, error_id, message
-                                ),
-                            );
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            ClientEvent::ResourcesResolved(resources) => {
+            WireEvent::ResourcesResolved(resources) => {
                 for resource in resources {
                     match resource {
                         holtburger_core::ResolvedResource::Spell { spell_id, info } => {
@@ -310,69 +41,187 @@ impl AppState {
                     }
                 }
             }
-            ClientEvent::StatusUpdate { state } => {
+            WireEvent::ServerMessage(message) => {
+                self.log_chat(ChatMessageKind::System, message);
+            }
+            WireEvent::Chat { sender, message } => {
+                self.log_chat(ChatMessageKind::Chat, format!("{}: {}", sender, message));
+            }
+            WireEvent::Emote { sender, text } => {
+                self.log_chat(ChatMessageKind::Emote, format!("{} {}", sender, text));
+            }
+            WireEvent::PingResponse => {
+                self.log_chat(ChatMessageKind::System, "Pong!".to_string());
+            }
+            WireEvent::RawMessage(data) => {
+                self.net_stats.bytes_in += data.len() as u64;
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_received_state_event(&mut self, event: StateEvent) {
+        if let StateEvent::EntityIdentified(entity) = event {
+            let guid = entity.guid;
+            self.entities.insert(guid, *entity);
+            self.context_view = ContextView::Assess(guid);
+        }
+    }
+
+    pub(super) fn handle_client_view_event(&mut self, event: holtburger_core::ClientViewEvent) {
+        use holtburger_core::ClientViewEvent;
+        match event {
+            ClientViewEvent::StatusUpdate { state } => {
                 self.core_state = state;
                 if self.core_state == holtburger_core::ClientState::InWorld {
                     self.logon_retry.reset();
                     self.enter_retry.reset();
                 }
             }
-            ClientEvent::ServerMessage(message) => {
-                self.log_chat(ChatMessageKind::System, message);
-            }
-            ClientEvent::Chat { sender, message } => {
-                self.log_chat(ChatMessageKind::Chat, format!("{}: {}", sender, message));
-            }
-            ClientEvent::Emote { sender, text } => {
-                self.log_chat(ChatMessageKind::Emote, format!("{} {}", sender, text));
-            }
-            ClientEvent::InventoryServerSaveFailed { item_guid, error } => {
-                self.log_chat(
-                    ChatMessageKind::Warning,
-                    format!(
-                        "[!] Inventory save failed (item 0x{:08X}): {:?}",
-                        item_guid.0, error
-                    ),
-                );
-            }
-            ClientEvent::CharacterError(error) => {
+            ClientViewEvent::ErrorRaised {
+                source: _,
+                kind,
+                code,
+                message,
+                is_transient: _,
+            } => {
+                use holtburger_core::ErrorKind;
                 use holtburger_protocol::errors::CharacterError;
-                if error == CharacterError::Logon {
-                    self.logon_retry.schedule();
-                    self.log_chat(
-                        ChatMessageKind::Warning,
-                        format!(
-                            "Account already logged on. Retrying in {}s...",
-                            self.logon_retry.backoff_secs
-                        ),
-                    );
-                } else if error == CharacterError::EnterGameCharacterInWorld {
-                    self.enter_retry.schedule();
-                    self.log_chat(
-                        ChatMessageKind::Warning,
-                        format!(
-                            "Character still in world. Retrying in {}s...",
-                            self.enter_retry.backoff_secs
-                        ),
-                    );
-                } else if error != CharacterError::None {
-                    self.log_chat(
-                        ChatMessageKind::Error,
-                        format!("[!] Character Error: {:?}", error),
-                    );
+
+                if let (ErrorKind::Character, Some(error_code)) = (kind, code) {
+                    let error =
+                        CharacterError::from_repr(error_code).unwrap_or(CharacterError::None);
+                    if error == CharacterError::Logon {
+                        self.logon_retry.schedule();
+                        self.log_chat(
+                            ChatMessageKind::Warning,
+                            format!(
+                                "Account already logged on. Retrying in {}s...",
+                                self.logon_retry.backoff_secs
+                            ),
+                        );
+                        return;
+                    } else if error == CharacterError::EnterGameCharacterInWorld {
+                        self.enter_retry.schedule();
+                        self.log_chat(
+                            ChatMessageKind::Warning,
+                            format!(
+                                "Character still in world. Retrying in {}s...",
+                                self.enter_retry.backoff_secs
+                            ),
+                        );
+                        return;
+                    }
+                }
+
+                let kind = match kind {
+                    ErrorKind::Weenie | ErrorKind::Character | ErrorKind::Client => {
+                        ChatMessageKind::Error
+                    }
+                    ErrorKind::Transport => ChatMessageKind::Warning,
+                };
+                self.log_chat(kind, format!("[!] {}", message));
+            }
+            ClientViewEvent::PlayerEnchantmentsUpdated {
+                enchantments,
+                resolved_names,
+            } => {
+                self.player_enchantments = enchantments;
+                for (id, name) in resolved_names {
+                    self.spell_names.insert(id, name);
                 }
             }
-            ClientEvent::ClientError(err) => {
-                self.log_chat(ChatMessageKind::Error, format!("[!] Client Error: {}", err));
-                self.state = UIState::Chat;
+            ClientViewEvent::PlayerStatsSkillsUpdated {
+                attributes,
+                skills,
+                resistances,
+                armor,
+                vitae,
+                level_info,
+            } => {
+                self.attributes = attributes;
+                self.skills = skills;
+                self.resistances = resistances;
+                self.armor = armor;
+                self.vitae = vitae;
+                self.level_info = Some(level_info);
             }
-            ClientEvent::PingResponse => {
-                self.log_chat(ChatMessageKind::System, "Pong!".to_string());
+            ClientViewEvent::PlayerVitalUpdated { vital } => {
+                self.vitals.insert(vital.vital_type, vital);
             }
-            ClientEvent::RawMessage(data) => {
-                self.net_stats.bytes_in += data.len() as u64;
+            ClientViewEvent::PlayerSpellsUpdated {
+                spell_ids,
+                resolved,
+            } => {
+                self.player_spells = spell_ids;
+                for summary in resolved {
+                    if let (id, Some(name)) = (summary.spell_id, summary.name) {
+                        self.spell_names.insert(id, name);
+                    }
+                    // We could also populate self.spell_info here if we added enough fields to ResolvedSpellSummary
+                }
             }
-            _ => {}
+            ClientViewEvent::EntityUpserted { entity } => {
+                let guid = entity.guid;
+                if Some(guid) == self.player_guid {
+                    self.player_pos = Some(entity.position);
+                }
+
+                // Update inventory tracking
+                if let Some(pguid) = self.player_guid {
+                    if let Some(cid) = entity.container_id
+                        && (cid == pguid || self.inventory.contains(&cid))
+                    {
+                        self.inventory.insert(guid);
+                    } else if let Some(wid) = entity.wielder_id
+                        && wid == pguid
+                    {
+                        self.inventory.insert(guid);
+                    } else {
+                        // If it's no longer in our inventory/wielded, remove it
+                        self.inventory.remove(&guid);
+                    }
+                }
+
+                // Update equipment tracking
+                if let Some(&loc) = entity
+                    .int_properties
+                    .get(&(PropertyInt::CurrentWieldedLocation as u32))
+                {
+                    let mask = EquipMask::from_bits_truncate(loc as u32);
+                    if mask.is_empty() {
+                        self.equipment.remove(&guid);
+                    } else {
+                        self.equipment.insert(guid, mask);
+                    }
+                } else {
+                    self.equipment.remove(&guid);
+                }
+
+                self.entities.insert(entity.guid, *entity);
+            }
+            ClientViewEvent::EntityRemoved { guid } => {
+                self.update_inventory_recursive(guid, false);
+                self.entities.remove(&guid);
+                self.equipment.remove(&guid);
+                if self.current_debug_guid == Some(guid) {
+                    self.current_debug_guid = None;
+                }
+            }
+            ClientViewEvent::ServerTimeUpdated { time } => {
+                self.server_time = Some((time, std::time::Instant::now()));
+            }
+            ClientViewEvent::CombatModeUpdated { mode } => {
+                self.combat_mode = mode;
+            }
+            ClientViewEvent::NoClipUpdated { enabled } => {
+                self.noclip = enabled;
+                let status = if enabled { "ENABLED" } else { "DISABLED" };
+                self.log_chat(
+                    ChatMessageKind::System,
+                    format!(">> NoClip is now {}", status),
+                );
+            }
         }
     }
 }

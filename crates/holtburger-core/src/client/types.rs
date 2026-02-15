@@ -1,8 +1,28 @@
-use crate::world::WorldEvent;
+use crate::world::entity::Entity;
+use crate::world::stats::{Resistances, Vital};
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+pub use crate::world::StateEvent;
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum ErrorSource {
+    Wire,
+    State,
+    Client,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum ErrorKind {
+    Weenie,
+    Character,
+    Client,
+    Transport,
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ClientState {
@@ -14,7 +34,7 @@ pub enum ClientState {
 }
 
 #[derive(Debug, Clone)]
-pub enum ClientEvent {
+pub enum WireEvent {
     CharacterList(Vec<CharacterEntry>),
     PlayerEntered {
         guid: Guid,
@@ -35,7 +55,6 @@ pub enum ClientEvent {
         error: holtburger_protocol::errors::WeenieError,
     },
     BootAccount(String),
-    World(Box<WorldEvent>),
     GameMessage(Box<GameMessage>),
     Chat {
         sender: String,
@@ -56,6 +75,62 @@ pub enum ClientEvent {
         error_id: u32,
     },
     ResourcesResolved(Vec<ResolvedResource>),
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedSpellSummary {
+    pub spell_id: u32,
+    pub name: Option<String>,
+    pub school: Option<u32>,
+    pub icon: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ClientViewEvent {
+    StatusUpdate {
+        state: ClientState,
+    },
+    PlayerStatsSkillsUpdated {
+        attributes: HashMap<crate::world::stats::AttributeType, crate::world::stats::Attribute>,
+        skills: HashMap<crate::world::stats::SkillType, crate::world::stats::Skill>,
+        resistances: Resistances,
+        armor: i32,
+        vitae: f32,
+        level_info: crate::world::stats::CharacterLevelInfo,
+    },
+    PlayerVitalUpdated {
+        vital: Vital,
+    },
+    PlayerSpellsUpdated {
+        spell_ids: Vec<u32>,
+        resolved: Vec<ResolvedSpellSummary>,
+    },
+    PlayerEnchantmentsUpdated {
+        enchantments: Vec<Enchantment>,
+        resolved_names: HashMap<u32, String>,
+    },
+    ErrorRaised {
+        source: ErrorSource,
+        kind: ErrorKind,
+        code: Option<u32>,
+        message: String,
+        is_transient: bool,
+    },
+    EntityUpserted {
+        entity: Box<Entity>,
+    },
+    EntityRemoved {
+        guid: Guid,
+    },
+    ServerTimeUpdated {
+        time: f64,
+    },
+    CombatModeUpdated {
+        mode: holtburger_protocol::messages::combat::CombatMode,
+    },
+    NoClipUpdated {
+        enabled: bool,
+    },
 }
 
 #[derive(Debug, Clone)]

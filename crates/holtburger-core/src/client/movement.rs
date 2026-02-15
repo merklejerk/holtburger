@@ -1,6 +1,6 @@
-use crate::client::ClientEvent;
+use crate::client::WireEvent;
 use crate::session::Session;
-use crate::world::WorldState;
+use crate::world::{StateEvent, WorldState};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
@@ -8,7 +8,6 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionFlags;
 use holtburger_protocol::messages::*;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
 
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
@@ -63,15 +62,14 @@ impl MovementSystem {
         _dt: f32,
         world: &mut WorldState,
         session: &mut Session,
-        _event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
-    ) -> Result<()> {
+    ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
         let player_pos = world.player.position.coords;
         let target_pos = if let Some(target) = world.entities.get(target_guid) {
             target.position.coords
         } else {
             log::warn!("Approach aborted: Target 0x{:08X} not found", target_guid);
             self.move_target = None;
-            return Ok(());
+            return Ok((Vec::new(), Vec::new()));
         };
 
         let diff = target_pos - player_pos;
@@ -81,7 +79,7 @@ impl MovementSystem {
             log::info!("Arrived at target 0x{:08X}", target_guid);
             self.move_target = None;
             world.set_player_velocity(holtburger_common::Vector3::zero());
-            return Ok(());
+            return Ok((Vec::new(), Vec::new()));
         }
 
         // Stuck detection
@@ -95,7 +93,7 @@ impl MovementSystem {
                 log::warn!("Approach aborted: Player seems stuck");
                 self.move_target = None;
                 world.set_player_velocity(holtburger_common::Vector3::zero());
-                return Ok(());
+                return Ok((Vec::new(), Vec::new()));
             }
             self.last_move_pos = world.player.position;
             self.last_move_pos_time = now;
@@ -131,7 +129,7 @@ impl MovementSystem {
                 .await?;
         }
 
-        Ok(())
+        Ok((Vec::new(), Vec::new()))
     }
 
     pub(super) async fn handle_server_controlled_movement(
@@ -139,8 +137,8 @@ impl MovementSystem {
         data: MovementEventData,
         world: &mut WorldState,
         session: &mut Session,
-        event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
-    ) -> Result<()> {
+    ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
+        let mut wire_events = Vec::new();
         log::info!(
             ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
             data.movement_type,
@@ -229,23 +227,14 @@ impl MovementSystem {
                 distance,
                 AUTO_MOVE_DISTANCE_LIMIT
             );
-            if let Some(tx) = event_tx {
-                let _ = tx.send(ClientEvent::ClientError(format!(
-                    "Item is too far away ({:.1}m). Move closer!",
-                    distance
-                )));
-            }
-            return Ok(());
+            wire_events.push(WireEvent::ClientError(format!(
+                "Item is too far away ({:.1}m). Move closer!",
+                distance
+            )));
+            return Ok((wire_events, Vec::new()));
         }
 
-        let world_events = world.set_player_position(next_pos);
-
-        // Emit events so TUI knows we "arrived"
-        if let Some(tx) = event_tx {
-            for event in world_events {
-                let _ = tx.send(ClientEvent::World(Box::new(event)));
-            }
-        }
+        let state_events = world.set_player_position(next_pos);
 
         // Respond with AutonomousPosition heartbeat to confirm arrival
         // We use AutonomousPosition instead of MoveToState because MoveToState
@@ -274,7 +263,7 @@ impl MovementSystem {
             .send_message(&GameMessage::GameAction(Box::new(action)))
             .await?;
 
-        Ok(())
+        Ok((wire_events, state_events))
     }
 }
 

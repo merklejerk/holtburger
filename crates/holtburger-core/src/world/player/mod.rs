@@ -619,12 +619,10 @@ mod tests {
         let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: player.guid,
             sequence: 1,
-            event: GameEvent::MagicPurgeBadEnchantments(Box::new(
-                MagicPurgeBadEnchantmentsData {
-                    target: player.guid,
-                    sequence: 1,
-                },
-            )),
+            event: GameEvent::MagicPurgeBadEnchantments(Box::new(MagicPurgeBadEnchantmentsData {
+                target: player.guid,
+                sequence: 1,
+            })),
         }));
 
         let mut events = Vec::new();
@@ -636,9 +634,11 @@ mod tests {
         assert!(player.enchantments.iter().any(|e| e.spell_id == 300));
         assert_eq!(player.vitae, 0.95);
 
-        assert!(events
-            .iter()
-            .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated { .. }))
+        );
         let derived_vitae = events.iter().find_map(|e| match e {
             WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
             _ => None,

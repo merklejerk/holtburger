@@ -1,5 +1,5 @@
 use crate::world::entity::Entity;
-use crate::world::stats::{Resistances, Vital};
+use crate::world::stats::Resistances;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::magic::Enchantment;
@@ -98,8 +98,8 @@ pub enum ClientViewEvent {
         vitae: f32,
         level_info: crate::world::stats::CharacterLevelInfo,
     },
-    PlayerVitalUpdated {
-        vital: Vital,
+    PlayerVitalsUpdated {
+        vitals: HashMap<crate::world::stats::VitalType, crate::world::stats::Vital>,
     },
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,

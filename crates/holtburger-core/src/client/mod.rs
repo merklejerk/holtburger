@@ -1,6 +1,7 @@
 use crate::session::Session;
 use crate::world::{StateEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
@@ -160,13 +161,18 @@ impl Client {
                         vitae: self.world.player.vitae,
                         level_info: level_info.clone(),
                     });
-            }
-            StateEvent::VitalUpdated(vital) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::PlayerVitalUpdated {
-                        vital: vital.clone(),
+                    .send(ClientViewEvent::PlayerVitalsUpdated {
+                        vitals: self.world.player.vitals.clone(),
                     });
+            }
+            StateEvent::VitalUpdated(vital) => {
+                let mut vitals = HashMap::new();
+                vitals.insert(vital.vital_type, vital.clone());
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
             StateEvent::SpellUpdated { .. } | StateEvent::SpellRemoved { .. } => {
                 let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();

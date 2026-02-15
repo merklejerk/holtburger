@@ -74,15 +74,6 @@ pub enum WireEvent {
     UseDone {
         error_id: u32,
     },
-    ResourcesResolved(Vec<ResolvedResource>),
-}
-
-#[derive(Debug, Clone)]
-pub struct ResolvedSpellSummary {
-    pub spell_id: u32,
-    pub name: Option<String>,
-    pub school: Option<u32>,
-    pub icon: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -103,7 +94,7 @@ pub enum ClientViewEvent {
     },
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
-        resolved: Vec<ResolvedSpellSummary>,
+        spells: HashMap<u32, holtburger_dat::file_type::spell_table::SpellBase>,
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
@@ -130,19 +121,6 @@ pub enum ClientViewEvent {
     },
     NoClipUpdated {
         enabled: bool,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub enum ResourceDescriptor {
-    Spell(u32),
-}
-
-#[derive(Debug, Clone)]
-pub enum ResolvedResource {
-    Spell {
-        spell_id: u32,
-        info: Box<holtburger_dat::file_type::spell_table::SpellBase>,
     },
 }
 
@@ -219,7 +197,6 @@ pub enum ClientCommand {
     CastUntargetedSpell {
         spell_id: u32,
     },
-    ResolveResources(Vec<ResourceDescriptor>),
     SetCombatMode(holtburger_protocol::messages::combat::CombatMode),
     SetNoClip(bool),
     CancelAttack,

@@ -79,7 +79,7 @@ impl WorldState {
         })
     }
 
-    fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
+    pub fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
         let mut names = std::collections::HashMap::new();
         if let Some(table) = &self.spell_table {
             // Player's known spells

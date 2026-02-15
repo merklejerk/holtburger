@@ -1,8 +1,26 @@
+use crate::world::entity::Entity;
 use crate::world::WorldEvent;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum ErrorSource {
+    Wire,
+    State,
+    Client,
+}
+
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum ErrorKind {
+    Weenie,
+    Character,
+    Client,
+    Transport,
+}
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ClientState {
@@ -62,6 +80,23 @@ pub enum ClientEvent {
 pub enum ClientViewEvent {
     StatusUpdate {
         state: ClientState,
+    },
+    PlayerEnchantmentsUpdated {
+        enchantments: Vec<Enchantment>,
+        resolved_names: HashMap<u32, String>,
+    },
+    ErrorRaised {
+        source: ErrorSource,
+        kind: ErrorKind,
+        code: Option<u32>,
+        message: String,
+        is_transient: bool,
+    },
+    EntityUpserted {
+        entity: Box<Entity>,
+    },
+    EntityRemoved {
+        guid: Guid,
     },
 }
 

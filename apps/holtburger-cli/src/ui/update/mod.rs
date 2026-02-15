@@ -29,6 +29,10 @@ impl AppState {
                 self.handle_received_event(event);
                 self.refresh_context_buffer();
             }
+            AppAction::ReceivedViewEvent(event) => {
+                self.handle_client_view_event(event);
+                self.refresh_context_buffer();
+            }
         }
 
         // Track bytes_out for commands

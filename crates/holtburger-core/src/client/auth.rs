@@ -69,7 +69,7 @@ impl AuthState {
         session: &mut Session,
     ) -> Result<()> {
         self.character_id = Some(char_id);
-        
+
         // Wait up to 1s for the server seq to advance (helps ensure our ACK reflects the latest server packet)
         let prev_seq = session.last_server_seq;
         let mut waited = 0u64;

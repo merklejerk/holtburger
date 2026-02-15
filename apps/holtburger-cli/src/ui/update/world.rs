@@ -146,8 +146,10 @@ impl AppState {
                 self.vitae = vitae;
                 self.level_info = Some(level_info);
             }
-            ClientViewEvent::PlayerVitalUpdated { vital } => {
-                self.vitals.insert(vital.vital_type, vital);
+            ClientViewEvent::PlayerVitalsUpdated { vitals } => {
+                for (vt, v) in vitals {
+                    self.vitals.insert(vt, v);
+                }
             }
             ClientViewEvent::PlayerSpellsUpdated {
                 spell_ids,

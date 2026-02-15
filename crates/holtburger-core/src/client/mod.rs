@@ -2,7 +2,7 @@ use crate::session::Session;
 use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 mod auth;
 mod builder;
@@ -22,6 +22,7 @@ pub struct Client {
     pub world: WorldState,
     state: ClientState,
     event_tx: Option<mpsc::UnboundedSender<ClientEvent>>,
+    client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     pub message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
@@ -38,12 +39,21 @@ impl Client {
         self.command_rx = Some(rx);
     }
 
+    pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
+        self.client_view_event_tx.subscribe()
+    }
+
     fn send_status_event(&self) {
         if let Some(tx) = &self.event_tx {
             let _ = tx.send(ClientEvent::StatusUpdate {
                 state: self.state.clone(),
             });
         }
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::StatusUpdate {
+                state: self.state.clone(),
+            });
     }
 
     pub async fn run(&mut self) -> Result<()> {

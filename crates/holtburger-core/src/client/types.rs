@@ -59,6 +59,13 @@ pub enum ClientEvent {
 }
 
 #[derive(Debug, Clone)]
+pub enum ClientViewEvent {
+    StatusUpdate {
+        state: ClientState,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub enum ResourceDescriptor {
     Spell(u32),
 }

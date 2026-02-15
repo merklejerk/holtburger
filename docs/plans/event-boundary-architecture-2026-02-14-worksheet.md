@@ -346,9 +346,9 @@ The following defaults are adopted for implementation unless explicitly revised:
 ### A) Checklist
 
 #### Phase 1
-- [ ] Introduce `ClientViewEvent` type and emission channel.
-- [ ] Add parallel subscription API for `ClientViewEvent`.
-- [ ] Keep `WireEvent` + `StateEvent` available for their intended roles.
+- [x] Introduce `ClientViewEvent` type and emission channel.
+- [x] Add parallel subscription API for `ClientViewEvent`.
+- [x] Keep `WireEvent` + `StateEvent` available for their intended roles.
 
 #### Phase 2
 - [ ] Add `PlayerEnchantmentsUpdated` `ClientViewEvent`.
@@ -387,8 +387,8 @@ The following defaults are adopted for implementation unless explicitly revised:
 
 | Date | Check | Result | Notes |
 |---|---|---|---|
-| YYYY-MM-DD | `cargo check -p holtburger-core` | ⬜ | |
-| YYYY-MM-DD | `cargo check -p holtburger-cli` | ⬜ | |
+| 2026-02-14 | `cargo check -p holtburger-core` | ✅ | Phase 1 stream plumbing compiles in core |
+| 2026-02-14 | `cargo check -p holtburger-cli` | ✅ | Existing CLI consumer unchanged and compiling |
 | YYYY-MM-DD | Focused event-order tests | ⬜ | Enchant/update/purge ordering |
 | YYYY-MM-DD | Manual TUI smoke via user-run | ⬜ | Verify panel/state correctness |
 

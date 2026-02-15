@@ -1,16 +1,14 @@
-#[cfg(test)]
-mod tests {
-    use crate::messages::game_message::GameMessage;
-    use crate::messages::movement::messages::*;
-    use crate::messages::movement::types::PositionType;
-    use crate::test_fixtures;
-    use crate::test_helpers::assert_pack_unpack_parity;
-    use holtburger_common::Guid;
-    use holtburger_common::position::WorldPosition;
-    use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
+use crate::messages::game_message::GameMessage;
+use crate::messages::movement::messages::*;
+use crate::messages::movement::types::PositionType;
+use crate::test_fixtures;
+use crate::test_helpers::assert_pack_unpack_parity;
+use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
+use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
-    #[test]
-    fn test_public_update_position_fixture() {
+#[test]
+fn test_player_movement_pack_unpack() {
         let expected = GameMessage::PublicUpdatePosition(Box::new(PublicUpdatePositionData {
             sequence: 12,
             guid: Guid(0x50000001),
@@ -183,4 +181,3 @@ mod tests {
         params.pack(&mut buf);
         assert_eq!(buf.len(), 12);
     }
-}

@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
     let event_tx_inner = event_tx.clone();
     tokio::spawn(async move {
         while let Ok(event) = wire_rx.recv().await {
-            if let Err(_) = event_tx_inner.send(event) {
+            if event_tx_inner.send(event).is_err() {
                 break;
             }
         }

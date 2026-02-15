@@ -1,6 +1,6 @@
 use crate::client::WireEvent;
 use crate::session::Session;
-use crate::world::{WorldState, StateEvent};
+use crate::world::{StateEvent, WorldState};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};

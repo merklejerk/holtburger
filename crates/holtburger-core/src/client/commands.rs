@@ -1,4 +1,4 @@
-use crate::client::types::{ClientCommand, WireEvent, ResolvedResource, ResourceDescriptor};
+use crate::client::types::{ClientCommand, ResolvedResource, ResourceDescriptor, WireEvent};
 use crate::client::{Client, ClientState};
 use crate::world::StateEvent;
 use anyhow::Result;

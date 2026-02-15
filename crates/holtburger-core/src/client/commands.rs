@@ -1,4 +1,4 @@
-use crate::client::types::{ClientCommand, ResolvedResource, ResourceDescriptor, WireEvent};
+use crate::client::types::ClientCommand;
 use crate::client::{Client, ClientState};
 use crate::world::StateEvent;
 use anyhow::Result;
@@ -25,8 +25,9 @@ impl Client {
             | ClientCommand::Use(_)
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::CastTargetedSpell { .. }
-            | ClientCommand::CastUntargetedSpell { .. }
-            | ClientCommand::ResolveResources(_) => self.handle_interaction_command(cmd).await,
+            | ClientCommand::CastUntargetedSpell { .. } => {
+                self.handle_interaction_command(cmd).await
+            }
 
             ClientCommand::Drop(_)
             | ClientCommand::Get(_)
@@ -185,25 +186,6 @@ impl Client {
                     CastUntargetedSpellData { spell_id },
                 )))
                 .await
-            }
-            ClientCommand::ResolveResources(descriptors) => {
-                let mut results = Vec::new();
-                for descriptor in descriptors {
-                    match descriptor {
-                        ResourceDescriptor::Spell(spell_id) => {
-                            if let Some(info) = self.world.resolve_spell_info(spell_id) {
-                                results.push(ResolvedResource::Spell {
-                                    spell_id,
-                                    info: Box::new(info),
-                                });
-                            }
-                        }
-                    }
-                }
-                if !results.is_empty() {
-                    self.emit_wire_event(WireEvent::ResourcesResolved(results));
-                }
-                Ok(())
             }
             _ => unreachable!(),
         }

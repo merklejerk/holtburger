@@ -218,7 +218,7 @@ pub struct Resistances {
     pub nether: f32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct CharacterLevelInfo {
     pub level: u32,
     pub current_xp: u64,

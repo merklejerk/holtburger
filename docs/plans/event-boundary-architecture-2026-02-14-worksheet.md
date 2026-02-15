@@ -356,9 +356,9 @@ The following defaults are adopted for implementation unless explicitly revised:
 - [x] Add entity transport abstraction event(s).
 
 #### Phase 3
-- [ ] Add combined stats+skills `ClientViewEvent` snapshot.
-- [ ] Keep vitals separate and verify update cadence behavior.
-- [ ] Add `PlayerSpellsUpdated` + resource-enrichment hooks.
+- [x] Add combined stats+skills `ClientViewEvent` snapshot.
+- [x] Keep vitals separate and verify update cadence behavior.
+- [x] Add `PlayerSpellsUpdated` + resource-enrichment hooks.
 
 #### Phase 4
 - [ ] Migrate TUI handlers to selected `ClientViewEvent` variants.
@@ -382,6 +382,7 @@ The following defaults are adopted for implementation unless explicitly revised:
 | 2026-02-14 | Use parallel `ClientViewEvent` channel by default | Avoid overloading `ClientEvent` and keep boundaries clear | Cleaner long-term API |
 | 2026-02-14 | Add mandatory cleanup phase | Prevent permanent migration/legacy code | Lower maintenance burden |
 | 2026-02-14 | Single-PR cutover (no compatibility window) | Avoid legacy migration code | Faster convergence to steady-state architecture |
+| 2026-02-14 | Trigger snapshots on Character Selection Success / PlayerDescription | Vitals/Stats/Spells initial sync | Ensure UI is ready immediately on logon |
 
 ### C) Verification Log
 
@@ -390,6 +391,7 @@ The following defaults are adopted for implementation unless explicitly revised:
 | 2026-02-14 | `cargo check -p holtburger-core` | ✅ | Phase 1 stream plumbing compiles in core |
 | 2026-02-14 | `cargo check -p holtburger-cli` | ✅ | Existing CLI consumer unchanged and compiling |
 | 2026-02-14 | Phase 2 implementation | ✅ | Enchants, Errors, and Entity abstractions implemented and projected correctly. |
+| 2026-02-14 | Phase 3 implementation | ✅ | Stats, Skills, and Spells abstractions implemented. Character Selection triggers initial sync. |
 | YYYY-MM-DD | Focused event-order tests | ⬜ | Enchant/update/purge ordering |
 | YYYY-MM-DD | Manual TUI smoke via user-run | ⬜ | Verify panel/state correctness |
 

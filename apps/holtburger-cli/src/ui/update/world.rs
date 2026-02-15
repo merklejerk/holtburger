@@ -258,61 +258,8 @@ impl AppState {
                         self.update_inventory_recursive(guid, false);
                         self.entities.remove(&guid);
                     }
-                    // Handle inventory events if they exist in WorldEvent, otherwise skip
-                    // For now, these were placeholders and need to match actual WorldEvent variants
-                    WorldEvent::EnchantmentUpdated {
-                        enchantment,
-                        spell_name,
-                    } => {
-                        if let Some(name) = spell_name {
-                            self.spell_names.insert(enchantment.spell_id as u32, name);
-                        }
-                        if let Some(existing) = self.player_enchantments.iter_mut().find(|e| {
-                            e.spell_id == enchantment.spell_id && e.layer == enchantment.layer
-                        }) {
-                            *existing = enchantment;
-                        } else {
-                            self.player_enchantments.push(enchantment);
-                        }
-                    }
-                    WorldEvent::EnchantmentRemoved { spell_id, layer } => {
-                        // Find the enchantment before removing it to log its name
-                        if let Some(enchant) = self
-                            .player_enchantments
-                            .iter()
-                            .find(|e| e.spell_id == spell_id && e.layer == layer)
-                            && self.verbosity >= 1
-                        {
-                            self.log_chat(
-                                ChatMessageKind::System,
-                                format!(
-                                    "Spell removed: ID {} (Layer {})",
-                                    enchant.spell_id, enchant.layer
-                                ),
-                            );
-                        }
-                        self.player_enchantments
-                            .retain(|e| e.spell_id != spell_id || e.layer != layer);
-                    }
-                    WorldEvent::EnchantmentDispelled { spell_id, layer } => {
-                        if let Some(enchant) = self
-                            .player_enchantments
-                            .iter()
-                            .find(|e| e.spell_id == spell_id && e.layer == layer)
-                        {
-                            self.log_chat(
-                                ChatMessageKind::System,
-                                format!(
-                                    "Spell DISPELLED: ID {} (Layer {})",
-                                    enchant.spell_id, enchant.layer
-                                ),
-                            );
-                        }
-                        self.player_enchantments
-                            .retain(|e| e.spell_id != spell_id || e.layer != layer);
-                    }
-                    WorldEvent::EnchantmentsPurged => {
-                        self.player_enchantments.clear();
+                    WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
+                        self.player_enchantments = enchantments;
                     }
                     WorldEvent::SpellUpdated { spell_id, name } => {
                         if !self.player_spells.contains(&spell_id) {

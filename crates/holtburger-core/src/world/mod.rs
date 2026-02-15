@@ -63,17 +63,8 @@ pub enum WorldEvent {
         value: PropertyValue,
     },
     PlayerInfo(Box<PlayerInfoData>),
-    EnchantmentUpdated {
-        enchantment: Enchantment,
-        spell_name: Option<String>,
-    },
-    EnchantmentRemoved {
-        spell_id: u16,
-        layer: u16,
-    },
-    EnchantmentDispelled {
-        spell_id: u16,
-        layer: u16,
+    PlayerEnchantmentsUpdated {
+        enchantments: Vec<Enchantment>,
     },
     SpellUpdated {
         spell_id: u32,
@@ -85,7 +76,6 @@ pub enum WorldEvent {
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
     NoClipUpdated(bool),
     ServerTimeUpdate(f64),
-    EnchantmentsPurged,
     DerivedStatsUpdated(Box<DerivedStatsData>),
     EntityStateUpdated {
         guid: Guid,

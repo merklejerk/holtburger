@@ -1,7 +1,7 @@
 use crate::ui::model::AppState;
-use crate::ui::types::{ChatMessageKind, UIState};
+use crate::ui::types::{ChatMessageKind, ContextView, UIState};
 use holtburger_common::properties::PropertyInt;
-use holtburger_core::WireEvent;
+use holtburger_core::{StateEvent, WireEvent};
 use holtburger_protocol::messages::EquipMask;
 
 impl AppState {
@@ -57,6 +57,14 @@ impl AppState {
                 self.net_stats.bytes_in += data.len() as u64;
             }
             _ => {}
+        }
+    }
+
+    pub(super) fn handle_received_state_event(&mut self, event: StateEvent) {
+        if let StateEvent::EntityIdentified(entity) = event {
+            let guid = entity.guid;
+            self.entities.insert(guid, *entity);
+            self.context_view = ContextView::Assess(guid);
         }
     }
 

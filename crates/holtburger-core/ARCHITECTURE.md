@@ -16,6 +16,7 @@ We use a 3-layer event model to separate protocol fidelity from UI ergonomics:
 #### Interaction
 - **ClientCommand**: Commands sent from the UI to the engine (e.g., `MoveTo`, `Use`).
 - **Subscription**: Apps should prefer subscribing to the `ClientViewEvent` broadcast channel for a stable, low-drift view of the authoritative game state.
+- **Producer-Only Pattern**: The Core Engine is a strictly *producer-only* for these event streams. It never consumes its own broadcast events internally, as that would introduce unnecessary async latency and potential for state drift. It always uses direct, synchronous logic to move from Wire -> State -> View.
 
 ### 2. World State ([src/world/](src/world/))
 This module tracks the current state of the 3D world:

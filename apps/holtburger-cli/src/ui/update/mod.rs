@@ -29,8 +29,8 @@ impl AppState {
                 self.handle_received_event(event);
                 self.refresh_context_buffer();
             }
-            AppAction::ReceivedStateEvent(_event) => {
-                // Currently most state is handled via the view projection
+            AppAction::ReceivedStateEvent(event) => {
+                self.handle_received_state_event(event);
                 self.refresh_context_buffer();
             }
             AppAction::ReceivedViewEvent(event) => {

@@ -513,9 +513,8 @@ impl PlayerState {
                             } else {
                                 self.enchantments.push(*enchantment);
                             }
-                            events.push(WorldEvent::EnchantmentUpdated {
-                                enchantment: *enchantment,
-                                spell_name: None,
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
                             true
@@ -539,11 +538,10 @@ impl PlayerState {
                                 } else {
                                     self.enchantments.push(*enchantment);
                                 }
-                                events.push(WorldEvent::EnchantmentUpdated {
-                                    enchantment: *enchantment,
-                                    spell_name: None,
-                                });
                             }
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
+                            });
                             self.emit_derived_stats(events);
                             true
                         } else {
@@ -560,9 +558,8 @@ impl PlayerState {
                         if *target == self.guid {
                             self.enchantments
                                 .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                            events.push(WorldEvent::EnchantmentRemoved {
-                                spell_id: *spell_id,
-                                layer: *layer,
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
                             true
@@ -576,11 +573,10 @@ impl PlayerState {
                             for (spell_id, layer) in spells {
                                 self.enchantments
                                     .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                                events.push(WorldEvent::EnchantmentRemoved {
-                                    spell_id: *spell_id,
-                                    layer: *layer,
-                                });
                             }
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
+                            });
                             self.emit_derived_stats(events);
                             true
                         } else {
@@ -597,9 +593,8 @@ impl PlayerState {
                         if *target == self.guid {
                             self.enchantments
                                 .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                            events.push(WorldEvent::EnchantmentDispelled {
-                                spell_id: *spell_id,
-                                layer: *layer,
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
                             true
@@ -613,11 +608,10 @@ impl PlayerState {
                             for (spell_id, layer) in spells {
                                 self.enchantments
                                     .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                                events.push(WorldEvent::EnchantmentDispelled {
-                                    spell_id: *spell_id,
-                                    layer: *layer,
-                                });
                             }
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
+                            });
                             self.emit_derived_stats(events);
                             true
                         } else {
@@ -627,8 +621,13 @@ impl PlayerState {
                     GameEvent::MagicPurgeEnchantments(data) => {
                         let MagicPurgeEnchantmentsData { target, .. } = &**data;
                         if *target == self.guid {
-                            self.enchantments.clear();
-                            events.push(WorldEvent::EnchantmentsPurged);
+                            self.enchantments.retain(|e| {
+                                let flags = holtburger_common::properties::EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
+                                flags.contains(holtburger_common::properties::EnchantmentTypeFlags::VITAE)
+                            });
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
+                            });
                             self.emit_derived_stats(events);
                             true
                         } else {
@@ -639,9 +638,13 @@ impl PlayerState {
                         let MagicPurgeBadEnchantmentsData { target, .. } = &**data;
                         if *target == self.guid {
                             self.enchantments.retain(|e| {
-                                (e.stat_mod_type & holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL.bits()) != 0
+                                let flags = holtburger_common::properties::EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
+                                flags.contains(holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
+                                    || flags.contains(holtburger_common::properties::EnchantmentTypeFlags::VITAE)
                             });
-                            events.push(WorldEvent::EnchantmentsPurged);
+                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                                enchantments: self.enchantments.clone(),
+                            });
                             self.emit_derived_stats(events);
                             true
                         } else {

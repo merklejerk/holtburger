@@ -1,5 +1,5 @@
 use super::PlayerState;
-use crate::world::WorldEvent;
+use crate::world::StateEvent;
 use crate::world::player::types::LastSentStats;
 use crate::world::stats;
 use holtburger_common::properties::{EnchantmentTypeFlags, PropertyFloat, PropertyInt};
@@ -192,7 +192,7 @@ impl PlayerState {
         }
     }
 
-    pub fn emit_derived_stats(&mut self, events: &mut Vec<WorldEvent>) {
+    pub fn emit_derived_stats(&mut self, events: &mut Vec<StateEvent>) {
         // Recalculate Attributes
         let attr_types: Vec<_> = self.attributes.keys().cloned().collect();
         for attr_type in attr_types {
@@ -287,7 +287,7 @@ impl PlayerState {
 
         self.last_sent_stats = Some(current.clone());
 
-        events.push(WorldEvent::DerivedStatsUpdated(Box::new(
+        events.push(StateEvent::DerivedStatsUpdated(Box::new(
             crate::world::DerivedStatsData {
                 attributes: current.attributes,
                 vitals: current.vitals,

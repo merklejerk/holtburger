@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use holtburger_core::{Client, ClientCommand, ClientEvent};
+use holtburger_core::{Client, ClientCommand, WireEvent};
 use tokio::sync::mpsc;
 
 #[derive(clap::Subcommand, Debug, Clone)]
@@ -94,8 +94,17 @@ async fn main() -> Result<()> {
 
         client.session.set_capture(&capture_path)?;
     }
-    client.set_event_tx(event_tx);
     client.set_command_rx(command_rx);
+    let mut wire_rx = client.subscribe_wire_events();
+    let _state_rx = client.subscribe_state_events();
+    let loop_tx = event_tx.clone();
+
+    // Bridge broadcast to legacy MPSC channel
+    tokio::spawn(async move {
+        while let Ok(msg) = wire_rx.recv().await {
+            let _ = loop_tx.send(msg);
+        }
+    });
 
     let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
     let client_handle = tokio::spawn(async move {
@@ -114,7 +123,7 @@ async fn main() -> Result<()> {
         Commands::ListCharacters => loop {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
-                    if let ClientEvent::CharacterList(chars) = event {
+                    if let WireEvent::CharacterList(chars) = event {
                         println!("Characters for account {}:", args.account);
                         for character in chars { println!("  - {} (ID: {:08X})", character.name, character.guid); }
                         let _ = command_tx.send(ClientCommand::Quit);
@@ -136,11 +145,11 @@ async fn main() -> Result<()> {
                 tokio::select! {
                     Some(event) = event_rx.recv() => {
                         match event {
-                            ClientEvent::LogMessage(msg) => { println!("{}", msg); }
-                            ClientEvent::ServerMessage(msg) => { println!("{}", msg); }
-                            ClientEvent::Chat { sender, message } => { println!("{}: {}", sender, message); }
-                            ClientEvent::Emote { sender, text } => { println!("{} {}", sender, text); }
-                            ClientEvent::CharacterList(chars) => {
+                            WireEvent::LogMessage(msg) => { println!("{}", msg); }
+                            WireEvent::ServerMessage(msg) => { println!("{}", msg); }
+                            WireEvent::Chat { sender, message } => { println!("{}: {}", sender, message); }
+                            WireEvent::Emote { sender, text } => { println!("{} {}", sender, text); }
+                            WireEvent::CharacterList(chars) => {
                                 println!("Available characters: {:?}", chars.iter().map(|c| &c.name).collect::<Vec<_>>());
                                 if character_pref.is_none() {
                                     println!("Selecting first character...");

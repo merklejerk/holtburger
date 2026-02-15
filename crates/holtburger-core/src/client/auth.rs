@@ -1,4 +1,3 @@
-use crate::client::types::*;
 use crate::session::Session;
 use anyhow::Result;
 use holtburger_common::Guid;
@@ -8,10 +7,9 @@ use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use std::time::Duration;
-use tokio::sync::mpsc;
 
 /// Finds a character Guid based on a preference string (either 1-based index or case-insensitive name).
-fn find_preferred_character(
+pub(super) fn find_preferred_character(
     characters: &[CharacterEntry],
     preference: &Option<String>,
 ) -> Option<Guid> {
@@ -53,82 +51,25 @@ impl AuthState {
         }
     }
 
-    pub(super) async fn handle_character_list(
-        &mut self,
-        data: CharacterListData,
-        session: &mut Session,
-        client_state: &mut ClientState,
-        event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
-    ) -> Result<()> {
-        self.characters = data.characters.clone();
-
-        log::info!("Character List for account: {}", data.account_name);
-        for (i, c) in self.characters.iter().enumerate() {
-            log::info!("  [{}] {} (0x{:08X})", i + 1, c.name, c.guid);
-        }
-
-        if let Some(id) = find_preferred_character(&self.characters, &self.character_preference) {
-            return self
-                .select_character(id, session, client_state, event_tx)
-                .await;
-        }
-
-        *client_state = ClientState::CharacterSelection(self.characters.clone());
-        if let Some(tx) = event_tx {
-            let _ = tx.send(ClientEvent::StatusUpdate {
-                state: client_state.clone(),
-            });
-            let _ = tx.send(ClientEvent::CharacterList(self.characters.clone()));
-        }
-        Ok(())
-    }
-
-    pub(super) fn handle_character_error(
-        &mut self,
-        error_code: u32,
-        event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
-    ) -> Result<()> {
-        if let Some(tx) = event_tx {
-            let error = CharacterError::from_repr(error_code).unwrap_or(CharacterError::None);
-            let _ = tx.send(ClientEvent::CharacterError(error));
-        }
+    pub(super) fn handle_character_error(&mut self, error_code: u32) -> CharacterError {
+        let error = CharacterError::from_repr(error_code).unwrap_or(CharacterError::None);
         log::warn!("Character Error received: 0x{:08X}", error_code);
-        Ok(())
+        error
     }
 
-    pub(super) fn handle_boot_account(
-        &mut self,
-        data: BootAccountData,
-        client_state: &mut ClientState,
-        event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
-    ) -> Result<()> {
+    pub(super) fn handle_boot_account(&mut self, data: BootAccountData) -> String {
         let reason = data.reason.unwrap_or_default();
-        *client_state = ClientState::Disconnected;
-
-        if let Some(tx) = event_tx {
-            let _ = tx.send(ClientEvent::StatusUpdate {
-                state: client_state.clone(),
-            });
-            let _ = tx.send(ClientEvent::BootAccount(reason.clone()));
-        }
         log::warn!("Boot Account received: {}", reason);
-        Ok(())
+        reason
     }
 
     pub(super) async fn select_character(
         &mut self,
         char_id: Guid,
         session: &mut Session,
-        client_state: &mut ClientState,
-        event_tx: &Option<mpsc::UnboundedSender<ClientEvent>>,
     ) -> Result<()> {
         self.character_id = Some(char_id);
-        *client_state = ClientState::EnteringWorld;
-        if let Some(tx) = event_tx {
-            let _ = tx.send(ClientEvent::StatusUpdate {
-                state: client_state.clone(),
-            });
-        }
+
         // Wait up to 1s for the server seq to advance (helps ensure our ACK reflects the latest server packet)
         let prev_seq = session.last_server_seq;
         let mut waited = 0u64;

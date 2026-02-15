@@ -532,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_vector_update_routing() {
-        use crate::world::WorldEvent;
+        use crate::world::StateEvent;
         use holtburger_common::Vector3;
         use holtburger_protocol::messages::GameMessage;
         use holtburger_protocol::messages::VectorUpdateData;
@@ -554,7 +554,7 @@ mod tests {
 
         assert!(handled);
         assert_eq!(events.len(), 1);
-        if let WorldEvent::EntityVectorUpdated {
+        if let StateEvent::EntityVectorUpdated {
             guid,
             velocity,
             omega,
@@ -570,7 +570,7 @@ mod tests {
 
     #[test]
     fn test_magic_purge_bad_enchantments_preserves_vitae() {
-        use crate::world::WorldEvent;
+        use crate::world::StateEvent;
         use holtburger_protocol::messages::{
             GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsData,
         };
@@ -637,10 +637,10 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated { .. }))
+                .any(|e| matches!(e, StateEvent::PlayerEnchantmentsUpdated { .. }))
         );
         let derived_vitae = events.iter().find_map(|e| match e {
-            WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+            StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),
             _ => None,
         });
         assert_eq!(derived_vitae, Some(0.95));
@@ -648,7 +648,7 @@ mod tests {
 
     #[test]
     fn test_magic_purge_enchantments_preserves_vitae_only() {
-        use crate::world::WorldEvent;
+        use crate::world::StateEvent;
         use holtburger_protocol::messages::{
             GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsData,
             MagicUpdateEnchantmentData,
@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(player.vitae, 0.88);
 
         let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
-            WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+            StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),
             _ => None,
         });
         assert_eq!(latest_derived_vitae, Some(0.88));

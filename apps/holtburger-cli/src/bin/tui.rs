@@ -7,7 +7,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::ui::{self, AppState, ChatMessageKind};
-use holtburger_core::{Client, ClientCommand, ClientEvent, ClientState};
+use holtburger_core::{Client, ClientCommand, ClientState, WireEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -16,7 +16,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 struct TuiLogger {
-    tx: mpsc::UnboundedSender<ClientEvent>,
+    tx: mpsc::UnboundedSender<WireEvent>,
     file: Option<Mutex<File>>,
     verbosity: u8,
 }
@@ -47,7 +47,7 @@ impl log::Log for TuiLogger {
             };
 
             if should_send {
-                let _ = self.tx.send(ClientEvent::LogMessage(log_msg));
+                let _ = self.tx.send(WireEvent::LogMessage(log_msg));
             }
         }
     }
@@ -177,8 +177,10 @@ async fn main() -> Result<()> {
         let _ = client.session.set_capture(&capture_path);
     }
 
-    client.set_event_tx(event_tx);
     client.set_command_rx(command_rx);
+    let mut wire_view_rx = client.subscribe_wire_events();
+    let mut state_view_rx = client.subscribe_state_events();
+    let mut view_event_rx = client.subscribe_client_view_events();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -310,33 +312,44 @@ async fn main() -> Result<()> {
             }
         }
 
-        while let Ok(event) = event_rx.try_recv() {
+        while let Ok(event) = wire_view_rx.try_recv() {
             match &event {
-                ClientEvent::CharacterList(_)
-                | ClientEvent::PlayerEntered { .. }
-                | ClientEvent::StatusUpdate { .. } => {
+                WireEvent::CharacterList(_)
+                | WireEvent::PlayerEntered { .. }
+                | WireEvent::StatusUpdate { .. } => {
                     if args.verbose >= 2 {
-                        log::info!("ClientEvent: {:?}", event);
+                        log::info!("WireEvent: {:?}", event);
                     }
                 }
-                ClientEvent::World(world_event) => {
-                    if args.verbose >= 2 {
-                        log::info!("WorldEvent: {:?}", world_event);
-                    }
-                }
-                ClientEvent::GameMessage(msg) => {
+                WireEvent::GameMessage(msg) => {
                     use holtburger_protocol::messages::GameMessage;
                     if let GameMessage::ServerName(data) = msg.as_ref() {
                         app_state.world_name = data.name.clone();
                     }
                 }
-                ClientEvent::RawMessage(_data) => {
+                WireEvent::RawMessage(_data) => {
                     // Logged by holtburger-core
                 }
                 _ => {}
             }
 
             app_state.handle_action(ui::AppAction::ReceivedEvent(event));
+        }
+
+        while let Ok(event) = state_view_rx.try_recv() {
+            if args.verbose >= 2 {
+                log::info!("StateEvent: {:?}", event);
+            }
+            app_state.handle_action(ui::AppAction::ReceivedStateEvent(event));
+        }
+
+        while let Ok(event) = event_rx.try_recv() {
+            // These are logs/signals from the TUI itself
+            app_state.handle_action(ui::AppAction::ReceivedEvent(event));
+        }
+
+        while let Ok(event) = view_event_rx.try_recv() {
+            app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
         }
     }
 

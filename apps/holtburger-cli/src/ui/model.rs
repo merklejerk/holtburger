@@ -21,7 +21,8 @@ use super::types::{
     UIState,
 };
 use crate::entities::filter::{EntityFilter, filter_entities};
-use ratatui::text::Line;
+use ratatui::style::{Color, Style};
+use ratatui::text::{Line, Span};
 
 pub struct AppState {
     pub account_name: String,
@@ -185,6 +186,11 @@ impl AppState {
             ContextView::Assess(guid) => {
                 if let Some(entity) = self.entities.get(&guid) {
                     self.context_buffer = crate::entities::assess::get_assess_info(entity);
+                } else {
+                    self.context_buffer = vec![Line::from(vec![
+                        Span::styled("Error: ", Style::default().fg(Color::Red)),
+                        Span::styled("Entity data missing", Style::default().fg(Color::Gray)),
+                    ])];
                 }
             }
             ContextView::Spell(spell_id) => {

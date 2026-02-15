@@ -569,6 +569,155 @@ mod tests {
     }
 
     #[test]
+    fn test_magic_purge_bad_enchantments_preserves_vitae() {
+        use crate::world::WorldEvent;
+        use holtburger_protocol::messages::{
+            GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsData,
+        };
+
+        let mut player = PlayerState::new();
+        player.guid = Guid(0x50000001);
+
+        // Beneficial buff: should remain after bad-enchantment purge.
+        player.enchantments.push(Enchantment {
+            spell_id: 100,
+            layer: 1,
+            spell_category: 100,
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+                | EnchantmentTypeFlags::ADDITIVE
+                | EnchantmentTypeFlags::BENEFICIAL)
+                .bits(),
+            stat_mod_key: stats::AttributeType::StrengthAttr as u32,
+            stat_mod_value: 10.0,
+            ..Default::default()
+        });
+
+        // Harmful debuff: should be removed by bad-enchantment purge.
+        player.enchantments.push(Enchantment {
+            spell_id: 200,
+            layer: 1,
+            spell_category: 200,
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE | EnchantmentTypeFlags::ADDITIVE)
+                .bits(),
+            stat_mod_key: stats::AttributeType::StrengthAttr as u32,
+            stat_mod_value: -10.0,
+            ..Default::default()
+        });
+
+        // Vitae penalty: must be preserved even though it's not BENEFICIAL.
+        player.enchantments.push(Enchantment {
+            spell_id: 300,
+            layer: 1,
+            spell_category: 300,
+            stat_mod_type: (EnchantmentTypeFlags::VITAE | EnchantmentTypeFlags::MULTIPLICATIVE)
+                .bits(),
+            stat_mod_key: 0,
+            stat_mod_value: 0.95,
+            ..Default::default()
+        });
+
+        let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player.guid,
+            sequence: 1,
+            event: GameEvent::MagicPurgeBadEnchantments(Box::new(MagicPurgeBadEnchantmentsData {
+                target: player.guid,
+                sequence: 1,
+            })),
+        }));
+
+        let mut events = Vec::new();
+        let handled = player.handle_message(&msg, &mut events, None);
+
+        assert!(handled);
+        assert!(player.enchantments.iter().any(|e| e.spell_id == 100));
+        assert!(!player.enchantments.iter().any(|e| e.spell_id == 200));
+        assert!(player.enchantments.iter().any(|e| e.spell_id == 300));
+        assert_eq!(player.vitae, 0.95);
+
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated { .. }))
+        );
+        let derived_vitae = events.iter().find_map(|e| match e {
+            WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+            _ => None,
+        });
+        assert_eq!(derived_vitae, Some(0.95));
+    }
+
+    #[test]
+    fn test_magic_purge_enchantments_preserves_vitae_only() {
+        use crate::world::WorldEvent;
+        use holtburger_protocol::messages::{
+            GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsData,
+            MagicUpdateEnchantmentData,
+        };
+
+        let mut player = PlayerState::new();
+        player.guid = Guid(0x50000001);
+
+        // Existing buff should be removed by full purge.
+        player.enchantments.push(Enchantment {
+            spell_id: 100,
+            layer: 1,
+            spell_category: 100,
+            stat_mod_type: (EnchantmentTypeFlags::ATTRIBUTE
+                | EnchantmentTypeFlags::ADDITIVE
+                | EnchantmentTypeFlags::BENEFICIAL)
+                .bits(),
+            stat_mod_key: stats::AttributeType::StrengthAttr as u32,
+            stat_mod_value: 10.0,
+            ..Default::default()
+        });
+
+        // Death-like sequence from server: apply vitae, then purge enchantments.
+        let vitae_enchant = Enchantment {
+            spell_id: 666,
+            layer: 0,
+            spell_category: 204,
+            stat_mod_type: (EnchantmentTypeFlags::VITAE | EnchantmentTypeFlags::MULTIPLICATIVE)
+                .bits(),
+            stat_mod_key: 0,
+            stat_mod_value: 0.88,
+            ..Default::default()
+        };
+
+        let update_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player.guid,
+            sequence: 16,
+            event: GameEvent::MagicUpdateEnchantment(Box::new(MagicUpdateEnchantmentData {
+                target: player.guid,
+                sequence: 16,
+                enchantment: vitae_enchant,
+            })),
+        }));
+
+        let purge_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: player.guid,
+            sequence: 17,
+            event: GameEvent::MagicPurgeEnchantments(Box::new(MagicPurgeEnchantmentsData {
+                target: player.guid,
+                sequence: 17,
+            })),
+        }));
+
+        let mut events = Vec::new();
+        assert!(player.handle_message(&update_msg, &mut events, None));
+        assert!(player.handle_message(&purge_msg, &mut events, None));
+
+        assert!(!player.enchantments.iter().any(|e| e.spell_id == 100));
+        assert!(player.enchantments.iter().any(|e| e.spell_id == 666));
+        assert_eq!(player.vitae, 0.88);
+
+        let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
+            WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+            _ => None,
+        });
+        assert_eq!(latest_derived_vitae, Some(0.88));
+    }
+
+    #[test]
     fn test_heal_command_updates() {
         use holtburger_protocol::messages::{
             GameMessage, PrivateUpdateVitalCurrentData, PrivateUpdateVitalData,

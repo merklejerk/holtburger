@@ -244,12 +244,6 @@ impl WorldState {
             // Enrich events with spell names if available
             for ev in &mut events {
                 match ev {
-                    WorldEvent::EnchantmentUpdated {
-                        enchantment,
-                        spell_name,
-                    } if spell_name.is_none() => {
-                        *spell_name = self.resolve_spell_name(enchantment.spell_id as u32);
-                    }
                     WorldEvent::SpellUpdated { spell_id, name } if name.is_none() => {
                         *name = self.resolve_spell_name(*spell_id);
                     }

@@ -1,4 +1,5 @@
 use crate::world::entity::Entity;
+use crate::world::stats::{Resistances, Vital};
 use crate::world::WorldEvent;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::CharacterError;
@@ -77,9 +78,32 @@ pub enum ClientEvent {
 }
 
 #[derive(Debug, Clone)]
+pub struct ResolvedSpellSummary {
+    pub spell_id: u32,
+    pub name: Option<String>,
+    pub school: Option<u32>,
+    pub icon: Option<u32>,
+}
+
+#[derive(Debug, Clone)]
 pub enum ClientViewEvent {
     StatusUpdate {
         state: ClientState,
+    },
+    PlayerStatsSkillsUpdated {
+        attributes: HashMap<crate::world::stats::AttributeType, crate::world::stats::Attribute>,
+        skills: HashMap<crate::world::stats::SkillType, crate::world::stats::Skill>,
+        resistances: Resistances,
+        armor: i32,
+        vitae: f32,
+        level_info: crate::world::stats::CharacterLevelInfo,
+    },
+    PlayerVitalUpdated {
+        vital: Vital,
+    },
+    PlayerSpellsUpdated {
+        spell_ids: Vec<u32>,
+        resolved: Vec<ResolvedSpellSummary>,
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,

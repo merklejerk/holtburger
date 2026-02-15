@@ -125,6 +125,86 @@ impl Client {
                     },
                 );
             }
+            WorldEvent::DerivedStatsUpdated(stats) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
+                        attributes: stats
+                            .attributes
+                            .iter()
+                            .map(|a| (a.attr_type, a.clone()))
+                            .collect(),
+                        skills: stats
+                            .skills
+                            .iter()
+                            .map(|s| (s.skill_type, s.clone()))
+                            .collect(),
+                        resistances: stats.resistances.clone(),
+                        armor: stats.armor,
+                        vitae: stats.vitae,
+                        level_info: self.world.get_level_info().unwrap_or_default(),
+                    });
+            }
+            WorldEvent::LevelInfoUpdated(level_info) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
+                        attributes: self.world.player.attributes.clone(),
+                        skills: self.world.player.skills.clone(),
+                        resistances: self.world.player.resistances.clone(),
+                        armor: self.world.player.armor,
+                        vitae: self.world.player.vitae,
+                        level_info: level_info.clone(),
+                    });
+            }
+            WorldEvent::VitalUpdated(vital) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerVitalUpdated {
+                        vital: vital.clone(),
+                    });
+            }
+            WorldEvent::SpellUpdated { .. } | WorldEvent::SpellRemoved { .. } => {
+                let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();
+                spell_ids.sort();
+
+                let mut resolved = Vec::new();
+                for &spell_id in &spell_ids {
+                    if let Some(spell) = self.world.resolve_spell_info(spell_id) {
+                        resolved.push(ResolvedSpellSummary {
+                            spell_id,
+                            name: Some(spell.name),
+                            school: Some(spell.school),
+                            icon: Some(spell.icon_id),
+                        });
+                    } else {
+                        resolved.push(ResolvedSpellSummary {
+                            spell_id,
+                            name: None,
+                            school: None,
+                            icon: None,
+                        });
+                    }
+                }
+
+                let _ = self.client_view_event_tx.send(ClientViewEvent::PlayerSpellsUpdated {
+                    spell_ids,
+                    resolved,
+                });
+            }
+            WorldEvent::PlayerInfo(_) => {
+                // Emit all snapshots
+                self.emit_world_view_projection(&WorldEvent::PlayerEnchantmentsUpdated {
+                    enchantments: self.world.player.enchantments.clone(),
+                });
+                self.emit_world_view_projection(&WorldEvent::LevelInfoUpdated(
+                    self.world.get_level_info().unwrap_or_default(),
+                ));
+                self.emit_world_view_projection(&WorldEvent::SpellUpdated {
+                    spell_id: 0,
+                    name: None,
+                }); // Trigger spell sync
+            }
             WorldEvent::EntitySpawned(entity) | WorldEvent::EntityIdentified(entity) => {
                 let _ = self
                     .client_view_event_tx

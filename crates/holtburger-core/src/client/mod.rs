@@ -178,22 +178,10 @@ impl Client {
                 let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();
                 spell_ids.sort();
 
-                let mut resolved = Vec::new();
+                let mut spells = HashMap::new();
                 for &spell_id in &spell_ids {
                     if let Some(spell) = self.world.resolve_spell_info(spell_id) {
-                        resolved.push(ResolvedSpellSummary {
-                            spell_id,
-                            name: Some(spell.name),
-                            school: Some(spell.school),
-                            icon: Some(spell.icon_id),
-                        });
-                    } else {
-                        resolved.push(ResolvedSpellSummary {
-                            spell_id,
-                            name: None,
-                            school: None,
-                            icon: None,
-                        });
+                        spells.insert(spell_id, spell);
                     }
                 }
 
@@ -201,7 +189,7 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerSpellsUpdated {
                         spell_ids,
-                        resolved,
+                        spells,
                     });
             }
             StateEvent::PlayerInfo(_) => {

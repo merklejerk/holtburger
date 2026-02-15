@@ -32,15 +32,6 @@ impl AppState {
                 self.player_guid = Some(guid);
                 self.character_name = Some(name);
             }
-            WireEvent::ResourcesResolved(resources) => {
-                for resource in resources {
-                    match resource {
-                        holtburger_core::ResolvedResource::Spell { spell_id, info } => {
-                            self.spell_info.insert(spell_id, info);
-                        }
-                    }
-                }
-            }
             WireEvent::ServerMessage(message) => {
                 self.log_chat(ChatMessageKind::System, message);
             }
@@ -153,14 +144,12 @@ impl AppState {
             }
             ClientViewEvent::PlayerSpellsUpdated {
                 spell_ids,
-                resolved,
+                spells,
             } => {
                 self.player_spells = spell_ids;
-                for summary in resolved {
-                    if let (id, Some(name)) = (summary.spell_id, summary.name) {
-                        self.spell_names.insert(id, name);
-                    }
-                    // We could also populate self.spell_info here if we added enough fields to ResolvedSpellSummary
+                for (id, info) in spells {
+                    self.spell_names.insert(id, info.name.clone());
+                    self.spell_info.insert(id, Box::new(info));
                 }
             }
             ClientViewEvent::EntityUpserted { entity } => {

@@ -1,4 +1,4 @@
-# Protocol Fixture Provenance SOP
+# Protocol Fixture SOP
 
 This document defines the canonical workflow for generating, storing, and identifying the provenance of binary fixtures used for protocol parity testing.
 
@@ -47,39 +47,9 @@ fn test_player_teleport_fixture() {
 }
 ```
 
-## 2. Provenance Tracking
-
-When adding a new fixture, record its provenance in `crates/holtburger-protocol/tests/fixtures/PROVENANCE.md`. This ensures we can regenerate it if the protocol implementation changes.
-
-Include:
-- **Filename**: `example.bin`
-- **Source**: `ACE.Server.Tests/SyntheticProtocolTests.cs` (or TUI capture path)
-- **Method/Logic**: The specific C# test method used.
-- **Commit**: The ACE submodule commit hash at the time of generation.
-
-## 3. Canonical Paths
-
-- **Synthetic Fixtures**: `crates/holtburger-protocol/tests/fixtures/`
-- **TUI Captures**: `caps/` (Used for integration testing, not strict parity).
-- **Provenance Log**: `crates/holtburger-protocol/tests/fixtures/PROVENANCE.md`
-
-## 4. Exceptions
+## 2. Exceptions
 
 If a message type has known parity issues (e.g., `PLAYER_DESCRIPTION` due to complex registry heuristics), use `assert_dispatch_match_no_parity` and document the gap in this SOP's "Known Parity Gaps" section.
 
 ### Known Parity Gaps
 - `PLAYER_DESCRIPTION`: Currently fails strict repack parity due to `EnchantmentRegistry` and `GameplayOptions` sorting/packing differences.
-
-## 5. `PLAYER_DESCRIPTION` Closure Checklist
-
-Use this checklist to determine when the remaining `PLAYER_DESCRIPTION` parity concern is truly resolved.
-
-- [ ] Regenerate `player_description.bin` from `ACE/Source/ACE.Server.Tests/SyntheticProtocolTests.cs` and record the exact ACE submodule commit in `tests/fixtures/PROVENANCE.md`.
-- [ ] Remove `assert_dispatch_match_no_parity` usage for `PLAYER_DESCRIPTION` in `src/messages/game_message/tests.rs`.
-- [ ] Add strict `assert_pack_unpack_parity` coverage for the `PLAYER_DESCRIPTION` dispatch path.
-- [ ] Add focused tests for lossy nested structures called out in the known gap (`EnchantmentRegistry` and `GameplayOptions`) to prove deterministic pack order.
-- [ ] Run `cargo test -p holtburger-protocol` and verify all parity tests pass.
-
-### Exit Criteria
-
-`PLAYER_DESCRIPTION` can be removed from "Known Parity Gaps" only when fixture round-trip is byte-identical and no no-parity helper is used for that message.

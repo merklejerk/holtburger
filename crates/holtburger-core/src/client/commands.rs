@@ -102,7 +102,9 @@ impl Client {
                     );
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
-                    self.auth.select_character(char_guid, &mut self.session).await
+                    self.auth
+                        .select_character(char_guid, &mut self.session)
+                        .await
                 }
                 _ => Ok(()),
             },
@@ -114,9 +116,7 @@ impl Client {
                     );
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
-                    self.auth
-                        .select_character(char_id, &mut self.session)
-                        .await
+                    self.auth.select_character(char_id, &mut self.session).await
                 } else {
                     Ok(())
                 }

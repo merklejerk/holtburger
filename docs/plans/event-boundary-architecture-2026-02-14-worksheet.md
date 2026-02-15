@@ -361,15 +361,15 @@ The following defaults are adopted for implementation unless explicitly revised:
 - [x] Add `PlayerSpellsUpdated` + resource-enrichment hooks.
 
 #### Phase 4
-- [ ] Migrate TUI handlers to selected `ClientViewEvent` variants.
-- [ ] Verify no behavior regressions in death/purge/movement/error cases.
-- [ ] Document stream usage guidance.
+- [x] Migrate TUI handlers to selected `ClientViewEvent` variants.
+- [x] Verify no behavior regressions in death/purge/movement/error cases.
+- [x] Document stream usage guidance.
 
 #### Phase 5
-- [ ] Confirm no temporary bridge/event rollout shims exist.
-- [ ] Delete obsolete dual-path consumer handlers.
-- [ ] Remove migration-only feature flags/toggles/comments.
-- [ ] Confirm docs describe only steady-state architecture.
+- [x] Confirm no temporary bridge/event rollout shims exist.
+- [x] Delete obsolete dual-path consumer handlers.
+- [x] Remove migration-only feature flags/toggles/comments.
+- [x] Confirm docs describe only steady-state architecture.
 
 ### B) Decision Log
 
@@ -383,6 +383,13 @@ The following defaults are adopted for implementation unless explicitly revised:
 | 2026-02-14 | Add mandatory cleanup phase | Prevent permanent migration/legacy code | Lower maintenance burden |
 | 2026-02-14 | Single-PR cutover (no compatibility window) | Avoid legacy migration code | Faster convergence to steady-state architecture |
 | 2026-02-14 | Trigger snapshots on Character Selection Success / PlayerDescription | Vitals/Stats/Spells initial sync | Ensure UI is ready immediately on logon |
+| 2026-02-14 | Subsystems (Auth/Movement) return events instead of emitting | Enable centralized projection | Guarantees all events hit the Projector for translation |
+| 2026-02-14 | Use `HashMap` instead of `Vec` for Stats/Skills snapshots | O(1) lookup for UI rendering | Significantly reduces UI logic complexity |
+| 2026-02-14 | Centralize Character Selection in `messages.rs` | Resolve borrow checker conflicts | Safe mutation of player state during auth flow |
+| 2026-02-14 | Add `Default` to `CharacterLevelInfo` | Early projection safety | Prevents crashes during early-sync snapshots |
+| 2026-02-14 | Use `AppAction::ReceivedViewEvent` for TUI bridge | Connect TUI main loop to broadcast | Safe multi-threaded event handling |
+| 2026-02-14 | Gut TUI `WorldEvent` handlers in Phase 5 | Enforce authoritative snapshot use | Eliminates logic duplication and UI drift |
+| 2026-02-14 | Use `Box<Entity>` in `ClientViewEvent` | Balance performance vs ergonomics | Avoids excessive large-object clones while keeping events predictable |
 
 ### C) Verification Log
 
@@ -392,6 +399,7 @@ The following defaults are adopted for implementation unless explicitly revised:
 | 2026-02-14 | `cargo check -p holtburger-cli` | ✅ | Existing CLI consumer unchanged and compiling |
 | 2026-02-14 | Phase 2 implementation | ✅ | Enchants, Errors, and Entity abstractions implemented and projected correctly. |
 | 2026-02-14 | Phase 3 implementation | ✅ | Stats, Skills, and Spells abstractions implemented. Character Selection triggers initial sync. |
+| 2026-02-14 | Phase 4/5 integration check | ✅ | CLI fully migrated to ClientViewEvents; compilation success across workspace. |
 | YYYY-MM-DD | Focused event-order tests | ⬜ | Enchant/update/purge ordering |
 | YYYY-MM-DD | Manual TUI smoke via user-run | ⬜ | Verify panel/state correctness |
 

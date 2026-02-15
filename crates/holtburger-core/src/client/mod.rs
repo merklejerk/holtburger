@@ -53,9 +53,25 @@ impl Client {
         // New ClientView stream projection (normalization)
         match &event {
             ClientEvent::StatusUpdate { state } => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::StatusUpdate {
-                    state: state.clone(),
-                });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::StatusUpdate {
+                        state: state.clone(),
+                    });
+            }
+            ClientEvent::InventoryServerSaveFailed { item_guid, error } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ErrorRaised {
+                        source: ErrorSource::Wire,
+                        kind: ErrorKind::Weenie,
+                        code: Some(*error as u32),
+                        message: format!(
+                            "Inventory save failed for 0x{:08X}: {:?}",
+                            item_guid.0, error
+                        ),
+                        is_transient: true,
+                    });
             }
             ClientEvent::WeenieError { error_id, message } => {
                 let _ = self
@@ -118,34 +134,18 @@ impl Client {
     fn emit_world_view_projection(&self, event: &WorldEvent) {
         match event {
             WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
-                let _ = self.client_view_event_tx.send(
-                    ClientViewEvent::PlayerEnchantmentsUpdated {
-                        enchantments: enchantments.clone(),
-                        resolved_names: self.world.get_player_spell_names(),
-                    },
-                );
+                let _ =
+                    self.client_view_event_tx
+                        .send(ClientViewEvent::PlayerEnchantmentsUpdated {
+                            enchantments: enchantments.clone(),
+                            resolved_names: self.world.get_player_spell_names(),
+                        });
             }
-            WorldEvent::DerivedStatsUpdated(stats) => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
-                        attributes: stats
-                            .attributes
-                            .iter()
-                            .map(|a| (a.attr_type, a.clone()))
-                            .collect(),
-                        skills: stats
-                            .skills
-                            .iter()
-                            .map(|s| (s.skill_type, s.clone()))
-                            .collect(),
-                        resistances: stats.resistances.clone(),
-                        armor: stats.armor,
-                        vitae: stats.vitae,
-                        level_info: self.world.get_level_info().unwrap_or_default(),
-                    });
-            }
-            WorldEvent::LevelInfoUpdated(level_info) => {
+            WorldEvent::AttributeUpdated(_)
+            | WorldEvent::SkillUpdated(_)
+            | WorldEvent::LevelInfoUpdated(_)
+            | WorldEvent::DerivedStatsUpdated(_) => {
+                let level_info = self.world.get_level_info().unwrap_or_default();
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerStatsSkillsUpdated {
@@ -187,10 +187,12 @@ impl Client {
                     }
                 }
 
-                let _ = self.client_view_event_tx.send(ClientViewEvent::PlayerSpellsUpdated {
-                    spell_ids,
-                    resolved,
-                });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerSpellsUpdated {
+                        spell_ids,
+                        resolved,
+                    });
             }
             WorldEvent::PlayerInfo(_) => {
                 // Emit all snapshots
@@ -204,6 +206,15 @@ impl Client {
                     spell_id: 0,
                     name: None,
                 }); // Trigger spell sync
+
+                // Emit player entity snapshot if available
+                if let Some(entity) = self.world.entities.get(self.world.player.guid) {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::EntityUpserted {
+                            entity: Box::new(entity.clone()),
+                        });
+                }
             }
             WorldEvent::EntitySpawned(entity) | WorldEvent::EntityIdentified(entity) => {
                 let _ = self
@@ -219,7 +230,8 @@ impl Client {
             }
             WorldEvent::EntityMoved { guid, .. }
             | WorldEvent::EntityStateUpdated { guid, .. }
-            | WorldEvent::EntityVectorUpdated { guid, .. } => {
+            | WorldEvent::EntityVectorUpdated { guid, .. }
+            | WorldEvent::PropertyUpdated { guid, .. } => {
                 if let Some(entity) = self.world.entities.get(*guid) {
                     let _ = self
                         .client_view_event_tx
@@ -227,6 +239,21 @@ impl Client {
                             entity: Box::new(entity.clone()),
                         });
                 }
+            }
+            WorldEvent::ServerTimeUpdate(time) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ServerTimeUpdated { time: *time });
+            }
+            WorldEvent::CombatModeUpdated(mode) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CombatModeUpdated { mode: *mode });
+            }
+            WorldEvent::NoClipUpdated(enabled) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::NoClipUpdated { enabled: *enabled });
             }
             _ => {}
         }

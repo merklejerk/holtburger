@@ -179,6 +179,7 @@ async fn main() -> Result<()> {
 
     client.set_event_tx(event_tx);
     client.set_command_rx(command_rx);
+    let mut view_event_rx = client.subscribe_client_view_events();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -337,6 +338,10 @@ async fn main() -> Result<()> {
             }
 
             app_state.handle_action(ui::AppAction::ReceivedEvent(event));
+        }
+
+        while let Ok(event) = view_event_rx.try_recv() {
+            app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
         }
     }
 

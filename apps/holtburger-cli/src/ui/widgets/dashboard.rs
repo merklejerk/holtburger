@@ -273,33 +273,30 @@ pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
     spells
         .iter()
-        .map(|&spell_id| {
+        .enumerate()
+        .map(|(i, &spell_id)| {
             let name = state
                 .spell_names
                 .get(&spell_id)
                 .cloned()
                 .unwrap_or_else(|| format!("Unknown Spell {}", spell_id));
 
-            let is_selected = if let Some(idx) = state.dashboard_list_state.selected() {
-                state.selected_dashboard_index == idx
-                    && state
-                        .player_spells
-                        .get(state.selected_dashboard_index)
-                        .is_some_and(|&s| s == spell_id)
+            let is_selected = i == state.selected_dashboard_index;
+
+            let name_style = if is_selected {
+                Style::default().bg(Color::DarkGray)
             } else {
-                false
+                Style::default()
             };
 
-            let style = if is_selected {
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD)
+            let power_style = if is_selected {
+                Style::default().bg(Color::DarkGray).fg(Color::Gray)
             } else {
-                Style::default()
+                Style::default().fg(Color::DarkGray)
             };
 
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<30}", name), style),
+                Span::styled(format!("{:<30}", name), name_style),
                 Span::raw(" "),
                 Span::styled(
                     if let Some(info) = state.spell_info.get(&spell_id) {
@@ -307,7 +304,7 @@ pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                     } else {
                         "".to_string()
                     },
-                    Style::default().fg(Color::DarkGray),
+                    power_style,
                 ),
             ]))
         })

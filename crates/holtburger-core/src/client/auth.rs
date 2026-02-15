@@ -17,12 +17,14 @@ fn find_preferred_character(
 ) -> Option<Guid> {
     let pref = preference.as_ref()?;
 
-    // Try numeric index
+    // Try numeric index: if sorting by name is desired, we sort a copy
     if let Ok(idx) = pref.parse::<usize>()
         && idx > 0
         && idx <= characters.len()
     {
-        return Some(characters[idx - 1].guid);
+        let mut sorted_chars = characters.to_vec();
+        sorted_chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        return Some(sorted_chars[idx - 1].guid);
     }
 
     // Try name match

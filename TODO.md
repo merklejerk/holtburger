@@ -11,7 +11,7 @@
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
-- [ ] When navigating the spells list in dashboard a random non-selected spell will be rendered with a blue/cyan font color for some reason. Selection style also doesn't match other tabs.
+- [x] When navigating the spells list in dashboard a random non-selected spell will be rendered with a blue/cyan font color for some reason. Selection style also doesn't match other tabs. (Done)
 - [ ] Shift+backspace to clear chat input buffer.
 
 ### Medium
@@ -27,7 +27,7 @@
 - [ ] DC detection.
 - [ ] Approach verb is janky.
 - [ ] Augment entities spawned by `ObjectCreate` with weenie template properties.  
-- [ ] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable.
+- [x] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable. (Done)
 - [ ] All verbs should have synonymous slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] [C]ombine verb (crafting).

@@ -142,10 +142,7 @@ impl AppState {
                     self.vitals.insert(vt, v);
                 }
             }
-            ClientViewEvent::PlayerSpellsUpdated {
-                spell_ids,
-                spells,
-            } => {
+            ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells } => {
                 self.player_spells = spell_ids;
                 for (id, info) in spells {
                     self.spell_names.insert(id, info.name.clone());

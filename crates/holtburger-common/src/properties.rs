@@ -1100,6 +1100,7 @@ bitflags! {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct WeenieHeaderFlag: u32 {
+        const NONE = 0x00000000;
         const PLURAL_NAME = 0x00000001;
         const ITEMS_CAPACITY = 0x00000002;
         const CONTAINERS_CAPACITY = 0x00000004;
@@ -1138,6 +1139,7 @@ bitflags! {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct WeenieHeaderFlag2: u32 {
+        const NONE = 0x00;
         const ICON_UNDERLAY = 0x01;
         const COOLDOWN = 0x02;
         const COOLDOWN_DURATION = 0x04;

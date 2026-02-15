@@ -31,7 +31,6 @@
 - [ ] Manage in-world containers.
 - [ ] DC detection.
 - [ ] Approach verb is janky.
-- [ ] Augment entities spawned by `ObjectCreate` with weenie template properties.  
 - [ ] All verbs should have synonymous slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] [C]ombine verb (crafting).
@@ -60,9 +59,7 @@
 - [x] Vitae debuff requires restart to show up? Or if you have one then you die, it seems to get hidden?
 - [ ] Combat.
 - [ ] Equipment management.
-    - [ ] Populate all entities with weenie data.
-    - [ ] Use armor weenie equipment slots to determine equip mask.
-    - [ ] Make equipped items more obvious.
+- [ ] Make equipped items more obvious.
 
 ### Critical
 
@@ -70,5 +67,6 @@
 - [ ] Integrate `deno-core` for scripting.
 
 ### Investigate
-- [ ] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)
+- [x] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)
+- [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
 

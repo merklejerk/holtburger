@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use holtburger_core::{Client, ClientCommand, ClientEvent};
+use holtburger_core::{Client, ClientCommand, WireEvent};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -78,8 +78,18 @@ async fn main() -> Result<()> {
     };
 
     client.message_dump_dir = Some(out_dir);
-    client.set_event_tx(event_tx);
+    let mut wire_rx = client.subscribe_wire_events();
     client.set_command_rx(command_rx);
+
+    // Forward broadcast to mpsc for the loop
+    let event_tx_inner = event_tx.clone();
+    tokio::spawn(async move {
+        while let Ok(event) = wire_rx.recv().await {
+            if event_tx_inner.send(event).is_err() {
+                break;
+            }
+        }
+    });
 
     let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
     let mut client_handle = tokio::spawn(async move {
@@ -98,7 +108,7 @@ async fn main() -> Result<()> {
     loop {
         tokio::select! {
             Some(event) = event_rx.recv() => {
-                if let ClientEvent::CharacterList(chars) = event {
+                if let WireEvent::CharacterList(chars) = event {
                     println!("Characters received:");
                     for entry in &chars { println!("  - {} ({:08X})", entry.name, entry.guid); }
 

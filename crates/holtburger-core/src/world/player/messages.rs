@@ -1,7 +1,7 @@
 use super::PlayerState;
 use super::types::SkillBase;
 use super::types::VitalBase;
-use crate::world::WorldEvent;
+use crate::world::StateEvent;
 use crate::world::stats;
 use holtburger_common::Guid;
 use holtburger_common::sequence::is_newer_u16;
@@ -14,7 +14,7 @@ impl PlayerState {
     pub fn handle_message(
         &mut self,
         msg: &GameMessage,
-        events: &mut Vec<WorldEvent>,
+        events: &mut Vec<StateEvent>,
         xp_table: Option<&holtburger_dat::file_type::XpTable>,
     ) -> bool {
         match msg {
@@ -37,7 +37,7 @@ impl PlayerState {
                     self.force_position_sequence = data.pos.force_position_sequence;
 
                     if is_newer_u16(self.force_position_sequence, old_forced_seq) {
-                        events.push(WorldEvent::ForcedReposition {
+                        events.push(StateEvent::ForcedReposition {
                             guid: self.guid,
                             pos: self.position,
                             sequence: self.force_position_sequence,
@@ -60,7 +60,7 @@ impl PlayerState {
             GameMessage::VectorUpdate(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
                     self.instance_sequence = data.instance_sequence;
-                    events.push(WorldEvent::EntityVectorUpdated {
+                    events.push(StateEvent::EntityVectorUpdated {
                         guid: data.guid,
                         velocity: data.velocity,
                         omega: data.omega,
@@ -113,7 +113,7 @@ impl PlayerState {
 
                     self.attributes.insert(attr_type, attr_obj.clone());
 
-                    events.push(WorldEvent::AttributeUpdated(attr_obj));
+                    events.push(StateEvent::AttributeUpdated(attr_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -145,7 +145,7 @@ impl PlayerState {
 
                     self.attributes.insert(attr_type, attr_obj.clone());
 
-                    events.push(WorldEvent::AttributeUpdated(attr_obj));
+                    events.push(StateEvent::AttributeUpdated(attr_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -197,7 +197,7 @@ impl PlayerState {
 
                     self.skills.insert(skill_type, skill_obj.clone());
 
-                    events.push(WorldEvent::SkillUpdated(skill_obj));
+                    events.push(StateEvent::SkillUpdated(skill_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -249,7 +249,7 @@ impl PlayerState {
 
                     self.skills.insert(skill_type, skill_obj.clone());
 
-                    events.push(WorldEvent::SkillUpdated(skill_obj));
+                    events.push(StateEvent::SkillUpdated(skill_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -289,7 +289,7 @@ impl PlayerState {
                     };
                     self.vitals.insert(vital_type, vital_obj.clone());
 
-                    events.push(WorldEvent::VitalUpdated(vital_obj));
+                    events.push(StateEvent::VitalUpdated(vital_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -329,7 +329,7 @@ impl PlayerState {
                     };
                     self.vitals.insert(vital_type, vital_obj.clone());
 
-                    events.push(WorldEvent::VitalUpdated(vital_obj));
+                    events.push(StateEvent::VitalUpdated(vital_obj));
 
                     self.emit_derived_stats(events);
                     return true;
@@ -341,7 +341,7 @@ impl PlayerState {
                     && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
                 {
                     vital_obj.current = *current;
-                    events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                    events.push(StateEvent::VitalUpdated(vital_obj.clone()));
                     return true;
                 }
             }
@@ -513,7 +513,7 @@ impl PlayerState {
                             } else {
                                 self.enchantments.push(*enchantment);
                             }
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -539,7 +539,7 @@ impl PlayerState {
                                     self.enchantments.push(*enchantment);
                                 }
                             }
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -558,7 +558,7 @@ impl PlayerState {
                         if *target == self.guid {
                             self.enchantments
                                 .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -574,7 +574,7 @@ impl PlayerState {
                                 self.enchantments
                                     .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                             }
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -593,7 +593,7 @@ impl PlayerState {
                         if *target == self.guid {
                             self.enchantments
                                 .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -609,7 +609,7 @@ impl PlayerState {
                                 self.enchantments
                                     .retain(|e| e.spell_id != *spell_id || e.layer != *layer);
                             }
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -625,7 +625,7 @@ impl PlayerState {
                                 let flags = holtburger_common::properties::EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
                                 flags.contains(holtburger_common::properties::EnchantmentTypeFlags::VITAE)
                             });
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -642,7 +642,7 @@ impl PlayerState {
                                 flags.contains(holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
                                     || flags.contains(holtburger_common::properties::EnchantmentTypeFlags::VITAE)
                             });
-                            events.push(WorldEvent::PlayerEnchantmentsUpdated {
+                            events.push(StateEvent::PlayerEnchantmentsUpdated {
                                 enchantments: self.enchantments.clone(),
                             });
                             self.emit_derived_stats(events);
@@ -654,7 +654,7 @@ impl PlayerState {
                     GameEvent::MagicUpdateSpell(data) => {
                         let spell_id = data.spell_id as u32;
                         self.spells.insert(spell_id, 0.0);
-                        events.push(WorldEvent::SpellUpdated {
+                        events.push(StateEvent::SpellUpdated {
                             spell_id,
                             name: None,
                         });
@@ -663,7 +663,7 @@ impl PlayerState {
                     GameEvent::MagicRemoveSpell(data) => {
                         let spell_id = data.spell_id as u32;
                         self.spells.remove(&spell_id);
-                        events.push(WorldEvent::SpellRemoved { spell_id });
+                        events.push(StateEvent::SpellRemoved { spell_id });
                         true
                     }
                     GameEvent::UpdateHealth(data) => {
@@ -681,7 +681,7 @@ impl PlayerState {
                             // UpdateHealth is a percentage float (0.0 to 1.0)
                             let new_current = (*health * vital_obj.buffed_max as f32) as u32;
                             vital_obj.current = new_current;
-                            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                            events.push(StateEvent::VitalUpdated(vital_obj.clone()));
                             true
                         } else {
                             false

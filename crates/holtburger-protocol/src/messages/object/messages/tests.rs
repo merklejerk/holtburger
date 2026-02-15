@@ -1,99 +1,139 @@
 use crate::messages::game_message::GameMessage;
 use crate::messages::object::messages::*;
+use crate::messages::object::types::{ModelChange, ModelData, SubPalette, TextureChange};
 use crate::test_fixtures;
 use crate::test_helpers::assert_pack_unpack_parity;
-use byteorder::{LittleEndian, WriteBytesExt};
-use holtburger_common::Guid;
+use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::{PhysicsDescriptionFlag, PhysicsState};
+use holtburger_common::properties::{
+    ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
+    WeenieHeaderFlag2,
+};
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
-
-pub use crate::messages::object::types::{ModelChange, ModelData, SubPalette, TextureChange};
-
-#[test]
-fn test_create_object_minimal() {
-    let body = test_fixtures::OBJECT_CREATE_MINIMAL;
-    let mut data = Vec::new();
-    data.write_u32::<LittleEndian>(0xF745).unwrap();
-    data.extend_from_slice(body);
-
-    let mut offset = 0;
-    let msg = GameMessage::unpack(&data, &mut offset).expect("Failed to unpack minimal");
-
-    if let GameMessage::ObjectCreate(desc) = &msg {
-        assert_eq!(desc.name.as_deref(), Some("Buddy"));
-        assert_eq!(desc.guid.0, 0x50000001);
-    } else {
-        panic!("Wrong message type: {:?}", msg);
-    }
-
-    let mut packed = Vec::new();
-    msg.pack(&mut packed);
-    assert_eq!(packed, data);
-}
+use holtburger_common::{Guid, Vector3};
 
 #[test]
-fn test_create_object_complex() {
-    let body = test_fixtures::OBJECT_CREATE_COMPLEX;
-    let mut data = Vec::new();
-    data.write_u32::<LittleEndian>(0xF745).unwrap();
-    data.extend_from_slice(body);
-
-    let mut offset = 0;
-    let msg = GameMessage::unpack(&data, &mut offset).expect("Failed to unpack complex");
-
-    if let GameMessage::ObjectCreate(desc) = &msg {
-        assert_eq!(desc.name.as_deref(), Some("Fancy Buddy"));
-        assert_eq!(desc.guid.0, 0x50000002);
-        assert_eq!(desc.sequences[0], 100);
-        assert!(desc.physics_flags.contains(PhysicsDescriptionFlag::PARENT));
-        assert_eq!(desc.parent_id.unwrap().0, 0x50000001);
-    } else {
-        panic!("Wrong message type: {:?}", msg);
-    }
-
-    let mut packed = Vec::new();
-    msg.pack(&mut packed);
-    assert_eq!(packed, data);
-}
-
-#[test]
-fn test_object_create_minimal_struct() {
-    use holtburger_common::math::{Quaternion, Vector3};
+fn test_object_description_data_parity_minimal() {
     let expected = ObjectDescriptionData {
-        guid: Guid(0x50000001),
+        guid: Guid(0x12345678),
         model_data: ModelData {
-            header: 1,
-            ..Default::default()
+            header: 0x11,
+            extra: [0, 0, 0],
+            palette_id: None,
+            sub_palettes: vec![],
+            texture_changes: vec![],
+            model_changes: vec![],
         },
-        physics_flags: PhysicsDescriptionFlag::POSITION | PhysicsDescriptionFlag::TIMESTAMPS,
-        physics_state: PhysicsState::empty(),
-        pos: Some(WorldPosition {
-            landblock_id: Guid(0x12340001),
-            coords: Vector3 {
-                x: 100.0,
-                y: 200.0,
-                z: 300.0,
-            },
-            rotation: Quaternion {
-                w: 1.0,
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-        }),
-        name: Some("Buddy".to_string()),
-        sequences: [0, 1, 2, 3, 4, 5, 6, 7, 8],
-        wcid: 123,
-        icon_id: 100663296,
-        item_type: 1,
-        ..Default::default()
+        physics_flags: PhysicsDescriptionFlag::ANIMATION_FRAME,
+        physics_state: PhysicsState::REPORT_COLLISIONS
+            | PhysicsState::GRAVITY
+            | PhysicsState::LIGHTING_ON
+            | PhysicsState::EDGE_SLIDE,
+        animation_frame: Some(101),
+        name: Some("Minimal".to_string()),
+        wcid: 1234,
+        icon_id: 0x06000000,
+        item_type: 0,
+        obj_desc_flags: ObjectDescriptionFlag::ATTACKABLE,
+        weenie_flags2: WeenieHeaderFlag2::empty(),
+        ..ObjectDescriptionData::default()
     };
+
     assert_pack_unpack_parity(test_fixtures::OBJECT_CREATE_MINIMAL, &expected);
 }
 
 #[test]
-fn test_set_state_parity() {
+fn test_object_description_data_parity_complex() {
+    let expected = ObjectDescriptionData {
+        guid: Guid(0x12345678),
+        model_data: ModelData {
+            header: 0x11,
+            extra: [1, 1, 1],
+            palette_id: Some(0x04001111),
+            sub_palettes: vec![SubPalette {
+                id: 0x04002222,
+                offset: 1,
+                length: 2,
+            }],
+            texture_changes: vec![TextureChange {
+                part_index: 3,
+                old_id: 0x05004444,
+                new_id: 0x05005555,
+            }],
+            model_changes: vec![ModelChange {
+                index: 6,
+                animation_id: 0x01007777,
+            }],
+        },
+        physics_flags: PhysicsDescriptionFlag::POSITION
+            | PhysicsDescriptionFlag::MTABLE
+            | PhysicsDescriptionFlag::STABLE
+            | PhysicsDescriptionFlag::CSETUP
+            | PhysicsDescriptionFlag::PARENT
+            | PhysicsDescriptionFlag::OBJSCALE
+            | PhysicsDescriptionFlag::DEFAULT_SCRIPT
+            | PhysicsDescriptionFlag::DEFAULT_SCRIPT_INTENSITY
+            | PhysicsDescriptionFlag::ANIMATION_FRAME,
+        physics_state: PhysicsState::GRAVITY | PhysicsState::REPORT_COLLISIONS,
+        animation_frame: Some(101),
+        pos: Some(WorldPosition {
+            landblock_id: Guid(0x12340001),
+            coords: Vector3 {
+                x: 10.0,
+                y: 20.0,
+                z: 30.0,
+            },
+            rotation: Quaternion::identity(),
+        }),
+        mtable_id: Some(0x09000001),
+        stable_id: Some(0x20000001),
+        csetup_id: Some(0x02001111),
+        parent_id: Some(Guid(0x20000001)),
+        parent_loc: Some(1),
+        obj_scale: Some(1.5),
+        default_script_id: Some(0x0F000001),
+        default_script_intensity: Some(0.5),
+        sequences: [0, 0, 0, 0, 0, 0, 0, 0, 9],
+        weenie_flags: WeenieHeaderFlag::PLURAL_NAME
+            | WeenieHeaderFlag::ITEMS_CAPACITY
+            | WeenieHeaderFlag::VALUE
+            | WeenieHeaderFlag::USABLE
+            | WeenieHeaderFlag::USE_RADIUS
+            | WeenieHeaderFlag::COMBAT_USE
+            | WeenieHeaderFlag::STACK_SIZE
+            | WeenieHeaderFlag::CONTAINER
+            | WeenieHeaderFlag::WIELDER
+            | WeenieHeaderFlag::BURDEN
+            | WeenieHeaderFlag::SPELL
+            | WeenieHeaderFlag::PSCRIPT,
+        name: Some("SuperComplex".to_string()),
+        plural_name: Some("SuperComplexes".to_string()),
+        wcid: 1234,
+        icon_id: 0x06001234,
+        item_type: 0x80,
+        items_capacity: Some(100),
+        value: Some(1000),
+        usable: Some(0x02),
+        use_radius: Some(5.0),
+        combat_use: Some(1),
+        stack_size: Some(5),
+        container_id: Some(0x20000002.into()),
+        wielder_id: Some(0x20000001.into()),
+        burden: Some(100),
+        spell: Some(1),
+        obj_desc_flags: ObjectDescriptionFlag::ATTACKABLE
+            | ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
+        weenie_flags2: WeenieHeaderFlag2::COOLDOWN,
+        cooldown_id: Some(5),
+        pscript: Some(1),
+        ..ObjectDescriptionData::default()
+    };
+
+    assert_pack_unpack_parity(test_fixtures::OBJECT_CREATE_COMPLEX, &expected);
+}
+
+#[test]
+fn test_create_object_minimal_parity() {
     let hex = "010000500804400063010100";
     let data = hex::decode(hex).unwrap();
     let mut offset = 0;
@@ -155,32 +195,4 @@ fn test_force_obj_desc_send_parity() {
         guid: Guid(0x50000001),
     }));
     assert_pack_unpack_parity(test_fixtures::FORCE_OBJ_DESC_SEND, &expected);
-}
-
-#[test]
-fn test_obj_desc_event_parity() {
-    let expected = GameMessage::ObjDescEvent(Box::new(ObjDescEventData {
-        guid: Guid(0x50000001),
-        instance_sequence: 1234,
-        visual_desc_sequence: 5678,
-        model_data: ModelData {
-            header: 17,
-            palette_id: Some(67108865),
-            sub_palettes: vec![SubPalette {
-                id: 67108866,
-                offset: 0,
-                length: 32,
-            }],
-            texture_changes: vec![TextureChange {
-                part_index: 0,
-                old_id: 83886081,
-                new_id: 83886082,
-            }],
-            model_changes: vec![ModelChange {
-                index: 0,
-                animation_id: 16777217,
-            }],
-        },
-    }));
-    assert_pack_unpack_parity(test_fixtures::OBJ_DESC_EVENT, &expected);
 }

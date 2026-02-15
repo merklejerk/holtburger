@@ -554,6 +554,7 @@ impl WorldState {
                     }
                     GameEvent::IdentifyObjectResponse(data) => {
                         let guid = data.object_guid;
+
                         if let Some(entity) = self.entities.get_mut(guid) {
                             for (&k, &v) in &data.int_stats {
                                 entity.int_properties.insert(k, v);

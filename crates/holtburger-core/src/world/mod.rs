@@ -40,7 +40,7 @@ pub struct DerivedStatsData {
 }
 
 #[derive(Debug, Clone)]
-pub enum WorldEvent {
+pub enum StateEvent {
     EntitySpawned(Box<Entity>),
     EntityMoved {
         guid: Guid,
@@ -112,29 +112,29 @@ pub enum EventDedupeKey {
     EntityState(Guid),
 }
 
-impl holtburger_common::traits::Deduplicable for WorldEvent {
+impl holtburger_common::traits::Deduplicable for StateEvent {
     type Key = EventDedupeKey;
 
     fn dedupe_key(&self) -> Option<Self::Key> {
         match self {
-            WorldEvent::DerivedStatsUpdated(_) => Some(EventDedupeKey::DerivedStats),
-            WorldEvent::VitalUpdated(v) => Some(EventDedupeKey::Vital(v.vital_type)),
-            WorldEvent::AttributeUpdated(a) => Some(EventDedupeKey::Attribute(a.attr_type)),
-            WorldEvent::SkillUpdated(s) => Some(EventDedupeKey::Skill(s.skill_type)),
-            WorldEvent::CombatModeUpdated(_) => Some(EventDedupeKey::CombatMode),
-            WorldEvent::LevelInfoUpdated(_) => Some(EventDedupeKey::LevelInfo),
-            WorldEvent::ServerTimeUpdate(_) => Some(EventDedupeKey::ServerTime),
-            WorldEvent::EntityMoved { guid, .. } => Some(EventDedupeKey::EntityPosition(*guid)),
-            WorldEvent::EntityVectorUpdated { guid, .. } => {
+            StateEvent::DerivedStatsUpdated(_) => Some(EventDedupeKey::DerivedStats),
+            StateEvent::VitalUpdated(v) => Some(EventDedupeKey::Vital(v.vital_type)),
+            StateEvent::AttributeUpdated(a) => Some(EventDedupeKey::Attribute(a.attr_type)),
+            StateEvent::SkillUpdated(s) => Some(EventDedupeKey::Skill(s.skill_type)),
+            StateEvent::CombatModeUpdated(_) => Some(EventDedupeKey::CombatMode),
+            StateEvent::LevelInfoUpdated(_) => Some(EventDedupeKey::LevelInfo),
+            StateEvent::ServerTimeUpdate(_) => Some(EventDedupeKey::ServerTime),
+            StateEvent::EntityMoved { guid, .. } => Some(EventDedupeKey::EntityPosition(*guid)),
+            StateEvent::EntityVectorUpdated { guid, .. } => {
                 Some(EventDedupeKey::EntityVector(*guid))
             }
-            WorldEvent::EntityStateUpdated { guid, .. } => Some(EventDedupeKey::EntityState(*guid)),
+            StateEvent::EntityStateUpdated { guid, .. } => Some(EventDedupeKey::EntityState(*guid)),
             _ => None,
         }
     }
 }
 
-pub fn dedupe_world_events(events: Vec<WorldEvent>) -> Vec<WorldEvent> {
+pub fn dedupe_state_events(events: Vec<StateEvent>) -> Vec<StateEvent> {
     holtburger_common::traits::dedupe_events(events)
 }
 

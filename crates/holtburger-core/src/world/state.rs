@@ -1,4 +1,4 @@
-use super::WorldEvent;
+use super::StateEvent;
 use super::entity::{Entity, EntityManager};
 use super::player::PlayerState;
 use super::spatial::SpatialScene;
@@ -149,9 +149,9 @@ impl WorldState {
         super::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
     }
 
-    fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
+    fn emit_level_info(&self, events: &mut Vec<StateEvent>) {
         if let Some(info) = self.get_level_info() {
-            events.push(WorldEvent::LevelInfoUpdated(info));
+            events.push(StateEvent::LevelInfoUpdated(info));
         }
     }
 
@@ -233,7 +233,7 @@ impl WorldState {
         }
     }
 
-    pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
+    pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<StateEvent> {
         let mut events = Vec::new();
 
         // Delegate player-specific messages first
@@ -244,7 +244,7 @@ impl WorldState {
             // Enrich events with spell names if available
             for ev in &mut events {
                 match ev {
-                    WorldEvent::SpellUpdated { spell_id, name } if name.is_none() => {
+                    StateEvent::SpellUpdated { spell_id, name } if name.is_none() => {
                         *name = self.resolve_spell_name(*spell_id);
                     }
                     _ => {}
@@ -279,7 +279,7 @@ impl WorldState {
                 }
 
                 self.add_entity(entity.clone());
-                events.push(WorldEvent::EntitySpawned(Box::new(entity)));
+                events.push(StateEvent::EntitySpawned(Box::new(entity)));
             }
             GameMessage::ObjectDelete(data) => {
                 let guid = data.guid;
@@ -288,7 +288,7 @@ impl WorldState {
                 self.update_player_inventory_recursive(guid, false);
 
                 if let Some(_entity) = self.remove_entity(guid) {
-                    events.push(WorldEvent::EntityDespawned(guid));
+                    events.push(StateEvent::EntityDespawned(guid));
                 }
             }
             GameMessage::ParentEvent(data) => {
@@ -316,7 +316,7 @@ impl WorldState {
 
                 if should_remove {
                     if let Some(_entity) = self.remove_entity(guid) {
-                        events.push(WorldEvent::EntityDespawned(guid));
+                        events.push(StateEvent::EntityDespawned(guid));
                     }
                 } else if let Some(entity) = self.entities.get_mut(guid) {
                     let old_lb = entity.position.landblock_id;
@@ -335,7 +335,7 @@ impl WorldState {
                     self.scene
                         .update_entity(guid, old_lb, data.pos.pos.landblock_id);
 
-                    events.push(WorldEvent::EntityMoved {
+                    events.push(StateEvent::EntityMoved {
                         guid,
                         pos: data.pos.pos,
                     });
@@ -354,7 +354,7 @@ impl WorldState {
                     self.scene
                         .update_entity(guid, old_lb, data.pos.landblock_id);
 
-                    events.push(WorldEvent::EntityMoved {
+                    events.push(StateEvent::EntityMoved {
                         guid,
                         pos: data.pos,
                     });
@@ -369,7 +369,7 @@ impl WorldState {
                     self.scene
                         .update_entity(data.guid, old_lb, data.position.landblock_id);
 
-                    events.push(WorldEvent::EntityMoved {
+                    events.push(StateEvent::EntityMoved {
                         guid: data.guid,
                         pos: data.position,
                     });
@@ -400,7 +400,7 @@ impl WorldState {
                                     events.extend(self.set_player_position(pos));
                                 } else {
                                     entity.position.rotation = new_rot;
-                                    events.push(WorldEvent::EntityMoved {
+                                    events.push(StateEvent::EntityMoved {
                                         guid,
                                         pos: entity.position,
                                     });
@@ -426,7 +426,7 @@ impl WorldState {
                                 events.extend(self.set_player_position(pos));
                             } else {
                                 entity.position.rotation = new_rot;
-                                events.push(WorldEvent::EntityMoved {
+                                events.push(StateEvent::EntityMoved {
                                     guid,
                                     pos: entity.position,
                                 });
@@ -443,7 +443,7 @@ impl WorldState {
                     events.extend(self.set_player_velocity(data.velocity));
                 } else if let Some(entity) = self.entities.get_mut(guid) {
                     entity.velocity = data.velocity;
-                    events.push(WorldEvent::EntityVectorUpdated {
+                    events.push(StateEvent::EntityVectorUpdated {
                         guid,
                         velocity: data.velocity,
                         omega: data.omega,
@@ -465,7 +465,7 @@ impl WorldState {
                         events.extend(self.set_player_position(*p));
                     }
 
-                    events.push(WorldEvent::PlayerInfo(Box::new(
+                    events.push(StateEvent::PlayerInfo(Box::new(
                         crate::world::PlayerInfoData {
                             guid,
                             name: name.clone(),
@@ -496,7 +496,7 @@ impl WorldState {
                                 || self.player.inventory.contains(&data.container_guid);
                             self.update_player_inventory_recursive(data.item_guid, is_owned);
 
-                            events.push(WorldEvent::PropertyUpdated {
+                            events.push(StateEvent::PropertyUpdated {
                                 guid: data.item_guid,
                                 property_id: PropertyInstanceId::Container as u32,
                                 value: PropertyValue::IID(data.container_guid),
@@ -511,7 +511,7 @@ impl WorldState {
                             // Recursively remove from inventory tracking
                             self.update_player_inventory_recursive(data.object_guid, false);
 
-                            events.push(WorldEvent::PropertyUpdated {
+                            events.push(StateEvent::PropertyUpdated {
                                 guid: data.object_guid,
                                 property_id: PropertyInstanceId::Container as u32,
                                 value: PropertyValue::IID(Guid::NULL),
@@ -529,7 +529,7 @@ impl WorldState {
                                 self.player.wield_item(data.object_guid, data.equip_mask);
                             }
 
-                            events.push(WorldEvent::PropertyUpdated {
+                            events.push(StateEvent::PropertyUpdated {
                                 guid: data.object_guid,
                                 property_id: PropertyInstanceId::Wielder as u32,
                                 value: PropertyValue::IID(ev.target),
@@ -537,18 +537,18 @@ impl WorldState {
                         }
                     }
                     GameEvent::WeenieError(data) => {
-                        events.push(WorldEvent::WeenieError {
+                        events.push(StateEvent::WeenieError {
                             error_id: data.error_id,
                         });
                     }
                     GameEvent::WeenieErrorWithString(data) => {
-                        events.push(WorldEvent::WeenieErrorWithString {
+                        events.push(StateEvent::WeenieErrorWithString {
                             error_id: data.error_id,
                             message: data.message.clone(),
                         });
                     }
                     GameEvent::UseDone(data) => {
-                        events.push(WorldEvent::UseDone {
+                        events.push(StateEvent::UseDone {
                             error_id: data.error_id,
                         });
                     }
@@ -584,7 +584,7 @@ impl WorldState {
                                 entity.weapon_profile = data.weapon_profile.clone();
                             }
 
-                            events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
+                            events.push(StateEvent::EntityIdentified(Box::new(entity.clone())));
                         }
                     }
                     _ => {}
@@ -597,7 +597,7 @@ impl WorldState {
                 self.update_player_inventory_recursive(guid, false);
 
                 if let Some(_entity) = self.remove_entity(guid) {
-                    events.push(WorldEvent::EntityDespawned(guid));
+                    events.push(StateEvent::EntityDespawned(guid));
                 }
             }
             GameMessage::SetStackSize(data) => {
@@ -608,12 +608,12 @@ impl WorldState {
                     // PropertyInt.Value = 19
                     entity.int_properties.insert(19, data.value as i32);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid,
                     property_id: 15,
                     value: PropertyValue::Int(data.stack_size as i32),
                 });
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid,
                     property_id: 19,
                     value: PropertyValue::Int(data.value as i32),
@@ -622,7 +622,7 @@ impl WorldState {
             GameMessage::SetState(data) => {
                 if let Some(entity) = self.entities.get_mut(data.guid) {
                     entity.physics_state = data.physics_state;
-                    events.push(WorldEvent::EntityStateUpdated {
+                    events.push(StateEvent::EntityStateUpdated {
                         guid: data.guid,
                         physics_state: data.physics_state,
                     });
@@ -655,14 +655,14 @@ impl WorldState {
                                 )
                             {
                                 self.player.combat_mode = mode;
-                                events.push(WorldEvent::CombatModeUpdated(mode));
+                                events.push(StateEvent::CombatModeUpdated(mode));
                             }
                         }
                         _ => {}
                     }
                     self.player.emit_derived_stats(&mut events);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Int(data.value),
@@ -687,12 +687,12 @@ impl WorldState {
 
                         if let Some(mode) = maybe_mode {
                             self.player.combat_mode = mode;
-                            events.push(WorldEvent::CombatModeUpdated(mode));
+                            events.push(StateEvent::CombatModeUpdated(mode));
                         }
                     }
                     self.player.emit_derived_stats(&mut events);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Int(data.value),
@@ -723,7 +723,7 @@ impl WorldState {
                         _ => {}
                     }
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Int64(data.value),
@@ -738,7 +738,7 @@ impl WorldState {
                 if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.int64_properties.insert(data.property, data.value);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Int64(data.value),
@@ -758,7 +758,7 @@ impl WorldState {
                         .bool_properties
                         .insert(data.property, data.value);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Bool(data.value),
@@ -778,7 +778,7 @@ impl WorldState {
                         .bool_properties
                         .insert(data.property, data.value);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Bool(data.value),
@@ -799,7 +799,7 @@ impl WorldState {
                         .insert(data.property, data.value);
                     self.player.emit_derived_stats(&mut events);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Float(data.value),
@@ -820,7 +820,7 @@ impl WorldState {
                         .insert(data.property, data.value);
                     self.player.emit_derived_stats(&mut events);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::Float(data.value),
@@ -842,7 +842,7 @@ impl WorldState {
                         .string_properties
                         .insert(data.property, data.value.clone());
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::String(data.value.clone()),
@@ -864,7 +864,7 @@ impl WorldState {
                         .string_properties
                         .insert(data.property, data.value.clone());
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::String(data.value.clone()),
@@ -882,7 +882,7 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.did_properties.insert(data.property, data.value);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::DID(data.value),
@@ -900,7 +900,7 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.did_properties.insert(data.property, data.value);
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::DID(data.value),
@@ -960,7 +960,7 @@ impl WorldState {
                         }
                     }
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::IID(data.value),
@@ -1020,7 +1020,7 @@ impl WorldState {
                         }
                     }
                 }
-                events.push(WorldEvent::PropertyUpdated {
+                events.push(StateEvent::PropertyUpdated {
                     guid: data.guid,
                     property_id: data.property,
                     value: PropertyValue::IID(data.value),
@@ -1100,7 +1100,7 @@ impl WorldState {
         false
     }
 
-    pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<WorldEvent> {
+    pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<StateEvent> {
         let mut events = Vec::new();
 
         if self.player.guid == Guid::NULL {
@@ -1137,7 +1137,7 @@ impl WorldState {
 
     /// Updates the player's position, ensuring the record in PlayerState,
     /// the mirrored Entity, and the SpatialScene stay in sync.
-    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<WorldEvent> {
+    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<StateEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
@@ -1160,12 +1160,12 @@ impl WorldState {
         }
         self.scene.update_entity(guid, old_lb, pos.landblock_id);
 
-        events.push(WorldEvent::EntityMoved { guid, pos });
+        events.push(StateEvent::EntityMoved { guid, pos });
         events
     }
 
     /// Updates the player's velocity in both PlayerState (if mirrored) and the Entity map.
-    pub fn set_player_velocity(&mut self, velocity: Vector3) -> Vec<WorldEvent> {
+    pub fn set_player_velocity(&mut self, velocity: Vector3) -> Vec<StateEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
@@ -1174,7 +1174,7 @@ impl WorldState {
 
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.velocity = velocity;
-            events.push(WorldEvent::EntityVectorUpdated {
+            events.push(StateEvent::EntityVectorUpdated {
                 guid,
                 velocity,
                 omega: Vector3::zero(), // Entities don't currently store omega
@@ -1187,7 +1187,7 @@ impl WorldState {
     pub fn apply_player_autonomous_position(
         &mut self,
         data: &ServerAutonomousPositionData,
-    ) -> Vec<WorldEvent> {
+    ) -> Vec<StateEvent> {
         let events = self.set_player_position(data.position);
 
         self.player.instance_sequence = data.instance_sequence;
@@ -1378,10 +1378,10 @@ mod tests {
         assert_eq!(entity.container_id, Some(container_guid));
         assert_eq!(entity.position.landblock_id, Guid::NULL);
 
-        // Check for WorldEvent::PropertyUpdated
+        // Check for StateEvent::PropertyUpdated
         assert!(events.iter().any(|e| matches!(
             e,
-            WorldEvent::PropertyUpdated {
+            StateEvent::PropertyUpdated {
                 guid,
                 property_id,
                 value: PropertyValue::IID(val),
@@ -1417,7 +1417,7 @@ mod tests {
 
         assert!(events.iter().any(|e| matches!(
             e,
-            WorldEvent::PropertyUpdated {
+            StateEvent::PropertyUpdated {
                 guid,
                 property_id,
                 value: PropertyValue::IID(val),
@@ -1456,7 +1456,7 @@ mod tests {
 
         assert!(events.iter().any(|e| matches!(
             e,
-            WorldEvent::PropertyUpdated {
+            StateEvent::PropertyUpdated {
                 guid,
                 property_id,
                 value: PropertyValue::IID(val),
@@ -1486,7 +1486,7 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid))
+                .any(|e| matches!(e, StateEvent::EntityDespawned(guid) if *guid == obj_guid))
         );
     }
 

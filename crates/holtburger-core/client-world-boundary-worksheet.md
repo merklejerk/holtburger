@@ -69,7 +69,7 @@ Add narrow `WorldState` methods that encapsulate paired updates:
   - updates `player.position`
   - updates player entity position (if present)
   - updates spatial scene index
-  - returns canonical `WorldEvent::EntityMoved`
+  - returns canonical `StateEvent::EntityMoved`
 - [x] `set_player_velocity(velocity)`
   - updates player entity velocity (and any mirrored field if needed)
   - returns canonical vector/update event when appropriate

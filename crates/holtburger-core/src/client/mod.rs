@@ -1,5 +1,5 @@
 use crate::session::Session;
-use crate::world::{WorldEvent, WorldState, state::ServerTimeSync};
+use crate::world::{StateEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
@@ -21,7 +21,8 @@ pub struct Client {
     pub session: Session,
     pub world: WorldState,
     state: ClientState,
-    event_tx: Option<mpsc::UnboundedSender<ClientEvent>>,
+    wire_event_tx: broadcast::Sender<WireEvent>,
+    state_event_tx: broadcast::Sender<StateEvent>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     pub message_dump_dir: Option<std::path::PathBuf>,
@@ -31,35 +32,39 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn set_event_tx(&mut self, tx: mpsc::UnboundedSender<ClientEvent>) {
-        self.event_tx = Some(tx);
+    pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
+        self.wire_event_tx.subscribe()
     }
 
-    pub fn set_command_rx(&mut self, rx: mpsc::UnboundedReceiver<ClientCommand>) {
-        self.command_rx = Some(rx);
+    pub fn subscribe_state_events(&self) -> broadcast::Receiver<StateEvent> {
+        self.state_event_tx.subscribe()
     }
 
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
         self.client_view_event_tx.subscribe()
     }
 
+    pub fn set_command_rx(&mut self, rx: mpsc::UnboundedReceiver<ClientCommand>) {
+        self.command_rx = Some(rx);
+    }
+
     fn send_status_event(&self) {
-        self.emit_client_event(ClientEvent::StatusUpdate {
+        self.emit_wire_event(WireEvent::StatusUpdate {
             state: self.state.clone(),
         });
     }
 
-    pub fn emit_client_event(&self, event: ClientEvent) {
+    pub fn emit_wire_event(&self, event: WireEvent) {
         // New ClientView stream projection (normalization)
         match &event {
-            ClientEvent::StatusUpdate { state } => {
+            WireEvent::StatusUpdate { state } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::StatusUpdate {
                         state: state.clone(),
                     });
             }
-            ClientEvent::InventoryServerSaveFailed { item_guid, error } => {
+            WireEvent::InventoryServerSaveFailed { item_guid, error } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
@@ -73,7 +78,7 @@ impl Client {
                         is_transient: true,
                     });
             }
-            ClientEvent::WeenieError { error_id, message } => {
+            WireEvent::WeenieError { error_id, message } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
@@ -86,7 +91,7 @@ impl Client {
                         is_transient: true,
                     });
             }
-            ClientEvent::CharacterError(err) => {
+            WireEvent::CharacterError(err) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
@@ -97,7 +102,7 @@ impl Client {
                         is_transient: true,
                     });
             }
-            ClientEvent::ClientError(msg) => {
+            WireEvent::ClientError(msg) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
@@ -108,7 +113,7 @@ impl Client {
                         is_transient: true,
                     });
             }
-            ClientEvent::UseDone { error_id } if *error_id != 0 => {
+            WireEvent::UseDone { error_id } if *error_id != 0 => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
@@ -119,21 +124,20 @@ impl Client {
                         is_transient: true,
                     });
             }
-            ClientEvent::World(event) => {
-                self.emit_world_view_projection(event);
-            }
             _ => {}
         }
 
-        // Legacy stream
-        if let Some(tx) = &self.event_tx {
-            let _ = tx.send(event);
-        }
+        let _ = self.wire_event_tx.send(event);
     }
 
-    fn emit_world_view_projection(&self, event: &WorldEvent) {
+    pub fn emit_state_event(&self, event: StateEvent) {
+        self.emit_world_view_projection(&event);
+        let _ = self.state_event_tx.send(event);
+    }
+
+    fn emit_world_view_projection(&self, event: &StateEvent) {
         match event {
-            WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
+            StateEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 let _ =
                     self.client_view_event_tx
                         .send(ClientViewEvent::PlayerEnchantmentsUpdated {
@@ -141,10 +145,10 @@ impl Client {
                             resolved_names: self.world.get_player_spell_names(),
                         });
             }
-            WorldEvent::AttributeUpdated(_)
-            | WorldEvent::SkillUpdated(_)
-            | WorldEvent::LevelInfoUpdated(_)
-            | WorldEvent::DerivedStatsUpdated(_) => {
+            StateEvent::AttributeUpdated(_)
+            | StateEvent::SkillUpdated(_)
+            | StateEvent::LevelInfoUpdated(_)
+            | StateEvent::DerivedStatsUpdated(_) => {
                 let level_info = self.world.get_level_info().unwrap_or_default();
                 let _ = self
                     .client_view_event_tx
@@ -157,14 +161,14 @@ impl Client {
                         level_info: level_info.clone(),
                     });
             }
-            WorldEvent::VitalUpdated(vital) => {
+            StateEvent::VitalUpdated(vital) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalUpdated {
                         vital: vital.clone(),
                     });
             }
-            WorldEvent::SpellUpdated { .. } | WorldEvent::SpellRemoved { .. } => {
+            StateEvent::SpellUpdated { .. } | StateEvent::SpellRemoved { .. } => {
                 let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();
                 spell_ids.sort();
 
@@ -194,15 +198,15 @@ impl Client {
                         resolved,
                     });
             }
-            WorldEvent::PlayerInfo(_) => {
+            StateEvent::PlayerInfo(_) => {
                 // Emit all snapshots
-                self.emit_world_view_projection(&WorldEvent::PlayerEnchantmentsUpdated {
+                self.emit_world_view_projection(&StateEvent::PlayerEnchantmentsUpdated {
                     enchantments: self.world.player.enchantments.clone(),
                 });
-                self.emit_world_view_projection(&WorldEvent::LevelInfoUpdated(
+                self.emit_world_view_projection(&StateEvent::LevelInfoUpdated(
                     self.world.get_level_info().unwrap_or_default(),
                 ));
-                self.emit_world_view_projection(&WorldEvent::SpellUpdated {
+                self.emit_world_view_projection(&StateEvent::SpellUpdated {
                     spell_id: 0,
                     name: None,
                 }); // Trigger spell sync
@@ -216,22 +220,22 @@ impl Client {
                         });
                 }
             }
-            WorldEvent::EntitySpawned(entity) | WorldEvent::EntityIdentified(entity) => {
+            StateEvent::EntitySpawned(entity) | StateEvent::EntityIdentified(entity) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityUpserted {
                         entity: entity.clone(),
                     });
             }
-            WorldEvent::EntityDespawned(guid) => {
+            StateEvent::EntityDespawned(guid) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityRemoved { guid: *guid });
             }
-            WorldEvent::EntityMoved { guid, .. }
-            | WorldEvent::EntityStateUpdated { guid, .. }
-            | WorldEvent::EntityVectorUpdated { guid, .. }
-            | WorldEvent::PropertyUpdated { guid, .. } => {
+            StateEvent::EntityMoved { guid, .. }
+            | StateEvent::EntityStateUpdated { guid, .. }
+            | StateEvent::EntityVectorUpdated { guid, .. }
+            | StateEvent::PropertyUpdated { guid, .. } => {
                 if let Some(entity) = self.world.entities.get(*guid) {
                     let _ = self
                         .client_view_event_tx
@@ -240,17 +244,17 @@ impl Client {
                         });
                 }
             }
-            WorldEvent::ServerTimeUpdate(time) => {
+            StateEvent::ServerTimeUpdate(time) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ServerTimeUpdated { time: *time });
             }
-            WorldEvent::CombatModeUpdated(mode) => {
+            StateEvent::CombatModeUpdated(mode) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CombatModeUpdated { mode: *mode });
             }
-            WorldEvent::NoClipUpdated(enabled) => {
+            StateEvent::NoClipUpdated(enabled) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::NoClipUpdated { enabled: *enabled });
@@ -282,13 +286,13 @@ impl Client {
                                         let world_events = self.handle_message(&msg_data).await?;
 
                                         for event in world_events {
-                                            if let WorldEvent::ForcedReposition { .. } = event
+                                            if let StateEvent::ForcedReposition { .. } = event
                                                 && self.movement.move_target.is_some() {
                                                     log::warn!("Approach aborted: Forced reposition by server");
                                                     self.movement.move_target = None;
                                                     let events = self.world.set_player_velocity(holtburger_common::Vector3::zero());
                                                     for ev in events {
-                                                        self.emit_client_event(ClientEvent::World(Box::new(ev)));
+                                                        self.emit_state_event(ev);
                                                     }
                                                 }
                                         }
@@ -308,9 +312,9 @@ impl Client {
                                             server_time,
                                             local_time: Instant::now(),
                                         });
-                                        self.emit_client_event(ClientEvent::World(Box::new(
-                                            WorldEvent::ServerTimeUpdate(server_time),
-                                        )));
+                                        self.emit_state_event(
+                                            StateEvent::ServerTimeUpdate(server_time),
+                                        );
                                     }
                                 }
                             }
@@ -339,17 +343,20 @@ impl Client {
 
                     if let Some(target_guid) = self.movement.move_target {
                         let Client { movement, world, session, .. } = self;
-                        let events = movement.handle_approach_task(target_guid, dt, world, session).await?;
-                        for event in events {
-                            self.emit_client_event(event);
+                        let (wire_events, state_events) = movement.handle_approach_task(target_guid, dt, world, session).await?;
+                        for event in wire_events {
+                            self.emit_wire_event(event);
+                        }
+                        for event in state_events {
+                            self.emit_state_event(event);
                         }
                     }
 
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);
-                    let physics_events = crate::world::dedupe_world_events(physics_events);
+                    let physics_events = crate::world::dedupe_state_events(physics_events);
                     for event in physics_events {
-                        self.emit_client_event(ClientEvent::World(Box::new(event)));
+                        self.emit_state_event(event);
                     }
                 }
             }

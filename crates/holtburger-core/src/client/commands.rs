@@ -1,6 +1,6 @@
-use crate::client::types::{ClientCommand, ClientEvent, ResolvedResource, ResourceDescriptor};
+use crate::client::types::{ClientCommand, WireEvent, ResolvedResource, ResourceDescriptor};
 use crate::client::{Client, ClientState};
-use crate::world::WorldEvent;
+use crate::world::StateEvent;
 use anyhow::Result;
 use holtburger_common::Quaternion;
 use holtburger_protocol::messages::game_action::*;
@@ -201,7 +201,7 @@ impl Client {
                     }
                 }
                 if !results.is_empty() {
-                    self.emit_client_event(ClientEvent::ResourcesResolved(results));
+                    self.emit_wire_event(WireEvent::ResourcesResolved(results));
                 }
                 Ok(())
             }
@@ -382,7 +382,7 @@ impl Client {
                 next_pos.rotation = Quaternion::from_heading(heading);
                 let world_events = self.world.set_player_position(next_pos);
                 for event in world_events {
-                    self.emit_client_event(ClientEvent::World(Box::new(event)));
+                    self.emit_state_event(event);
                 }
 
                 let obj_inst = self.world.player.instance_sequence;
@@ -443,9 +443,7 @@ impl Client {
             ClientCommand::SetNoClip(enabled) => {
                 log::info!(">>> NoClip set to: {}", enabled);
                 self.world.player.noclip = enabled;
-                self.emit_client_event(ClientEvent::World(Box::new(WorldEvent::NoClipUpdated(
-                    enabled,
-                ))));
+                self.emit_state_event(StateEvent::NoClipUpdated(enabled));
                 Ok(())
             }
             ClientCommand::CancelAttack => {

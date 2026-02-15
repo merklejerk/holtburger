@@ -1,13 +1,13 @@
 use super::{Client, types::*};
-use crate::world::WorldEvent;
+use crate::world::StateEvent;
 use anyhow::Result;
 use holtburger_common::ProtocolUnpack;
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::*;
 
 impl Client {
-    pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
-        self.emit_client_event(ClientEvent::RawMessage(data.to_vec()));
+    pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<StateEvent>> {
+        self.emit_wire_event(WireEvent::RawMessage(data.to_vec()));
 
         if let Some(ref dump_dir) = self.message_dump_dir {
             let path = dump_dir.join(format!("{:05}.bin", self.message_counter));
@@ -36,16 +36,16 @@ impl Client {
 
         log::debug!("GameMessage: {:?}", message);
 
-        self.emit_client_event(ClientEvent::GameMessage(Box::new(message.clone())));
+        self.emit_wire_event(WireEvent::GameMessage(Box::new(message.clone())));
 
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);
 
         // Deduplicate events that are snapshots/derived
-        let world_events = crate::world::dedupe_world_events(world_events);
+        let world_events = crate::world::dedupe_state_events(world_events);
 
         for event in world_events.iter() {
-            self.emit_client_event(ClientEvent::World(Box::new(event.clone())));
+            self.emit_state_event(event.clone());
         }
 
         match message {
@@ -76,11 +76,14 @@ impl Client {
                         session,
                         ..
                     } = self;
-                    let events = movement
+                    let (wire_events, state_events) = movement
                         .handle_server_controlled_movement(*data, world, session)
                         .await?;
-                    for event in events {
-                        self.emit_client_event(event);
+                    for event in wire_events {
+                        self.emit_wire_event(event);
+                    }
+                    for event in state_events {
+                        self.emit_state_event(event);
                     }
                 }
                 Ok(())
@@ -117,7 +120,7 @@ impl Client {
 
                 self.state = ClientState::CharacterSelection(self.auth.characters.clone());
                 self.send_status_event();
-                self.emit_client_event(ClientEvent::CharacterList(self.auth.characters.clone()));
+                self.emit_wire_event(WireEvent::CharacterList(self.auth.characters.clone()));
                 Ok(())
             }
             GameMessage::CharacterEnterWorldServerReady => {
@@ -138,53 +141,53 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::PingResponse(_) => {
-                    self.emit_client_event(ClientEvent::PingResponse);
+                    self.emit_wire_event(WireEvent::PingResponse);
                     Ok(())
                 }
                 GameEvent::ViewContents(data) => {
-                    self.emit_client_event(ClientEvent::ViewContents {
+                    self.emit_wire_event(WireEvent::ViewContents {
                         container: data.container,
                         items: data.items.clone(),
                     });
                     Ok(())
                 }
                 GameEvent::Tell(data) => {
-                    self.emit_client_event(ClientEvent::Chat {
+                    self.emit_wire_event(WireEvent::Chat {
                         sender: data.sender_name.clone(),
                         message: data.message.clone(),
                     });
                     Ok(())
                 }
                 GameEvent::ChannelBroadcast(data) => {
-                    self.emit_client_event(ClientEvent::Chat {
+                    self.emit_wire_event(WireEvent::Chat {
                         sender: data.sender_name.clone(),
                         message: data.message.clone(),
                     });
                     Ok(())
                 }
                 GameEvent::WeenieError(data) => {
-                    self.emit_client_event(ClientEvent::WeenieError {
+                    self.emit_wire_event(WireEvent::WeenieError {
                         error_id: data.error_id,
                         message: None,
                     });
                     Ok(())
                 }
                 GameEvent::WeenieErrorWithString(data) => {
-                    self.emit_client_event(ClientEvent::WeenieError {
+                    self.emit_wire_event(WireEvent::WeenieError {
                         error_id: data.error_id,
                         message: Some(data.message.clone()),
                     });
                     Ok(())
                 }
                 GameEvent::InventoryServerSaveFailed(data) => {
-                    self.emit_client_event(ClientEvent::InventoryServerSaveFailed {
+                    self.emit_wire_event(WireEvent::InventoryServerSaveFailed {
                         item_guid: data.item_guid,
                         error: data.error,
                     });
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
-                    self.emit_client_event(ClientEvent::UseDone {
+                    self.emit_wire_event(WireEvent::UseDone {
                         error_id: data.error_id,
                     });
                     Ok(())
@@ -215,7 +218,7 @@ impl Client {
                         }
                     });
 
-                self.emit_client_event(ClientEvent::PlayerEntered {
+                self.emit_wire_event(WireEvent::PlayerEntered {
                     guid: player_id,
                     name: name.clone(),
                 });
@@ -238,19 +241,19 @@ impl Client {
             }
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
-                self.emit_client_event(ClientEvent::ServerMessage(data.message.clone()));
+                self.emit_wire_event(WireEvent::ServerMessage(data.message.clone()));
                 Ok(())
             }
             GameMessage::CharacterError(data) => {
                 let error = self.auth.handle_character_error(data.error_id);
-                self.emit_client_event(ClientEvent::CharacterError(error));
+                self.emit_wire_event(WireEvent::CharacterError(error));
                 Ok(())
             }
             GameMessage::AccountBoot(data) => {
                 let reason = self.auth.handle_boot_account(*data);
                 self.state = ClientState::Disconnected;
                 self.send_status_event();
-                self.emit_client_event(ClientEvent::BootAccount(reason));
+                self.emit_wire_event(WireEvent::BootAccount(reason));
                 Ok(())
             }
             GameMessage::DddInterrogation => {
@@ -268,28 +271,28 @@ impl Client {
                 } else {
                     data.sender_name.clone()
                 };
-                self.emit_client_event(ClientEvent::Chat {
+                self.emit_wire_event(WireEvent::Chat {
                     sender,
                     message: data.message.clone(),
                 });
                 Ok(())
             }
             GameMessage::HearRangedSpeech(data) => {
-                self.emit_client_event(ClientEvent::Chat {
+                self.emit_wire_event(WireEvent::Chat {
                     sender: data.sender_name.clone(),
                     message: data.message.clone(),
                 });
                 Ok(())
             }
             GameMessage::EmoteText(data) => {
-                self.emit_client_event(ClientEvent::Emote {
+                self.emit_wire_event(WireEvent::Emote {
                     sender: data.sender_name.clone(),
                     text: data.text.clone(),
                 });
                 Ok(())
             }
             GameMessage::SoulEmote(data) => {
-                self.emit_client_event(ClientEvent::Emote {
+                self.emit_wire_event(WireEvent::Emote {
                     sender: data.sender_name.clone(),
                     text: data.text.clone(),
                 });

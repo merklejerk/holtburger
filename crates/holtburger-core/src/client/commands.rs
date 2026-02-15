@@ -86,14 +86,9 @@ impl Client {
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
-                let Client {
-                    auth,
-                    session,
-                    state,
-                    event_tx,
-                    ..
-                } = self;
-                auth.select_character(id, session, state, event_tx).await
+                self.state = ClientState::EnteringWorld;
+                self.send_status_event();
+                self.auth.select_character(id, &mut self.session).await
             }
             ClientCommand::SelectCharacterByIndex(idx) => match &self.state {
                 ClientState::CharacterSelection(chars) if (1..=chars.len()).contains(&idx) => {
@@ -105,15 +100,9 @@ impl Client {
                         char_name,
                         char_guid
                     );
-                    let Client {
-                        auth,
-                        session,
-                        state,
-                        event_tx,
-                        ..
-                    } = self;
-                    auth.select_character(char_guid, session, state, event_tx)
-                        .await
+                    self.state = ClientState::EnteringWorld;
+                    self.send_status_event();
+                    self.auth.select_character(char_guid, &mut self.session).await
                 }
                 _ => Ok(()),
             },
@@ -123,14 +112,10 @@ impl Client {
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
-                    let Client {
-                        auth,
-                        session,
-                        state,
-                        event_tx,
-                        ..
-                    } = self;
-                    auth.select_character(char_id, session, state, event_tx)
+                    self.state = ClientState::EnteringWorld;
+                    self.send_status_event();
+                    self.auth
+                        .select_character(char_id, &mut self.session)
                         .await
                 } else {
                     Ok(())
@@ -202,23 +187,21 @@ impl Client {
                 .await
             }
             ClientCommand::ResolveResources(descriptors) => {
-                if let Some(tx) = &self.event_tx {
-                    let mut results = Vec::new();
-                    for descriptor in descriptors {
-                        match descriptor {
-                            ResourceDescriptor::Spell(spell_id) => {
-                                if let Some(info) = self.world.resolve_spell_info(spell_id) {
-                                    results.push(ResolvedResource::Spell {
-                                        spell_id,
-                                        info: Box::new(info),
-                                    });
-                                }
+                let mut results = Vec::new();
+                for descriptor in descriptors {
+                    match descriptor {
+                        ResourceDescriptor::Spell(spell_id) => {
+                            if let Some(info) = self.world.resolve_spell_info(spell_id) {
+                                results.push(ResolvedResource::Spell {
+                                    spell_id,
+                                    info: Box::new(info),
+                                });
                             }
                         }
                     }
-                    if !results.is_empty() {
-                        let _ = tx.send(ClientEvent::ResourcesResolved(results));
-                    }
+                }
+                if !results.is_empty() {
+                    self.emit_client_event(ClientEvent::ResourcesResolved(results));
                 }
                 Ok(())
             }
@@ -398,10 +381,8 @@ impl Client {
                 let mut next_pos = self.world.player.position;
                 next_pos.rotation = Quaternion::from_heading(heading);
                 let world_events = self.world.set_player_position(next_pos);
-                if let Some(tx) = &self.event_tx {
-                    for event in world_events {
-                        let _ = tx.send(ClientEvent::World(Box::new(event)));
-                    }
+                for event in world_events {
+                    self.emit_client_event(ClientEvent::World(Box::new(event)));
                 }
 
                 let obj_inst = self.world.player.instance_sequence;
@@ -462,11 +443,9 @@ impl Client {
             ClientCommand::SetNoClip(enabled) => {
                 log::info!(">>> NoClip set to: {}", enabled);
                 self.world.player.noclip = enabled;
-                if let Some(tx) = &self.event_tx {
-                    let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::NoClipUpdated(
-                        enabled,
-                    ))));
-                }
+                self.emit_client_event(ClientEvent::World(Box::new(WorldEvent::NoClipUpdated(
+                    enabled,
+                ))));
                 Ok(())
             }
             ClientCommand::CancelAttack => {

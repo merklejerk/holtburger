@@ -44,16 +44,112 @@ impl Client {
     }
 
     fn send_status_event(&self) {
-        if let Some(tx) = &self.event_tx {
-            let _ = tx.send(ClientEvent::StatusUpdate {
-                state: self.state.clone(),
-            });
+        self.emit_client_event(ClientEvent::StatusUpdate {
+            state: self.state.clone(),
+        });
+    }
+
+    pub fn emit_client_event(&self, event: ClientEvent) {
+        // New ClientView stream projection (normalization)
+        match &event {
+            ClientEvent::StatusUpdate { state } => {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::StatusUpdate {
+                    state: state.clone(),
+                });
+            }
+            ClientEvent::WeenieError { error_id, message } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ErrorRaised {
+                        source: ErrorSource::Wire,
+                        kind: ErrorKind::Weenie,
+                        code: Some(*error_id),
+                        message: message
+                            .clone()
+                            .unwrap_or_else(|| format!("Weenie error {}", error_id)),
+                        is_transient: true,
+                    });
+            }
+            ClientEvent::CharacterError(err) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ErrorRaised {
+                        source: ErrorSource::Wire,
+                        kind: ErrorKind::Character,
+                        code: Some(*err as u32),
+                        message: format!("Character error: {:?}", err),
+                        is_transient: true,
+                    });
+            }
+            ClientEvent::ClientError(msg) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ErrorRaised {
+                        source: ErrorSource::Client,
+                        kind: ErrorKind::Client,
+                        code: None,
+                        message: msg.clone(),
+                        is_transient: true,
+                    });
+            }
+            ClientEvent::UseDone { error_id } if *error_id != 0 => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ErrorRaised {
+                        source: ErrorSource::Wire,
+                        kind: ErrorKind::Weenie,
+                        code: Some(*error_id),
+                        message: format!("Use failed: {}", error_id),
+                        is_transient: true,
+                    });
+            }
+            ClientEvent::World(event) => {
+                self.emit_world_view_projection(event);
+            }
+            _ => {}
         }
-        let _ = self
-            .client_view_event_tx
-            .send(ClientViewEvent::StatusUpdate {
-                state: self.state.clone(),
-            });
+
+        // Legacy stream
+        if let Some(tx) = &self.event_tx {
+            let _ = tx.send(event);
+        }
+    }
+
+    fn emit_world_view_projection(&self, event: &WorldEvent) {
+        match event {
+            WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
+                let _ = self.client_view_event_tx.send(
+                    ClientViewEvent::PlayerEnchantmentsUpdated {
+                        enchantments: enchantments.clone(),
+                        resolved_names: self.world.get_player_spell_names(),
+                    },
+                );
+            }
+            WorldEvent::EntitySpawned(entity) | WorldEvent::EntityIdentified(entity) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityUpserted {
+                        entity: entity.clone(),
+                    });
+            }
+            WorldEvent::EntityDespawned(guid) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityRemoved { guid: *guid });
+            }
+            WorldEvent::EntityMoved { guid, .. }
+            | WorldEvent::EntityStateUpdated { guid, .. }
+            | WorldEvent::EntityVectorUpdated { guid, .. } => {
+                if let Some(entity) = self.world.entities.get(*guid) {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::EntityUpserted {
+                            entity: Box::new(entity.clone()),
+                        });
+                }
+            }
+            _ => {}
+        }
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -84,10 +180,8 @@ impl Client {
                                                     log::warn!("Approach aborted: Forced reposition by server");
                                                     self.movement.move_target = None;
                                                     let events = self.world.set_player_velocity(holtburger_common::Vector3::zero());
-                                                    if let Some(tx) = &self.event_tx {
-                                                        for ev in events {
-                                                            let _ = tx.send(ClientEvent::World(Box::new(ev)));
-                                                        }
+                                                    for ev in events {
+                                                        self.emit_client_event(ClientEvent::World(Box::new(ev)));
                                                     }
                                                 }
                                         }
@@ -107,9 +201,9 @@ impl Client {
                                             server_time,
                                             local_time: Instant::now(),
                                         });
-                                        if let Some(tx) = &self.event_tx {
-                                            let _ = tx.send(ClientEvent::World(Box::new(WorldEvent::ServerTimeUpdate(server_time))));
-                                        }
+                                        self.emit_client_event(ClientEvent::World(Box::new(
+                                            WorldEvent::ServerTimeUpdate(server_time),
+                                        )));
                                     }
                                 }
                             }
@@ -137,17 +231,18 @@ impl Client {
                     last_physics_time = now;
 
                     if let Some(target_guid) = self.movement.move_target {
-                        let Client { movement, world, session, event_tx, .. } = self;
-                        movement.handle_approach_task(target_guid, dt, world, session, event_tx).await?;
+                        let Client { movement, world, session, .. } = self;
+                        let events = movement.handle_approach_task(target_guid, dt, world, session).await?;
+                        for event in events {
+                            self.emit_client_event(event);
+                        }
                     }
 
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);
                     let physics_events = crate::world::dedupe_world_events(physics_events);
                     for event in physics_events {
-                        if let Some(tx) = &self.event_tx {
-                            let _ = tx.send(ClientEvent::World(Box::new(event)));
-                        }
+                        self.emit_client_event(ClientEvent::World(Box::new(event)));
                     }
                 }
             }

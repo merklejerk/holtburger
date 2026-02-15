@@ -158,8 +158,8 @@ impl AppState {
                                 }
                                 _ => {}
                             }
+                            return commands;
                         }
-                        return commands;
                     }
 
                     if self.focused_pane == FocusedPane::Input {

@@ -1,6 +1,4 @@
-use crate::messages::utils::{
-    align_to_4, pad_to_4, read_packed_u32_with_known_type, write_packed_u32_with_known_type,
-};
+use crate::messages::utils::{align_to_4, pad_to_4, read_packed_data_id, write_packed_data_id};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
@@ -9,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct ModelData {
     pub header: u8,
+    pub extra: [u8; 3], // Header bytes for non-0x11 headers, or num_p, num_t, num_m for 0x11
     pub palette_id: Option<u32>,
     pub sub_palettes: Vec<SubPalette>,
     pub texture_changes: Vec<TextureChange>,
@@ -267,10 +266,12 @@ impl ProtocolPack for WeaponProfile {
     }
 }
 
+use holtburger_common::properties::EquipMask;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookProfile {
     pub flags: u32,
-    pub valid_locations: u32,
+    pub valid_locations: EquipMask,
     pub ammo_type: u32,
 }
 
@@ -280,7 +281,8 @@ impl ProtocolUnpack for HookProfile {
             return None;
         }
         let flags = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let valid_locations = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let valid_locations =
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
         let ammo_type = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
         *offset += 12;
         Some(HookProfile {
@@ -294,7 +296,8 @@ impl ProtocolUnpack for HookProfile {
 impl ProtocolPack for HookProfile {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.flags).unwrap();
-        buf.write_u32::<LittleEndian>(self.valid_locations).unwrap();
+        buf.write_u32::<LittleEndian>(self.valid_locations.bits())
+            .unwrap();
         buf.write_u32::<LittleEndian>(self.ammo_type).unwrap();
     }
 }
@@ -363,24 +366,26 @@ impl ProtocolUnpack for ModelData {
         let header = data[*offset];
         *offset += 1;
 
+        if *offset + 3 > data.len() {
+            return None;
+        }
+        let extra = [data[*offset], data[*offset + 1], data[*offset + 2]];
+        *offset += 3;
+
         let mut palette_id = None;
         let mut sub_palettes = Vec::new();
         let mut texture_changes = Vec::new();
         let mut model_changes = Vec::new();
 
         if header == 0x11 {
-            if *offset + 3 > data.len() {
-                return None;
-            }
-            let num_p = data[*offset];
-            let num_t = data[*offset + 1];
-            let num_m = data[*offset + 2];
-            *offset += 3;
+            let num_p = extra[0];
+            let num_t = extra[1];
+            let num_m = extra[2];
 
             if num_p > 0 {
-                palette_id = Some(read_packed_u32_with_known_type(data, offset, 0x04000000));
+                palette_id = Some(read_packed_data_id(data, offset, 0x04000000));
                 for _ in 0..num_p {
-                    let id = read_packed_u32_with_known_type(data, offset, 0x04000000);
+                    let id = read_packed_data_id(data, offset, 0x04000000);
                     if *offset + 2 > data.len() {
                         return None;
                     }
@@ -401,8 +406,8 @@ impl ProtocolUnpack for ModelData {
                 }
                 let part_index = data[*offset];
                 *offset += 1;
-                let old_id = read_packed_u32_with_known_type(data, offset, 0x05000000);
-                let new_id = read_packed_u32_with_known_type(data, offset, 0x05000000);
+                let old_id = read_packed_data_id(data, offset, 0x05000000);
+                let new_id = read_packed_data_id(data, offset, 0x05000000);
                 texture_changes.push(TextureChange {
                     part_index,
                     old_id,
@@ -416,23 +421,18 @@ impl ProtocolUnpack for ModelData {
                 }
                 let index = data[*offset];
                 *offset += 1;
-                let animation_id = read_packed_u32_with_known_type(data, offset, 0x01000000);
+                let animation_id = read_packed_data_id(data, offset, 0x01000000);
                 model_changes.push(ModelChange {
                     index,
                     animation_id,
                 });
             }
-            *offset = align_to_4(*offset);
-        } else {
-            // Modern ACE / Minimal ModelData
-            if *offset + 3 <= data.len() {
-                *offset += 3;
-                *offset = align_to_4(*offset);
-            }
         }
+        *offset = align_to_4(*offset);
 
         Some(ModelData {
             header,
+            extra,
             palette_id,
             sub_palettes,
             texture_changes,
@@ -444,15 +444,16 @@ impl ProtocolUnpack for ModelData {
 impl ProtocolPack for ModelData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.push(self.header);
+
         if self.header == 0x11 {
             buf.push(self.sub_palettes.len() as u8);
             buf.push(self.texture_changes.len() as u8);
             buf.push(self.model_changes.len() as u8);
 
             if !self.sub_palettes.is_empty() {
-                write_packed_u32_with_known_type(buf, self.palette_id.unwrap_or(0), 0x04000000);
+                write_packed_data_id(buf, self.palette_id.unwrap_or(0), 0x04000000);
                 for p in &self.sub_palettes {
-                    write_packed_u32_with_known_type(buf, p.id, 0x04000000);
+                    write_packed_data_id(buf, p.id, 0x04000000);
                     buf.push(p.offset);
                     buf.push(p.length);
                 }
@@ -460,21 +461,18 @@ impl ProtocolPack for ModelData {
 
             for t in &self.texture_changes {
                 buf.push(t.part_index);
-                write_packed_u32_with_known_type(buf, t.old_id, 0x05000000);
-                write_packed_u32_with_known_type(buf, t.new_id, 0x05000000);
+                write_packed_data_id(buf, t.old_id, 0x05000000);
+                write_packed_data_id(buf, t.new_id, 0x05000000);
             }
 
             for m in &self.model_changes {
                 buf.push(m.index);
-                write_packed_u32_with_known_type(buf, m.animation_id, 0x01000000);
+                write_packed_data_id(buf, m.animation_id, 0x01000000);
             }
-
-            pad_to_4(buf);
         } else {
-            buf.push(0);
-            buf.push(0);
-            buf.push(0);
+            buf.extend_from_slice(&self.extra);
         }
+        pad_to_4(buf);
     }
 }
 
@@ -607,7 +605,7 @@ mod tests {
     fn test_hook_profile_parity() {
         let expected = HookProfile {
             flags: 0x3, // HookFlags.Inscribable (0x1) | HookFlags.IsHealer (0x2)
-            valid_locations: 0x100,
+            valid_locations: EquipMask::from_bits_truncate(0x100),
             ammo_type: 2,
         };
         assert_pack_unpack_parity(test_fixtures::HOOK_PROFILE, &expected);
@@ -658,6 +656,7 @@ mod tests {
     fn test_model_data_parity() {
         let expected = ModelData {
             header: 0x11,
+            extra: [1, 1, 1],
             palette_id: Some(0x04000001),
             sub_palettes: vec![SubPalette {
                 id: 0x04000002,

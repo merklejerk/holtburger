@@ -118,9 +118,9 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         Style::default()
     };
     let input_title = if state.focused_pane == FocusedPane::Input {
-        ">> Input ('/quit' to exit) <<"
+        ">> Input ([ENTER] to focus) <<"
     } else {
-        "Input ('/quit' to exit)"
+        "Input ([ENTER] to focus)"
     };
     let input_block = Block::default()
         .borders(Borders::ALL)

@@ -1,7 +1,7 @@
 use crate::entities::classification::{self, EntityClass};
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
-use holtburger_common::properties::{ObjectDescriptionFlag, PropertyInt};
+use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::ClientCommand;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -375,17 +375,10 @@ pub fn get_verbs_for_target(
                             };
 
                         if !is_equipped {
-                            match (
-                                class,
-                                e.int_properties.get(&(PropertyInt::ValidLocations as u32)),
-                            ) {
-                                (
-                                    EntityClass::Weapon | EntityClass::Apparel | EntityClass::Wand,
-                                    Some(&mask),
-                                ) if mask != 0 => {
-                                    ent_verbs.push(EntityVerb::Equip(mask as u32));
-                                }
-                                _ => {}
+                            if let Some(mask) = e.valid_locations
+                                && !mask.is_empty()
+                            {
+                                ent_verbs.push(EntityVerb::Equip(mask.bits()));
                             }
                         } else {
                             ent_verbs.push(EntityVerb::Unequip);

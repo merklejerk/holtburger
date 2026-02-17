@@ -1100,6 +1100,7 @@ bitflags! {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct WeenieHeaderFlag: u32 {
+        const NONE = 0x00000000;
         const PLURAL_NAME = 0x00000001;
         const ITEMS_CAPACITY = 0x00000002;
         const CONTAINERS_CAPACITY = 0x00000004;
@@ -1138,6 +1139,7 @@ bitflags! {
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
     pub struct WeenieHeaderFlag2: u32 {
+        const NONE = 0x00;
         const ICON_UNDERLAY = 0x01;
         const COOLDOWN = 0x02;
         const COOLDOWN_DURATION = 0x04;
@@ -1248,7 +1250,8 @@ pub enum WeenieType {
     LifeStone = 25,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr, Display)]
+#[repr(u8)]
 pub enum RadarColor {
     Default = 0x00,
     Blue = 0x01,
@@ -1261,6 +1264,133 @@ pub enum RadarColor {
     Yellow = 0x08,
     Cyan = 0x09,
     BrightGreen = 0x10,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr, Display)]
+#[repr(u8)]
+pub enum RadarBehavior {
+    ShowNever = 0,
+    ShowAlways = 1,
+    ShowDistance = 2,
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+    pub struct EquipMask: u32 {
+        const NONE = 0x00000000;
+        const HEAD_WEAR = 0x00000001;
+        const CHEST_WEAR = 0x00000002;
+        const ABDOMEN_WEAR = 0x00000004;
+        const UPPER_ARM_WEAR = 0x00000008;
+        const LOWER_ARM_WEAR = 0x00000010;
+        const HAND_WEAR = 0x00000020;
+        const UPPER_LEG_WEAR = 0x00000040;
+        const LOWER_LEG_WEAR = 0x00000080;
+        const FOOT_WEAR = 0x00000100;
+        const CHEST_ARMOR = 0x00000200;
+        const ABDOMEN_ARMOR = 0x00000400;
+        const UPPER_ARM_ARMOR = 0x00000800;
+        const LOWER_ARM_ARMOR = 0x00001000;
+        const UPPER_LEG_ARMOR = 0x00002000;
+        const LOWER_LEG_ARMOR = 0x00004000;
+        const NECK_WEAR = 0x00008000;
+        const WRIST_WEAR_LEFT = 0x00010000;
+        const WRIST_WEAR_RIGHT = 0x00020000;
+        const FINGER_WEAR_LEFT = 0x00040000;
+        const FINGER_WEAR_RIGHT = 0x00080000;
+        const MELEE_WEAPON = 0x00100000;
+        const SHIELD = 0x00200000;
+        const MISSILE_WEAPON = 0x00400000;
+        const MISSILE_AMMO = 0x00800000;
+        const HELD = 0x01000000;
+        const TWO_HANDED = 0x02000000;
+        const TRINKET_ONE = 0x04000000;
+        const CLOAK = 0x08000000;
+        const SIGIL_ONE = 0x10000000;
+        const SIGIL_TWO = 0x20000000;
+        const SIGIL_THREE = 0x40000000;
+
+        const CLOTHING = 0x80000000 | Self::HEAD_WEAR.bits() | Self::CHEST_WEAR.bits() | Self::ABDOMEN_WEAR.bits() | Self::UPPER_ARM_WEAR.bits() | Self::LOWER_ARM_WEAR.bits() | Self::HAND_WEAR.bits() | Self::UPPER_LEG_WEAR.bits() | Self::LOWER_LEG_WEAR.bits() | Self::FOOT_WEAR.bits();
+        const ARMOR = Self::CHEST_ARMOR.bits() | Self::ABDOMEN_ARMOR.bits() | Self::UPPER_ARM_ARMOR.bits() | Self::LOWER_ARM_ARMOR.bits() | Self::UPPER_LEG_ARMOR.bits() | Self::LOWER_LEG_ARMOR.bits() | Self::FOOT_WEAR.bits();
+        const ARMOR_EXCLUSIVE = Self::CHEST_ARMOR.bits() | Self::ABDOMEN_ARMOR.bits() | Self::UPPER_ARM_ARMOR.bits() | Self::LOWER_ARM_ARMOR.bits() | Self::UPPER_LEG_ARMOR.bits() | Self::LOWER_LEG_ARMOR.bits();
+        const EXTREMITY = Self::HEAD_WEAR.bits() | Self::HAND_WEAR.bits() | Self::FOOT_WEAR.bits();
+        const JEWELRY = Self::NECK_WEAR.bits() | Self::WRIST_WEAR_LEFT.bits() | Self::WRIST_WEAR_RIGHT.bits() | Self::FINGER_WEAR_LEFT.bits() | Self::FINGER_WEAR_RIGHT.bits() | Self::TRINKET_ONE.bits() | Self::CLOAK.bits() | Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::SIGIL_THREE.bits();
+        const WRIST_WEAR = Self::WRIST_WEAR_LEFT.bits() | Self::WRIST_WEAR_RIGHT.bits();
+        const FINGER_WEAR = Self::FINGER_WEAR_LEFT.bits() | Self::FINGER_WEAR_RIGHT.bits();
+        const SIGIL = Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::SIGIL_THREE.bits();
+        const READY_SLOT = Self::HELD.bits() | Self::TWO_HANDED.bits() | Self::TRINKET_ONE.bits() | Self::CLOAK.bits() | Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits();
+        const WEAPON = Self::SIGIL_TWO.bits() | Self::TRINKET_ONE.bits() | Self::HELD.bits();
+        const WEAPON_READY_SLOT = Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::TRINKET_ONE.bits() | Self::HELD.bits();
+        const SELECTABLE = Self::MELEE_WEAPON.bits() | Self::SHIELD.bits() | Self::MISSILE_WEAPON.bits() | Self::HELD.bits() | Self::TWO_HANDED.bits();
+        const SELECTABLE_PLUS_AMMO = Self::SELECTABLE.bits() | Self::MISSILE_AMMO.bits();
+        const ALL = 0x7FFFFFFF;
+        const CAN_GO_IN_READY_SLOT = 0x7FFFFFFF;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display, Serialize, Deserialize, Default)]
+#[repr(u8)]
+pub enum CombatUse {
+    #[default]
+    None = 0,
+    Melee = 1,
+    Missile = 2,
+    Ammo = 3,
+    Shield = 4,
+    TwoHanded = 5,
+}
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+    pub struct Usable: u32 {
+        const UNDEF       = 0x00;
+        const NO          = 0x01;
+        const SELF        = 0x02;
+        const WIELDED     = 0x04;
+        const CONTAINED   = 0x08;
+        const VIEWED      = 0x10;
+        const REMOTE      = 0x20;
+        const NEVER_WALK   = 0x40;
+        const OBJ_SELF     = 0x80;
+
+        const SOURCE_MASK = 0x0000FFFF;
+        const TARGET_MASK = 0xFFFF0000;
+
+        const CONTAINED_VIEWED                 = 0x08 | 0x10;
+        const CONTAINED_VIEWED_REMOTE           = 0x08 | 0x10 | 0x20;
+        const CONTAINED_VIEWED_REMOTE_NEVER_WALK  = 0x08 | 0x10 | 0x20 | 0x40;
+
+        const VIEWED_REMOTE                    = 0x10 | 0x20;
+        const VIEWED_REMOTE_NEVER_WALK           = 0x10 | 0x20 | 0x40;
+
+        const REMOTE_NEVER_WALK                 = 0x20 | 0x40;
+
+        const SOURCE_WIELDED_TARGET_WIELDED              = 0x040004;
+        const SOURCE_WIELDED_TARGET_CONTAINED            = 0x080004;
+        const SOURCE_WIELDED_TARGET_VIEWED               = 0x100004;
+        const SOURCE_WIELDED_TARGET_REMOTE               = 0x200004;
+        const SOURCE_WIELDED_TARGET_REMOTE_NEVER_WALK    = 0x600004;
+
+        const SOURCE_CONTAINED_TARGET_WIELDED            = 0x040008;
+        const SOURCE_CONTAINED_TARGET_CONTAINED          = 0x080008;
+        const SOURCE_CONTAINED_TARGET_OBJSELF_OR_CONTAINED = 0x880008;
+        const SOURCE_CONTAINED_TARGET_SELF_OR_CONTAINED    = 0x0A0008;
+        const SOURCE_CONTAINED_TARGET_VIEWED             = 0x100008;
+        const SOURCE_CONTAINED_TARGET_REMOTE             = 0x200008;
+        const SOURCE_CONTAINED_TARGET_REMOTE_NEVER_WALK  = 0x600008;
+        const SOURCE_CONTAINED_TARGET_REMOTE_OR_SELF       = 0x220008;
+
+        const SOURCE_VIEWED_TARGET_WIELDED               = 0x040010;
+        const SOURCE_VIEWED_TARGET_CONTAINED             = 0x080010;
+        const SOURCE_VIEWED_TARGET_VIEWED                = 0x100010;
+        const SOURCE_VIEWED_TARGET_REMOTE                = 0x200010;
+
+        const SOURCE_REMOTE_TARGET_WIELDED               = 0x040020;
+        const SOURCE_REMOTE_TARGET_CONTAINED             = 0x080020;
+        const SOURCE_REMOTE_TARGET_VIEWED                = 0x100020;
+        const SOURCE_REMOTE_TARGET_REMOTE                = 0x200020;
+        const SOURCE_REMOTE_TARGET_REMOTE_NEVER_WALK     = 0x600020;
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

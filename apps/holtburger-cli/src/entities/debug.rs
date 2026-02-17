@@ -5,8 +5,17 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
     PropertyInt, PropertyInt64, PropertyString,
 };
-use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
+use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
+use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::text::Line;
+use std::collections::HashMap;
+
+pub struct PlayerDebugInfo<'a> {
+    pub attributes: &'a HashMap<AttributeType, Attribute>,
+    pub vitals: &'a HashMap<VitalType, Vital>,
+    pub skills: &'a HashMap<SkillType, Skill>,
+    pub enchantments: &'a [Enchantment],
+}
 
 /// Generates a list of strings representing the debug information for a target.
 pub fn get_debug_info(
@@ -15,6 +24,7 @@ pub fn get_debug_info(
     spell_lookup: Option<
         &std::collections::HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
     >,
+    player_info: Option<PlayerDebugInfo>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
@@ -56,9 +66,25 @@ pub fn get_debug_info(
 
             lines.push(Line::from(format!("WCID:   {:?}", e.wcid)));
             lines.push(Line::from(format!("GfxID:  {:?}", e.gfx_id)));
+            lines.push(Line::from(format!("IconID: {:?}", e.icon_id)));
             lines.push(Line::from(format!("Vel:    {:?}", e.velocity)));
+            lines.push(Line::from(format!("Accel:  {:?}", e.acceleration)));
+            lines.push(Line::from(format!("Omega:  {:?}", e.omega)));
             lines.push(Line::from(format!("Flags:  {:08X}", e.flags.bits())));
             for (name, _) in e.flags.iter_names() {
+                lines.push(Line::from(format!("  [X] {}", name)));
+            }
+
+            lines.push(Line::from(format!("WFlags: {:08X}", e.weenie_flags.bits())));
+            for (name, _) in e.weenie_flags.iter_names() {
+                lines.push(Line::from(format!("  [X] {}", name)));
+            }
+
+            lines.push(Line::from(format!(
+                "WFlag2: {:08X}",
+                e.weenie_flags2.bits()
+            )));
+            for (name, _) in e.weenie_flags2.iter_names() {
                 lines.push(Line::from(format!("  [X] {}", name)));
             }
 
@@ -86,6 +112,199 @@ pub fn get_debug_info(
             )));
             lines.push(Line::from(format!("Coords: {:?}", e.position.coords)));
 
+            if let Some(s) = e.obj_scale {
+                lines.push(Line::from(format!("Scale:  {:.4}", s)));
+            }
+            if let Some(f) = e.friction {
+                lines.push(Line::from(format!("Frict:  {:.4}", f)));
+            }
+            if let Some(el) = e.elasticity {
+                lines.push(Line::from(format!("Elast:  {:.4}", el)));
+            }
+            if let Some(t) = e.translucency {
+                lines.push(Line::from(format!("Transl: {:.4}", t)));
+            }
+
+            if e.plural_name.is_some()
+                || e.items_capacity.is_some()
+                || e.containers_capacity.is_some()
+                || e.ammo_type.is_some()
+                || e.value.is_some()
+                || e.usable.is_some()
+                || e.use_radius.is_some()
+                || e.workmanship.is_some()
+                || e.burden.is_some()
+                || e.target_type.is_some()
+                || e.ui_effects.is_some()
+                || e.combat_use.is_some()
+                || e.stack_size.is_some()
+                || e.valid_locations.is_some()
+                || e.currently_wielded_location.is_some()
+            {
+                lines.push(Line::from("-- Weenie Data --"));
+                if let Some(p) = &e.plural_name {
+                    lines.push(Line::from(format!("  Plural:    {}", p)));
+                }
+                if let Some(v) = e.items_capacity {
+                    lines.push(Line::from(format!("  ICapacity: {}", v)));
+                }
+                if let Some(v) = e.containers_capacity {
+                    lines.push(Line::from(format!("  CCapacity: {}", v)));
+                }
+                if let Some(v) = e.ammo_type {
+                    lines.push(Line::from(format!("  AmmoType:  {}", v)));
+                }
+                if let Some(v) = e.value {
+                    lines.push(Line::from(format!("  Value:     {}", v)));
+                }
+                if let Some(v) = e.usable {
+                    lines.push(Line::from(format!("  Usable:    {:08X}", v.bits())));
+                    for (name, _) in v.iter_names() {
+                        lines.push(Line::from(format!("    - {}", name)));
+                    }
+                }
+                if let Some(v) = e.use_radius {
+                    lines.push(Line::from(format!("  UseRadius: {:.2}", v)));
+                }
+                if let Some(v) = e.workmanship {
+                    lines.push(Line::from(format!("  Work:      {:.2}", v)));
+                }
+                if let Some(v) = e.burden {
+                    lines.push(Line::from(format!("  Burden:    {}", v)));
+                }
+                if let Some(v) = e.target_type {
+                    lines.push(Line::from(format!("  TargetTyp: {:08X}", v.bits())));
+                    for (name, _) in v.iter_names() {
+                        lines.push(Line::from(format!("    - {}", name)));
+                    }
+                }
+                if let Some(v) = e.ui_effects {
+                    lines.push(Line::from(format!("  UIEffects: 0x{:08X}", v)));
+                }
+                if let Some(v) = e.combat_use {
+                    lines.push(Line::from(format!("  CombatUse: {} ({:02X})", v, v as u32)));
+                }
+                if let Some(v) = e.structure {
+                    lines.push(Line::from(format!(
+                        "  Struct:    {}/{}",
+                        v,
+                        e.max_structure.unwrap_or(0)
+                    )));
+                }
+                if let Some(v) = e.stack_size {
+                    lines.push(Line::from(format!(
+                        "  Stack:     {}/{}",
+                        v,
+                        e.max_stack_size.unwrap_or(0)
+                    )));
+                }
+                if let Some(v) = e.valid_locations {
+                    lines.push(Line::from(format!("  ValidLocs: {:08X}", v.bits())));
+                    for (name, _) in v.iter_names() {
+                        lines.push(Line::from(format!("    - {}", name)));
+                    }
+                }
+                if let Some(v) = e.currently_wielded_location {
+                    lines.push(Line::from(format!("  WieldLoc:  {:08X}", v.bits())));
+                    for (name, _) in v.iter_names() {
+                        lines.push(Line::from(format!("    - {}", name)));
+                    }
+                }
+                if let Some(v) = e.priority {
+                    lines.push(Line::from(format!("  Priority:  {}", v)));
+                }
+                if let Some(v) = e.radar_blip_color {
+                    lines.push(Line::from(format!("  RadarBlip: {} ({:?})", v, v)));
+                }
+                if let Some(v) = e.radar_enum {
+                    lines.push(Line::from(format!("  RadarEnum: {} ({:?})", v, v)));
+                }
+                if let Some(v) = e.pscript {
+                    lines.push(Line::from(format!("  PScript:   {}", v)));
+                }
+                if let Some(v) = e.spell {
+                    lines.push(Line::from(format!("  Spell:     {}", v)));
+                }
+                if let Some(v) = e.cooldown_id {
+                    lines.push(Line::from(format!(
+                        "  CD:        #{} ({})",
+                        v,
+                        format_duration(e.cooldown_duration.unwrap_or(0.0))
+                    )));
+                }
+            }
+
+            if e.mtable_id.is_some()
+                || e.stable_id.is_some()
+                || e.petable_id.is_some()
+                || e.csetup_id.is_some()
+                || e.parent_loc.is_some()
+                || e.default_script_id.is_some()
+                || e.autonomous_movement.is_some()
+                || e.animation_frame.is_some()
+            {
+                lines.push(Line::from("-- Technical Data --"));
+                if let Some(v) = e.mtable_id {
+                    lines.push(Line::from(format!("  MTable:    0x{:08X}", v)));
+                }
+                if let Some(v) = e.stable_id {
+                    lines.push(Line::from(format!("  STable:    0x{:08X}", v)));
+                }
+                if let Some(v) = e.petable_id {
+                    lines.push(Line::from(format!("  PETable:   0x{:08X}", v)));
+                }
+                if let Some(v) = e.csetup_id {
+                    lines.push(Line::from(format!("  CSetup:    0x{:08X}", v)));
+                }
+                if let Some(v) = e.parent_loc {
+                    lines.push(Line::from(format!("  ParentLoc: 0x{:08X}", v)));
+                }
+                if let Some(v) = e.default_script_id {
+                    lines.push(Line::from(format!(
+                        "  DefScript: {} ({:.2})",
+                        v,
+                        e.default_script_intensity.unwrap_or(0.0)
+                    )));
+                }
+                if let Some(v) = e.autonomous_movement {
+                    lines.push(Line::from(format!("  AutoMove:  {}", v)));
+                }
+                if let Some(v) = e.animation_frame {
+                    lines.push(Line::from(format!("  AnimFrame: 0x{:08X}", v)));
+                }
+            }
+
+            if e.house_owner.is_some() || e.monarch_id.is_some() || e.pet_owner.is_some() {
+                lines.push(Line::from("-- Ownership --"));
+                if let Some(v) = e.house_owner {
+                    lines.push(Line::from(format!("  HouseOwn:  {:08X}", v)));
+                }
+                if let Some(v) = e.monarch_id {
+                    lines.push(Line::from(format!("  Monarch:   {:08X}", v)));
+                }
+                if let Some(v) = e.pet_owner {
+                    lines.push(Line::from(format!("  PetOwner:  {:08X}", v)));
+                }
+            }
+
+            if e.icon_overlay_id.is_some()
+                || e.icon_underlay_id.is_some()
+                || e.material_type.is_some()
+            {
+                lines.push(Line::from("-- Appearance Overlay --"));
+                if let Some(v) = e.icon_overlay_id {
+                    lines.push(Line::from(format!("  Overlay:   0x{:08X}", v)));
+                }
+                if let Some(v) = e.icon_underlay_id {
+                    lines.push(Line::from(format!("  Underlay:  0x{:08X}", v)));
+                }
+                if let Some(v) = e.material_type {
+                    lines.push(Line::from(format!("  Material:  0x{:08X}", v)));
+                }
+            }
+
+            lines.push(Line::from(format!("Sequences: {:?}", e.sequences)));
+
             if let Some(profile) = &e.creature_profile {
                 lines.push(Line::from("-- Creature Profile --"));
                 lines.push(Line::from(format!(
@@ -108,6 +327,12 @@ pub fn get_debug_info(
                     lines.push(Line::from(format!("  FOC: {}", attr.focus)));
                     lines.push(Line::from(format!("  SEL: {}", attr.self_attr)));
                 }
+                if let Some(buffs) = &profile.buffs {
+                    lines.push(Line::from(format!(
+                        "  Highlights: {:04X}, Colors: {:04X}",
+                        buffs.highlights, buffs.colors
+                    )));
+                }
             }
 
             if let Some(profile) = &e.armor_profile {
@@ -126,12 +351,86 @@ pub fn get_debug_info(
             if let Some(profile) = &e.weapon_profile {
                 lines.push(Line::from("-- Weapon Profile --"));
                 lines.push(Line::from(format!(
-                    "  Damage: {}, Speed: {}, Skill: {}",
-                    profile.damage, profile.weapon_time, profile.weapon_skill
+                    "  DType:  0x{:08X}, Speed: {}, Skill: {}",
+                    profile.damage_type, profile.weapon_time, profile.weapon_skill
                 )));
                 lines.push(Line::from(format!(
-                    "  Var: {:.2}, Mod: {:.2}, Range: {:.2}",
-                    profile.damage_variance, profile.damage_mod, profile.weapon_length
+                    "  Damage: {}, Var: {:.2}, Mod: {:.2}",
+                    profile.damage, profile.damage_variance, profile.damage_mod
+                )));
+                lines.push(Line::from(format!(
+                    "  Range: {:.2}, MaxVel: {:.2}, Offense: {:.2}",
+                    profile.weapon_length, profile.max_velocity, profile.weapon_offense
+                )));
+                lines.push(Line::from(format!(
+                    "  MaxVelEst: {}",
+                    profile.max_velocity_estimated
+                )));
+            }
+
+            if e.hook_type.is_some() || e.hook_item_types.is_some() || e.hook_profile.is_some() {
+                lines.push(Line::from("-- Hooks --"));
+                if let Some(v) = e.hook_type {
+                    lines.push(Line::from(format!("  Type:      0x{:04X}", v)));
+                }
+                if let Some(v) = e.hook_item_types {
+                    lines.push(Line::from(format!("  ItemTypes: {:?}", v)));
+                }
+                if let Some(hook) = &e.hook_profile {
+                    lines.push(Line::from(format!(
+                        "  Flags: 0x{:08X}, Locations: {:?}",
+                        hook.flags, hook.valid_locations
+                    )));
+                    lines.push(Line::from(format!("  AmmoType: {}", hook.ammo_type)));
+                }
+            }
+
+            if let Some(al) = &e.armor_levels {
+                lines.push(Line::from("-- Armor Levels --"));
+                lines.push(Line::from(format!(
+                    "  Head: {}, Chest: {}, Abd: {}",
+                    al.head, al.chest, al.abdomen
+                )));
+                lines.push(Line::from(format!(
+                    "  UArm: {}, LArm: {}, Hand: {}",
+                    al.upper_arm, al.lower_arm, al.hand
+                )));
+                lines.push(Line::from(format!(
+                    "  ULeg: {}, LLeg: {}, Foot: {}",
+                    al.upper_leg, al.lower_leg, al.foot
+                )));
+            }
+
+            if !e.spell_book.is_empty() {
+                lines.push(Line::from("-- Spell Book --"));
+                for &spell_id in &e.spell_book {
+                    let name = spell_lookup
+                        .and_then(|m| m.get(&spell_id))
+                        .map(|s| s.name.as_str())
+                        .unwrap_or("Unknown");
+                    lines.push(Line::from(format!("  #{} - {}", spell_id, name)));
+                }
+            }
+
+            if let Some(h) = e.armor_highlight {
+                lines.push(Line::from(format!(
+                    "Armor Highlight:  {:04X}, Color: {:04X}",
+                    h,
+                    e.armor_color.unwrap_or(0)
+                )));
+            }
+            if let Some(h) = e.weapon_highlight {
+                lines.push(Line::from(format!(
+                    "Weapon Highlight: {:04X}, Color: {:04X}",
+                    h,
+                    e.weapon_color.unwrap_or(0)
+                )));
+            }
+            if let Some(h) = e.resist_highlight {
+                lines.push(Line::from(format!(
+                    "Resist Highlight: {:04X}, Color: {:04X}",
+                    h,
+                    e.resist_color.unwrap_or(0)
                 )));
             }
 
@@ -227,6 +526,71 @@ pub fn get_debug_info(
                     )));
                 }
             }
+
+            if let Some(info) = player_info {
+                lines.push(Line::from("-- Player Attributes --"));
+                let mut attr_keys: Vec<_> = info.attributes.keys().copied().collect();
+                attr_keys.sort();
+                for k in attr_keys {
+                    let a = &info.attributes[&k];
+                    lines.push(Line::from(format!(
+                        "  {:<12} cur: {}, base: {}, start: {}, ranks: {}",
+                        k.to_string(),
+                        a.current,
+                        a.base,
+                        a.start,
+                        a.ranks
+                    )));
+                }
+
+                lines.push(Line::from("-- Player Vitals --"));
+                let mut vital_keys: Vec<_> = info.vitals.keys().copied().collect();
+                vital_keys.sort();
+                for k in vital_keys {
+                    let v = &info.vitals[&k];
+                    lines.push(Line::from(format!(
+                        "  {:<12} cur: {}, base: {}, bmax: {}, start: {}, ranks: {}",
+                        k.to_string(),
+                        v.current,
+                        v.base,
+                        v.buffed_max,
+                        v.start,
+                        v.ranks
+                    )));
+                }
+
+                lines.push(Line::from("-- Player Skills --"));
+                let mut skill_keys: Vec<_> = info.skills.keys().copied().collect();
+                skill_keys.sort();
+                for k in skill_keys {
+                    let s = &info.skills[&k];
+                    lines.push(Line::from(format!(
+                        "  {:<20} tr: {:?}, cur: {}, base: {}, start: {}, ranks: {}",
+                        k.to_string(),
+                        s.training,
+                        s.current,
+                        s.base,
+                        s.init,
+                        s.ranks
+                    )));
+                }
+
+                if !info.enchantments.is_empty() {
+                    lines.push(Line::from("-- Player Enchantments --"));
+                    for enc in info.enchantments {
+                        let name = spell_lookup
+                            .and_then(|m| m.get(&(enc.spell_id as u32)))
+                            .map(|s| s.name.as_str())
+                            .unwrap_or("Unknown Spell");
+                        lines.push(Line::from(format!(
+                            "  #{} - {} (dur: {})",
+                            enc.spell_id,
+                            name,
+                            format_duration(enc.duration)
+                        )));
+                    }
+                }
+            }
         }
         CommandTarget::Enchantment(enchant) => {
             lines.push(Line::from(format!(
@@ -243,8 +607,8 @@ pub fn get_debug_info(
                 enchant.power_level
             )));
             lines.push(Line::from(format!(
-                "Duration:       {:.1}s",
-                enchant.duration
+                "Duration:       {}",
+                format_duration(enchant.duration)
             )));
             lines.push(Line::from(format!(
                 "Stat Mod Type:  0x{:08X}",
@@ -329,4 +693,40 @@ pub fn get_debug_info(
     }
 
     lines
+}
+
+fn format_duration(seconds: f64) -> String {
+    if !(0.0..=86400.0 * 365.0).contains(&seconds) {
+        "Inf".to_string()
+    } else if seconds < 0.1 {
+        format!("{:.3}s", seconds)
+    } else if seconds < 1.0 {
+        format!("{:.2}s", seconds)
+    } else if seconds < 60.0 {
+        format!("{:.1}s", seconds)
+    } else if seconds < 3600.0 {
+        let m = (seconds / 60.0) as u32;
+        let s = (seconds % 60.0) as u32;
+        if s == 0 {
+            format!("{}m", m)
+        } else {
+            format!("{}m {}s", m, s)
+        }
+    } else if seconds < 86400.0 {
+        let h = (seconds / 3600.0) as u32;
+        let m = ((seconds % 3600.0) / 60.0) as u32;
+        if m == 0 {
+            format!("{}h", h)
+        } else {
+            format!("{}h {}m", h, m)
+        }
+    } else {
+        let d = (seconds / 86400.0) as u32;
+        let h = ((seconds % 86400.0) / 3600.0) as u32;
+        if h == 0 {
+            format!("{}d", d)
+        } else {
+            format!("{}d {}h", d, h)
+        }
+    }
 }

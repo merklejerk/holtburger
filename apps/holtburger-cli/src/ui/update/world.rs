@@ -142,10 +142,7 @@ impl AppState {
                     self.vitals.insert(vt, v);
                 }
             }
-            ClientViewEvent::PlayerSpellsUpdated {
-                spell_ids,
-                spells,
-            } => {
+            ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells } => {
                 self.player_spells = spell_ids;
                 for (id, info) in spells {
                     self.spell_names.insert(id, info.name.clone());
@@ -175,7 +172,13 @@ impl AppState {
                 }
 
                 // Update equipment tracking
-                if let Some(&loc) = entity
+                if let Some(mask) = entity.currently_wielded_location {
+                    if mask.is_empty() {
+                        self.equipment.remove(&guid);
+                    } else {
+                        self.equipment.insert(guid, mask);
+                    }
+                } else if let Some(&loc) = entity
                     .int_properties
                     .get(&(PropertyInt::CurrentWieldedLocation as u32))
                 {

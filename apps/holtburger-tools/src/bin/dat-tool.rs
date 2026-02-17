@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use holtburger_dat::{DatDatabase, HbaWriter};
+use holtburger_dat::{DatDatabase, DatFileType, HbaReader, HbaWriter, ResourceProvider};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -11,6 +11,143 @@ struct Cli {
 
     #[command(subcommand)]
     command: Commands,
+}
+
+enum Provider {
+    Dat(DatDatabase),
+    Hba(HbaReader),
+}
+
+impl Provider {
+    fn open(path: &Path) -> Result<Self> {
+        match path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("hba") => Ok(Self::Hba(HbaReader::open(path)?)),
+            Some("dat") => Ok(Self::Dat(DatDatabase::new(path)?)),
+            _ => {
+                let hba_path = path.with_extension("hba");
+                if hba_path.exists() {
+                    return Ok(Self::Hba(HbaReader::open(&hba_path)?));
+                }
+
+                let dat_path = path.with_extension("dat");
+                if dat_path.exists() {
+                    return Ok(Self::Dat(DatDatabase::new(&dat_path)?));
+                }
+
+                Err(anyhow::anyhow!(
+                    "Could not open provider for {:?}. Expected .hba or .dat",
+                    path
+                ))
+            }
+        }
+    }
+
+    fn get_file(&self, id: u32) -> Result<Vec<u8>> {
+        match self {
+            Self::Dat(db) => Ok(db.get_file(id)?),
+            Self::Hba(hba) => Ok(hba.get_file(id)?),
+        }
+    }
+
+    fn list_ids(&self) -> Vec<u32> {
+        let mut ids = match self {
+            Self::Dat(db) => db.files.keys().copied().collect::<Vec<_>>(),
+            Self::Hba(hba) => hba.index.keys().copied().collect::<Vec<_>>(),
+        };
+        ids.sort();
+        ids
+    }
+
+    fn kind_name(&self) -> &'static str {
+        match self {
+            Self::Dat(_) => "DAT",
+            Self::Hba(_) => "HBA",
+        }
+    }
+
+    fn file_count(&self) -> usize {
+        match self {
+            Self::Dat(db) => db.files.len(),
+            Self::Hba(hba) => hba.index.len(),
+        }
+    }
+
+    fn print_info(&self, id: u32) {
+        match self {
+            Self::Dat(db) => {
+                if let Some(entry) = db.files.get(&id) {
+                    println!("File ID: {:08X}", entry.id);
+                    println!("Type:    {}", entry.file_type());
+                    println!("Size:    {}", entry.size);
+                    println!("Offset:  {:08X}", entry.offset);
+                    println!("Flags:   {:08X}", entry.bit_flags);
+                } else {
+                    println!("File ID {:08X} not found.", id);
+                }
+            }
+            Self::Hba(hba) => {
+                if let Some(entry) = hba.index.get(&id) {
+                    println!("File ID: {:08X}", entry.id);
+                    println!("Type:    {}", DatFileType::from_id(entry.id));
+                    println!("Size:    {}", entry.size);
+                    println!("Offset:  {:08X}", entry.offset);
+                    println!("Flags:   {:02X}", entry.flags);
+                    println!("Pruned:  {}", entry.is_pruned());
+                    println!("Compressed: {}", entry.is_compressed());
+                } else {
+                    println!("File ID {:08X} not found.", id);
+                }
+            }
+        }
+    }
+
+    fn print_list_entry(&self, id: u32) {
+        match self {
+            Self::Dat(db) => {
+                let entry = &db.files[&id];
+                println!(
+                    "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:08X}",
+                    id,
+                    entry.file_type().to_string(),
+                    entry.size,
+                    entry.offset,
+                    entry.bit_flags
+                );
+            }
+            Self::Hba(hba) => {
+                let entry = &hba.index[&id];
+                println!(
+                    "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:02X}",
+                    id,
+                    DatFileType::from_id(id).to_string(),
+                    entry.size,
+                    entry.offset,
+                    entry.flags
+                );
+            }
+        }
+    }
+}
+
+fn parse_id_auto(raw: &str) -> Result<u32> {
+    let trimmed = raw.trim();
+    if let Some(hex) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        return Ok(u32::from_str_radix(hex, 16)?);
+    }
+
+    if let Ok(v) = trimmed.parse::<u32>() {
+        return Ok(v);
+    }
+
+    Ok(u32::from_str_radix(trimmed, 16)?)
 }
 
 #[derive(Subcommand)]
@@ -40,6 +177,11 @@ enum Commands {
     Weenie {
         #[arg(value_name = "ID")]
         id: String,
+    },
+    /// Scan table records for a WCID-based Weenie entry
+    WeenieFind {
+        #[arg(value_name = "WCID")]
+        wcid: String,
     },
     /// Inspect a Landblock
     Landblock {
@@ -112,48 +254,34 @@ fn main() -> Result<()> {
         .dat
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("--dat is required for this command"))?;
-    println!("Loading DAT: {:?}", dat_path);
-    let db = DatDatabase::new(dat_path)?;
-    println!("Loaded DAT with {} files.", db.files.len());
+    let provider = Provider::open(dat_path)?;
+    println!(
+        "Loaded {} provider with {} files.",
+        provider.kind_name(),
+        provider.file_count()
+    );
 
     match cli.command {
         Commands::List => {
-            let mut ids: Vec<_> = db.files.keys().collect();
-            ids.sort();
+            let ids = provider.list_ids();
             for id in ids {
-                let entry = &db.files[id];
-                println!(
-                    "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:08X}",
-                    id,
-                    entry.file_type().to_string(),
-                    entry.size,
-                    entry.offset,
-                    entry.bit_flags
-                );
+                provider.print_list_entry(id);
             }
         }
         Commands::Info { id } => {
-            let id_val = u32::from_str_radix(id.trim_start_matches("0x"), 16)?;
-            if let Some(entry) = db.files.get(&id_val) {
-                println!("File ID: {:08X}", entry.id);
-                println!("Type:    {}", entry.file_type());
-                println!("Size:    {}", entry.size);
-                println!("Offset:  {:08X}", entry.offset);
-                println!("Flags:   {:08X}", entry.bit_flags);
-            } else {
-                println!("File ID {:08X} not found.", id_val);
-            }
+            let id_val = parse_id_auto(&id)?;
+            provider.print_info(id_val);
         }
         Commands::Export { id, output } => {
-            let id_val = u32::from_str_radix(id.trim_start_matches("0x"), 16)?;
-            let data = db.get_file(id_val)?;
+            let id_val = parse_id_auto(&id)?;
+            let data = provider.get_file(id_val)?;
             let out_path = output.unwrap_or_else(|| PathBuf::from(format!("{:08X}.bin", id_val)));
             std::fs::write(&out_path, data)?;
             println!("Exported {:08X} to {:?}", id_val, out_path);
         }
         Commands::Extract { id, output } => {
-            let id_val = u32::from_str_radix(id.trim_start_matches("0x"), 16)?;
-            let data = db.get_file(id_val)?;
+            let id_val = parse_id_auto(&id)?;
+            let data = provider.get_file(id_val)?;
 
             match id_val >> 24 {
                 0x06 => {
@@ -219,31 +347,90 @@ fn main() -> Result<()> {
             }
         }
         Commands::Weenie { id } => {
-            let id_val = u32::from_str_radix(id.trim_start_matches("0x"), 16)?;
-            let data = db.get_file(id_val)?;
-            let weenie = holtburger_dat::weenie::Weenie::unpack(&data)?;
-            println!("Weenie Class ID: {:08X}", weenie.wcid);
-            println!("Weenie Type:     {}", weenie.weenie_type);
-            if let Some(name) = weenie.name() {
-                println!("Name:            {}", name);
+            let parsed = parse_id_auto(&id)?;
+            let direct_ids = vec![parsed];
+
+            let mut loaded = None;
+            for file_id in &direct_ids {
+                if let Some(weenie) = provider
+                    .get_file(*file_id)
+                    .ok()
+                    .and_then(|data| holtburger_dat::weenie::Weenie::unpack(&data).ok())
+                {
+                    loaded = Some((*file_id, weenie));
+                    break;
+                }
             }
-            if let Some(icon) = weenie.icon_id() {
-                println!("Icon ID:         {:08X}", icon);
+
+            if let Some((file_id, weenie)) = loaded {
+                println!("File ID:         {:08X}", file_id);
+                println!("Weenie Class ID: {:08X}", weenie.wcid);
+                println!("Weenie Type:     {}", weenie.weenie_type);
+                if let Some(name) = weenie.name() {
+                    println!("Name:            {}", name);
+                }
+                if let Some(icon) = weenie.icon_id() {
+                    println!("Icon ID:         {:08X}", icon);
+                }
+                println!("Properties (Int):    {}", weenie.properties_int.len());
+                println!("Properties (Float):  {}", weenie.properties_float.len());
+                println!("Properties (String): {}", weenie.properties_string.len());
+                println!("Properties (DID):    {}", weenie.properties_did.len());
+            } else {
+                println!("Could not decode a Weenie record from ID {:08X}.", parsed);
             }
-            println!("Properties (Int):    {}", weenie.properties_int.len());
-            println!("Properties (Float):  {}", weenie.properties_float.len());
-            println!("Properties (String): {}", weenie.properties_string.len());
-            println!("Properties (DID):    {}", weenie.properties_did.len());
+        }
+        Commands::WeenieFind { wcid } => {
+            let target_wcid = parse_id_auto(&wcid)?;
+            let candidate_ids: Vec<u32> = provider
+                .list_ids()
+                .into_iter()
+                .filter(|id| (*id >> 24) == 0x0E)
+                .collect();
+
+            println!(
+                "Scanning {} table files (0x0E prefix) for WCID {}...",
+                candidate_ids.len(),
+                target_wcid
+            );
+
+            let mut hits = 0usize;
+            for file_id in candidate_ids {
+                let Ok(data) = provider.get_file(file_id) else {
+                    continue;
+                };
+
+                let Ok(table) = holtburger_dat::weenie::WeenieTable::unpack(&data) else {
+                    continue;
+                };
+
+                if let Some(weenie) = table.entries.get(&target_wcid) {
+                    hits += 1;
+                    println!("Hit in table {:08X}", file_id);
+                    println!("  Entry WCID: {:08X}", weenie.wcid);
+                    println!("  WeenieType: {}", weenie.weenie_type);
+                    if let Some(name) = weenie.name() {
+                        println!("  Name: {}", name);
+                    }
+                }
+            }
+
+            if hits == 0 {
+                println!(
+                    "No WCID {} entries found in scan-able table files (0x0E range).",
+                    target_wcid
+                );
+            }
         }
         Commands::Landblock { id } => {
-            let mut id_val = u32::from_str_radix(id.trim_start_matches("0x"), 16)?;
+            let mut id_val = parse_id_auto(&id)?;
 
             // Auto-fix ID if they passed base landblock ID
             if id_val & 0xFFFF == 0 {
                 id_val |= 0xFFFF;
             }
 
-            let terrain_data = db.get_file(id_val)?;
+            let terrain_data = provider.get_file(id_val)?;
             let lb = holtburger_dat::landblock::CellLandblock::unpack(&terrain_data)?;
             println!("Landblock ID:   {:08X}", lb.id);
             println!("Has Objects:     {}", lb.has_objects != 0);
@@ -259,7 +446,7 @@ fn main() -> Result<()> {
             }
 
             let info_id = (id_val & 0xFFFF0000) | 0xFFFE;
-            if let Ok(info_data) = db.get_file(info_id) {
+            if let Ok(info_data) = provider.get_file(info_id) {
                 let info = holtburger_dat::landblock::LandblockInfo::unpack(&info_data)?;
                 println!("\nLandblock Info ({:08X}):", info_id);
                 println!("Objects:   {}", info.objects.len());

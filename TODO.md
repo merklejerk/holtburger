@@ -41,6 +41,8 @@
 - [ ] TUI client needs major refactors.
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
+- [ ] Startup is slow. Slow DAT parsing?
+- [ ] Color code usable entities in dashboard.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

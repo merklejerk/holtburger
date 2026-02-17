@@ -168,6 +168,17 @@ impl AppState {
                     let player_guid = self.player_guid;
                     let entities_ref = &self.entities;
 
+                    let player_info = if Some(guid) == player_guid {
+                        Some(crate::entities::debug::PlayerDebugInfo {
+                            attributes: &self.attributes,
+                            vitals: &self.vitals,
+                            skills: &self.skills,
+                            enchantments: &self.player_enchantments,
+                        })
+                    } else {
+                        None
+                    };
+
                     self.context_buffer = crate::entities::debug::get_debug_info(
                         &target,
                         |id| {
@@ -180,6 +191,7 @@ impl AppState {
                             })
                         },
                         Some(&self.spell_info),
+                        player_info,
                     );
                 }
             }
@@ -199,6 +211,7 @@ impl AppState {
                     &target,
                     |_| None,
                     Some(&self.spell_info),
+                    None,
                 );
             }
             ContextView::Default => {

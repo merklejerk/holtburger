@@ -43,7 +43,7 @@
 - [ ] Use sibling files for tests.
 - [ ] Startup is slow. Slow DAT parsing?
 - [x] get_next_pane and get_prev_pane are the same logic but reversed.
-- [ ] Is the `Usability` bitflags hallucinated?
+- [x] Is the `Usability` bitflags hallucinated?
 - [ ] Use meta `EquipMask` flags for more intelligent equipping.
 - [ ] Auto-follow.
 

@@ -1,6 +1,7 @@
 // Layout constants
 pub const STATUS_BAR_HEIGHT: u16 = 3;
 pub const DYNAMIC_PANEL_HEIGHT: u16 = 3;
+use holtburger_common::properties::EquipMask;
 use holtburger_common::Guid;
 pub const INPUT_AREA_HEIGHT: u16 = 3;
 pub const MIN_MAIN_AREA_HEIGHT: u16 = 10;
@@ -33,7 +34,7 @@ pub enum StatType {
 
 #[derive(Debug, Clone)]
 pub enum CommandTarget<'a> {
-    Entity(&'a Entity),
+    Entity(&'a Entity, Option<EquipMask>),
     Enchantment(Enchantment),
     Stat(StatType, Option<u64>, Option<u32>),
     Spell(u32),
@@ -96,6 +97,7 @@ pub enum DashboardTab {
     Inventory,
     Character,
     Spells,
+    Equip,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

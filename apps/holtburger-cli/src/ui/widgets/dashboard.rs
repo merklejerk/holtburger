@@ -19,53 +19,61 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         Style::default()
     };
 
-    let tabs = [
+    let top_tabs = [
         (DashboardTab::Entities, "1", "Near"),
         (DashboardTab::Inventory, "2", "Inv"),
         (DashboardTab::Character, "3", "Char"),
         (DashboardTab::Spells, "4", "Spells"),
     ];
 
-    let mut spans = Vec::new();
+    let bottom_tabs = [
+        (DashboardTab::Equip, "5", "Equip"),
+    ];
 
-    // Add focus indicator at the beginning
-    if state.focused_pane == FocusedPane::Dashboard {
-        spans.push(ratatui::text::Span::styled(
-            ">> ",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-    for (i, (tab, key, label)) in tabs.iter().enumerate() {
-        if i > 0 {
-            spans.push(ratatui::text::Span::raw("|"));
-        }
+    let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], state: &AppState| {
+        let mut spans = Vec::new();
 
-        let is_active = state.dashboard_tab == *tab;
-        if is_active {
+        // Add focus indicator at the beginning
+        if state.focused_pane == FocusedPane::Dashboard {
             spans.push(ratatui::text::Span::styled(
-                format!(" [{}] {} ", key, label),
-                Style::default().add_modifier(Modifier::BOLD),
+                ">> ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
             ));
-        } else {
-            spans.push(ratatui::text::Span::raw(format!(" [{}] {} ", key, label)));
         }
-    }
+        for (i, (tab, key, label)) in tabs.iter().enumerate() {
+            if i > 0 {
+                spans.push(ratatui::text::Span::raw("|"));
+            }
 
-    // Add focus indicator at the end
-    if state.focused_pane == FocusedPane::Dashboard {
-        spans.push(ratatui::text::Span::styled(
-            " <<",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
+            let is_active = state.dashboard_tab == *tab;
+            if is_active {
+                spans.push(ratatui::text::Span::styled(
+                    format!(" [{}] {} ", key, label),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(ratatui::text::Span::raw(format!(" [{}] {} ", key, label)));
+            }
+        }
+
+        // Add focus indicator at the end
+        if state.focused_pane == FocusedPane::Dashboard {
+            spans.push(ratatui::text::Span::styled(
+                " <<",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+        ratatui::text::Line::from(spans)
+    };
 
     let dashboard_block = Block::default()
         .borders(Borders::ALL)
-        .title(ratatui::text::Line::from(spans))
+        .title(create_tab_line(&top_tabs, state))
+        .title_bottom(create_tab_line(&bottom_tabs, state))
         .border_style(dashboard_style);
 
     let inner_area = dashboard_block.inner(area);
@@ -157,11 +165,12 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 );
             }
         }
-        DashboardTab::Entities | DashboardTab::Inventory | DashboardTab::Spells => {
+        DashboardTab::Entities | DashboardTab::Inventory | DashboardTab::Spells | DashboardTab::Equip => {
             // These tabs currently all use a List view
             let items = match state.dashboard_tab {
                 DashboardTab::Entities => get_nearby_list_items(state),
                 DashboardTab::Inventory => get_inventory_list_items(state),
+                DashboardTab::Equip => get_equip_list_items(state),
                 DashboardTab::Spells => get_spells_list_items(state),
                 _ => unreachable!(),
             };
@@ -208,13 +217,102 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
+pub enum EquipTabLine<'a> {
+    Header(String, bool),
+    Item(&'a Entity, bool, bool, Option<EquipMask>),
+}
+
+pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
+    let mut lines = Vec::new();
+
+    let categories = [
+        (EquipMask::MAIN_HAND_IMPLEMENTS, "Main Hand", None),
+        (EquipMask::OFF_HAND_IMPLEMENTS, "Off-Hand", Some(EquipMask::OFF_HAND_SLOT)),
+        (EquipMask::HEAD_WEAR, "Head Wear", None),
+        (EquipMask::CHEST_WEAR, "Chest Wear", None),
+        (EquipMask::ABDOMEN_WEAR, "Abdomen Wear", None),
+        (EquipMask::UPPER_ARM_WEAR, "Upper Arm Wear", None),
+        (EquipMask::LOWER_ARM_WEAR, "Lower Arm Wear", None),
+        (EquipMask::HAND_WEAR, "Hand Wear", None),
+        (EquipMask::UPPER_LEG_WEAR, "Upper Leg Wear", None),
+        (EquipMask::LOWER_LEG_WEAR, "Lower Leg Wear", None),
+        (EquipMask::FOOT_WEAR, "Foot Wear", None),
+        (EquipMask::CHEST_ARMOR, "Chest Armor", None),
+        (EquipMask::ABDOMEN_ARMOR, "Abdomen Armor", None),
+        (EquipMask::UPPER_ARM_ARMOR, "Upper Arm Armor", None),
+        (EquipMask::LOWER_ARM_ARMOR, "Lower Arm Armor", None),
+        (EquipMask::UPPER_LEG_ARMOR, "Upper Leg Armor", None),
+        (EquipMask::LOWER_LEG_ARMOR, "Lower Leg Armor", None),
+        (EquipMask::NECK_WEAR, "Neck Wear", None),
+        (EquipMask::WRIST_WEAR_LEFT, "Left Wrist", None),
+        (EquipMask::WRIST_WEAR_RIGHT, "Right Wrist", None),
+        (EquipMask::FINGER_WEAR_LEFT, "Left Finger", None),
+        (EquipMask::FINGER_WEAR_RIGHT, "Right Finger", None),
+        (EquipMask::MISSILE_AMMO, "Missile Ammo", None),
+        (EquipMask::TRINKET_ONE, "Trinket", None),
+        (EquipMask::CLOAK, "Cloak", None),
+        (EquipMask::SIGIL_ONE, "Sigil 1", None),
+        (EquipMask::SIGIL_TWO, "Sigil 2", None),
+        (EquipMask::SIGIL_THREE, "Sigil 3", None),
+    ];
+
+    let mut equippable_items: Vec<&Entity> = state
+        .inventory
+        .iter()
+        .filter_map(|guid| state.entities.get(guid))
+        .filter(|e| e.valid_locations.is_some_and(|v| !v.is_empty()))
+        .collect();
+
+    // Sort all equippable items by name once to keep consistent ordering within buckets
+    equippable_items.sort_by(|a, b| a.name.cmp(&b.name));
+
+    for (mask, name, context_mask) in categories {
+        let mut items_in_slot: Vec<(&Entity, bool, bool)> = Vec::new();
+        let mut is_occupied = false;
+        
+        let check_mask = context_mask.unwrap_or(mask);
+
+        for item in &equippable_items {
+            let valid = item.valid_locations.unwrap_or(EquipMask::NONE);
+
+            if valid.intersects(mask) {
+                let current_mask = state
+                    .equipment
+                    .get(&item.guid)
+                    .cloned()
+                    .unwrap_or(EquipMask::NONE);
+                let is_equipped_here = current_mask.intersects(check_mask);
+                let is_equipped_elsewhere = !current_mask.is_empty() && !is_equipped_here;
+
+                if is_equipped_here {
+                    is_occupied = true;
+                }
+                items_in_slot.push((item, is_equipped_here, is_equipped_elsewhere));
+            }
+        }
+
+        lines.push(EquipTabLine::Header(name.to_string(), is_occupied));
+
+        if !items_in_slot.is_empty() {
+            // Sort: equipped items first
+            items_in_slot.sort_by(|(_, a_eq, _), (_, b_eq, _)| b_eq.cmp(a_eq));
+
+            for (item, is_equipped_here, is_equipped_elsewhere) in items_in_slot {
+                lines.push(EquipTabLine::Item(item, is_equipped_here, is_equipped_elsewhere, context_mask));
+            }
+        }
+    }
+
+    lines
+}
+
 pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     let dashboard = state.get_filtered_nearby_tab();
     dashboard
         .iter()
         .enumerate()
         .map(|(i, (e, dist, depth))| {
-            let target = CommandTarget::Entity(e);
+            let target = CommandTarget::Entity(e, None);
             let has_verbs = !get_verbs_for_target(
                 &target,
                 state.player_guid,
@@ -229,6 +327,9 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 i == state.selected_dashboard_index && has_verbs,
                 state.use_emojis,
                 e.currently_wielded_location,
+                true,
+                None,
+                false,
             )
         })
         .collect()
@@ -240,7 +341,7 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, _, depth))| {
-            let target = CommandTarget::Entity(e);
+            let target = CommandTarget::Entity(e, None);
             let has_verbs = !get_verbs_for_target(
                 &target,
                 state.player_guid,
@@ -256,7 +357,74 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 i == state.selected_dashboard_index && has_verbs,
                 state.use_emojis,
                 equipped_mask,
+                false,
+                None,
+                false,
             )
+        })
+        .collect()
+}
+
+pub fn get_equip_list_items(state: &AppState) -> Vec<ListItem<'static>> {
+    let lines = get_equip_tab_lines(state);
+    lines
+        .into_iter()
+        .enumerate()
+        .map(|(i, line)| match line {
+            EquipTabLine::Header(name, is_occupied) => {
+                let is_selected = i == state.selected_dashboard_index;
+                let style = if is_selected {
+                    Style::default().bg(Color::DarkGray).fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                };
+
+                let marker = if state.use_emojis {
+                    if is_occupied { "🧥 " } else { "⭕ " }
+                } else {
+                    if is_occupied { "[X] " } else { "[ ] " }
+                };
+
+                ListItem::new(Line::from(vec![
+                    Span::styled(marker, style),
+                    Span::styled(
+                        name,
+                        style
+                            .add_modifier(Modifier::BOLD)
+                            .add_modifier(Modifier::UNDERLINED),
+                    ),
+                ]))
+            }
+            EquipTabLine::Item(e, is_equipped_here, is_equipped_elsewhere, mask) => {
+                let target = CommandTarget::Entity(e, mask);
+                let has_verbs = !get_verbs_for_target(
+                    &target,
+                    state.player_guid,
+                    &state.inventory,
+                    state.active_interaction,
+                )
+                .is_empty();
+
+                let is_selected = i == state.selected_dashboard_index;
+                
+                let marker = if is_equipped_here {
+                    if state.use_emojis { " ✅ " } else { " (*) " }
+                } else {
+                    "    "
+                };
+
+                render_entity_list_item(
+                    e,
+                    None,
+                    1, // Indent items
+                    is_selected && has_verbs,
+                    state.use_emojis,
+                    None, // Don't show (E) suffix because we have our prefix
+                    false,
+                    Some(marker),
+                    is_equipped_elsewhere,
+                )
+            }
         })
         .collect()
 }
@@ -318,14 +486,23 @@ fn render_entity_list_item(
     highlight: bool,
     use_emojis: bool,
     equipped_mask: Option<EquipMask>,
+    show_slot_names: bool,
+    prefix: Option<&str>,
+    is_dimmed: bool,
 ) -> ListItem<'static> {
     let class = classification::classify_entity(e);
     let color = get_entity_color(e, class);
-    let style = if highlight {
-        Style::default().bg(Color::DarkGray).fg(color)
+    let item_style = if highlight {
+        Style::default().bg(Color::DarkGray)
     } else {
-        Style::default().fg(color)
+        Style::default()
     };
+
+    let mut text_style = Style::default().fg(color);
+    if is_dimmed {
+        text_style = text_style.fg(Color::Gray).add_modifier(Modifier::DIM);
+    }
+
     let type_marker = if use_emojis {
         class.emoji()
     } else {
@@ -335,38 +512,43 @@ fn render_entity_list_item(
     let display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
     } else if let Some(mask) = equipped_mask {
-        // Collect slot names and limit how many we display to avoid overly long strings.
-        let slot_names = mask.iter_names().map(|(name, _)| name).collect::<Vec<_>>();
-        let max_display_slots = 3usize;
-        let slots = if slot_names.len() <= max_display_slots {
-            slot_names.join("|")
-        } else {
-            let shown = slot_names[..max_display_slots].join("|");
-            let remaining = slot_names.len() - max_display_slots;
-            format!("{}|+{}", shown, remaining)
-        };
+        if show_slot_names {
+            // Collect slot names and limit how many we display to avoid overly long strings.
+            let slot_names = mask.iter_names().map(|(name, _)| name).collect::<Vec<_>>();
+            let max_display_slots = 3usize;
+            let slots = if slot_names.len() <= max_display_slots {
+                slot_names.join("|")
+            } else {
+                let shown = slot_names[..max_display_slots].join("|");
+                let remaining = slot_names.len() - max_display_slots;
+                format!("{}|+{}", shown, remaining)
+            };
 
-        if slots.is_empty() {
-            format!("{} (E)", e.name)
+            if slots.is_empty() {
+                format!("{} (E)", e.name)
+            } else {
+                format!("{} [{}]", e.name, slots)
+            }
         } else {
-            format!("{} [{}]", e.name, slots)
+            format!("{} (E)", e.name)
         }
     } else {
         e.name.clone()
     };
 
     let indent = "  ".repeat(depth);
+    let pre = prefix.unwrap_or("");
 
     let text = if let Some(d) = dist {
         format!(
-            "{}[{}] {:<15} [{:.1}m]",
-            indent, type_marker, display_name, d
+            "{}{}[{}] {:<15} [{:.1}m]",
+            pre, indent, type_marker, display_name, d
         )
     } else {
-        format!("{}[{}] {:<15}", indent, type_marker, display_name)
+        format!("{}{}[{}] {:<15}", pre, indent, type_marker, display_name)
     };
 
-    ListItem::new(text).style(style)
+    ListItem::new(Line::styled(text, text_style)).style(item_style)
 }
 
 fn get_entity_color(e: &Entity, class: classification::EntityClass) -> Color {

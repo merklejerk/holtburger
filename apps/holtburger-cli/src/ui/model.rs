@@ -164,7 +164,7 @@ impl AppState {
                 if let Some(guid) = self.current_debug_guid
                     && let Some(entity) = self.entities.get(&guid)
                 {
-                    let target = crate::ui::types::CommandTarget::Entity(entity);
+                    let target = crate::ui::types::CommandTarget::Entity(entity, None);
                     let player_guid = self.player_guid;
                     let entities_ref = &self.entities;
 
@@ -239,11 +239,13 @@ impl AppState {
                 &self.entities,
                 self.player_guid,
                 &self.inventory,
+                &self.equipment,
                 self.player_pos.as_ref(),
                 EntityFilter::World,
             )
             .len(),
             DashboardTab::Inventory => self.get_filtered_inventory_tab().len(),
+            DashboardTab::Equip => crate::ui::widgets::dashboard::get_equip_tab_lines(self).len(),
             DashboardTab::Spells => self.player_spells.len(),
             DashboardTab::Character => crate::ui::widgets::stats::get_stats_list_items(self).len(),
         }
@@ -254,6 +256,7 @@ impl AppState {
             &self.entities,
             self.player_guid,
             &self.inventory,
+            &self.equipment,
             self.player_pos.as_ref(),
             EntityFilter::World,
         )
@@ -264,6 +267,7 @@ impl AppState {
             &self.entities,
             self.player_guid,
             &self.inventory,
+            &self.equipment,
             self.player_pos.as_ref(),
             EntityFilter::Inventory,
         )

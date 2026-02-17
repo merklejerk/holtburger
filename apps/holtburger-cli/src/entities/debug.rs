@@ -227,9 +227,9 @@ pub fn get_debug_info(
                 }
                 if let Some(v) = e.cooldown_id {
                     lines.push(Line::from(format!(
-                        "  CD:        #{} ({:.1}s)",
+                        "  CD:        #{} ({})",
                         v,
-                        e.cooldown_duration.unwrap_or(0.0)
+                        format_duration(e.cooldown_duration.unwrap_or(0.0))
                     )));
                 }
             }
@@ -583,8 +583,10 @@ pub fn get_debug_info(
                             .map(|s| s.name.as_str())
                             .unwrap_or("Unknown Spell");
                         lines.push(Line::from(format!(
-                            "  #{} - {} (dur: {:.1}s)",
-                            enc.spell_id, name, enc.duration
+                            "  #{} - {} (dur: {})",
+                            enc.spell_id,
+                            name,
+                            format_duration(enc.duration)
                         )));
                     }
                 }
@@ -605,8 +607,8 @@ pub fn get_debug_info(
                 enchant.power_level
             )));
             lines.push(Line::from(format!(
-                "Duration:       {:.1}s",
-                enchant.duration
+                "Duration:       {}",
+                format_duration(enchant.duration)
             )));
             lines.push(Line::from(format!(
                 "Stat Mod Type:  0x{:08X}",
@@ -691,4 +693,40 @@ pub fn get_debug_info(
     }
 
     lines
+}
+
+fn format_duration(seconds: f64) -> String {
+    if !(0.0..=86400.0 * 365.0).contains(&seconds) {
+        "Inf".to_string()
+    } else if seconds < 0.1 {
+        format!("{:.3}s", seconds)
+    } else if seconds < 1.0 {
+        format!("{:.2}s", seconds)
+    } else if seconds < 60.0 {
+        format!("{:.1}s", seconds)
+    } else if seconds < 3600.0 {
+        let m = (seconds / 60.0) as u32;
+        let s = (seconds % 60.0) as u32;
+        if s == 0 {
+            format!("{}m", m)
+        } else {
+            format!("{}m {}s", m, s)
+        }
+    } else if seconds < 86400.0 {
+        let h = (seconds / 3600.0) as u32;
+        let m = ((seconds % 3600.0) / 60.0) as u32;
+        if m == 0 {
+            format!("{}h", h)
+        } else {
+            format!("{}h {}m", h, m)
+        }
+    } else {
+        let d = (seconds / 86400.0) as u32;
+        let h = ((seconds % 86400.0) / 3600.0) as u32;
+        if h == 0 {
+            format!("{}d", d)
+        } else {
+            format!("{}d {}h", d, h)
+        }
+    }
 }

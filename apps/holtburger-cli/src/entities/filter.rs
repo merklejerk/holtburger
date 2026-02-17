@@ -35,7 +35,9 @@ pub fn filter_entities<'a>(
                 classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
             }
             EntityFilter::Inventory => {
-                inventory.contains(&e.guid) && !e.name.is_empty() && !equipment.contains_key(&e.guid)
+                inventory.contains(&e.guid)
+                    && !e.name.is_empty()
+                    && !equipment.contains_key(&e.guid)
             }
         })
         .collect();

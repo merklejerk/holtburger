@@ -1,8 +1,8 @@
 // Layout constants
 pub const STATUS_BAR_HEIGHT: u16 = 3;
 pub const DYNAMIC_PANEL_HEIGHT: u16 = 3;
-use holtburger_common::properties::EquipMask;
 use holtburger_common::Guid;
+use holtburger_common::properties::EquipMask;
 pub const INPUT_AREA_HEIGHT: u16 = 3;
 pub const MIN_MAIN_AREA_HEIGHT: u16 = 10;
 pub const WIDTH_BREAKPOINT: u16 = 150;

@@ -1,6 +1,5 @@
-use super::super::types::{CommandTarget, DashboardTab, FocusedPane};
+use super::super::types::{DashboardTab, FocusedPane};
 use crate::entities::classification;
-use crate::entities::verbs::get_verbs_for_target;
 use crate::ui::AppState;
 use holtburger_common::properties::{EquipMask, PropertyInt, RadarColor};
 use holtburger_core::world::entity::Entity;
@@ -26,9 +25,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         (DashboardTab::Spells, "4", "Spells"),
     ];
 
-    let bottom_tabs = [
-        (DashboardTab::Equip, "5", "Equip"),
-    ];
+    let bottom_tabs = [(DashboardTab::Equip, "5", "Equip")];
 
     let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], state: &AppState| {
         let mut spans = Vec::new();
@@ -159,13 +156,21 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)
                         .begin_symbol(Some("▲"))
-                        .end_symbol(Some("▼")),
+                        .track_symbol(Some(" "))
+                        .thumb_symbol("█")
+                        .end_symbol(Some("▼"))
+                        .style(Style::default().fg(Color::Gray).bg(Color::Black))
+                        .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
+                        .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
                     bottom_area,
                     &mut scrollbar_state,
                 );
             }
         }
-        DashboardTab::Entities | DashboardTab::Inventory | DashboardTab::Spells | DashboardTab::Equip => {
+        DashboardTab::Entities
+        | DashboardTab::Inventory
+        | DashboardTab::Spells
+        | DashboardTab::Equip => {
             // These tabs currently all use a List view
             let items = match state.dashboard_tab {
                 DashboardTab::Entities => get_nearby_list_items(state),
@@ -204,7 +209,12 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                     Scrollbar::default()
                         .orientation(ScrollbarOrientation::VerticalRight)
                         .begin_symbol(Some("▲"))
-                        .end_symbol(Some("▼")),
+                        .track_symbol(Some(" "))
+                        .thumb_symbol("█")
+                        .end_symbol(Some("▼"))
+                        .style(Style::default().fg(Color::Gray).bg(Color::Black))
+                        .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
+                        .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
                     dashboard_inner_chunks[0],
                     &mut scrollbar_state,
                 );
@@ -227,7 +237,11 @@ pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
 
     let categories = [
         (EquipMask::MAIN_HAND_IMPLEMENTS, "Main Hand", None),
-        (EquipMask::OFF_HAND_IMPLEMENTS, "Off-Hand", Some(EquipMask::OFF_HAND_SLOT)),
+        (
+            EquipMask::OFF_HAND_IMPLEMENTS,
+            "Off-Hand",
+            Some(EquipMask::OFF_HAND_SLOT),
+        ),
         (EquipMask::HEAD_WEAR, "Head Wear", None),
         (EquipMask::CHEST_WEAR, "Chest Wear", None),
         (EquipMask::ABDOMEN_WEAR, "Abdomen Wear", None),
@@ -269,7 +283,7 @@ pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
     for (mask, name, context_mask) in categories {
         let mut items_in_slot: Vec<(&Entity, bool, bool)> = Vec::new();
         let mut is_occupied = false;
-        
+
         let check_mask = context_mask.unwrap_or(mask);
 
         for item in &equippable_items {
@@ -298,7 +312,12 @@ pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
             items_in_slot.sort_by(|(_, a_eq, _), (_, b_eq, _)| b_eq.cmp(a_eq));
 
             for (item, is_equipped_here, is_equipped_elsewhere) in items_in_slot {
-                lines.push(EquipTabLine::Item(item, is_equipped_here, is_equipped_elsewhere, context_mask));
+                lines.push(EquipTabLine::Item(
+                    item,
+                    is_equipped_here,
+                    is_equipped_elsewhere,
+                    context_mask,
+                ));
             }
         }
     }
@@ -312,22 +331,13 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, dist, depth))| {
-            let target = CommandTarget::Entity(e, None);
-            let has_verbs = !get_verbs_for_target(
-                &target,
-                state.player_guid,
-                &state.inventory,
-                state.active_interaction,
-            )
-            .is_empty();
             render_entity_list_item(
                 e,
                 Some(*dist),
                 *depth,
-                i == state.selected_dashboard_index && has_verbs,
+                i == state.selected_dashboard_index,
                 state.use_emojis,
-                e.currently_wielded_location,
-                true,
+                false,
                 None,
                 false,
             )
@@ -341,23 +351,15 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, (e, _, depth))| {
-            let target = CommandTarget::Entity(e, None);
-            let has_verbs = !get_verbs_for_target(
-                &target,
-                state.player_guid,
-                &state.inventory,
-                state.active_interaction,
-            )
-            .is_empty();
-            let equipped_mask = state.equipment.get(&e.guid).cloned();
+            let is_equipped =
+                state.equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
             render_entity_list_item(
                 e,
                 None,
                 *depth,
-                i == state.selected_dashboard_index && has_verbs,
+                i == state.selected_dashboard_index,
                 state.use_emojis,
-                equipped_mask,
-                false,
+                is_equipped,
                 None,
                 false,
             )
@@ -380,47 +382,36 @@ pub fn get_equip_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 };
 
                 let marker = if state.use_emojis {
-                    if is_occupied { "🧥 " } else { "⭕ " }
+                    if is_occupied { "🟢 " } else { "⭕ " }
+                } else if is_occupied {
+                    "[X] "
                 } else {
-                    if is_occupied { "[X] " } else { "[ ] " }
+                    "[ ] "
                 };
 
                 ListItem::new(Line::from(vec![
                     Span::styled(marker, style),
-                    Span::styled(
-                        name,
-                        style
-                            .add_modifier(Modifier::BOLD)
-                            .add_modifier(Modifier::UNDERLINED),
-                    ),
+                    Span::styled(name, style.add_modifier(Modifier::BOLD)),
                 ]))
             }
-            EquipTabLine::Item(e, is_equipped_here, is_equipped_elsewhere, mask) => {
-                let target = CommandTarget::Entity(e, mask);
-                let has_verbs = !get_verbs_for_target(
-                    &target,
-                    state.player_guid,
-                    &state.inventory,
-                    state.active_interaction,
-                )
-                .is_empty();
-
+            EquipTabLine::Item(e, is_equipped_here, is_equipped_elsewhere, _mask) => {
                 let is_selected = i == state.selected_dashboard_index;
-                
+
                 let marker = if is_equipped_here {
-                    if state.use_emojis { " ✅ " } else { " (*) " }
+                    if state.use_emojis { "✅" } else { "*" }
                 } else {
-                    "    "
+                    "  "
                 };
+                let is_equipped =
+                    state.equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
 
                 render_entity_list_item(
                     e,
                     None,
                     1, // Indent items
-                    is_selected && has_verbs,
+                    is_selected,
                     state.use_emojis,
-                    None, // Don't show (E) suffix because we have our prefix
-                    false,
+                    is_equipped,
                     Some(marker),
                     is_equipped_elsewhere,
                 )
@@ -478,15 +469,14 @@ pub fn get_spells_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         })
         .collect()
 }
-
+#[allow(clippy::too_many_arguments)]
 fn render_entity_list_item(
     e: &Entity,
     dist: Option<f32>,
     depth: usize,
     highlight: bool,
     use_emojis: bool,
-    equipped_mask: Option<EquipMask>,
-    show_slot_names: bool,
+    is_equipped: bool,
     prefix: Option<&str>,
     is_dimmed: bool,
 ) -> ListItem<'static> {
@@ -500,7 +490,8 @@ fn render_entity_list_item(
 
     let mut text_style = Style::default().fg(color);
     if is_dimmed {
-        text_style = text_style.fg(Color::Gray).add_modifier(Modifier::DIM);
+        // Use a darker gray for dimmed items instead of the DIM modifier, which can bleed into scrollbars.
+        text_style = text_style.fg(Color::Gray);
     }
 
     let type_marker = if use_emojis {
@@ -511,27 +502,8 @@ fn render_entity_list_item(
 
     let display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
-    } else if let Some(mask) = equipped_mask {
-        if show_slot_names {
-            // Collect slot names and limit how many we display to avoid overly long strings.
-            let slot_names = mask.iter_names().map(|(name, _)| name).collect::<Vec<_>>();
-            let max_display_slots = 3usize;
-            let slots = if slot_names.len() <= max_display_slots {
-                slot_names.join("|")
-            } else {
-                let shown = slot_names[..max_display_slots].join("|");
-                let remaining = slot_names.len() - max_display_slots;
-                format!("{}|+{}", shown, remaining)
-            };
-
-            if slots.is_empty() {
-                format!("{} (E)", e.name)
-            } else {
-                format!("{} [{}]", e.name, slots)
-            }
-        } else {
-            format!("{} (E)", e.name)
-        }
+    } else if is_equipped {
+        format!("{} (EQUIPPED)", e.name)
     } else {
         e.name.clone()
     };
@@ -542,10 +514,10 @@ fn render_entity_list_item(
     let text = if let Some(d) = dist {
         format!(
             "{}{}[{}] {:<15} [{:.1}m]",
-            pre, indent, type_marker, display_name, d
+            indent, pre, type_marker, display_name, d
         )
     } else {
-        format!("{}{}[{}] {:<15}", pre, indent, type_marker, display_name)
+        format!("{}{}[{}] {:<15}", indent, pre, type_marker, display_name)
     };
 
     ListItem::new(Line::styled(text, text_style)).style(item_style)

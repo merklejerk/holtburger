@@ -1309,6 +1309,22 @@ bitflags! {
         const SIGIL_ONE = 0x10000000;
         const SIGIL_TWO = 0x20000000;
         const SIGIL_THREE = 0x40000000;
+
+        const CLOTHING = 0x80000000 | Self::HEAD_WEAR.bits() | Self::CHEST_WEAR.bits() | Self::ABDOMEN_WEAR.bits() | Self::UPPER_ARM_WEAR.bits() | Self::LOWER_ARM_WEAR.bits() | Self::HAND_WEAR.bits() | Self::UPPER_LEG_WEAR.bits() | Self::LOWER_LEG_WEAR.bits() | Self::FOOT_WEAR.bits();
+        const ARMOR = Self::CHEST_ARMOR.bits() | Self::ABDOMEN_ARMOR.bits() | Self::UPPER_ARM_ARMOR.bits() | Self::LOWER_ARM_ARMOR.bits() | Self::UPPER_LEG_ARMOR.bits() | Self::LOWER_LEG_ARMOR.bits() | Self::FOOT_WEAR.bits();
+        const ARMOR_EXCLUSIVE = Self::CHEST_ARMOR.bits() | Self::ABDOMEN_ARMOR.bits() | Self::UPPER_ARM_ARMOR.bits() | Self::LOWER_ARM_ARMOR.bits() | Self::UPPER_LEG_ARMOR.bits() | Self::LOWER_LEG_ARMOR.bits();
+        const EXTREMITY = Self::HEAD_WEAR.bits() | Self::HAND_WEAR.bits() | Self::FOOT_WEAR.bits();
+        const JEWELRY = Self::NECK_WEAR.bits() | Self::WRIST_WEAR_LEFT.bits() | Self::WRIST_WEAR_RIGHT.bits() | Self::FINGER_WEAR_LEFT.bits() | Self::FINGER_WEAR_RIGHT.bits() | Self::TRINKET_ONE.bits() | Self::CLOAK.bits() | Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::SIGIL_THREE.bits();
+        const WRIST_WEAR = Self::WRIST_WEAR_LEFT.bits() | Self::WRIST_WEAR_RIGHT.bits();
+        const FINGER_WEAR = Self::FINGER_WEAR_LEFT.bits() | Self::FINGER_WEAR_RIGHT.bits();
+        const SIGIL = Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::SIGIL_THREE.bits();
+        const READY_SLOT = Self::HELD.bits() | Self::TWO_HANDED.bits() | Self::TRINKET_ONE.bits() | Self::CLOAK.bits() | Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits();
+        const WEAPON = Self::SIGIL_TWO.bits() | Self::TRINKET_ONE.bits() | Self::HELD.bits();
+        const WEAPON_READY_SLOT = Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::TRINKET_ONE.bits() | Self::HELD.bits();
+        const SELECTABLE = Self::MELEE_WEAPON.bits() | Self::SHIELD.bits() | Self::MISSILE_WEAPON.bits() | Self::HELD.bits() | Self::TWO_HANDED.bits();
+        const SELECTABLE_PLUS_AMMO = Self::SELECTABLE.bits() | Self::MISSILE_AMMO.bits();
+        const ALL = 0x7FFFFFFF;
+        const CAN_GO_IN_READY_SLOT = 0x7FFFFFFF;
     }
 }
 

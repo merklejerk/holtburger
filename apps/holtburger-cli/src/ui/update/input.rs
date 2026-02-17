@@ -64,14 +64,29 @@ impl AppState {
                                     let entities = self.get_filtered_nearby_tab();
                                     entities
                                         .get(self.selected_dashboard_index)
-                                        .map(|(e, _, _)| CommandTarget::Entity(e))
+                                        .map(|(e, _, _)| CommandTarget::Entity(e, None))
                                         .unwrap_or(CommandTarget::None)
                                 }
                                 DashboardTab::Inventory => {
                                     let entities = self.get_filtered_inventory_tab();
                                     entities
                                         .get(self.selected_dashboard_index)
-                                        .map(|(e, _, _)| CommandTarget::Entity(e))
+                                        .map(|(e, _, _)| CommandTarget::Entity(e, None))
+                                        .unwrap_or(CommandTarget::None)
+                                }
+                                DashboardTab::Equip => {
+                                    let lines = crate::ui::widgets::dashboard::get_equip_tab_lines(self);
+                                    lines
+                                        .get(self.selected_dashboard_index)
+                                        .and_then(|line| match line {
+                                            crate::ui::widgets::dashboard::EquipTabLine::Item(
+                                                e,
+                                                _,
+                                                _,
+                                                mask,
+                                            ) => Some(CommandTarget::Entity(e, *mask)),
+                                            _ => None,
+                                        })
                                         .unwrap_or(CommandTarget::None)
                                 }
                                 DashboardTab::Character => {
@@ -499,6 +514,11 @@ impl AppState {
                                         self.selected_dashboard_index = 0;
                                         return commands;
                                     }
+                                    '5' => {
+                                        self.dashboard_tab = DashboardTab::Equip;
+                                        self.selected_dashboard_index = 0;
+                                        return commands;
+                                    }
                                     _ => {}
                                 }
                             }
@@ -517,14 +537,29 @@ impl AppState {
                                                 let entities = self.get_filtered_nearby_tab();
                                                 entities
                                                     .get(self.selected_dashboard_index)
-                                                    .map(|(e, _, _)| CommandTarget::Entity(e))
+                                                    .map(|(e, _, _)| CommandTarget::Entity(e, None))
                                                     .unwrap_or(CommandTarget::None)
                                             }
                                             DashboardTab::Inventory => {
                                                 let entities = self.get_filtered_inventory_tab();
                                                 entities
                                                     .get(self.selected_dashboard_index)
-                                                    .map(|(e, _, _)| CommandTarget::Entity(e))
+                                                    .map(|(e, _, _)| CommandTarget::Entity(e, None))
+                                                    .unwrap_or(CommandTarget::None)
+                                            }
+                                            DashboardTab::Equip => {
+                                                let lines = crate::ui::widgets::dashboard::get_equip_tab_lines(self);
+                                                lines
+                                                    .get(self.selected_dashboard_index)
+                                                    .and_then(|line| match line {
+                                                        crate::ui::widgets::dashboard::EquipTabLine::Item(
+                                                            e,
+                                                            _,
+                                                            _,
+                                                            mask,
+                                                        ) => Some(CommandTarget::Entity(e, *mask)),
+                                                        _ => None,
+                                                    })
                                                     .unwrap_or(CommandTarget::None)
                                             }
                                             DashboardTab::Character => {
@@ -573,13 +608,13 @@ impl AppState {
                                         let (debug_lines, guid, is_spell_id) =
                                             if let Some(CommandHandler::ToggleDebug) = &handler {
                                                 let (guid, spell_id) = match &target {
-                                                    CommandTarget::Entity(e) => {
+                                                    CommandTarget::Entity(e, _) => {
                                                         (Some(e.guid), None)
                                                     }
                                                     CommandTarget::Spell(id) => (None, Some(*id)),
                                                     _ => (None, None),
                                                 };
-                                                let player_info = if let CommandTarget::Entity(e) =
+                                                let player_info = if let CommandTarget::Entity(e, _) =
                                                     &target
                                                     && Some(e.guid) == player_guid
                                                 {

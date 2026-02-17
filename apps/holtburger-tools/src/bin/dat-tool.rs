@@ -352,11 +352,13 @@ fn main() -> Result<()> {
 
             let mut loaded = None;
             for file_id in &direct_ids {
-                if let Ok(data) = provider.get_file(*file_id) {
-                    if let Ok(weenie) = holtburger_dat::weenie::Weenie::unpack(&data) {
-                        loaded = Some((*file_id, weenie));
-                        break;
-                    }
+                if let Some(weenie) = provider
+                    .get_file(*file_id)
+                    .ok()
+                    .and_then(|data| holtburger_dat::weenie::Weenie::unpack(&data).ok())
+                {
+                    loaded = Some((*file_id, weenie));
+                    break;
                 }
             }
 

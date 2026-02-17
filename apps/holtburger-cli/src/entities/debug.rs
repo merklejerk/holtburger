@@ -182,10 +182,7 @@ pub fn get_debug_info(
                     lines.push(Line::from(format!("  UIEffects: 0x{:08X}", v)));
                 }
                 if let Some(v) = e.combat_use {
-                    lines.push(Line::from(format!("  CombatUse: {:02X}", v.bits())));
-                    for (name, _) in v.iter_names() {
-                        lines.push(Line::from(format!("    - {}", name)));
-                    }
+                    lines.push(Line::from(format!("  CombatUse: {} ({:02X})", v, v as u32)));
                 }
                 if let Some(v) = e.structure {
                     lines.push(Line::from(format!(

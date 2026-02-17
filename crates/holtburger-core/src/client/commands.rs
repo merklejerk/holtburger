@@ -232,15 +232,41 @@ impl Client {
                 .await
             }
             ClientCommand::GetAndWield { item, equip_mask } => {
+                let target_mask = EquipMask::from_bits_truncate(equip_mask);
                 log::info!(
-                    ">>> Getting and wielding item 0x{:08X} (mask 0x{:08X})",
+                    ">>> Getting and wielding item 0x{:08X} (mask {:?})",
                     item,
-                    equip_mask
+                    target_mask
                 );
+
+                // Auto-unequip overlapping items
+                let to_unequip: Vec<holtburger_common::Guid> = self
+                    .world
+                    .player
+                    .equipment
+                    .iter()
+                    .filter(|&(eq_guid, eq_mask)| {
+                        eq_mask.intersects(target_mask) && *eq_guid != item
+                    })
+                    .map(|(&eq_guid, _)| eq_guid)
+                    .collect();
+
+                for guid in to_unequip {
+                    log::info!(">>> Auto-unequipping overlapping item 0x{:08X}", guid);
+                    self.send_game_action(GameAction::PutItemInContainer(Box::new(
+                        PutItemInContainerData {
+                            item_guid: guid,
+                            container_guid: self.world.player.guid,
+                            placement: 0,
+                        },
+                    )))
+                    .await?;
+                }
+
                 // Sequencing is handled automatically by the send_game_action helper.
                 self.send_game_action(GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
                     item_guid: item,
-                    equip_mask: EquipMask::from_bits_truncate(equip_mask),
+                    equip_mask: target_mask,
                 })))
                 .await
             }

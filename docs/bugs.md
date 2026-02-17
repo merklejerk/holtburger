@@ -26,3 +26,9 @@ This file documents bugs discovered in the ACE Server during development of Holt
 - You don't have to face the target of your spells.
 - You can cast Infuse Mana Other on yourself. Breaks even at Level 3.
 - You can cast Drain Health on yourself. The DMG:HEAL ratio starts at 0.25:2 and goes up to 0.6:0.35  so lvl 1 is the most efficient?
+
+
+# Investigate
+
+## Door Noclip
+- MITM override door entities as open/nocollide.

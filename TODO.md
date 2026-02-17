@@ -13,6 +13,7 @@
 - [ ] Add and resolve `SpellCategory` enum.
 - [ ] Chat tabs (Chat vs combat vs all).
 - [ ] Shift+backspace to clear chat input buffer.
+- [ ] Move compass to status bar.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -28,7 +29,6 @@
 - [x] Login character list is not alphabetically sorted so `-c NUM` arg is unreliable. (Done)
 - [x] Enter key for interaction target confirmation.
 - [x] Combat mode toggle.
-- [ ] Manage in-world containers.
 - [ ] DC detection.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have synonymous slash chat commands.
@@ -45,6 +45,7 @@
 - [x] get_next_pane and get_prev_pane are the same logic but reversed.
 - [ ] Is the `Usability` bitflags hallucinated?
 - [ ] Use meta `EquipMask` flags for more intelligent equipping.
+- [ ] Auto-follow.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -61,9 +62,16 @@
 - [x] Add "Spells" tab.
     - [x] Add [C]ast verb on current active entity (if chosen) or self.
 - [x] Vitae debuff requires restart to show up? Or if you have one then you die, it seems to get hidden?
-- [ ] Melee combat.
 - [x] Equipment management.
 - [x] Make equipped items more obvious.
+- [ ] Melee combat.
+    - [ ] Auto-attack on target.
+- [ ] Missile combat.
+    - [ ] Auto-attack on target.
+- [ ] Equip tab.
+- [ ] Trade tab.
+- [ ] Manage in-world containers.
+- [ ] Stacking/Splitting.
 
 ### Critical
 

@@ -18,6 +18,10 @@ pub struct PhysicsChildData {
     pub location_id: u32,
 }
 
+/// Mask for the high word of the house restrictions version.
+/// If the high word is not zero, it indicates a versioned message.
+const VERSION_HI_WORD_MASK: u32 = 0xFFFF0000;
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct HouseRestrictionsData {
     pub version: u32,
@@ -42,7 +46,7 @@ impl ProtocolUnpack for HouseRestrictionsData {
         let mut bucket_count = 0;
         let mut entries = Vec::new();
 
-        if (version & 0xFFFF0000) != 0 {
+        if (version & VERSION_HI_WORD_MASK) != 0 {
             if version >= 0x10000002 {
                 if *offset + 12 > data.len() {
                     return None;
@@ -141,7 +145,7 @@ impl ProtocolPack for HouseRestrictionsData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.version).unwrap();
 
-        if (self.version & 0xFFFF0000) != 0 {
+        if (self.version & VERSION_HI_WORD_MASK) != 0 {
             buf.write_u32::<LittleEndian>(self.bitmask.unwrap_or(0))
                 .unwrap();
             self.monarch_id.unwrap_or(Guid::NULL).pack(buf);
@@ -1220,6 +1224,9 @@ impl ProtocolPack for ObjectDescriptionData {
             if let Some(restrictions) = &self.house_restrictions {
                 restrictions.pack(buf);
             } else {
+                // When house restrictions are absent, the wire format still expects
+                // two u32 fields for the restrictions structure; write them as zeros
+                // to represent "no house restrictions" according to the protocol.
                 buf.write_u32::<LittleEndian>(0).unwrap();
                 buf.write_u32::<LittleEndian>(0).unwrap();
             }

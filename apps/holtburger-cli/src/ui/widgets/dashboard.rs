@@ -335,11 +335,17 @@ fn render_entity_list_item(
     let display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
     } else if let Some(mask) = equipped_mask {
-        let slots = mask
-            .iter_names()
-            .map(|(name, _)| name)
-            .collect::<Vec<_>>()
-            .join("|");
+        // Collect slot names and limit how many we display to avoid overly long strings.
+        let slot_names = mask.iter_names().map(|(name, _)| name).collect::<Vec<_>>();
+        let max_display_slots = 3usize;
+        let slots = if slot_names.len() <= max_display_slots {
+            slot_names.join("|")
+        } else {
+            let shown = slot_names[..max_display_slots].join("|");
+            let remaining = slot_names.len() - max_display_slots;
+            format!("{}|+{}", shown, remaining)
+        };
+
         if slots.is_empty() {
             format!("{} (E)", e.name)
         } else {

@@ -2,7 +2,7 @@ use super::super::types::{CommandTarget, DashboardTab, FocusedPane};
 use crate::entities::classification;
 use crate::entities::verbs::get_verbs_for_target;
 use crate::ui::AppState;
-use holtburger_common::properties::{PropertyInt, RadarColor};
+use holtburger_common::properties::{EquipMask, PropertyInt, RadarColor};
 use holtburger_core::world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -228,7 +228,7 @@ pub fn get_nearby_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 *depth,
                 i == state.selected_dashboard_index && has_verbs,
                 state.use_emojis,
-                false, // Nearby entities aren't "equipped" in our list
+                e.currently_wielded_location,
             )
         })
         .collect()
@@ -248,14 +248,14 @@ pub fn get_inventory_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 state.active_interaction,
             )
             .is_empty();
-            let is_equipped = state.equipment.contains_key(&e.guid);
+            let equipped_mask = state.equipment.get(&e.guid).cloned();
             render_entity_list_item(
                 e,
                 None,
                 *depth,
                 i == state.selected_dashboard_index && has_verbs,
                 state.use_emojis,
-                is_equipped,
+                equipped_mask,
             )
         })
         .collect()
@@ -317,7 +317,7 @@ fn render_entity_list_item(
     depth: usize,
     highlight: bool,
     use_emojis: bool,
-    is_equipped: bool,
+    equipped_mask: Option<EquipMask>,
 ) -> ListItem<'static> {
     let color = get_entity_color(e);
     let style = if highlight {
@@ -335,8 +335,17 @@ fn render_entity_list_item(
 
     let display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
-    } else if is_equipped {
-        format!("{} (E)", e.name)
+    } else if let Some(mask) = equipped_mask {
+        let slots = mask
+            .iter_names()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>()
+            .join("|");
+        if slots.is_empty() {
+            format!("{} (E)", e.name)
+        } else {
+            format!("{} [{}]", e.name, slots)
+        }
     } else {
         e.name.clone()
     };
@@ -356,6 +365,18 @@ fn render_entity_list_item(
 }
 
 fn get_entity_color(e: &Entity) -> Color {
+    if let Some(color) = e.radar_blip_color {
+        return match color {
+            RadarColor::Blue => Color::Blue,
+            RadarColor::Gold => Color::Yellow,
+            RadarColor::Purple => Color::Magenta,
+            RadarColor::Red => Color::Red,
+            RadarColor::Green => Color::Green,
+            RadarColor::Yellow => Color::Yellow,
+            _ => Color::White,
+        };
+    }
+
     let color_val = e
         .int_properties
         .get(&(PropertyInt::RadarBlipColor as u32))

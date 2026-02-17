@@ -5,8 +5,8 @@ use super::spatial::SpatialScene;
 use super::stats;
 use binrw::BinRead;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, ItemType, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
-    PropertyValue,
+    CombatUse, EnchantmentTypeFlags, EquipMask, ItemType, PropertyFloat, PropertyInstanceId,
+    PropertyInt, PropertyInt64, PropertyValue, RadarBehavior, RadarColor, Usability,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
@@ -260,11 +260,79 @@ impl WorldState {
                 let mut entity = Entity::new(data.guid, entity_name, data.pos.unwrap_or_default());
                 entity.wcid = Some(data.wcid);
                 entity.flags = data.obj_desc_flags;
+                entity.weenie_flags = data.weenie_flags;
+                entity.weenie_flags2 = data.weenie_flags2;
                 entity.item_type = Some(ItemType::from_bits_truncate(data.item_type));
                 entity.physics_state = data.physics_state;
                 entity.physics_parent_id = data.parent_id;
                 entity.container_id = data.container_id;
                 entity.wielder_id = data.wielder_id;
+
+                if let Some(v) = data.velocity {
+                    entity.velocity = v;
+                }
+                if let Some(a) = data.acceleration {
+                    entity.acceleration = a;
+                }
+                if let Some(o) = data.omega {
+                    entity.omega = o;
+                }
+                entity.gfx_id = data.mtable_id;
+                entity.icon_id = Some(data.icon_id);
+
+                entity.obj_scale = data.obj_scale;
+                entity.friction = data.friction;
+                entity.elasticity = data.elasticity;
+                entity.translucency = data.translucency;
+
+                entity.plural_name = data.plural_name.clone();
+                entity.items_capacity = data.items_capacity;
+                entity.containers_capacity = data.containers_capacity;
+                entity.ammo_type = data.ammo_type;
+                entity.value = data.value;
+                entity.usable = data.usable.map(Usability::from_bits_truncate);
+                entity.use_radius = data.use_radius;
+                entity.target_type = data.target_type.map(ItemType::from_bits_truncate);
+                entity.ui_effects = data.ui_effects;
+                entity.combat_use = data
+                    .combat_use
+                    .map(|v| CombatUse::from_bits_truncate(v as u32));
+                entity.structure = data.structure;
+                entity.max_structure = data.max_structure;
+                entity.stack_size = data.stack_size;
+                entity.max_stack_size = data.max_stack_size;
+                entity.valid_locations = data.valid_locations.map(EquipMask::from_bits_truncate);
+                entity.currently_wielded_location = data
+                    .currently_wielded_location
+                    .map(EquipMask::from_bits_truncate);
+                entity.priority = data.priority;
+                entity.radar_blip_color = data.radar_blip_color.and_then(RadarColor::from_repr);
+                entity.radar_enum = data.radar_enum.and_then(RadarBehavior::from_repr);
+                entity.pscript = data.pscript;
+                entity.workmanship = data.workmanship;
+                entity.burden = data.burden;
+                entity.spell = data.spell;
+                entity.cooldown_id = data.cooldown_id;
+                entity.cooldown_duration = data.cooldown_duration;
+
+                entity.mtable_id = data.mtable_id;
+                entity.stable_id = data.stable_id;
+                entity.petable_id = data.petable_id;
+                entity.csetup_id = data.csetup_id;
+                entity.parent_loc = data.parent_loc;
+                entity.default_script_id = data.default_script_id;
+                entity.default_script_intensity = data.default_script_intensity;
+                entity.autonomous_movement = data.autonomous_movement;
+                entity.animation_frame = data.animation_frame;
+                entity.house_owner = data.house_owner;
+                entity.hook_item_types = data.hook_item_types.map(ItemType::from_bits_truncate);
+                entity.monarch_id = data.monarch_id;
+                entity.hook_type = data.hook_type;
+                entity.icon_overlay_id = data.icon_overlay_id;
+                entity.icon_underlay_id = data.icon_underlay_id;
+                entity.material_type = data.material_type;
+                entity.pet_owner = data.pet_owner;
+                entity.sequences = data.sequences;
 
                 // Update inventory tracking for new objects appearing in containers
                 if let Some(cid) = data.container_id
@@ -443,6 +511,7 @@ impl WorldState {
                     events.extend(self.set_player_velocity(data.velocity));
                 } else if let Some(entity) = self.entities.get_mut(guid) {
                     entity.velocity = data.velocity;
+                    entity.omega = data.omega;
                     events.push(StateEvent::EntityVectorUpdated {
                         guid,
                         velocity: data.velocity,
@@ -584,6 +653,22 @@ impl WorldState {
                             if data.weapon_profile.is_some() {
                                 entity.weapon_profile = data.weapon_profile.clone();
                             }
+                            if data.hook_profile.is_some() {
+                                entity.hook_profile = data.hook_profile.clone();
+                            }
+                            if data.armor_levels.is_some() {
+                                entity.armor_levels = data.armor_levels.clone();
+                            }
+                            if !data.spell_book.is_empty() {
+                                entity.spell_book = data.spell_book.clone();
+                            }
+
+                            entity.armor_highlight = data.armor_highlight;
+                            entity.armor_color = data.armor_color;
+                            entity.weapon_highlight = data.weapon_highlight;
+                            entity.weapon_color = data.weapon_color;
+                            entity.resist_highlight = data.resist_highlight;
+                            entity.resist_color = data.resist_color;
 
                             events.push(StateEvent::EntityIdentified(Box::new(entity.clone())));
                         }

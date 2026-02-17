@@ -1,7 +1,20 @@
 use serde::{Deserialize, Serialize};
 use strum_macros::{Display, FromRepr};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Display,
+    FromRepr,
+    Hash,
+)]
 #[repr(u32)]
 pub enum AttributeType {
     #[strum(serialize = "Strength")]
@@ -18,7 +31,20 @@ pub enum AttributeType {
     SelfAttr = 6,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Display, FromRepr, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    Display,
+    FromRepr,
+    Hash,
+)]
 #[repr(u32)]
 pub enum VitalType {
     Health = 1,
@@ -60,7 +86,20 @@ pub struct Vital {
     pub current: u32,    // Current pool
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Display, FromRepr)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    FromRepr,
+)]
 #[repr(u32)]
 pub enum SkillType {
     Axe = 1,

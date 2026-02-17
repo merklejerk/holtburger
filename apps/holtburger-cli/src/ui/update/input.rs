@@ -578,6 +578,20 @@ impl AppState {
                                                     CommandTarget::Spell(id) => (None, Some(*id)),
                                                     _ => (None, None),
                                                 };
+                                                let player_info = if let CommandTarget::Entity(e) =
+                                                    &target
+                                                    && Some(e.guid) == player_guid
+                                                {
+                                                    Some(debug::PlayerDebugInfo {
+                                                        attributes: &self.attributes,
+                                                        vitals: &self.vitals,
+                                                        skills: &self.skills,
+                                                        enchantments: &self.player_enchantments,
+                                                    })
+                                                } else {
+                                                    None
+                                                };
+
                                                 let lines = debug::get_debug_info(
                                                     &target,
                                                     |id| {
@@ -593,6 +607,7 @@ impl AppState {
                                                             })
                                                     },
                                                     Some(&self.spell_info),
+                                                    player_info,
                                                 );
                                                 (Some(lines), guid, spell_id)
                                             } else {

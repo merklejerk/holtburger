@@ -266,10 +266,12 @@ impl ProtocolPack for WeaponProfile {
     }
 }
 
+use holtburger_common::properties::EquipMask;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookProfile {
     pub flags: u32,
-    pub valid_locations: u32,
+    pub valid_locations: EquipMask,
     pub ammo_type: u32,
 }
 
@@ -279,7 +281,8 @@ impl ProtocolUnpack for HookProfile {
             return None;
         }
         let flags = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let valid_locations = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let valid_locations =
+            EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset + 4..*offset + 8]));
         let ammo_type = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
         *offset += 12;
         Some(HookProfile {
@@ -293,7 +296,8 @@ impl ProtocolUnpack for HookProfile {
 impl ProtocolPack for HookProfile {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.flags).unwrap();
-        buf.write_u32::<LittleEndian>(self.valid_locations).unwrap();
+        buf.write_u32::<LittleEndian>(self.valid_locations.bits())
+            .unwrap();
         buf.write_u32::<LittleEndian>(self.ammo_type).unwrap();
     }
 }
@@ -601,7 +605,7 @@ mod tests {
     fn test_hook_profile_parity() {
         let expected = HookProfile {
             flags: 0x3, // HookFlags.Inscribable (0x1) | HookFlags.IsHealer (0x2)
-            valid_locations: 0x100,
+            valid_locations: EquipMask::from_bits_truncate(0x100),
             ammo_type: 2,
         };
         assert_pack_unpack_parity(test_fixtures::HOOK_PROFILE, &expected);

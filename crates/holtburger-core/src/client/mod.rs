@@ -187,10 +187,7 @@ impl Client {
 
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::PlayerSpellsUpdated {
-                        spell_ids,
-                        spells,
-                    });
+                    .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells });
             }
             StateEvent::PlayerInfo(_) => {
                 // Emit all snapshots

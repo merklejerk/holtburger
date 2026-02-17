@@ -12,7 +12,7 @@ use crate::ui::types::{
     ActiveInteraction, ChatMessageKind, CommandHandler, CommandTarget, ContextView, DashboardTab,
     FocusedPane, InteractionMode, UIState,
 };
-use crate::ui::utils::{get_next_pane, get_prev_pane};
+use crate::ui::utils::get_adjacent_pane;
 
 impl AppState {
     pub(super) fn handle_key_press(
@@ -34,15 +34,16 @@ impl AppState {
             }
             KeyCode::Tab | KeyCode::BackTab => {
                 let active = self.active_interaction.is_some();
-                if key
+                let delta = if key
                     .modifiers
                     .contains(crossterm::event::KeyModifiers::CONTROL)
                     || key.code == KeyCode::BackTab
                 {
-                    self.focused_pane = get_prev_pane(self.focused_pane, width, active);
+                    -1
                 } else {
-                    self.focused_pane = get_next_pane(self.focused_pane, width, active);
-                }
+                    1
+                };
+                self.focused_pane = get_adjacent_pane(self.focused_pane, width, active, delta);
             }
             KeyCode::Esc => {
                 self.active_interaction = None;
@@ -578,6 +579,20 @@ impl AppState {
                                                     CommandTarget::Spell(id) => (None, Some(*id)),
                                                     _ => (None, None),
                                                 };
+                                                let player_info = if let CommandTarget::Entity(e) =
+                                                    &target
+                                                    && Some(e.guid) == player_guid
+                                                {
+                                                    Some(debug::PlayerDebugInfo {
+                                                        attributes: &self.attributes,
+                                                        vitals: &self.vitals,
+                                                        skills: &self.skills,
+                                                        enchantments: &self.player_enchantments,
+                                                    })
+                                                } else {
+                                                    None
+                                                };
+
                                                 let lines = debug::get_debug_info(
                                                     &target,
                                                     |id| {
@@ -593,6 +608,7 @@ impl AppState {
                                                             })
                                                     },
                                                     Some(&self.spell_info),
+                                                    player_info,
                                                 );
                                                 (Some(lines), guid, spell_id)
                                             } else {

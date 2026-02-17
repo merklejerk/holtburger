@@ -1,18 +1,12 @@
 pub const CHARACTER_LIST: &[u8] = include_bytes!("../tests/fixtures/character_list.bin");
 pub const PLAYER_DESCRIPTION: &[u8] = include_bytes!("../tests/fixtures/player_description.bin");
 pub const UPDATE_PROPERTY_INT: &[u8] = include_bytes!("../tests/fixtures/update_property_int.bin");
-pub const OBJECT_CREATE_BUDDY: &[u8] = include_bytes!("../tests/fixtures/object_create_buddy.bin");
-pub const OBJECT_CREATE_SHIRT: &[u8] = include_bytes!("../tests/fixtures/object_create_shirt.bin");
 pub const CHARACTER_ENTER_WORLD: &[u8] =
     include_bytes!("../tests/fixtures/character_enter_world.bin");
 pub const CHARACTER_ENTER_WORLD_REQUEST: &[u8] =
     include_bytes!("../tests/fixtures/character_enter_world_request.bin");
 pub const PLAYER_DESCRIPTION_MINIMAL: &[u8] =
     include_bytes!("../tests/fixtures/player_description_minimal.bin");
-pub const OBJECT_CREATE_MINIMAL: &[u8] =
-    include_bytes!("../tests/fixtures/object_create_minimal.bin");
-pub const OBJECT_CREATE_COMPLEX: &[u8] =
-    include_bytes!("../tests/fixtures/object_create_complex.bin");
 pub const CREATURE_SKILL_MELEE_DEF: &[u8] =
     include_bytes!("../tests/fixtures/creature_skill_melee_def.bin");
 pub const MOVEMENT_EVENT_MOVETO: &[u8] =
@@ -91,3 +85,7 @@ pub const USE_DATA: &[u8] = include_bytes!("../tests/fixtures/use_data.bin");
 pub const USE_WITH_TARGET_DATA: &[u8] =
     include_bytes!("../tests/fixtures/use_with_target_data.bin");
 pub const MODEL_DATA: &[u8] = include_bytes!("../tests/fixtures/model_data.bin");
+pub const OBJECT_CREATE_MINIMAL: &[u8] =
+    include_bytes!("../tests/fixtures/object_create_minimal.bin");
+pub const OBJECT_CREATE_COMPLEX: &[u8] =
+    include_bytes!("../tests/fixtures/object_create_complex.bin");

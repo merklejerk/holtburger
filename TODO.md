@@ -42,7 +42,8 @@
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
 - [ ] Startup is slow. Slow DAT parsing?
-- [ ] Color code usable entities in dashboard.
+- [x] get_next_pane and get_prev_pane are the same logic but reversed.
+- [ ] Is the `Usability` bitflags hallucinated?
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -59,9 +60,9 @@
 - [x] Add "Spells" tab.
     - [x] Add [C]ast verb on current active entity (if chosen) or self.
 - [x] Vitae debuff requires restart to show up? Or if you have one then you die, it seems to get hidden?
-- [ ] Combat.
-- [ ] Equipment management.
-- [ ] Make equipped items more obvious.
+- [ ] Melee combat.
+- [x] Equipment management.
+- [x] Make equipped items more obvious.
 
 ### Critical
 

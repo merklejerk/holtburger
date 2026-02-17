@@ -319,14 +319,13 @@ fn render_entity_list_item(
     use_emojis: bool,
     equipped_mask: Option<EquipMask>,
 ) -> ListItem<'static> {
-    let color = get_entity_color(e);
+    let class = classification::classify_entity(e);
+    let color = get_entity_color(e, class);
     let style = if highlight {
         Style::default().bg(Color::DarkGray).fg(color)
     } else {
         Style::default().fg(color)
     };
-
-    let class = classification::classify_entity(e);
     let type_marker = if use_emojis {
         class.emoji()
     } else {
@@ -364,7 +363,11 @@ fn render_entity_list_item(
     ListItem::new(text).style(style)
 }
 
-fn get_entity_color(e: &Entity) -> Color {
+fn get_entity_color(e: &Entity, class: classification::EntityClass) -> Color {
+    if class == classification::EntityClass::Monster {
+        return Color::Red;
+    }
+
     if let Some(color) = e.radar_blip_color {
         return match color {
             RadarColor::Blue => Color::Blue,

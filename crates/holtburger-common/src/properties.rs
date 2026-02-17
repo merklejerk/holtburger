@@ -1312,33 +1312,68 @@ bitflags! {
     }
 }
 
-bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-    pub struct CombatUse: u32 {
-        const NONE = 0x01;
-        const MELEE = 0x02;
-        const MISSILE = 0x04;
-        const MAGIC = 0x08;
-    }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display, Serialize, Deserialize, Default)]
+#[repr(u8)]
+pub enum CombatUse {
+    #[default]
+    None = 0,
+    Melee = 1,
+    Missile = 2,
+    Ammo = 3,
+    Shield = 4,
+    TwoHanded = 5,
 }
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-    pub struct Usability: u32 {
-        const NONE = 0x00;
-        const USABLE = 0x01;
-        const CONTROLLABLE = 0x02;
-        const VIEWABLE = 0x04;
-        const TAKEABLE = 0x08;
-        const WEARABLE = 0x10;
-        const READABLE = 0x20;
-        const INSCRIBABLE = 0x40;
-        const STACKABLE = 0x80;
-        const ESTIMABLE = 0x100;
-        const USE_WAND_ON_ITEM = 0x200;
-        const USE_WAND_ON_SELF = 0x400;
-        const USE_WAND_ON_OTHER = 0x800;
-        const USE_WAND_ON_LOCATION = 0x1000;
+    pub struct Usable: u32 {
+        const UNDEF       = 0x00;
+        const NO          = 0x01;
+        const SELF        = 0x02;
+        const WIELDED     = 0x04;
+        const CONTAINED   = 0x08;
+        const VIEWED      = 0x10;
+        const REMOTE      = 0x20;
+        const NEVER_WALK   = 0x40;
+        const OBJ_SELF     = 0x80;
+
+        const SOURCE_MASK = 0x0000FFFF;
+        const TARGET_MASK = 0xFFFF0000;
+
+        const CONTAINED_VIEWED                 = 0x08 | 0x10;
+        const CONTAINED_VIEWED_REMOTE           = 0x08 | 0x10 | 0x20;
+        const CONTAINED_VIEWED_REMOTE_NEVER_WALK  = 0x08 | 0x10 | 0x20 | 0x40;
+
+        const VIEWED_REMOTE                    = 0x10 | 0x20;
+        const VIEWED_REMOTE_NEVER_WALK           = 0x10 | 0x20 | 0x40;
+
+        const REMOTE_NEVER_WALK                 = 0x20 | 0x40;
+
+        const SOURCE_WIELDED_TARGET_WIELDED              = 0x040004;
+        const SOURCE_WIELDED_TARGET_CONTAINED            = 0x080004;
+        const SOURCE_WIELDED_TARGET_VIEWED               = 0x100004;
+        const SOURCE_WIELDED_TARGET_REMOTE               = 0x200004;
+        const SOURCE_WIELDED_TARGET_REMOTE_NEVER_WALK    = 0x600004;
+
+        const SOURCE_CONTAINED_TARGET_WIELDED            = 0x040008;
+        const SOURCE_CONTAINED_TARGET_CONTAINED          = 0x080008;
+        const SOURCE_CONTAINED_TARGET_OBJSELF_OR_CONTAINED = 0x880008;
+        const SOURCE_CONTAINED_TARGET_SELF_OR_CONTAINED    = 0x0A0008;
+        const SOURCE_CONTAINED_TARGET_VIEWED             = 0x100008;
+        const SOURCE_CONTAINED_TARGET_REMOTE             = 0x200008;
+        const SOURCE_CONTAINED_TARGET_REMOTE_NEVER_WALK  = 0x600008;
+        const SOURCE_CONTAINED_TARGET_REMOTE_OR_SELF       = 0x220008;
+
+        const SOURCE_VIEWED_TARGET_WIELDED               = 0x040010;
+        const SOURCE_VIEWED_TARGET_CONTAINED             = 0x080010;
+        const SOURCE_VIEWED_TARGET_VIEWED                = 0x100010;
+        const SOURCE_VIEWED_TARGET_REMOTE                = 0x200010;
+
+        const SOURCE_REMOTE_TARGET_WIELDED               = 0x040020;
+        const SOURCE_REMOTE_TARGET_CONTAINED             = 0x080020;
+        const SOURCE_REMOTE_TARGET_VIEWED                = 0x100020;
+        const SOURCE_REMOTE_TARGET_REMOTE                = 0x200020;
+        const SOURCE_REMOTE_TARGET_REMOTE_NEVER_WALK     = 0x600020;
     }
 }
 

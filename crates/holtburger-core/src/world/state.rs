@@ -6,7 +6,7 @@ use super::stats;
 use binrw::BinRead;
 use holtburger_common::properties::{
     CombatUse, EnchantmentTypeFlags, EquipMask, ItemType, PropertyFloat, PropertyInstanceId,
-    PropertyInt, PropertyInt64, PropertyValue, RadarBehavior, RadarColor, Usability,
+    PropertyInt, PropertyInt64, PropertyValue, RadarBehavior, RadarColor, Usable,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
@@ -290,13 +290,11 @@ impl WorldState {
                 entity.containers_capacity = data.containers_capacity;
                 entity.ammo_type = data.ammo_type;
                 entity.value = data.value;
-                entity.usable = data.usable.map(Usability::from_bits_truncate);
+                entity.usable = data.usable.map(Usable::from_bits_truncate);
                 entity.use_radius = data.use_radius;
                 entity.target_type = data.target_type.map(ItemType::from_bits_truncate);
                 entity.ui_effects = data.ui_effects;
-                entity.combat_use = data
-                    .combat_use
-                    .map(|v| CombatUse::from_bits_truncate(v as u32));
+                entity.combat_use = data.combat_use.and_then(CombatUse::from_repr);
                 entity.structure = data.structure;
                 entity.max_structure = data.max_structure;
                 entity.stack_size = data.stack_size;
@@ -557,7 +555,13 @@ impl WorldState {
                 match &ev.event {
                     GameEvent::InventoryPutObjInContainer(data) => {
                         if let Some(entity) = self.entities.get_mut(data.item_guid) {
+                            if entity.wielder_id == Some(self.player.guid) {
+                                self.player.unwield_item(data.item_guid);
+                            }
+
                             entity.container_id = Some(data.container_guid);
+                            entity.wielder_id = None;
+                            entity.currently_wielded_location = Some(EquipMask::NONE);
                             entity.position.landblock_id = Guid::NULL;
 
                             // Update player inventory set recursively
@@ -574,8 +578,12 @@ impl WorldState {
                     }
                     GameEvent::InventoryPutObjectIn3D(data) => {
                         if let Some(entity) = self.entities.get_mut(data.object_guid) {
+                            if entity.wielder_id == Some(self.player.guid) {
+                                self.player.unwield_item(data.object_guid);
+                            }
                             entity.container_id = None;
                             entity.wielder_id = None;
+                            entity.currently_wielded_location = Some(EquipMask::NONE);
 
                             // Recursively remove from inventory tracking
                             self.update_player_inventory_recursive(data.object_guid, false);
@@ -592,6 +600,7 @@ impl WorldState {
                             // The target of the GameEvent message is the wielder
                             entity.wielder_id = Some(ev.target);
                             entity.container_id = None;
+                            entity.currently_wielded_location = Some(data.equip_mask);
                             entity.position.landblock_id = Guid::NULL;
 
                             if ev.target == self.player.guid {

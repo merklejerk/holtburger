@@ -1,7 +1,7 @@
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     CombatUse, EquipMask, ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, RadarColor,
-    Usability, WeenieHeaderFlag, WeenieHeaderFlag2,
+    Usable, WeenieHeaderFlag, WeenieHeaderFlag2,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::object::types::{
@@ -40,7 +40,7 @@ pub struct Entity {
     pub containers_capacity: Option<i8>,
     pub ammo_type: Option<u16>,
     pub value: Option<u32>,
-    pub usable: Option<Usability>,
+    pub usable: Option<Usable>,
     pub use_radius: Option<f32>,
     pub target_type: Option<ItemType>,
     pub ui_effects: Option<u32>,

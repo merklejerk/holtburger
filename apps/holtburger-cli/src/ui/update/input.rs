@@ -75,7 +75,8 @@ impl AppState {
                                         .unwrap_or(CommandTarget::None)
                                 }
                                 DashboardTab::Equip => {
-                                    let lines = crate::ui::widgets::dashboard::get_equip_tab_lines(self);
+                                    let lines =
+                                        crate::ui::widgets::dashboard::get_equip_tab_lines(self);
                                     lines
                                         .get(self.selected_dashboard_index)
                                         .and_then(|line| match line {
@@ -605,50 +606,50 @@ impl AppState {
                                                 )
                                             });
 
-                                        let (debug_lines, guid, is_spell_id) =
-                                            if let Some(CommandHandler::ToggleDebug) = &handler {
-                                                let (guid, spell_id) = match &target {
-                                                    CommandTarget::Entity(e, _) => {
-                                                        (Some(e.guid), None)
-                                                    }
-                                                    CommandTarget::Spell(id) => (None, Some(*id)),
-                                                    _ => (None, None),
-                                                };
-                                                let player_info = if let CommandTarget::Entity(e, _) =
-                                                    &target
-                                                    && Some(e.guid) == player_guid
-                                                {
-                                                    Some(debug::PlayerDebugInfo {
-                                                        attributes: &self.attributes,
-                                                        vitals: &self.vitals,
-                                                        skills: &self.skills,
-                                                        enchantments: &self.player_enchantments,
-                                                    })
-                                                } else {
-                                                    None
-                                                };
-
-                                                let lines = debug::get_debug_info(
-                                                    &target,
-                                                    |id| {
-                                                        self.entities
-                                                            .get(&id)
-                                                            .map(|e| e.name.clone())
-                                                            .or_else(|| {
-                                                                if Some(id) == player_guid {
-                                                                    Some("You".to_string())
-                                                                } else {
-                                                                    None
-                                                                }
-                                                            })
-                                                    },
-                                                    Some(&self.spell_info),
-                                                    player_info,
-                                                );
-                                                (Some(lines), guid, spell_id)
-                                            } else {
-                                                (None, None, None)
+                                        let (debug_lines, guid, is_spell_id) = if let Some(
+                                            CommandHandler::ToggleDebug,
+                                        ) = &handler
+                                        {
+                                            let (guid, spell_id) = match &target {
+                                                CommandTarget::Entity(e, _) => (Some(e.guid), None),
+                                                CommandTarget::Spell(id) => (None, Some(*id)),
+                                                _ => (None, None),
                                             };
+                                            let player_info = if let CommandTarget::Entity(e, _) =
+                                                &target
+                                                && Some(e.guid) == player_guid
+                                            {
+                                                Some(debug::PlayerDebugInfo {
+                                                    attributes: &self.attributes,
+                                                    vitals: &self.vitals,
+                                                    skills: &self.skills,
+                                                    enchantments: &self.player_enchantments,
+                                                })
+                                            } else {
+                                                None
+                                            };
+
+                                            let lines = debug::get_debug_info(
+                                                &target,
+                                                |id| {
+                                                    self.entities
+                                                        .get(&id)
+                                                        .map(|e| e.name.clone())
+                                                        .or_else(|| {
+                                                            if Some(id) == player_guid {
+                                                                Some("You".to_string())
+                                                            } else {
+                                                                None
+                                                            }
+                                                        })
+                                                },
+                                                Some(&self.spell_info),
+                                                player_info,
+                                            );
+                                            (Some(lines), guid, spell_id)
+                                        } else {
+                                            (None, None, None)
+                                        };
 
                                         (handler, debug_lines, guid, is_spell_id)
                                     };

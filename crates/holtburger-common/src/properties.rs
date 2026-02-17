@@ -1310,8 +1310,8 @@ bitflags! {
         const SIGIL_TWO = 0x20000000;
         const SIGIL_THREE = 0x40000000;
 
-        const COMBAT_IMPLEMENTS = Self::MELEE_WEAPON.bits() | Self::SHIELD.bits() | Self::MISSILE_WEAPON.bits() | Self::HELD.bits() | Self::TWO_HANDED.bits(); 
-        const MAIN_HAND_IMPLEMENTS = Self::COMBAT_IMPLEMENTS.bits() & !(Self::SHIELD.bits()); 
+        const COMBAT_IMPLEMENTS = Self::MELEE_WEAPON.bits() | Self::SHIELD.bits() | Self::MISSILE_WEAPON.bits() | Self::HELD.bits() | Self::TWO_HANDED.bits();
+        const MAIN_HAND_IMPLEMENTS = Self::COMBAT_IMPLEMENTS.bits() & !(Self::SHIELD.bits());
         const OFF_HAND_IMPLEMENTS = Self::COMBAT_IMPLEMENTS.bits() & (Self::SHIELD.bits() | Self::MELEE_WEAPON.bits());
         const MAIN_HAND_ONLY = Self::MAIN_HAND_IMPLEMENTS.bits() & !(Self::OFF_HAND_IMPLEMENTS.bits());
         const OFF_HAND_ONLY = Self::OFF_HAND_IMPLEMENTS.bits() & !(Self::MAIN_HAND_IMPLEMENTS.bits());

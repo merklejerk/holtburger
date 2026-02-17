@@ -1,7 +1,7 @@
 use crate::entities::classification::{self, EntityClass};
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
-use holtburger_common::properties::{EquipMask, ObjectDescriptionFlag};
 use holtburger_common::Guid;
+use holtburger_common::properties::{EquipMask, ObjectDescriptionFlag};
 use holtburger_core::ClientCommand;
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -157,7 +157,9 @@ impl EntityVerb {
                     target: e.guid,
                 }))
             }
-            (EntityVerb::Target, CommandTarget::Entity(e, _)) => Some(CommandHandler::Target(e.guid)),
+            (EntityVerb::Target, CommandTarget::Entity(e, _)) => {
+                Some(CommandHandler::Target(e.guid))
+            }
             (EntityVerb::MoveToSlot(slot_guid), CommandTarget::Entity(e, _)) => {
                 Some(CommandHandler::Command(ClientCommand::MoveItem {
                     item: e.guid,
@@ -375,11 +377,12 @@ pub fn get_verbs_for_target(
                             };
 
                         if !is_equipped {
-                            let override_mask: Option<EquipMask> = if let CommandTarget::Entity(_, m) = target {
-                                *m
-                            } else {
-                                None
-                            };
+                            let override_mask: Option<EquipMask> =
+                                if let CommandTarget::Entity(_, m) = target {
+                                    *m
+                                } else {
+                                    None
+                                };
 
                             if let Some(mask) = override_mask.or(e.valid_locations)
                                 && !mask.is_empty()

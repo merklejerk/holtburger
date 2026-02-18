@@ -29,7 +29,7 @@ pub fn get_debug_info(
     let mut lines = Vec::new();
 
     match target {
-        CommandTarget::Entity(e) => {
+        CommandTarget::Entity(e, _) => {
             lines.push(Line::from(format!("DEBUG INFO: {}", e.name)));
             lines.push(Line::from(format!("GUID:   {:08X}", e.guid)));
             let class = classification::classify_entity(e);

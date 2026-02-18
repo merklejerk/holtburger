@@ -1302,29 +1302,41 @@ bitflags! {
         const SHIELD = 0x00200000;
         const MISSILE_WEAPON = 0x00400000;
         const MISSILE_AMMO = 0x00800000;
-        const HELD = 0x01000000;
+        const CASTER = 0x01000000;
         const TWO_HANDED = 0x02000000;
         const TRINKET_ONE = 0x04000000;
         const CLOAK = 0x08000000;
         const SIGIL_ONE = 0x10000000;
         const SIGIL_TWO = 0x20000000;
         const SIGIL_THREE = 0x40000000;
+    }
+}
 
-        const CLOTHING = 0x80000000 | Self::HEAD_WEAR.bits() | Self::CHEST_WEAR.bits() | Self::ABDOMEN_WEAR.bits() | Self::UPPER_ARM_WEAR.bits() | Self::LOWER_ARM_WEAR.bits() | Self::HAND_WEAR.bits() | Self::UPPER_LEG_WEAR.bits() | Self::LOWER_LEG_WEAR.bits() | Self::FOOT_WEAR.bits();
-        const ARMOR = Self::CHEST_ARMOR.bits() | Self::ABDOMEN_ARMOR.bits() | Self::UPPER_ARM_ARMOR.bits() | Self::LOWER_ARM_ARMOR.bits() | Self::UPPER_LEG_ARMOR.bits() | Self::LOWER_LEG_ARMOR.bits() | Self::FOOT_WEAR.bits();
-        const ARMOR_EXCLUSIVE = Self::CHEST_ARMOR.bits() | Self::ABDOMEN_ARMOR.bits() | Self::UPPER_ARM_ARMOR.bits() | Self::LOWER_ARM_ARMOR.bits() | Self::UPPER_LEG_ARMOR.bits() | Self::LOWER_LEG_ARMOR.bits();
-        const EXTREMITY = Self::HEAD_WEAR.bits() | Self::HAND_WEAR.bits() | Self::FOOT_WEAR.bits();
-        const JEWELRY = Self::NECK_WEAR.bits() | Self::WRIST_WEAR_LEFT.bits() | Self::WRIST_WEAR_RIGHT.bits() | Self::FINGER_WEAR_LEFT.bits() | Self::FINGER_WEAR_RIGHT.bits() | Self::TRINKET_ONE.bits() | Self::CLOAK.bits() | Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::SIGIL_THREE.bits();
-        const WRIST_WEAR = Self::WRIST_WEAR_LEFT.bits() | Self::WRIST_WEAR_RIGHT.bits();
-        const FINGER_WEAR = Self::FINGER_WEAR_LEFT.bits() | Self::FINGER_WEAR_RIGHT.bits();
-        const SIGIL = Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::SIGIL_THREE.bits();
-        const READY_SLOT = Self::HELD.bits() | Self::TWO_HANDED.bits() | Self::TRINKET_ONE.bits() | Self::CLOAK.bits() | Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits();
-        const WEAPON = Self::SIGIL_TWO.bits() | Self::TRINKET_ONE.bits() | Self::HELD.bits();
-        const WEAPON_READY_SLOT = Self::SIGIL_ONE.bits() | Self::SIGIL_TWO.bits() | Self::TRINKET_ONE.bits() | Self::HELD.bits();
-        const SELECTABLE = Self::MELEE_WEAPON.bits() | Self::SHIELD.bits() | Self::MISSILE_WEAPON.bits() | Self::HELD.bits() | Self::TWO_HANDED.bits();
-        const SELECTABLE_PLUS_AMMO = Self::SELECTABLE.bits() | Self::MISSILE_AMMO.bits();
-        const ALL = 0x7FFFFFFF;
-        const CAN_GO_IN_READY_SLOT = 0x7FFFFFFF;
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+    pub struct PseudoEquipMask: u32 {
+        const TOP_CLOTHES = EquipMask::CHEST_WEAR.bits() | EquipMask::UPPER_ARM_WEAR.bits() | EquipMask::LOWER_ARM_WEAR.bits();
+        const BOTTOM_CLOTHES = EquipMask::UPPER_LEG_WEAR.bits() | EquipMask::LOWER_LEG_WEAR.bits();
+        const CLOTHES = Self::TOP_CLOTHES.bits() | Self::BOTTOM_CLOTHES.bits() | EquipMask::ABDOMEN_WEAR.bits();
+        const COMBAT_IMPLEMENTS = EquipMask::MELEE_WEAPON.bits() | EquipMask::SHIELD.bits() | EquipMask::MISSILE_WEAPON.bits() | EquipMask::CASTER.bits() | EquipMask::TWO_HANDED.bits();
+        const MAIN_HAND_EXCLUSIVE = EquipMask::TWO_HANDED.bits() | EquipMask::MISSILE_WEAPON.bits() | EquipMask::CASTER.bits();
+        const MAIN_HAND_IMPLEMENTS = Self::COMBAT_IMPLEMENTS.bits() & !(EquipMask::SHIELD.bits());
+        const OFF_HAND_IMPLEMENTS = Self::COMBAT_IMPLEMENTS.bits() & (EquipMask::SHIELD.bits() | EquipMask::MELEE_WEAPON.bits());
+        const MAIN_HAND_ONLY = Self::MAIN_HAND_IMPLEMENTS.bits() & !(Self::OFF_HAND_IMPLEMENTS.bits());
+        const OFF_HAND_ONLY = Self::OFF_HAND_IMPLEMENTS.bits() & !(Self::MAIN_HAND_IMPLEMENTS.bits());
+        const OFF_HAND_SLOT = EquipMask::SHIELD.bits();
+        const CLOTHING = 0x80000000 | EquipMask::HEAD_WEAR.bits() | EquipMask::CHEST_WEAR.bits() | EquipMask::ABDOMEN_WEAR.bits() | EquipMask::UPPER_ARM_WEAR.bits() | EquipMask::LOWER_ARM_WEAR.bits() | EquipMask::HAND_WEAR.bits() | EquipMask::UPPER_LEG_WEAR.bits() | EquipMask::LOWER_LEG_WEAR.bits() | EquipMask::FOOT_WEAR.bits();
+        const ARMOR = EquipMask::CHEST_ARMOR.bits() | EquipMask::ABDOMEN_ARMOR.bits() | EquipMask::UPPER_ARM_ARMOR.bits() | EquipMask::LOWER_ARM_ARMOR.bits() | EquipMask::UPPER_LEG_ARMOR.bits() | EquipMask::LOWER_LEG_ARMOR.bits() | EquipMask::FOOT_WEAR.bits();
+        const JEWELRY = EquipMask::NECK_WEAR.bits() | EquipMask::WRIST_WEAR_LEFT.bits() | EquipMask::WRIST_WEAR_RIGHT.bits() | EquipMask::FINGER_WEAR_LEFT.bits() | EquipMask::FINGER_WEAR_RIGHT.bits() | EquipMask::TRINKET_ONE.bits() | EquipMask::CLOAK.bits() | EquipMask::SIGIL_ONE.bits() | EquipMask::SIGIL_TWO.bits() | EquipMask::SIGIL_THREE.bits();
+        const WRIST_WEAR = EquipMask::WRIST_WEAR_LEFT.bits() | EquipMask::WRIST_WEAR_RIGHT.bits();
+        const FINGER_WEAR = EquipMask::FINGER_WEAR_LEFT.bits() | EquipMask::FINGER_WEAR_RIGHT.bits();
+        const SIGIL = EquipMask::SIGIL_ONE.bits() | EquipMask::SIGIL_TWO.bits() | EquipMask::SIGIL_THREE.bits();
+    }
+}
+
+impl From<PseudoEquipMask> for EquipMask {
+    fn from(value: PseudoEquipMask) -> Self {
+        Self::from_bits_truncate(value.bits())
     }
 }
 

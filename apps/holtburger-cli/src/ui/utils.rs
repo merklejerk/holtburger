@@ -97,14 +97,26 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
             let entities = state.get_filtered_nearby_tab();
             entities
                 .get(state.selected_dashboard_index)
-                .map(|(e, _, _)| CommandTarget::Entity(e))
+                .map(|(e, _, _)| CommandTarget::Entity(e, None))
                 .unwrap_or(CommandTarget::None)
         }
         DashboardTab::Inventory => {
             let entities = state.get_filtered_inventory_tab();
             entities
                 .get(state.selected_dashboard_index)
-                .map(|(e, _, _)| CommandTarget::Entity(e))
+                .map(|(e, _, _)| CommandTarget::Entity(e, None))
+                .unwrap_or(CommandTarget::None)
+        }
+        DashboardTab::Equip => {
+            let lines = crate::ui::widgets::dashboard::get_equip_tab_lines(state);
+            lines
+                .get(state.selected_dashboard_index)
+                .and_then(|line| match line {
+                    crate::ui::widgets::dashboard::EquipTabLine::Item(e, _, _, mask) => {
+                        Some(CommandTarget::Entity(e, *mask))
+                    }
+                    _ => None,
+                })
                 .unwrap_or(CommandTarget::None)
         }
         DashboardTab::Character => crate::ui::widgets::stats::get_command_target_at_index(

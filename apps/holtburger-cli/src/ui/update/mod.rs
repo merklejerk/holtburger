@@ -28,7 +28,6 @@ impl AppState {
                     event,
                     holtburger_core::WireEvent::LogMessage(_)
                         | holtburger_core::WireEvent::RawMessage(_)
-                        | holtburger_core::WireEvent::PingResponse
                 );
                 self.handle_received_event(event);
                 if should_redraw {

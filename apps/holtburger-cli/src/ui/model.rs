@@ -131,6 +131,19 @@ impl AppState {
             let _ = file.flush();
         }
         self.messages.push(ChatMessage { kind, text });
+
+        // Memory Guard: Prune to 4000 messages (2x window size) to avoid unbounded growth
+        const MAX_CHAT: usize = 4000;
+        if self.messages.len() > MAX_CHAT {
+            let drop_count = self.messages.len() - MAX_CHAT;
+            self.messages.drain(0..drop_count);
+            // Sync the wrapped cache too if it has been populated
+            if self.wrapped_chat_cache.len() > drop_count {
+                self.wrapped_chat_cache.drain(0..drop_count);
+            } else {
+                self.wrapped_chat_cache.clear();
+            }
+        }
     }
 
     pub fn maintain_scroll(&mut self, is_context: bool, current_total: usize, height: usize) {

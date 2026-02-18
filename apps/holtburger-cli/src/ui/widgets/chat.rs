@@ -16,6 +16,11 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let m_len = state.messages.len();
     let window_size = CHAT_HISTORY_WINDOW_SIZE;
 
+    // Guard: Ensure the cache is not longer than the current number of messages (stale cache fix)
+    if state.wrapped_chat_cache.len() > m_len {
+        state.wrapped_chat_cache.truncate(m_len);
+    }
+
     // Check if we need to refresh the cache due to width change
     if width != state.last_chat_width {
         state.wrapped_chat_cache.clear();
@@ -69,7 +74,7 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
         .map(|item| {
             let (text, color) = *item;
             ListItem::new(Line::from(vec![Span::styled(
-                text.clone(),
+                text.as_str(),
                 Style::default().fg(*color),
             )]))
         })

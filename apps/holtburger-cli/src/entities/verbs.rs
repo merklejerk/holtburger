@@ -1,7 +1,7 @@
 use crate::entities::classification::{self, EntityClass};
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
-use holtburger_common::properties::{EquipMask, ObjectDescriptionFlag};
+use holtburger_common::properties::{PseudoEquipMask, EquipMask, ObjectDescriptionFlag};
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use std::borrow::Cow;
 use std::collections::HashSet;
@@ -388,9 +388,9 @@ pub fn get_verbs_for_target(
                                 && !mask.is_empty()
                             {
                                 let mut slot = TargetSlot::EquipMask(mask);
-                                if mask.intersects(EquipMask::TOP_CLOTHES) {
+                                if mask.intersects(PseudoEquipMask::TOP_CLOTHES.into()) {
                                     slot = TargetSlot::TopClothes;
-                                } else if mask.intersects(EquipMask::BOTTOM_CLOTHES) {
+                                } else if mask.intersects(PseudoEquipMask::BOTTOM_CLOTHES.into()) {
                                     slot = TargetSlot::BottomClothes;
                                 }
 

@@ -1,7 +1,7 @@
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::entities::classification;
 use crate::ui::AppState;
-use holtburger_common::properties::{EquipMask, PropertyInt, RadarColor};
+use holtburger_common::properties::{PseudoEquipMask, EquipMask, PropertyInt, RadarColor};
 use holtburger_core::world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -236,14 +236,14 @@ pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
     let mut lines = Vec::new();
 
     let categories = [
-        (EquipMask::MAIN_HAND_IMPLEMENTS, "Main Hand", None),
+        (PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into(), "Main Hand", None),
         (
-            EquipMask::OFF_HAND_IMPLEMENTS,
+            PseudoEquipMask::OFF_HAND_IMPLEMENTS.into(),
             "Off-Hand",
-            Some(EquipMask::OFF_HAND_SLOT),
+            Some(PseudoEquipMask::OFF_HAND_SLOT.into()),
         ),
-        (EquipMask::TOP_CLOTHES, "Top Clothes", None),
-        (EquipMask::BOTTOM_CLOTHES, "Bottom Clothes", None),
+        (PseudoEquipMask::TOP_CLOTHES.into(), "Top Clothes", None),
+        (PseudoEquipMask::BOTTOM_CLOTHES.into(), "Bottom Clothes", None),
         (EquipMask::HEAD_WEAR, "Head Wear", None),
         (EquipMask::HAND_WEAR, "Hand Wear", None),
         (EquipMask::FOOT_WEAR, "Foot Wear", None),
@@ -284,11 +284,6 @@ pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
 
         for item in &equippable_items {
             let valid = item.valid_locations.unwrap_or(EquipMask::NONE);
-
-            // Filter out items that overlap with Top Clothes to avoid robes showing in both
-            if name == "Bottom Clothes" && valid.intersects(EquipMask::TOP_CLOTHES) {
-                continue;
-            }
 
             if valid.intersects(mask) {
                 let current_mask = state

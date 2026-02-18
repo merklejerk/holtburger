@@ -80,6 +80,8 @@ pub struct AppState {
     pub noclip: bool,
     pub inventory: HashSet<Guid>,
     pub equipment: HashMap<Guid, EquipMask>,
+    pub wrapped_chat_cache: Vec<Vec<(String, Color)>>,
+    pub last_chat_width: usize,
 }
 
 pub struct NetStats {

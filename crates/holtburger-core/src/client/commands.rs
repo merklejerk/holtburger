@@ -2,10 +2,10 @@ use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
 use crate::world::StateEvent;
 use anyhow::Result;
+use holtburger_common::properties::{PseudoEquipMask, EquipMask};
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
-use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use std::time::Instant;
@@ -506,8 +506,8 @@ impl Client {
                     EquipMask::MELEE_WEAPON
                 } else if item_mask.intersects(EquipMask::MISSILE_WEAPON) {
                     EquipMask::MISSILE_WEAPON
-                } else if item_mask.intersects(EquipMask::HELD) {
-                    EquipMask::HELD
+                } else if item_mask.intersects(EquipMask::CASTER) {
+                    EquipMask::CASTER
                 } else {
                     item_mask
                 };
@@ -518,11 +518,11 @@ impl Client {
                 get_equip_unequip_mask(item_mask, Some(resolved_slot)),
             ),
             TargetSlot::TopClothes => (
-                EquipMask::TOP_CLOTHES,
+                PseudoEquipMask::TOP_CLOTHES.into(),
                 get_equip_unequip_mask(item_mask, Some(resolved_slot)),
             ),
             TargetSlot::BottomClothes => (
-                EquipMask::BOTTOM_CLOTHES,
+                PseudoEquipMask::BOTTOM_CLOTHES.into(),
                 get_equip_unequip_mask(item_mask, Some(resolved_slot)),
             ),
         };
@@ -538,7 +538,6 @@ impl Client {
             .collect();
 
         for guid in to_unequip {
-            log::info!(">>> Auto-unequipping overlapping item 0x{:08X}", guid);
             self.send_game_action(GameAction::PutItemInContainer(Box::new(
                 PutItemInContainerData {
                     item_guid: guid,
@@ -558,43 +557,39 @@ impl Client {
 /// Returns an `EquipMask` of all potential overlapping slots that must be cleared
 /// to make room for the new item at the specified `target`.
 fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> EquipMask {
-    // These constants represent logical "hands" for equipment displacement logic.
-    const MAIN_HAND_VIRTUAL: EquipMask = EquipMask::from_bits_retain(
-        EquipMask::MELEE_WEAPON.bits()
-            | EquipMask::MISSILE_WEAPON.bits()
-            | EquipMask::HELD.bits()
-            | EquipMask::TWO_HANDED.bits(),
-    );
-    const OFF_HAND_VIRTUAL: EquipMask = EquipMask::SHIELD;
-
-    // Items that physically require both hands (e.g. bows, 2H swords, large staves)
-    const TWO_HANDED_REQUIRED: EquipMask = EquipMask::from_bits_retain(
-        EquipMask::TWO_HANDED.bits() | EquipMask::MISSILE_WEAPON.bits() | EquipMask::HELD.bits(),
-    );
-
-    match target {
-        Some(TargetSlot::EquipMask(m)) => {
+    log::info!("Resolving equip/unequip masks for item_mask={:?}, target={:?}", item_mask, target);
+    let target_mask = target.unwrap_or(TargetSlot::EquipMask(item_mask));
+    match target_mask {
+        TargetSlot::EquipMask(m) => {
             let mut unequip = m;
-            // If we are equipping a 2H item in its primary slot, we must clear the other hand.
-            if m.intersects(MAIN_HAND_VIRTUAL) && item_mask.intersects(TWO_HANDED_REQUIRED) {
-                unequip |= OFF_HAND_VIRTUAL;
+            // If we're equipping something that's a main hand exclusive (like a 2H weapon),
+            // we must also clear the offhand slot.
+            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
+                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
             }
             // Equipping in offhand must unequip anything in main hand that blocks it (2H).
-            if m.intersects(OFF_HAND_VIRTUAL) {
-                unequip |= TWO_HANDED_REQUIRED;
+            if item_mask.intersects(PseudoEquipMask::OFF_HAND_SLOT.into()) {
+                unequip |= PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into();
             }
             unequip
         }
-        Some(TargetSlot::MainHand) => {
-            let mut unequip = MAIN_HAND_VIRTUAL;
-            if item_mask.intersects(TWO_HANDED_REQUIRED) {
-                unequip |= OFF_HAND_VIRTUAL;
+        TargetSlot::MainHand => {
+            // If the item is a main hand exclusive, we must also clear the offhand slot.
+            let mut unequip = PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
+            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
+                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
             }
             unequip
         }
-        Some(TargetSlot::OffHand) => OFF_HAND_VIRTUAL | TWO_HANDED_REQUIRED,
-        Some(TargetSlot::TopClothes) => EquipMask::TOP_CLOTHES,
-        Some(TargetSlot::BottomClothes) => EquipMask::BOTTOM_CLOTHES,
-        None => item_mask,
+        TargetSlot::OffHand => {
+            let mut unequip = PseudoEquipMask::OFF_HAND_SLOT.into();
+            // If the item is a main hand exclusive, we must also clear the main hand slot.
+            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
+                unequip |= PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
+            }
+            unequip
+        }
+        TargetSlot::TopClothes => PseudoEquipMask::TOP_CLOTHES.into(),
+        TargetSlot::BottomClothes => PseudoEquipMask::BOTTOM_CLOTHES.into(),
     }
 }

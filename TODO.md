@@ -82,6 +82,7 @@
 - [ ] Trade tab.
 - [ ] Manage in-world containers.
 - [ ] Stacking/Splitting.
+- [ ] TUI very slow in `-vv` mode despite few outputs.
 
 ### Critical
 

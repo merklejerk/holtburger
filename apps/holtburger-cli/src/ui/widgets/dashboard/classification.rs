@@ -62,13 +62,9 @@ impl EntityClass {
     }
 }
 
-<<<<<<<< HEAD:apps/holtburger-cli/src/ui/widgets/dashboard/classification.rs
 pub fn radar_color_to_tui_color(
     color: holtburger_common::properties::RadarColor,
 ) -> Option<ratatui::style::Color> {
-========
-pub fn radar_color_to_tui_color(color: holtburger_common::properties::RadarColor) -> Option<ratatui::style::Color> {
->>>>>>>> 17124bc (refactor(tui): componentize dashboard into modular tab controllers):apps/holtburger-cli/src/entities/classification.rs
     use holtburger_common::properties::RadarColor;
     use ratatui::style::Color;
     match color {

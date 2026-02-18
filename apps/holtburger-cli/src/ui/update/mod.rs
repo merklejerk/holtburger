@@ -3,54 +3,63 @@ pub mod world;
 
 use crate::ui::action::AppAction;
 use crate::ui::model::AppState;
-use crate::ui::types::ChatMessageKind;
+use crate::ui::types::{ChatMessageKind, UpdateResult};
 use holtburger_core::ClientCommand;
 
 impl AppState {
-    pub fn handle_action(&mut self, action: AppAction) -> Vec<ClientCommand> {
-        let mut commands = Vec::new();
+    pub fn handle_action(&mut self, action: AppAction) -> UpdateResult {
+        let mut result = UpdateResult::new();
         match action {
             AppAction::Tick(elapsed) => {
-                commands.extend(self.update_tick(elapsed));
+                result = self.update_tick(elapsed);
             }
             AppAction::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
-                commands.extend(self.handle_key_press(
-                    key,
-                    width,
-                    height,
-                    main_chunks,
-                    dynamic_chunk,
-                ));
+                result.commands =
+                    self.handle_key_press(key, width, height, main_chunks, dynamic_chunk);
+                result.needs_redraw = true; // Input always redraws
             }
             AppAction::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
-                commands.extend(self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk));
+                result.commands =
+                    self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
+                result.needs_redraw = true;
             }
             AppAction::ReceivedEvent(event) => {
+                let should_redraw = !matches!(
+                    event,
+                    holtburger_core::WireEvent::LogMessage(_)
+                        | holtburger_core::WireEvent::RawMessage(_)
+                        | holtburger_core::WireEvent::PingResponse
+                );
                 self.handle_received_event(event);
-                self.refresh_context_buffer();
+                if should_redraw {
+                    self.refresh_context_buffer();
+                }
+                result.needs_redraw = should_redraw;
             }
             AppAction::ReceivedStateEvent(event) => {
                 self.handle_received_state_event(event);
                 self.refresh_context_buffer();
+                result.needs_redraw = true;
             }
             AppAction::ReceivedViewEvent(event) => {
                 self.handle_client_view_event(event);
                 self.refresh_context_buffer();
+                result.needs_redraw = true;
             }
         }
 
         // Track bytes_out for commands
-        for _cmd in &commands {
+        for _cmd in &result.commands {
             // Very rough estimate: ~64 bytes per command packet
             // In a real world we'd track the encoded length, but this is for rizz
             self.net_stats.bytes_out += 64;
         }
 
-        commands
+        result
     }
 
-    fn update_tick(&mut self, elapsed: f64) -> Vec<ClientCommand> {
-        let mut commands = Vec::new();
+    fn update_tick(&mut self, elapsed: f64) -> UpdateResult {
+        let mut result = UpdateResult::new();
         let now = std::time::Instant::now();
 
         // Update net stats
@@ -69,6 +78,7 @@ impl AppState {
             }
 
             self.net_stats.last_update = Some(now);
+            result.needs_redraw = true;
         }
 
         if self.logon_retry.tick(now) {
@@ -79,7 +89,10 @@ impl AppState {
                     self.logon_retry.attempts, self.logon_retry.max_attempts
                 ),
             );
-            commands.push(ClientCommand::Login(self.account_password.clone()));
+            result
+                .commands
+                .push(ClientCommand::Login(self.account_password.clone()));
+            result.needs_redraw = true;
         }
         if self.enter_retry.tick(now) {
             self.log_chat(
@@ -89,18 +102,22 @@ impl AppState {
                     self.enter_retry.attempts, self.enter_retry.max_attempts
                 ),
             );
-            commands.push(ClientCommand::EnterWorld);
+            result.commands.push(ClientCommand::EnterWorld);
+            result.needs_redraw = true;
         }
 
         // Enforce dashboard index bounds
         let dashboard_count = self.dashboard_item_count();
         if self.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
             self.selected_dashboard_index = dashboard_count - 1;
-        } else if dashboard_count == 0 {
+            result.needs_redraw = true;
+        } else if dashboard_count == 0 && self.selected_dashboard_index != 0 {
             self.selected_dashboard_index = 0;
+            result.needs_redraw = true;
         }
 
         // Proactive enchantment purge
+        let old_count = self.player_enchantments.len();
         self.player_enchantments.retain(|e| {
             if e.duration < 0.0 {
                 return true;
@@ -108,6 +125,9 @@ impl AppState {
             let expires_at = e.start_time + e.duration;
             expires_at > 0.0
         });
+        if self.player_enchantments.len() != old_count {
+            result.needs_redraw = true;
+        }
 
         // Update enchantment timers locally
         for enchant in &mut self.player_enchantments {
@@ -115,6 +135,7 @@ impl AppState {
                 enchant.start_time -= elapsed;
             }
         }
-        commands
+
+        result
     }
 }

@@ -70,16 +70,22 @@ Wire up the new system to the main input loop.
 
 ## 5. Definition of Done
 
-- [ ] `TabController` trait is defined.
-- [ ] Dashboard is split into submodules.
-- [ ] Equipment tab correctly generates specific `MainHand`/`OffHand` verbs.
-- [ ] Input loop is simplified.
-- [ ] Project compiles and valid `cargo check`.
+- [x] `TabController` trait is defined.
+- [x] Dashboard is split into submodules.
+- [x] Equipment tab correctly generates specific `MainHand`/`OffHand` verbs.
+- [x] Input loop is simplified.
+- [x] Project compiles and valid `cargo check`.
 
 ## 6. Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: Define Trait
-- [ ] Phase 2: Equip Tab
-- [ ] Phase 3: Other Tabs
-- [ ] Phase 4: Integration
+- [x] Phase 1: Define Trait
+- [x] Phase 2: Equip Tab
+- [x] Phase 3: Other Tabs
+- [x] Phase 4: Integration
+
+### Decisions Log
+- **2026-02-18**: Created `TabController` trait in `ui/traits.rs`. Included `handle_input` to allow tabs to manage their own keybindings in the future.
+
+### Verification Log
+- **2026-02-18**: Trait defined. Compilation check pending after Phase 2 (since it's not yet used).

@@ -23,7 +23,15 @@ struct TuiLogger {
 
 impl log::Log for TuiLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Trace
+        let level = metadata.level();
+        let should_send_to_tui = match level {
+            log::Level::Error => true,
+            log::Level::Warn => self.verbosity >= 1,
+            log::Level::Info => self.verbosity >= 2,
+            log::Level::Debug => self.verbosity >= 3,
+            log::Level::Trace => self.verbosity >= 4,
+        };
+        should_send_to_tui || self.file.is_some()
     }
 
     fn log(&self, record: &log::Record) {
@@ -243,6 +251,8 @@ async fn main() -> Result<()> {
         noclip: false,
         inventory: std::collections::HashSet::new(),
         equipment: std::collections::HashMap::new(),
+        wrapped_chat_cache: Vec::new(),
+        last_chat_width: 0,
     };
 
     app_state.refresh_context_buffer();
@@ -261,35 +271,72 @@ async fn main() -> Result<()> {
     let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
 
     let mut last_tick = Instant::now();
-    loop {
-        let elapsed = last_tick.elapsed().as_secs_f64();
-        last_tick = Instant::now();
+    let tick_rate = std::time::Duration::from_millis(100);
+    let frame_rate = std::time::Duration::from_millis(16); // ~60 FPS
+    let mut last_draw = Instant::now();
 
-        let actions = app_state.handle_action(ui::AppAction::Tick(elapsed));
-        for action in actions {
-            let _ = command_tx.send(action);
+    loop {
+        let mut needs_redraw = false;
+
+        // 1. Process Network Events (Drain batch)
+        while let Ok(event) = wire_view_rx.try_recv() {
+            if let WireEvent::GameMessage(msg) = &event {
+                use holtburger_protocol::messages::GameMessage;
+                if let GameMessage::ServerName(data) = msg.as_ref() {
+                    app_state.world_name = data.name.clone();
+                }
+            }
+            let res = app_state.handle_action(ui::AppAction::ReceivedEvent(event));
+            needs_redraw |= res.needs_redraw;
+            for cmd in res.commands {
+                let _ = command_tx.send(cmd);
+            }
         }
 
-        terminal.draw(|f| ui::ui(f, &mut app_state))?;
+        while let Ok(event) = state_view_rx.try_recv() {
+            let res = app_state.handle_action(ui::AppAction::ReceivedStateEvent(event));
+            needs_redraw |= res.needs_redraw;
+            for cmd in res.commands {
+                let _ = command_tx.send(cmd);
+            }
+        }
 
-        if event::poll(std::time::Duration::from_millis(100))? {
+        while let Ok(event) = event_rx.try_recv() {
+            let res = app_state.handle_action(ui::AppAction::ReceivedEvent(event));
+            needs_redraw |= res.needs_redraw;
+            for cmd in res.commands {
+                let _ = command_tx.send(cmd);
+            }
+        }
+
+        while let Ok(event) = view_event_rx.try_recv() {
+            let res = app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
+            needs_redraw |= res.needs_redraw;
+            for cmd in res.commands {
+                let _ = command_tx.send(cmd);
+            }
+        }
+
+        // 2. Poll Input (Short timeout)
+        if event::poll(std::time::Duration::from_millis(10))? {
             match event::read()? {
                 Event::Key(key) => {
                     let size = terminal.size()?;
                     let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                    let actions = app_state.handle_action(ui::AppAction::KeyPress(
+                    let res = app_state.handle_action(ui::AppAction::KeyPress(
                         key,
                         size.width,
                         size.height,
                         main_chunks,
                         dynamic_chunk,
                     ));
+                    needs_redraw |= res.needs_redraw;
                     let mut should_quit = false;
-                    for action in actions {
-                        if let ClientCommand::Quit = action {
+                    for cmd in res.commands {
+                        if let ClientCommand::Quit = cmd {
                             should_quit = true;
                         }
-                        let _ = command_tx.send(action);
+                        let _ = command_tx.send(cmd);
                     }
                     if should_quit {
                         break;
@@ -298,58 +345,36 @@ async fn main() -> Result<()> {
                 Event::Mouse(mouse) => {
                     let size = terminal.size()?;
                     let (chunks, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                    let actions = app_state.handle_action(ui::AppAction::Mouse(
+                    let res = app_state.handle_action(ui::AppAction::Mouse(
                         mouse,
                         chunks.to_vec(),
                         main_chunks.to_vec(),
                         dynamic_chunk,
                     ));
-                    for action in actions {
-                        let _ = command_tx.send(action);
+                    needs_redraw |= res.needs_redraw;
+                    for cmd in res.commands {
+                        let _ = command_tx.send(cmd);
                     }
                 }
                 _ => {}
             }
         }
 
-        while let Ok(event) = wire_view_rx.try_recv() {
-            match &event {
-                WireEvent::CharacterList(_)
-                | WireEvent::PlayerEntered { .. }
-                | WireEvent::StatusUpdate { .. } => {
-                    if args.verbose >= 2 {
-                        log::info!("WireEvent: {:?}", event);
-                    }
-                }
-                WireEvent::GameMessage(msg) => {
-                    use holtburger_protocol::messages::GameMessage;
-                    if let GameMessage::ServerName(data) = msg.as_ref() {
-                        app_state.world_name = data.name.clone();
-                    }
-                }
-                WireEvent::RawMessage(_data) => {
-                    // Logged by holtburger-core
-                }
-                _ => {}
+        // 3. Tick
+        let elapsed = last_tick.elapsed().as_secs_f64();
+        if last_tick.elapsed() >= tick_rate {
+            let res = app_state.handle_action(ui::AppAction::Tick(elapsed));
+            needs_redraw |= res.needs_redraw;
+            for cmd in res.commands {
+                let _ = command_tx.send(cmd);
             }
-
-            app_state.handle_action(ui::AppAction::ReceivedEvent(event));
+            last_tick = Instant::now();
         }
 
-        while let Ok(event) = state_view_rx.try_recv() {
-            if args.verbose >= 2 {
-                log::info!("StateEvent: {:?}", event);
-            }
-            app_state.handle_action(ui::AppAction::ReceivedStateEvent(event));
-        }
-
-        while let Ok(event) = event_rx.try_recv() {
-            // These are logs/signals from the TUI itself
-            app_state.handle_action(ui::AppAction::ReceivedEvent(event));
-        }
-
-        while let Ok(event) = view_event_rx.try_recv() {
-            app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
+        // 4. Draw (If needed and frame budget allows)
+        if needs_redraw && last_draw.elapsed() >= frame_rate {
+            terminal.draw(|f| ui::ui(f, &mut app_state))?;
+            last_draw = Instant::now();
         }
     }
 

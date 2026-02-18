@@ -146,6 +146,7 @@ impl AppState {
                         }
                         if input == "/clear" {
                             self.messages.clear();
+                            self.wrapped_chat_cache.clear();
                             self.input.clear();
                             return commands;
                         }

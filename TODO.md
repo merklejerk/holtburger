@@ -39,6 +39,7 @@
 - [x] Is the `Usability` bitflags hallucinated?
 - [x] Use meta `EquipMask` flags for more intelligent equipping.
 - [x] Combine the clothing slots into Top Clothing and Bottom Clothing pseudo-slots.
+- [x] TUI gets really slow when chat buffer gets full.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have synonymous slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -46,7 +47,6 @@
 - [ ] [U]se for Mana charges.
 - [ ] Search/filter on list tabs.
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
-- [ ] TUI gets really slow when chat buffer gets full.
 - [ ] TUI client needs major refactors.
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
@@ -73,6 +73,7 @@
 - [x] Equipment management.
 - [x] Make equipped items more obvious.
 - [x] Equip tab.
+- [x] TUI very slow in `-vv` mode despite few outputs.
 - [ ] DC detection.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -82,7 +83,6 @@
 - [ ] Trade tab.
 - [ ] Manage in-world containers.
 - [ ] Stacking/Splitting.
-- [ ] TUI very slow in `-vv` mode despite few outputs.
 
 ### Critical
 

@@ -2,12 +2,28 @@ use crate::world::entity::Entity;
 use crate::world::stats::Resistances;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::CharacterError;
+use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 pub use crate::world::StateEvent;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetSlot {
+    EquipMask(EquipMask),
+    MainHand,
+    OffHand,
+    TopClothes,
+    BottomClothes,
+}
+
+impl Default for TargetSlot {
+    fn default() -> Self {
+        Self::EquipMask(EquipMask::NONE)
+    }
+}
 
 #[derive(Debug, PartialEq, Clone, Copy, Eq)]
 pub enum ErrorSource {
@@ -147,11 +163,11 @@ pub enum ClientCommand {
     },
     GetAndWield {
         item: Guid,
-        equip_mask: u32,
+        slot: Option<TargetSlot>,
     },
     SplitToWield {
         item: Guid,
-        equip_mask: u32,
+        slot: Option<TargetSlot>,
         amount: u32,
     },
     Jump {

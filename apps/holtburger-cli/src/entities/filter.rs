@@ -16,6 +16,7 @@ pub fn filter_entities<'a>(
     entities: &'a HashMap<Guid, Entity>,
     player_guid: Option<Guid>,
     inventory: &HashSet<Guid>,
+    equipment: &HashMap<Guid, holtburger_common::properties::EquipMask>,
     player_pos: Option<&'a WorldPosition>,
     filter: EntityFilter,
 ) -> Vec<(&'a Entity, f32, usize)> {
@@ -33,7 +34,11 @@ pub fn filter_entities<'a>(
                 }
                 classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
             }
-            EntityFilter::Inventory => inventory.contains(&e.guid) && !e.name.is_empty(),
+            EntityFilter::Inventory => {
+                inventory.contains(&e.guid)
+                    && !e.name.is_empty()
+                    && !equipment.contains_key(&e.guid)
+            }
         })
         .collect();
 

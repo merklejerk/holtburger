@@ -1,8 +1,9 @@
-use crate::client::types::ClientCommand;
+use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
 use crate::world::StateEvent;
 use anyhow::Result;
-use holtburger_common::Quaternion;
+use holtburger_common::properties::{PseudoEquipMask, EquipMask};
+use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::transport::packet_flags;
@@ -231,37 +232,14 @@ impl Client {
                 )))
                 .await
             }
-            ClientCommand::GetAndWield { item, equip_mask } => {
-                let target_mask = EquipMask::from_bits_truncate(equip_mask);
+            ClientCommand::GetAndWield { item, slot } => {
+                let (target_mask, resolved_slot) = self.resolve_and_clear_slots(item, slot).await?;
+
                 log::info!(
-                    ">>> Getting and wielding item 0x{:08X} (mask {:?})",
+                    ">>> Getting and wielding item 0x{:08X} in slot {:?}",
                     item,
-                    target_mask
+                    resolved_slot,
                 );
-
-                // Auto-unequip overlapping items
-                let to_unequip: Vec<holtburger_common::Guid> = self
-                    .world
-                    .player
-                    .equipment
-                    .iter()
-                    .filter(|&(eq_guid, eq_mask)| {
-                        eq_mask.intersects(target_mask) && *eq_guid != item
-                    })
-                    .map(|(&eq_guid, _)| eq_guid)
-                    .collect();
-
-                for guid in to_unequip {
-                    log::info!(">>> Auto-unequipping overlapping item 0x{:08X}", guid);
-                    self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                        PutItemInContainerData {
-                            item_guid: guid,
-                            container_guid: self.world.player.guid,
-                            placement: 0,
-                        },
-                    )))
-                    .await?;
-                }
 
                 // Sequencing is handled automatically by the send_game_action helper.
                 self.send_game_action(GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
@@ -270,23 +248,21 @@ impl Client {
                 })))
                 .await
             }
-            ClientCommand::SplitToWield {
-                item,
-                equip_mask,
-                amount,
-            } => {
+            ClientCommand::SplitToWield { item, slot, amount } => {
+                let (target_mask, resolved_slot) = self.resolve_and_clear_slots(item, slot).await?;
+
                 log::info!(
-                    ">>> Splitting 0x{:08X} ({}x) to wield in (mask 0x{:08X})",
+                    ">>> Splitting 0x{:08X} ({}x) to wield in {:?}",
                     item,
                     amount,
-                    equip_mask
+                    resolved_slot,
                 );
 
                 self.send_game_action(GameAction::StackableSplitToWield(Box::new(
                     StackableSplitToWieldData {
                         stack_guid: item,
                         amount: amount as i32,
-                        equip_mask: EquipMask::from_bits_truncate(equip_mask),
+                        equip_mask: target_mask,
                     },
                 )))
                 .await
@@ -507,5 +483,113 @@ impl Client {
     pub(super) async fn send_login_complete(&mut self) -> Result<()> {
         self.send_game_action(GameAction::LoginComplete(Box::new(LoginCompleteData)))
             .await
+    }
+
+    async fn resolve_and_clear_slots(
+        &mut self,
+        item: Guid,
+        slot: Option<TargetSlot>,
+    ) -> Result<(EquipMask, TargetSlot)> {
+        let item_mask = self
+            .world
+            .entities
+            .get(item)
+            .and_then(|e| e.valid_locations)
+            .unwrap_or(EquipMask::NONE);
+
+        let resolved_slot = slot.unwrap_or(TargetSlot::EquipMask(item_mask));
+
+        let (target_mask, unequip_mask) = match resolved_slot {
+            TargetSlot::EquipMask(m) => (m, get_equip_unequip_mask(item_mask, Some(resolved_slot))),
+            TargetSlot::MainHand => {
+                let tm = if item_mask.intersects(EquipMask::MELEE_WEAPON) {
+                    EquipMask::MELEE_WEAPON
+                } else if item_mask.intersects(EquipMask::MISSILE_WEAPON) {
+                    EquipMask::MISSILE_WEAPON
+                } else if item_mask.intersects(EquipMask::CASTER) {
+                    EquipMask::CASTER
+                } else {
+                    item_mask
+                };
+                (tm, get_equip_unequip_mask(item_mask, Some(resolved_slot)))
+            }
+            TargetSlot::OffHand => (
+                EquipMask::SHIELD,
+                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
+            ),
+            TargetSlot::TopClothes => (
+                PseudoEquipMask::TOP_CLOTHES.into(),
+                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
+            ),
+            TargetSlot::BottomClothes => (
+                PseudoEquipMask::BOTTOM_CLOTHES.into(),
+                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
+            ),
+        };
+
+        // Auto-unequip overlapping items
+        let to_unequip: Vec<holtburger_common::Guid> = self
+            .world
+            .player
+            .equipment
+            .iter()
+            .filter(|&(eq_guid, eq_mask)| eq_mask.intersects(unequip_mask) && *eq_guid != item)
+            .map(|(&eq_guid, _)| eq_guid)
+            .collect();
+
+        for guid in to_unequip {
+            self.send_game_action(GameAction::PutItemInContainer(Box::new(
+                PutItemInContainerData {
+                    item_guid: guid,
+                    container_guid: self.world.player.guid,
+                    placement: 0,
+                },
+            )))
+            .await?;
+        }
+
+        Ok((target_mask, resolved_slot))
+    }
+}
+
+/// Pure/stateless function to determine the unequip mask for a given target slot and item.
+///
+/// Returns an `EquipMask` of all potential overlapping slots that must be cleared
+/// to make room for the new item at the specified `target`.
+fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> EquipMask {
+    log::info!("Resolving equip/unequip masks for item_mask={:?}, target={:?}", item_mask, target);
+    let target_mask = target.unwrap_or(TargetSlot::EquipMask(item_mask));
+    match target_mask {
+        TargetSlot::EquipMask(m) => {
+            let mut unequip = m;
+            // If we're equipping something that's a main hand exclusive (like a 2H weapon),
+            // we must also clear the offhand slot.
+            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
+                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
+            }
+            // Equipping in offhand must unequip anything in main hand that blocks it (2H).
+            if item_mask.intersects(PseudoEquipMask::OFF_HAND_SLOT.into()) {
+                unequip |= PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into();
+            }
+            unequip
+        }
+        TargetSlot::MainHand => {
+            // If the item is a main hand exclusive, we must also clear the offhand slot.
+            let mut unequip = PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
+            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
+                unequip |= PseudoEquipMask::OFF_HAND_SLOT.into();
+            }
+            unequip
+        }
+        TargetSlot::OffHand => {
+            let mut unequip = PseudoEquipMask::OFF_HAND_SLOT.into();
+            // If the item is a main hand exclusive, we must also clear the main hand slot.
+            if item_mask.intersects(PseudoEquipMask::MAIN_HAND_EXCLUSIVE.into()) {
+                unequip |= PseudoEquipMask::MAIN_HAND_IMPLEMENTS.into();
+            }
+            unequip
+        }
+        TargetSlot::TopClothes => PseudoEquipMask::TOP_CLOTHES.into(),
+        TargetSlot::BottomClothes => PseudoEquipMask::BOTTOM_CLOTHES.into(),
     }
 }

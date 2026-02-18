@@ -32,3 +32,6 @@ This file documents bugs discovered in the ACE Server during development of Holt
 
 ## Door Noclip
 - MITM override door entities as open/nocollide.
+
+## Equip outside inventory
+- ...

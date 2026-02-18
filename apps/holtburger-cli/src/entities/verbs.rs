@@ -387,7 +387,14 @@ pub fn get_verbs_for_target(
                             if let Some(mask) = override_mask.or(e.valid_locations)
                                 && !mask.is_empty()
                             {
-                                ent_verbs.push(EntityVerb::Equip(TargetSlot::EquipMask(mask)));
+                                let mut slot = TargetSlot::EquipMask(mask);
+                                if mask.intersects(EquipMask::TOP_CLOTHES) {
+                                    slot = TargetSlot::TopClothes;
+                                } else if mask.intersects(EquipMask::BOTTOM_CLOTHES) {
+                                    slot = TargetSlot::BottomClothes;
+                                }
+
+                                ent_verbs.push(EntityVerb::Equip(slot));
                             }
                         } else {
                             ent_verbs.push(EntityVerb::Unequip);

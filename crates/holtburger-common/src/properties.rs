@@ -1310,6 +1310,9 @@ bitflags! {
         const SIGIL_TWO = 0x20000000;
         const SIGIL_THREE = 0x40000000;
 
+        const TOP_CLOTHES = Self::CHEST_WEAR.bits() | Self::UPPER_ARM_WEAR.bits() | Self::LOWER_ARM_WEAR.bits();
+        const BOTTOM_CLOTHES = Self::UPPER_LEG_WEAR.bits() | Self::LOWER_LEG_WEAR.bits();
+        const CLOTHES = Self::TOP_CLOTHES.bits() | Self::BOTTOM_CLOTHES.bits() | Self::ABDOMEN_WEAR.bits();
         const COMBAT_IMPLEMENTS = Self::MELEE_WEAPON.bits() | Self::SHIELD.bits() | Self::MISSILE_WEAPON.bits() | Self::HELD.bits() | Self::TWO_HANDED.bits();
         const MAIN_HAND_EXCLUSIVE = Self::TWO_HANDED.bits() | Self::MISSILE_WEAPON.bits() | Self::HELD.bits();
         const MAIN_HAND_IMPLEMENTS = Self::COMBAT_IMPLEMENTS.bits() & !(Self::SHIELD.bits());

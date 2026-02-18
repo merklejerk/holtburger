@@ -242,14 +242,10 @@ pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
             "Off-Hand",
             Some(EquipMask::OFF_HAND_SLOT),
         ),
+        (EquipMask::TOP_CLOTHES, "Top Clothes", None),
+        (EquipMask::BOTTOM_CLOTHES, "Bottom Clothes", None),
         (EquipMask::HEAD_WEAR, "Head Wear", None),
-        (EquipMask::CHEST_WEAR, "Chest Wear", None),
-        (EquipMask::ABDOMEN_WEAR, "Abdomen Wear", None),
-        (EquipMask::UPPER_ARM_WEAR, "Upper Arm Wear", None),
-        (EquipMask::LOWER_ARM_WEAR, "Lower Arm Wear", None),
         (EquipMask::HAND_WEAR, "Hand Wear", None),
-        (EquipMask::UPPER_LEG_WEAR, "Upper Leg Wear", None),
-        (EquipMask::LOWER_LEG_WEAR, "Lower Leg Wear", None),
         (EquipMask::FOOT_WEAR, "Foot Wear", None),
         (EquipMask::CHEST_ARMOR, "Chest Armor", None),
         (EquipMask::ABDOMEN_ARMOR, "Abdomen Armor", None),
@@ -288,6 +284,11 @@ pub fn get_equip_tab_lines(state: &AppState) -> Vec<EquipTabLine<'_>> {
 
         for item in &equippable_items {
             let valid = item.valid_locations.unwrap_or(EquipMask::NONE);
+
+            // Filter out items that overlap with Top Clothes to avoid robes showing in both
+            if name == "Bottom Clothes" && valid.intersects(EquipMask::TOP_CLOTHES) {
+                continue;
+            }
 
             if valid.intersects(mask) {
                 let current_mask = state

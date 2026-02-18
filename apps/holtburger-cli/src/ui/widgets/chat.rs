@@ -98,7 +98,12 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("▲"))
-                .end_symbol(Some("▼")),
+                .track_symbol(Some(" "))
+                .thumb_symbol("█")
+                .end_symbol(Some("▼"))
+                .style(Style::default().fg(Color::Gray).bg(Color::Black))
+                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
+                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
             area.inner(&ratatui::layout::Margin {
                 vertical: 1,
                 horizontal: 0,
@@ -172,7 +177,12 @@ pub fn render_context_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(Some("▲"))
-                .end_symbol(Some("▼")),
+                .track_symbol(Some(" "))
+                .thumb_symbol("█")
+                .end_symbol(Some("▼"))
+                .style(Style::default().fg(Color::Gray).bg(Color::Black))
+                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
+                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
             area.inner(&ratatui::layout::Margin {
                 vertical: 1,
                 horizontal: 0,

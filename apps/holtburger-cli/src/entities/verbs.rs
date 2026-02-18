@@ -1,8 +1,8 @@
 use crate::entities::classification::{self, EntityClass};
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
-use holtburger_common::properties::ObjectDescriptionFlag;
-use holtburger_core::ClientCommand;
+use holtburger_common::properties::{PseudoEquipMask, EquipMask, ObjectDescriptionFlag};
+use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -62,7 +62,7 @@ macro_rules! define_verbs {
 define_verbs! {
     Assess => { "Assess", 'a' },
     Use => { "Use", 'u' },
-    Equip(u32) => { "Equip", 'e' },
+    Equip(TargetSlot) => { "Equip", 'e' },
     Unequip => { "Unequip", 'q' },
     Drop => { "Drop", 'd' },
     PickUp => { "Pick up", 'p' },
@@ -112,33 +112,33 @@ impl EntityVerb {
         active_interaction: Option<ActiveInteraction>,
     ) -> Option<CommandHandler> {
         match (self, target) {
-            (EntityVerb::Assess, CommandTarget::Entity(e)) => {
+            (EntityVerb::Assess, CommandTarget::Entity(e, _)) => {
                 Some(CommandHandler::Command(ClientCommand::Identify(e.guid)))
             }
-            (EntityVerb::Use, CommandTarget::Entity(e)) => {
+            (EntityVerb::Use, CommandTarget::Entity(e, _)) => {
                 if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
                     Some(CommandHandler::Heal(e.guid))
                 } else {
                     Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
                 }
             }
-            (EntityVerb::Equip(mask), CommandTarget::Entity(e)) => {
+            (EntityVerb::Equip(slot), CommandTarget::Entity(e, _)) => {
                 Some(CommandHandler::Command(ClientCommand::GetAndWield {
                     item: e.guid,
-                    equip_mask: *mask,
+                    slot: Some(*slot),
                 }))
             }
-            (EntityVerb::Unequip, CommandTarget::Entity(e)) => player_guid.map(|pguid| {
+            (EntityVerb::Unequip, CommandTarget::Entity(e, _)) => player_guid.map(|pguid| {
                 CommandHandler::Command(ClientCommand::MoveItem {
                     item: e.guid,
                     container: pguid,
                     placement: 0,
                 })
             }),
-            (EntityVerb::Drop, CommandTarget::Entity(e)) => {
+            (EntityVerb::Drop, CommandTarget::Entity(e, _)) => {
                 Some(CommandHandler::Command(ClientCommand::Drop(e.guid)))
             }
-            (EntityVerb::PickUp, CommandTarget::Entity(e)) => {
+            (EntityVerb::PickUp, CommandTarget::Entity(e, _)) => {
                 if let (Some(pguid), EntityClass::Container) =
                     (player_guid, classification::classify_entity(e))
                 {
@@ -152,13 +152,15 @@ impl EntityVerb {
                     Some(CommandHandler::Command(ClientCommand::Get(e.guid)))
                 }
             }
-            (EntityVerb::Approach, CommandTarget::Entity(e)) => {
+            (EntityVerb::Approach, CommandTarget::Entity(e, _)) => {
                 Some(CommandHandler::Command(ClientCommand::MoveTo {
                     target: e.guid,
                 }))
             }
-            (EntityVerb::Target, CommandTarget::Entity(e)) => Some(CommandHandler::Target(e.guid)),
-            (EntityVerb::MoveToSlot(slot_guid), CommandTarget::Entity(e)) => {
+            (EntityVerb::Target, CommandTarget::Entity(e, _)) => {
+                Some(CommandHandler::Target(e.guid))
+            }
+            (EntityVerb::MoveToSlot(slot_guid), CommandTarget::Entity(e, _)) => {
                 Some(CommandHandler::Command(ClientCommand::MoveItem {
                     item: e.guid,
                     container: *slot_guid,
@@ -200,7 +202,7 @@ impl EntityVerb {
             }
             (EntityVerb::LevelUp, CommandTarget::Stat(_, None, _)) => None,
             (EntityVerb::Debug, _) => Some(CommandHandler::ToggleDebug),
-            (EntityVerb::Move, CommandTarget::Entity(e)) => Some(CommandHandler::Move(e.guid)),
+            (EntityVerb::Move, CommandTarget::Entity(e, _)) => Some(CommandHandler::Move(e.guid)),
             (EntityVerb::Cast(_), CommandTarget::Spell(spell_id)) => {
                 use crate::ui::types::InteractionMode;
                 if let Some(interaction) = active_interaction
@@ -223,7 +225,7 @@ impl EntityVerb {
                 if let Some(interaction) = active_interaction {
                     match interaction.mode {
                         InteractionMode::Healing => match target {
-                            CommandTarget::Entity(e) => {
+                            CommandTarget::Entity(e, _) => {
                                 if e.guid == interaction.guid {
                                     player_guid.map(CommandHandler::ApplyHealing)
                                 } else {
@@ -233,7 +235,7 @@ impl EntityVerb {
                             _ => player_guid.map(CommandHandler::ApplyHealing),
                         },
                         InteractionMode::Moving => match target {
-                            CommandTarget::Entity(e) if e.guid != interaction.guid => {
+                            CommandTarget::Entity(e, _) if e.guid != interaction.guid => {
                                 let class = classification::classify_entity(e);
                                 match class {
                                     classification::EntityClass::Container
@@ -246,7 +248,7 @@ impl EntityVerb {
                             _ => player_guid.map(CommandHandler::ApplyMoving),
                         },
                         InteractionMode::Target => match target {
-                            CommandTarget::Entity(e) => Some(CommandHandler::Target(e.guid)),
+                            CommandTarget::Entity(e, _) => Some(CommandHandler::Target(e.guid)),
                             _ => None,
                         },
                     }
@@ -274,7 +276,7 @@ pub fn get_verbs_for_target(
     }
 
     if let Some(interaction) = active_interaction {
-        if let CommandTarget::Entity(e) = target {
+        if let CommandTarget::Entity(e, _) = target {
             if interaction.mode == InteractionMode::Target {
                 // Target mode is special: it doesn't limit verbs and doesn't show a Confirm verb.
                 // We fall through to the global list below, but effectively we want to see
@@ -341,7 +343,7 @@ pub fn get_verbs_for_target(
     }
 
     let mut verbs = match target {
-        CommandTarget::Entity(e) => {
+        CommandTarget::Entity(e, _) => {
             let class = classification::classify_entity(e);
             let flags = e.flags;
             let mut ent_verbs = vec![EntityVerb::Assess, EntityVerb::Target];
@@ -375,10 +377,24 @@ pub fn get_verbs_for_target(
                             };
 
                         if !is_equipped {
-                            if let Some(mask) = e.valid_locations
+                            let override_mask: Option<EquipMask> =
+                                if let CommandTarget::Entity(_, m) = target {
+                                    *m
+                                } else {
+                                    None
+                                };
+
+                            if let Some(mask) = override_mask.or(e.valid_locations)
                                 && !mask.is_empty()
                             {
-                                ent_verbs.push(EntityVerb::Equip(mask.bits()));
+                                let mut slot = TargetSlot::EquipMask(mask);
+                                if mask.intersects(PseudoEquipMask::TOP_CLOTHES.into()) {
+                                    slot = TargetSlot::TopClothes;
+                                } else if mask.intersects(PseudoEquipMask::BOTTOM_CLOTHES.into()) {
+                                    slot = TargetSlot::BottomClothes;
+                                }
+
+                                ent_verbs.push(EntityVerb::Equip(slot));
                             }
                         } else {
                             ent_verbs.push(EntityVerb::Unequip);
@@ -445,7 +461,7 @@ pub fn get_verbs_for_target(
 /// Determines if the [D]ebug command should be available.
 fn should_show_debug(target: &CommandTarget) -> bool {
     match target {
-        CommandTarget::Entity(_)
+        CommandTarget::Entity(_, _)
         | CommandTarget::Enchantment(_)
         | CommandTarget::Stat(_, _, _)
         | CommandTarget::Spell(_) => true,

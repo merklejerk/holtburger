@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders};
 
 pub mod action;
 pub mod model;
+pub mod traits;
 pub mod types;
 pub mod update;
 pub mod utils;
@@ -12,6 +13,7 @@ pub mod widgets;
 
 pub use self::action::*;
 pub use self::model::*;
+pub use self::traits::*;
 pub use self::types::*;
 pub use self::update::*;
 use self::widgets::chat::{render_chat_pane, render_context_pane};

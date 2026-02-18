@@ -1,4 +1,4 @@
-use crate::entities::classification;
+use super::classification;
 use crate::ui::types::CommandTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{

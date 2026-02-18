@@ -15,6 +15,8 @@ pub enum TargetSlot {
     EquipMask(EquipMask),
     MainHand,
     OffHand,
+    TopClothes,
+    BottomClothes,
 }
 
 impl Default for TargetSlot {

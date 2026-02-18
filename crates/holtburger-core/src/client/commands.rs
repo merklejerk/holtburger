@@ -517,6 +517,14 @@ impl Client {
                 EquipMask::SHIELD,
                 get_equip_unequip_mask(item_mask, Some(resolved_slot)),
             ),
+            TargetSlot::TopClothes => (
+                EquipMask::TOP_CLOTHES,
+                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
+            ),
+            TargetSlot::BottomClothes => (
+                EquipMask::BOTTOM_CLOTHES,
+                get_equip_unequip_mask(item_mask, Some(resolved_slot)),
+            ),
         };
 
         // Auto-unequip overlapping items
@@ -585,6 +593,8 @@ fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> E
             unequip
         }
         Some(TargetSlot::OffHand) => OFF_HAND_VIRTUAL | TWO_HANDED_REQUIRED,
+        Some(TargetSlot::TopClothes) => EquipMask::TOP_CLOTHES,
+        Some(TargetSlot::BottomClothes) => EquipMask::BOTTOM_CLOTHES,
         None => item_mask,
     }
 }

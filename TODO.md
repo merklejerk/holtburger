@@ -46,6 +46,8 @@
 - [x] Is the `Usability` bitflags hallucinated?
 - [ ] Use meta `EquipMask` flags for more intelligent equipping.
 - [ ] Auto-follow.
+- [ ] Color portal entries purple.
+- [ ] Combine the clothing slots into Top Clothing and Bottom Clothing pseudo-slots.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -64,6 +66,7 @@
 - [x] Vitae debuff requires restart to show up? Or if you have one then you die, it seems to get hidden?
 - [x] Equipment management.
 - [x] Make equipped items more obvious.
+- [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.

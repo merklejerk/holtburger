@@ -2,7 +2,7 @@ use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
 use crate::world::StateEvent;
 use anyhow::Result;
-use holtburger_common::properties::{PseudoEquipMask, EquipMask};
+use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
@@ -557,7 +557,11 @@ impl Client {
 /// Returns an `EquipMask` of all potential overlapping slots that must be cleared
 /// to make room for the new item at the specified `target`.
 fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> EquipMask {
-    log::info!("Resolving equip/unequip masks for item_mask={:?}, target={:?}", item_mask, target);
+    log::info!(
+        "Resolving equip/unequip masks for item_mask={:?}, target={:?}",
+        item_mask,
+        target
+    );
     let target_mask = target.unwrap_or(TargetSlot::EquipMask(item_mask));
     match target_mask {
         TargetSlot::EquipMask(m) => {

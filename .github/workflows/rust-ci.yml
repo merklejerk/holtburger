@@ -1,0 +1,59 @@
+name: Rust CI (Fmt, Clippy, Tests)
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Run Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch HBA files
+        shell: bash
+        run: |
+          if [ -n "${{ vars.HBA_LATEST_URL }}" ]; then
+            mkdir -p dats
+            curl -L "${{ vars.HBA_LATEST_URL }}" -o hba.zip
+            unzip hba.zip -d dats
+            rm hba.zip
+          else
+            echo "HBA_LATEST_URL not set, skipping HBA fetch"
+          fi
+        continue-on-error: true
+      - name: Run Tests
+        run: cargo test --workspace --all-targets --all-features

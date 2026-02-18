@@ -216,7 +216,7 @@ async fn main() -> Result<()> {
         chat_last_total_lines: 0,
         context_total_lines: 0,
         context_last_total_lines: 0,
-        dashboard_tab: ui::DashboardTab::Entities,
+        dashboard_tab: ui::DashboardTab::Nearby,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
         context_view: ui::ContextView::Default,

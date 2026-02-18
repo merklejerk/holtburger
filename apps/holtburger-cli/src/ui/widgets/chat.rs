@@ -13,34 +13,57 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     let width = area.width.saturating_sub(2) as usize;
     let height = area.height.saturating_sub(2) as usize;
 
+    let m_len = state.messages.len();
     let window_size = CHAT_HISTORY_WINDOW_SIZE;
 
-    let m_len = state.messages.len();
-    let window_start = m_len.saturating_sub(window_size);
-    // For now, let's just optimize by only wrapping the window.
-    // Even at 10k messages, if we don't re-wrap, it should be fast.
+    // Guard: Ensure the cache is not longer than the current number of messages (stale cache fix)
+    if state.wrapped_chat_cache.len() > m_len {
+        state.wrapped_chat_cache.truncate(m_len);
+    }
 
-    let mut all_lines = Vec::new();
-    for m in &state.messages[window_start..] {
-        let color = match m.kind {
-            ChatMessageKind::Chat => Color::White,
-            ChatMessageKind::Tell => Color::Magenta,
-            ChatMessageKind::Emote => Color::Green,
-            ChatMessageKind::Info => Color::Cyan,
-            ChatMessageKind::System => Color::DarkGray,
-            ChatMessageKind::Error => Color::Red,
-            ChatMessageKind::Warning => Color::Yellow,
-            ChatMessageKind::Debug => Color::Indexed(242), // Greyish
-        };
+    // Check if we need to refresh the cache due to width change
+    if width != state.last_chat_width {
+        state.wrapped_chat_cache.clear();
+        state.last_chat_width = width;
+    }
 
-        let wrapped = wrap_text(&m.text, width);
-        for line in wrapped {
-            all_lines.push((line, color));
+    // Add new messages to the cache
+    if state.wrapped_chat_cache.len() < m_len {
+        let start_idx = state.wrapped_chat_cache.len();
+        for m in &state.messages[start_idx..] {
+            let color = match m.kind {
+                ChatMessageKind::Chat => Color::White,
+                ChatMessageKind::Tell => Color::Magenta,
+                ChatMessageKind::Emote => Color::Green,
+                ChatMessageKind::Info => Color::Cyan,
+                ChatMessageKind::System => Color::DarkGray,
+                ChatMessageKind::Error => Color::Red,
+                ChatMessageKind::Warning => Color::Yellow,
+                ChatMessageKind::Debug => Color::Indexed(242), // Greyish
+            };
+
+            let wrapped = wrap_text(&m.text, width);
+            let mut msg_lines = Vec::new();
+            for line in wrapped {
+                msg_lines.push((line, color));
+            }
+            state.wrapped_chat_cache.push(msg_lines);
         }
     }
 
-    let total_lines = all_lines.len();
+    // Now flatten the window into a temporary references vector
+    let window_start = m_len.saturating_sub(window_size);
+
+    let total_lines: usize = state.wrapped_chat_cache[window_start..]
+        .iter()
+        .map(|v| v.len())
+        .sum();
     state.maintain_scroll(false, total_lines, height);
+
+    let all_lines: Vec<&(String, Color)> = state.wrapped_chat_cache[window_start..]
+        .iter()
+        .flat_map(|v| v.iter())
+        .collect();
 
     let effective_scroll = state.scroll_offset;
     let end = total_lines.saturating_sub(effective_scroll);
@@ -48,9 +71,10 @@ pub fn render_chat_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let mut messages: Vec<ListItem> = all_lines[start..end]
         .iter()
-        .map(|(text, color)| {
+        .map(|item| {
+            let (text, color) = *item;
             ListItem::new(Line::from(vec![Span::styled(
-                text,
+                text.as_str(),
                 Style::default().fg(*color),
             )]))
         })

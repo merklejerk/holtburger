@@ -14,7 +14,7 @@ pub const LAYOUT_NARROW_DASHBOARD_PCT: u16 = 50;
 pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
 
 // Chat constants
-pub const CHAT_HISTORY_WINDOW_SIZE: usize = 10000;
+pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 
 // Interaction constants
 pub const SCROLL_STEP: usize = 3;
@@ -114,4 +114,40 @@ pub enum ContextView {
     Custom,
     Assess(Guid),
     Spell(u32),
+}
+
+#[derive(Debug, Default)]
+pub struct UpdateResult {
+    pub commands: Vec<ClientCommand>,
+    pub needs_redraw: bool,
+}
+
+impl UpdateResult {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_redraw(mut self, needs_redraw: bool) -> Self {
+        self.needs_redraw = needs_redraw;
+        self
+    }
+
+    pub fn redraw() -> Self {
+        Self {
+            commands: Vec::new(),
+            needs_redraw: true,
+        }
+    }
+
+    pub fn commands(commands: Vec<ClientCommand>) -> Self {
+        Self {
+            commands,
+            needs_redraw: false,
+        }
+    }
+
+    pub fn merge(&mut self, other: UpdateResult) {
+        self.commands.extend(other.commands);
+        self.needs_redraw |= other.needs_redraw;
+    }
 }

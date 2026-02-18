@@ -2,7 +2,7 @@ use crate::entities::classification::{self, EntityClass};
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, ObjectDescriptionFlag};
-use holtburger_core::ClientCommand;
+use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -62,7 +62,7 @@ macro_rules! define_verbs {
 define_verbs! {
     Assess => { "Assess", 'a' },
     Use => { "Use", 'u' },
-    Equip(u32) => { "Equip", 'e' },
+    Equip(TargetSlot) => { "Equip", 'e' },
     Unequip => { "Unequip", 'q' },
     Drop => { "Drop", 'd' },
     PickUp => { "Pick up", 'p' },
@@ -122,10 +122,10 @@ impl EntityVerb {
                     Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
                 }
             }
-            (EntityVerb::Equip(mask), CommandTarget::Entity(e, _)) => {
+            (EntityVerb::Equip(slot), CommandTarget::Entity(e, _)) => {
                 Some(CommandHandler::Command(ClientCommand::GetAndWield {
                     item: e.guid,
-                    equip_mask: *mask,
+                    slot: Some(*slot),
                 }))
             }
             (EntityVerb::Unequip, CommandTarget::Entity(e, _)) => player_guid.map(|pguid| {
@@ -387,7 +387,7 @@ pub fn get_verbs_for_target(
                             if let Some(mask) = override_mask.or(e.valid_locations)
                                 && !mask.is_empty()
                             {
-                                ent_verbs.push(EntityVerb::Equip(mask.bits()));
+                                ent_verbs.push(EntityVerb::Equip(TargetSlot::EquipMask(mask)));
                             }
                         } else {
                             ent_verbs.push(EntityVerb::Unequip);

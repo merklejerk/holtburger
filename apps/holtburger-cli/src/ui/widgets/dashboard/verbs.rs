@@ -1,10 +1,9 @@
-use crate::entities::classification::{self, EntityClass};
+use super::classification::{self, EntityClass};
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
-use holtburger_common::properties::{PseudoEquipMask, EquipMask, ObjectDescriptionFlag};
+use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 macro_rules! define_verbs {
     // Internal helpers
@@ -262,204 +261,109 @@ impl EntityVerb {
     }
 }
 
-pub fn get_verbs_for_target(
-    target: &CommandTarget,
-    player_guid: Option<Guid>,
-    inventory: &HashSet<Guid>,
-    active_interaction: Option<ActiveInteraction>,
-) -> Vec<EntityVerb> {
-    if let CommandTarget::Spell(_) = target {
-        let is_targeted = active_interaction
-            .map(|i| i.mode == InteractionMode::Target || i.mode == InteractionMode::Healing)
-            .unwrap_or(false);
-        return vec![EntityVerb::Cast(is_targeted), EntityVerb::Debug];
-    }
+/// Helper to get the base verbs common to almost all entities (Assess, Target, and class-based Use).
+pub fn get_base_entity_verbs(e: &holtburger_core::world::entity::Entity) -> Vec<EntityVerb> {
+    let mut verbs = vec![EntityVerb::Assess, EntityVerb::Target];
+    let class = classification::classify_entity(e);
 
-    if let Some(interaction) = active_interaction {
-        if let CommandTarget::Entity(e, _) = target {
-            if interaction.mode == InteractionMode::Target {
-                // Target mode is special: it doesn't limit verbs and doesn't show a Confirm verb.
-                // We fall through to the global list below, but effectively we want to see
-                // the normal verb list even while targeting.
-            } else {
-                let mut verbs = Vec::new();
-
-                match interaction.mode {
-                    InteractionMode::Moving => {
-                        let class = classification::classify_entity(e);
-                        let is_creature = matches!(
-                            class,
-                            EntityClass::Player | EntityClass::Monster | EntityClass::Npc
-                        );
-                        let is_self = Some(e.guid) == player_guid;
-                        if !is_self {
-                            let is_container =
-                                matches!(class, EntityClass::Container | EntityClass::Chest);
-                            let is_subject = e.guid == interaction.guid;
-                            let is_in_main_pack = e.container_id == player_guid;
-
-                            if is_subject && !is_in_main_pack {
-                                verbs.push(EntityVerb::Confirm("Move to main pack".to_string()));
-                            } else if is_container {
-                                verbs.push(EntityVerb::Confirm(format!("Move to {}", e.name)));
-                            } else if is_creature {
-                                verbs.push(EntityVerb::Confirm(format!("Give to {}", e.name)));
-                            }
-                        }
-                    }
-                    InteractionMode::Healing => {
-                        let class = classification::classify_entity(e);
-                        let is_creature = matches!(
-                            class,
-                            EntityClass::Player | EntityClass::Monster | EntityClass::Npc
-                        );
-
-                        if is_creature || e.guid == interaction.guid {
-                            let label = if Some(e.guid) == player_guid || e.guid == interaction.guid
-                            {
-                                "Heal yourself".to_string()
-                            } else {
-                                format!("Heal {}", e.name)
-                            };
-                            verbs.push(EntityVerb::Confirm(label));
-                        }
-                    }
-                    InteractionMode::Target => unsafe {
-                        std::hint::unreachable_unchecked();
-                    },
-                }
-
-                verbs.push(EntityVerb::Cancel);
-
-                return verbs;
-            }
+    match class {
+        EntityClass::Npc
+        | EntityClass::Portal
+        | EntityClass::Door
+        | EntityClass::LifeStone
+        | EntityClass::Chest => {
+            verbs.push(EntityVerb::Use);
         }
-
-        if let InteractionMode::Target = interaction.mode {
-            // No automatic [Cancel] for target mode here, it'll just show the normal verbs below
-        } else {
-            return vec![EntityVerb::Cancel];
+        EntityClass::Weapon | EntityClass::Apparel | EntityClass::Wand | EntityClass::Tool => {
+            // These usually have a Use action (e.g. read, eat, or just context use)
+            verbs.push(EntityVerb::Use);
         }
-    }
-
-    let mut verbs = match target {
-        CommandTarget::Entity(e, _) => {
-            let class = classification::classify_entity(e);
-            let flags = e.flags;
-            let mut ent_verbs = vec![EntityVerb::Assess, EntityVerb::Target];
-
-            let is_inventory = inventory.contains(&e.guid);
-
-            // Global approach for non-parented/world objects
-            if !is_inventory && e.container_id.is_none() && e.wielder_id.is_none() {
-                ent_verbs.push(EntityVerb::Approach);
-            }
-
-            match class {
-                EntityClass::Npc
-                | EntityClass::Portal
-                | EntityClass::Door
-                | EntityClass::LifeStone
-                | EntityClass::Chest => {
-                    ent_verbs.push(EntityVerb::Use);
-                }
-                EntityClass::Weapon
-                | EntityClass::Apparel
-                | EntityClass::Wand
-                | EntityClass::Item
-                | EntityClass::Tool => {
-                    if is_inventory {
-                        let is_equipped =
-                            if let (Some(pguid), Some(wielder)) = (player_guid, e.wielder_id) {
-                                pguid == wielder
-                            } else {
-                                false
-                            };
-
-                        if !is_equipped {
-                            let override_mask: Option<EquipMask> =
-                                if let CommandTarget::Entity(_, m) = target {
-                                    *m
-                                } else {
-                                    None
-                                };
-
-                            if let Some(mask) = override_mask.or(e.valid_locations)
-                                && !mask.is_empty()
-                            {
-                                let mut slot = TargetSlot::EquipMask(mask);
-                                if mask.intersects(PseudoEquipMask::TOP_CLOTHES.into()) {
-                                    slot = TargetSlot::TopClothes;
-                                } else if mask.intersects(PseudoEquipMask::BOTTOM_CLOTHES.into()) {
-                                    slot = TargetSlot::BottomClothes;
-                                }
-
-                                ent_verbs.push(EntityVerb::Equip(slot));
-                            }
-                        } else {
-                            ent_verbs.push(EntityVerb::Unequip);
-                        }
-
-                        ent_verbs.push(EntityVerb::Use);
-                        ent_verbs.push(EntityVerb::Drop);
-
-                        if !flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
-                            ent_verbs.push(EntityVerb::Move);
-                        }
-                    } else if !flags.intersects(ObjectDescriptionFlag::STUCK) {
-                        ent_verbs.push(EntityVerb::PickUp);
-                    }
-                }
-                EntityClass::Container => {
-                    if is_inventory {
-                        ent_verbs.push(EntityVerb::Use);
-                        ent_verbs.push(EntityVerb::Drop);
-                    } else if !flags.intersects(ObjectDescriptionFlag::STUCK) {
-                        ent_verbs.push(EntityVerb::PickUp);
-                        if let Some(pguid) = player_guid {
-                            ent_verbs.push(EntityVerb::MoveToSlot(pguid));
-                        }
-                        ent_verbs.push(EntityVerb::Use);
-                    }
-                }
-                EntityClass::Monster => {
-                    // Handled by global logic above
-                }
-                _ => {}
-            }
-            // Remove duplicates that might have been added by specific classes
-            ent_verbs.dedup();
-            ent_verbs
+        EntityClass::Container => {
+            verbs.push(EntityVerb::Use);
         }
-        CommandTarget::Enchantment(_) => Vec::new(),
-        CommandTarget::Stat(_, xp_cost, sp_cost) => {
-            let mut v = Vec::new();
-            if xp_cost.is_some() {
-                v.push(EntityVerb::LevelUp);
-            }
-            if sp_cost.is_some() {
-                v.push(EntityVerb::Train);
-            }
-            v
-        }
-        CommandTarget::Spell(_) => {
-            let is_targeted = active_interaction
-                .map(|i| i.mode == InteractionMode::Target || i.mode == InteractionMode::Healing)
-                .unwrap_or(false);
-            vec![EntityVerb::Cast(is_targeted)]
-        }
-        CommandTarget::None => Vec::new(),
-    };
-
-    if should_show_debug(target) {
-        verbs.push(EntityVerb::Debug);
+        _ => {}
     }
 
     verbs
 }
 
+/// Helper to get verbs for a specific interaction mode (Moving, Healing, or Targeting).
+pub fn get_interaction_verbs(
+    target: &CommandTarget,
+    player_guid: Option<Guid>,
+    active_interaction: Option<ActiveInteraction>,
+) -> Option<Vec<EntityVerb>> {
+    let interaction = active_interaction?;
+
+    match target {
+        CommandTarget::Entity(e, _) => {
+            if interaction.mode == InteractionMode::Target {
+                // Target mode allows normal verbs but let's the caller decide if it wants to show a Cancel.
+                return None;
+            }
+
+            let mut verbs = Vec::new();
+            match interaction.mode {
+                InteractionMode::Moving => {
+                    let class = classification::classify_entity(e);
+                    let is_creature = matches!(
+                        class,
+                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                    );
+                    let is_self = Some(e.guid) == player_guid;
+                    if !is_self {
+                        let is_container =
+                            matches!(class, EntityClass::Container | EntityClass::Chest);
+                        let is_subject = e.guid == interaction.guid;
+                        let is_in_main_pack = e.container_id == player_guid;
+
+                        if is_subject && !is_in_main_pack {
+                            verbs.push(EntityVerb::Confirm("Move to main pack".to_string()));
+                        } else if is_container {
+                            verbs.push(EntityVerb::Confirm(format!("Move to {}", e.name)));
+                        } else if is_creature {
+                            verbs.push(EntityVerb::Confirm(format!("Give to {}", e.name)));
+                        }
+                    }
+                }
+                InteractionMode::Healing => {
+                    let class = classification::classify_entity(e);
+                    let is_creature = matches!(
+                        class,
+                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                    );
+
+                    if is_creature || e.guid == interaction.guid {
+                        let label = if Some(e.guid) == player_guid || e.guid == interaction.guid {
+                            "Heal yourself".to_string()
+                        } else {
+                            format!("Heal {}", e.name)
+                        };
+                        verbs.push(EntityVerb::Confirm(label));
+                    }
+                }
+                InteractionMode::Target => unreachable!(),
+            }
+            verbs.push(EntityVerb::Cancel);
+            Some(verbs)
+        }
+        CommandTarget::Spell(_) => {
+            let is_targeted = interaction.mode == InteractionMode::Target
+                || interaction.mode == InteractionMode::Healing;
+            Some(vec![EntityVerb::Cast(is_targeted), EntityVerb::Debug])
+        }
+        _ => {
+            if interaction.mode == InteractionMode::Target {
+                None
+            } else {
+                Some(vec![EntityVerb::Cancel])
+            }
+        }
+    }
+}
+
 /// Determines if the [D]ebug command should be available.
-fn should_show_debug(target: &CommandTarget) -> bool {
+pub fn should_show_debug(target: &CommandTarget) -> bool {
     match target {
         CommandTarget::Entity(_, _)
         | CommandTarget::Enchantment(_)

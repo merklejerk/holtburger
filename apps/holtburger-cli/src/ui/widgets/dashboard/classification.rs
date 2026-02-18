@@ -62,6 +62,22 @@ impl EntityClass {
     }
 }
 
+pub fn radar_color_to_tui_color(
+    color: holtburger_common::properties::RadarColor,
+) -> Option<ratatui::style::Color> {
+    use holtburger_common::properties::RadarColor;
+    use ratatui::style::Color;
+    match color {
+        RadarColor::Blue => Some(Color::Blue),
+        RadarColor::Gold => Some(Color::Yellow),
+        RadarColor::Purple => Some(Color::Magenta),
+        RadarColor::Red => Some(Color::Red),
+        RadarColor::Green => Some(Color::Green),
+        RadarColor::Yellow => Some(Color::Yellow),
+        _ => None,
+    }
+}
+
 pub fn classify_entity(entity: &Entity) -> EntityClass {
     if entity.flags.intersects(ObjectDescriptionFlag::PLAYER) {
         return EntityClass::Player;

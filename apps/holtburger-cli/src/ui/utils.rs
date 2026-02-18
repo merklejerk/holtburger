@@ -1,4 +1,3 @@
-use super::types::{CommandTarget, DashboardTab};
 use crate::ui::AppState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -92,60 +91,10 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
-    let target = match state.dashboard_tab {
-        DashboardTab::Entities => {
-            let entities = state.get_filtered_nearby_tab();
-            entities
-                .get(state.selected_dashboard_index)
-                .map(|(e, _, _)| CommandTarget::Entity(e, None))
-                .unwrap_or(CommandTarget::None)
-        }
-        DashboardTab::Inventory => {
-            let entities = state.get_filtered_inventory_tab();
-            entities
-                .get(state.selected_dashboard_index)
-                .map(|(e, _, _)| CommandTarget::Entity(e, None))
-                .unwrap_or(CommandTarget::None)
-        }
-        DashboardTab::Equip => {
-            let lines = crate::ui::widgets::dashboard::get_equip_tab_lines(state);
-            lines
-                .get(state.selected_dashboard_index)
-                .and_then(|line| match line {
-                    crate::ui::widgets::dashboard::EquipTabLine::Item(e, _, _, mask) => {
-                        Some(CommandTarget::Entity(e, *mask))
-                    }
-                    _ => None,
-                })
-                .unwrap_or(CommandTarget::None)
-        }
-        DashboardTab::Character => crate::ui::widgets::stats::get_command_target_at_index(
-            state,
-            DashboardTab::Character,
-            state.selected_dashboard_index,
-        )
-        .unwrap_or(CommandTarget::None),
-        DashboardTab::Spells => {
-            let mut spells = state.player_spells.clone();
-            spells.sort_by_key(|&sid| {
-                state
-                    .spell_names
-                    .get(&sid)
-                    .cloned()
-                    .unwrap_or_else(|| "".to_string())
-            });
-            spells
-                .get(state.selected_dashboard_index)
-                .map(|&sid| CommandTarget::Spell(sid))
-                .unwrap_or(CommandTarget::None)
-        }
-    };
-
-    let verbs = crate::entities::verbs::get_verbs_for_target(
-        &target,
-        state.player_guid,
-        &state.inventory,
-        state.active_interaction,
+    let verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(
+        state,
+        state.dashboard_tab,
+        state.selected_dashboard_index,
     );
     if verbs.is_empty() {
         return None;

@@ -62,7 +62,9 @@ impl EntityClass {
     }
 }
 
-pub fn radar_color_to_tui_color(color: holtburger_common::properties::RadarColor) -> Option<ratatui::style::Color> {
+pub fn radar_color_to_tui_color(
+    color: holtburger_common::properties::RadarColor,
+) -> Option<ratatui::style::Color> {
     use holtburger_common::properties::RadarColor;
     use ratatui::style::Color;
     match color {

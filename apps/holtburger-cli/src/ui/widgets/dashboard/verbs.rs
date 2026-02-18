@@ -1,4 +1,4 @@
-use crate::entities::classification::{self, EntityClass};
+use super::classification::{self, EntityClass};
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;

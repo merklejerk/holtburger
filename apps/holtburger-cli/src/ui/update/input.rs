@@ -4,8 +4,6 @@ use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
-use crate::entities::debug;
-use crate::entities::verbs::{self};
 use crate::ui;
 use crate::ui::model::AppState;
 use crate::ui::types::{
@@ -13,6 +11,7 @@ use crate::ui::types::{
     FocusedPane, InteractionMode, UIState,
 };
 use crate::ui::utils::get_adjacent_pane;
+use crate::ui::widgets::dashboard::debug;
 
 impl AppState {
     pub(super) fn handle_key_press(
@@ -58,70 +57,26 @@ impl AppState {
                     if self.active_interaction.is_some() && self.focused_pane != FocusedPane::Input
                     {
                         // Find the Enter verb for the currently focused target
-                        let target = match self.focused_pane {
-                            FocusedPane::Dashboard => match self.dashboard_tab {
-                                DashboardTab::Entities => {
-                                    let entities = self.get_filtered_nearby_tab();
-                                    entities
-                                        .get(self.selected_dashboard_index)
-                                        .map(|(e, _, _)| CommandTarget::Entity(e, None))
-                                        .unwrap_or(CommandTarget::None)
-                                }
-                                DashboardTab::Inventory => {
-                                    let entities = self.get_filtered_inventory_tab();
-                                    entities
-                                        .get(self.selected_dashboard_index)
-                                        .map(|(e, _, _)| CommandTarget::Entity(e, None))
-                                        .unwrap_or(CommandTarget::None)
-                                }
-                                DashboardTab::Equip => {
-                                    let lines =
-                                        crate::ui::widgets::dashboard::get_equip_tab_lines(self);
-                                    lines
-                                        .get(self.selected_dashboard_index)
-                                        .and_then(|line| match line {
-                                            crate::ui::widgets::dashboard::EquipTabLine::Item(
-                                                e,
-                                                _,
-                                                _,
-                                                mask,
-                                            ) => Some(CommandTarget::Entity(e, *mask)),
-                                            _ => None,
-                                        })
-                                        .unwrap_or(CommandTarget::None)
-                                }
-                                DashboardTab::Character => {
-                                    ui::widgets::stats::get_command_target_at_index(
-                                        self,
-                                        DashboardTab::Character,
-                                        self.selected_dashboard_index,
-                                    )
-                                    .unwrap_or(CommandTarget::None)
-                                }
-                                DashboardTab::Spells => {
-                                    let mut spells = self.player_spells.clone();
-                                    spells.sort_by_key(|&sid| {
-                                        self.spell_names
-                                            .get(&sid)
-                                            .cloned()
-                                            .unwrap_or_else(|| "".to_string())
-                                    });
-                                    spells
-                                        .get(self.selected_dashboard_index)
-                                        .map(|&sid| CommandTarget::Spell(sid))
-                                        .unwrap_or(CommandTarget::None)
-                                }
-                            },
-                            _ => CommandTarget::None,
+                        let target = if self.focused_pane == FocusedPane::Dashboard {
+                            crate::ui::widgets::dashboard::get_target_at_index(
+                                self,
+                                self.dashboard_tab,
+                                self.selected_dashboard_index,
+                            )
+                        } else {
+                            CommandTarget::None
                         };
 
                         let player_guid = self.player_guid;
-                        let entity_verbs = verbs::get_verbs_for_target(
-                            &target,
-                            player_guid,
-                            &self.inventory,
-                            self.active_interaction,
-                        );
+                        let entity_verbs = if self.focused_pane == FocusedPane::Dashboard {
+                            crate::ui::widgets::dashboard::get_verbs_for_tab(
+                                self,
+                                self.dashboard_tab,
+                                self.selected_dashboard_index,
+                            )
+                        } else {
+                            Vec::new()
+                        };
 
                         let handler = entity_verbs
                             .iter()
@@ -496,7 +451,7 @@ impl AppState {
                             if self.focused_pane == FocusedPane::Dashboard {
                                 match c {
                                     '1' => {
-                                        self.dashboard_tab = DashboardTab::Entities;
+                                        self.dashboard_tab = DashboardTab::Nearby;
                                         self.selected_dashboard_index = 0;
                                         return commands;
                                     }
@@ -533,66 +488,20 @@ impl AppState {
                                 _ => {
                                     // Action processing
                                     let (handler, debug_lines, target_guid, is_spell_id) = {
-                                        let target = match self.dashboard_tab {
-                                            DashboardTab::Entities => {
-                                                let entities = self.get_filtered_nearby_tab();
-                                                entities
-                                                    .get(self.selected_dashboard_index)
-                                                    .map(|(e, _, _)| CommandTarget::Entity(e, None))
-                                                    .unwrap_or(CommandTarget::None)
-                                            }
-                                            DashboardTab::Inventory => {
-                                                let entities = self.get_filtered_inventory_tab();
-                                                entities
-                                                    .get(self.selected_dashboard_index)
-                                                    .map(|(e, _, _)| CommandTarget::Entity(e, None))
-                                                    .unwrap_or(CommandTarget::None)
-                                            }
-                                            DashboardTab::Equip => {
-                                                let lines = crate::ui::widgets::dashboard::get_equip_tab_lines(self);
-                                                lines
-                                                    .get(self.selected_dashboard_index)
-                                                    .and_then(|line| match line {
-                                                        crate::ui::widgets::dashboard::EquipTabLine::Item(
-                                                            e,
-                                                            _,
-                                                            _,
-                                                            mask,
-                                                        ) => Some(CommandTarget::Entity(e, *mask)),
-                                                        _ => None,
-                                                    })
-                                                    .unwrap_or(CommandTarget::None)
-                                            }
-                                            DashboardTab::Character => {
-                                                ui::widgets::stats::get_command_target_at_index(
-                                                    self,
-                                                    DashboardTab::Character,
-                                                    self.selected_dashboard_index,
-                                                )
-                                                .unwrap_or(CommandTarget::None)
-                                            }
-                                            DashboardTab::Spells => {
-                                                let mut spells = self.player_spells.clone();
-                                                spells.sort_by_key(|&sid| {
-                                                    self.spell_names
-                                                        .get(&sid)
-                                                        .cloned()
-                                                        .unwrap_or_else(|| "".to_string())
-                                                });
-                                                spells
-                                                    .get(self.selected_dashboard_index)
-                                                    .map(|&sid| CommandTarget::Spell(sid))
-                                                    .unwrap_or(CommandTarget::None)
-                                            }
-                                        };
+                                        let target =
+                                            crate::ui::widgets::dashboard::get_target_at_index(
+                                                self,
+                                                self.dashboard_tab,
+                                                self.selected_dashboard_index,
+                                            );
 
                                         let player_guid = self.player_guid;
-                                        let entity_verbs = verbs::get_verbs_for_target(
-                                            &target,
-                                            player_guid,
-                                            &self.inventory,
-                                            self.active_interaction,
-                                        );
+                                        let entity_verbs =
+                                            crate::ui::widgets::dashboard::get_verbs_for_tab(
+                                                self,
+                                                self.dashboard_tab,
+                                                self.selected_dashboard_index,
+                                            );
                                         let handler = entity_verbs
                                             .iter()
                                             .find(|verb| {
@@ -741,7 +650,7 @@ impl AppState {
                                                     let target_entity =
                                                         self.entities.get(&target_guid);
                                                     let class = target_entity.map(|e| {
-                                                        crate::entities::classification::classify_entity(e)
+                                                        crate::ui::widgets::dashboard::classification::classify_entity(e)
                                                     });
 
                                                     let is_self =
@@ -750,9 +659,9 @@ impl AppState {
                                                     if !is_self
                                                         && matches!(
                                                             class,
-                                                            Some(crate::entities::classification::EntityClass::Container)
+                                                            Some(crate::ui::widgets::dashboard::classification::EntityClass::Container)
                                                                 | Some(
-                                                                    crate::entities::classification::EntityClass::Chest,
+                                                                    crate::ui::widgets::dashboard::classification::EntityClass::Chest,
                                                                 )
                                                         )
                                                     {

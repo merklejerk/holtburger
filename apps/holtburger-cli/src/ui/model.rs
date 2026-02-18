@@ -20,7 +20,8 @@ use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
     UIState,
 };
-use crate::entities::filter::{EntityFilter, filter_entities};
+use crate::ui::traits::TabController;
+use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
@@ -169,7 +170,7 @@ impl AppState {
                     let entities_ref = &self.entities;
 
                     let player_info = if Some(guid) == player_guid {
-                        Some(crate::entities::debug::PlayerDebugInfo {
+                        Some(crate::ui::widgets::dashboard::debug::PlayerDebugInfo {
                             attributes: &self.attributes,
                             vitals: &self.vitals,
                             skills: &self.skills,
@@ -179,7 +180,7 @@ impl AppState {
                         None
                     };
 
-                    self.context_buffer = crate::entities::debug::get_debug_info(
+                    self.context_buffer = crate::ui::widgets::dashboard::debug::get_debug_info(
                         &target,
                         |id| {
                             entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
@@ -197,7 +198,8 @@ impl AppState {
             }
             ContextView::Assess(guid) => {
                 if let Some(entity) = self.entities.get(&guid) {
-                    self.context_buffer = crate::entities::assess::get_assess_info(entity);
+                    self.context_buffer =
+                        crate::ui::widgets::dashboard::assess::get_assess_info(entity);
                 } else {
                     self.context_buffer = vec![Line::from(vec![
                         Span::styled("Error: ", Style::default().fg(Color::Red)),
@@ -207,7 +209,7 @@ impl AppState {
             }
             ContextView::Spell(spell_id) => {
                 let target = crate::ui::types::CommandTarget::Spell(spell_id);
-                self.context_buffer = crate::entities::debug::get_debug_info(
+                self.context_buffer = crate::ui::widgets::dashboard::debug::get_debug_info(
                     &target,
                     |_| None,
                     Some(&self.spell_info),
@@ -235,19 +237,26 @@ impl AppState {
 
     pub fn dashboard_item_count(&self) -> usize {
         match self.dashboard_tab {
-            DashboardTab::Entities => filter_entities(
-                &self.entities,
-                self.player_guid,
-                &self.inventory,
-                &self.equipment,
-                self.player_pos.as_ref(),
-                EntityFilter::World,
-            )
-            .len(),
-            DashboardTab::Inventory => self.get_filtered_inventory_tab().len(),
-            DashboardTab::Equip => crate::ui::widgets::dashboard::get_equip_tab_lines(self).len(),
-            DashboardTab::Spells => self.player_spells.len(),
-            DashboardTab::Character => crate::ui::widgets::stats::get_stats_list_items(self).len(),
+            DashboardTab::Nearby => {
+                use crate::ui::widgets::dashboard::NearbyTab;
+                NearbyTab.get_item_count(self)
+            }
+            DashboardTab::Inventory => {
+                use crate::ui::widgets::dashboard::InventoryTab;
+                InventoryTab.get_item_count(self)
+            }
+            DashboardTab::Equip => {
+                use crate::ui::widgets::dashboard::EquipTab;
+                EquipTab.get_item_count(self)
+            }
+            DashboardTab::Spells => {
+                use crate::ui::widgets::dashboard::SpellsTab;
+                SpellsTab.get_item_count(self)
+            }
+            DashboardTab::Character => {
+                use crate::ui::widgets::dashboard::CharacterTab;
+                CharacterTab.get_item_count(self)
+            }
         }
     }
 

@@ -1,12 +1,11 @@
+use crate::ui::model::AppState;
+use crate::ui::types::{CommandTarget, UIEffect};
+use crate::ui::widgets::dashboard::{Action, Verb, input::handle_common_dashboard_input};
 use crossterm::event::KeyEvent;
 use holtburger_core::ClientCommand;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-
-use crate::ui::model::AppState;
-use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
-use crate::ui::widgets::dashboard::{Action, Verb};
-use holtburger_common::Guid;
+use ratatui::text::Line;
 
 pub trait TabController {
     /// Renders the tab's content into the given area.
@@ -25,13 +24,17 @@ pub trait TabController {
     fn handle_action(
         &self,
         action: &Action,
-        target: &CommandTarget,
-        player_guid: Option<Guid>,
-        active_interaction: Option<ActiveInteraction>,
-    ) -> Option<CommandHandler>;
+        index: usize,
+        state: &mut AppState,
+    ) -> Option<UIEffect>;
 
     /// Optional: Handles tab-specific input. Returns a list of commands to execute.
-    fn handle_input(&self, _key: KeyEvent, _state: &mut AppState) -> Option<Vec<ClientCommand>> {
-        None
+    fn handle_input(&self, key: KeyEvent, state: &mut AppState) -> Option<Vec<ClientCommand>> {
+        handle_common_dashboard_input(self, key, state)
+    }
+
+    /// Returns the content to be displayed in the context panel for the current selection.
+    fn get_context_panel_content(&self, state: &AppState) -> Vec<Line<'static>> {
+        crate::ui::widgets::dashboard::tabs::common::get_context_content_for_view(state)
     }
 }

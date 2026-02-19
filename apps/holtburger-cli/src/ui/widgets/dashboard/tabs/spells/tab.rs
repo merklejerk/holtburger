@@ -6,8 +6,7 @@ use super::render::render_spells_tab;
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
-use holtburger_common::Guid;
+use crate::ui::types::{CommandTarget, UIEffect};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct SpellsTab;
@@ -33,34 +32,54 @@ impl TabController for SpellsTab {
     fn handle_action(
         &self,
         action: &Action,
-        target: &CommandTarget,
-        player_guid: Option<Guid>,
-        active_interaction: Option<ActiveInteraction>,
-    ) -> Option<CommandHandler> {
-        match (action, target) {
+        index: usize,
+        state: &mut AppState,
+    ) -> Option<UIEffect> {
+        let target = self.get_target_at_index(state, index);
+        match (action, &target) {
             (Action::Cast(_), CommandTarget::Spell(spell_id)) => {
-                use crate::ui::types::InteractionMode;
-                if let Some(interaction) = active_interaction
+                use crate::ui::types::{ChatMessageKind, InteractionMode};
+                use holtburger_protocol::messages::combat::CombatMode;
+
+                if !state.is_wielding_caster() {
+                    state.log_chat(
+                        ChatMessageKind::Error,
+                        "You must be wielding a caster to cast spells!".to_string(),
+                    );
+                    return Some(UIEffect::Commands(vec![]));
+                }
+
+                let mut cmds = Vec::new();
+                if state.combat_mode != CombatMode::Magic {
+                    cmds.push(ClientCommand::SetCombatMode(CombatMode::Magic));
+                }
+
+                if let Some(interaction) = state.active_interaction
                     && (interaction.mode == InteractionMode::Target
                         || interaction.mode == InteractionMode::Healing)
                 {
-                    Some(CommandHandler::Command(ClientCommand::CastTargetedSpell {
+                    cmds.push(ClientCommand::CastTargetedSpell {
                         target: interaction.guid,
                         spell_id: *spell_id,
-                    }))
+                    });
+                } else if let Some(player_guid) = state.player_guid {
+                    cmds.push(ClientCommand::CastTargetedSpell {
+                        target: player_guid,
+                        spell_id: *spell_id,
+                    });
                 } else {
-                    Some(CommandHandler::Command(
-                        ClientCommand::CastUntargetedSpell {
-                            spell_id: *spell_id,
-                        },
-                    ))
+                    cmds.push(ClientCommand::CastUntargetedSpell {
+                        spell_id: *spell_id,
+                    });
                 }
+
+                Some(UIEffect::Commands(cmds))
             }
             _ => super::super::common::handle_base_action(
                 action,
-                target,
-                player_guid,
-                active_interaction,
+                &target,
+                state.player_guid,
+                state.active_interaction,
             ),
         }
     }

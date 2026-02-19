@@ -6,8 +6,7 @@ use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, StatType};
-use holtburger_common::Guid;
+use crate::ui::types::{CommandTarget, StatType, UIEffect};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;
@@ -38,37 +37,36 @@ impl TabController for CharacterTab {
     fn handle_action(
         &self,
         action: &Action,
-        target: &CommandTarget,
-        player_guid: Option<Guid>,
-        active_interaction: Option<ActiveInteraction>,
-    ) -> Option<CommandHandler> {
-        match (action, target) {
+        index: usize,
+        state: &mut AppState,
+    ) -> Option<UIEffect> {
+        let target = self.get_target_at_index(state, index);
+        let player_guid = state.player_guid;
+        let active_interaction = state.active_interaction;
+
+        match (action, &target) {
             (Action::LevelUp, CommandTarget::Stat(st, Some(cost), _)) => {
                 let xp_spent = *cost as u32;
                 match st {
                     StatType::Attribute(at) => {
-                        Some(CommandHandler::Command(ClientCommand::RaiseAttribute {
+                        Some(UIEffect::Command(ClientCommand::RaiseAttribute {
                             attribute: *at,
                             xp_spent,
                         }))
                     }
-                    StatType::Vital(vt) => {
-                        Some(CommandHandler::Command(ClientCommand::RaiseVital {
-                            vital: *vt,
-                            xp_spent,
-                        }))
-                    }
-                    StatType::Skill(st) => {
-                        Some(CommandHandler::Command(ClientCommand::RaiseSkill {
-                            skill: *st,
-                            xp_spent,
-                        }))
-                    }
+                    StatType::Vital(vt) => Some(UIEffect::Command(ClientCommand::RaiseVital {
+                        vital: *vt,
+                        xp_spent,
+                    })),
+                    StatType::Skill(st) => Some(UIEffect::Command(ClientCommand::RaiseSkill {
+                        skill: *st,
+                        xp_spent,
+                    })),
                 }
             }
             (Action::Train, CommandTarget::Stat(st, _, Some(credits))) => {
                 if let StatType::Skill(skill) = st {
-                    Some(CommandHandler::Command(ClientCommand::TrainSkill {
+                    Some(UIEffect::Command(ClientCommand::TrainSkill {
                         skill: *skill,
                         credits: *credits,
                     }))
@@ -78,7 +76,7 @@ impl TabController for CharacterTab {
             }
             _ => super::super::common::handle_base_action(
                 action,
-                target,
+                &target,
                 player_guid,
                 active_interaction,
             ),

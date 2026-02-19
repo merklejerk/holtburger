@@ -20,10 +20,9 @@ use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
     UIState,
 };
-use crate::ui::traits::TabController;
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Color;
+use ratatui::text::Line;
 
 pub struct AppState {
     /// Account name used for login.
@@ -231,66 +230,13 @@ impl AppState {
     }
 
     pub fn refresh_context_buffer(&mut self) {
-        match self.context_view {
-            ContextView::Custom => {
-                if let Some(guid) = self.current_debug_guid
-                    && let Some(entity) = self.entities.get(&guid)
-                {
-                    let target = crate::ui::types::CommandTarget::Entity(entity, None);
-                    let player_guid = self.player_guid;
-                    let entities_ref = &self.entities;
-
-                    let player_info = if Some(guid) == player_guid {
-                        Some(crate::ui::widgets::dashboard::debug::PlayerDebugInfo {
-                            attributes: &self.attributes,
-                            vitals: &self.vitals,
-                            skills: &self.skills,
-                            enchantments: &self.player_enchantments,
-                        })
-                    } else {
-                        None
-                    };
-
-                    self.context_buffer = crate::ui::widgets::dashboard::debug::get_debug_info(
-                        &target,
-                        |id| {
-                            entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
-                                if Some(id) == player_guid {
-                                    Some("You".to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                        },
-                        Some(&self.spell_info),
-                        player_info,
-                    );
-                }
-            }
-            ContextView::Assess(guid) => {
-                if let Some(entity) = self.entities.get(&guid) {
-                    self.context_buffer =
-                        crate::ui::widgets::dashboard::assess::get_assess_info(entity);
-                } else {
-                    self.context_buffer = vec![Line::from(vec![
-                        Span::styled("Error: ", Style::default().fg(Color::Red)),
-                        Span::styled("Entity data missing", Style::default().fg(Color::Gray)),
-                    ])];
-                }
-            }
-            ContextView::Spell(spell_id) => {
-                let target = crate::ui::types::CommandTarget::Spell(spell_id);
-                self.context_buffer = crate::ui::widgets::dashboard::debug::get_debug_info(
-                    &target,
-                    |_| None,
-                    Some(&self.spell_info),
-                    None,
-                );
-            }
-            ContextView::Default => {
-                self.context_buffer.clear();
-            }
+        if self.context_view == ContextView::Default {
+            self.context_buffer.clear();
+            return;
         }
+
+        let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.dashboard_tab);
+        self.context_buffer = active_tab.get_context_panel_content(self);
     }
 
     pub fn current_server_time(&self) -> f64 {
@@ -307,28 +253,8 @@ impl AppState {
     }
 
     pub fn dashboard_item_count(&self) -> usize {
-        match self.dashboard_tab {
-            DashboardTab::Nearby => {
-                use crate::ui::widgets::dashboard::NearbyTab;
-                NearbyTab.get_item_count(self)
-            }
-            DashboardTab::Inventory => {
-                use crate::ui::widgets::dashboard::InventoryTab;
-                InventoryTab.get_item_count(self)
-            }
-            DashboardTab::Equip => {
-                use crate::ui::widgets::dashboard::EquipTab;
-                EquipTab.get_item_count(self)
-            }
-            DashboardTab::Spells => {
-                use crate::ui::widgets::dashboard::SpellsTab;
-                SpellsTab.get_item_count(self)
-            }
-            DashboardTab::Character => {
-                use crate::ui::widgets::dashboard::CharacterTab;
-                CharacterTab.get_item_count(self)
-            }
-        }
+        let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.dashboard_tab);
+        active_tab.get_item_count(self)
     }
 
     pub fn get_filtered_nearby_tab(&self) -> Vec<(&Entity, f32, usize)> {

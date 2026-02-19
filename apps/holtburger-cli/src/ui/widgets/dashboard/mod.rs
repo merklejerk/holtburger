@@ -1,8 +1,7 @@
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
-use holtburger_common::Guid;
+use crate::ui::types::CommandTarget;
 use holtburger_core::world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -11,41 +10,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, ListItem};
 
 pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<Verb> {
-    match tab {
-        DashboardTab::Equip => EquipTab.get_verbs(state, index),
-        DashboardTab::Nearby => NearbyTab.get_verbs(state, index),
-        DashboardTab::Inventory => InventoryTab.get_verbs(state, index),
-        DashboardTab::Character => CharacterTab.get_verbs(state, index),
-        DashboardTab::Spells => SpellsTab.get_verbs(state, index),
-    }
+    get_tab_controller(tab).get_verbs(state, index)
 }
 
-pub fn handle_action_for_tab(
-    _state: &AppState,
-    tab: DashboardTab,
-    action: &Action,
-    target: &CommandTarget,
-    player_guid: Option<Guid>,
-    active_interaction: Option<ActiveInteraction>,
-) -> Option<CommandHandler> {
-    match tab {
-        DashboardTab::Equip => {
-            EquipTab.handle_action(action, target, player_guid, active_interaction)
-        }
-        DashboardTab::Nearby => {
-            NearbyTab.handle_action(action, target, player_guid, active_interaction)
-        }
-        DashboardTab::Inventory => {
-            InventoryTab.handle_action(action, target, player_guid, active_interaction)
-        }
-        DashboardTab::Character => {
-            CharacterTab.handle_action(action, target, player_guid, active_interaction)
-        }
-        DashboardTab::Spells => {
-            SpellsTab.handle_action(action, target, player_guid, active_interaction)
-        }
-    }
-}
+pub mod input;
 pub mod tabs;
 
 pub use self::tabs::common::{Action, Verb};
@@ -60,12 +28,16 @@ pub fn get_target_at_index<'a>(
     tab: DashboardTab,
     index: usize,
 ) -> CommandTarget<'a> {
+    get_tab_controller(tab).get_target_at_index(state, index)
+}
+
+pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
     match tab {
-        DashboardTab::Equip => EquipTab.get_target_at_index(state, index),
-        DashboardTab::Nearby => NearbyTab.get_target_at_index(state, index),
-        DashboardTab::Inventory => InventoryTab.get_target_at_index(state, index),
-        DashboardTab::Character => CharacterTab.get_target_at_index(state, index),
-        DashboardTab::Spells => SpellsTab.get_target_at_index(state, index),
+        DashboardTab::Equip => Box::new(EquipTab),
+        DashboardTab::Nearby => Box::new(NearbyTab),
+        DashboardTab::Inventory => Box::new(InventoryTab),
+        DashboardTab::Character => Box::new(CharacterTab),
+        DashboardTab::Spells => Box::new(SpellsTab),
     }
 }
 

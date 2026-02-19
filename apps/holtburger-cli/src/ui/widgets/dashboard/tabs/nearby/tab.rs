@@ -7,8 +7,7 @@ use super::render::render_nearby_tab;
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
-use holtburger_common::Guid;
+use crate::ui::types::{CommandTarget, UIEffect};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct NearbyTab;
@@ -38,32 +37,33 @@ impl TabController for NearbyTab {
     fn handle_action(
         &self,
         action: &Action,
-        target: &CommandTarget,
-        player_guid: Option<Guid>,
-        active_interaction: Option<ActiveInteraction>,
-    ) -> Option<CommandHandler> {
-        match (action, target) {
+        index: usize,
+        state: &mut AppState,
+    ) -> Option<UIEffect> {
+        let target = self.get_target_at_index(state, index);
+        let player_guid = state.player_guid;
+        let active_interaction = state.active_interaction;
+
+        match (action, &target) {
             (Action::PickUp, CommandTarget::Entity(e, _)) => {
                 if let (Some(pguid), EntityClass::Container) =
                     (player_guid, classification::classify_entity(e))
                 {
                     // Force the "MoveItem" variant for containers explicitly
-                    Some(CommandHandler::Command(ClientCommand::MoveItem {
+                    Some(UIEffect::Command(ClientCommand::MoveItem {
                         item: e.guid,
                         container: pguid,
                         placement: 0,
                     }))
                 } else {
-                    Some(CommandHandler::Command(ClientCommand::Get(e.guid)))
+                    Some(UIEffect::Command(ClientCommand::Get(e.guid)))
                 }
             }
             (Action::Approach, CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::MoveTo {
-                    target: e.guid,
-                }))
+                Some(UIEffect::Command(ClientCommand::MoveTo { target: e.guid }))
             }
             (Action::MoveToSlot(slot_guid), CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::MoveItem {
+                Some(UIEffect::Command(ClientCommand::MoveItem {
                     item: e.guid,
                     container: *slot_guid,
                     placement: 0,
@@ -71,7 +71,7 @@ impl TabController for NearbyTab {
             }
             _ => super::super::common::handle_base_action(
                 action,
-                target,
+                &target,
                 player_guid,
                 active_interaction,
             ),

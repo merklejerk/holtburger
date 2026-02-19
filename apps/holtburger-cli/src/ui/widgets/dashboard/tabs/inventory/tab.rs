@@ -6,8 +6,7 @@ use super::render::render_inventory_tab;
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
-use holtburger_common::Guid;
+use crate::ui::types::{CommandTarget, UIEffect};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct InventoryTab;
@@ -37,19 +36,22 @@ impl TabController for InventoryTab {
     fn handle_action(
         &self,
         action: &Action,
-        target: &CommandTarget,
-        player_guid: Option<Guid>,
-        active_interaction: Option<ActiveInteraction>,
-    ) -> Option<CommandHandler> {
-        match (action, target) {
+        index: usize,
+        state: &mut AppState,
+    ) -> Option<UIEffect> {
+        let target = self.get_target_at_index(state, index);
+        let player_guid = state.player_guid;
+        let active_interaction = state.active_interaction;
+
+        match (action, &target) {
             (Action::Equip(slot), CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::GetAndWield {
+                Some(UIEffect::Command(ClientCommand::GetAndWield {
                     item: e.guid,
                     slot: Some(*slot),
                 }))
             }
             (Action::Unequip, CommandTarget::Entity(e, _)) => player_guid.map(|pguid| {
-                CommandHandler::Command(ClientCommand::MoveItem {
+                UIEffect::Command(ClientCommand::MoveItem {
                     item: e.guid,
                     container: pguid,
                     placement: 0,
@@ -57,7 +59,7 @@ impl TabController for InventoryTab {
             }),
             _ => super::super::common::handle_base_action(
                 action,
-                target,
+                &target,
                 player_guid,
                 active_interaction,
             ),

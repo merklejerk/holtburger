@@ -1,9 +1,13 @@
 use super::classification::{self, EntityClass};
-use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, InteractionMode};
+use super::super::debug;
+use super::super::assess;
+use crate::ui::types::{ActiveInteraction, UIEffect, CommandTarget, InteractionMode, ContextView};
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use holtburger_core::world::entity::Entity;
+use ratatui::text::Line;
+use crate::ui::model::AppState;
 use std::borrow::Cow;
 
 pub type VerbSet = Vec<Verb>;
@@ -41,36 +45,38 @@ pub fn handle_base_action(
     target: &CommandTarget,
     player_guid: Option<Guid>,
     active_interaction: Option<ActiveInteraction>,
-) -> Option<CommandHandler> {
+) -> Option<UIEffect> {
     match (action, target) {
-        (Action::Assess, CommandTarget::Entity(e, _)) => {
-            Some(CommandHandler::Command(ClientCommand::Identify(e.guid)))
-        }
+        (Action::Assess, CommandTarget::Entity(e, _)) => Some(UIEffect::Assess(e.guid)),
         (Action::Use, CommandTarget::Entity(e, _)) => {
             if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
-                Some(CommandHandler::Heal(e.guid))
+                Some(UIEffect::Heal(e.guid))
             } else {
-                Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
+                Some(UIEffect::Command(ClientCommand::Use(e.guid)))
             }
         }
         (Action::Drop, CommandTarget::Entity(e, _)) => {
-            Some(CommandHandler::Command(ClientCommand::Drop(e.guid)))
+            Some(UIEffect::Command(ClientCommand::Drop(e.guid)))
         }
-        (Action::Debug, _) => Some(CommandHandler::ToggleDebug),
-        (Action::Move, CommandTarget::Entity(e, _)) => Some(CommandHandler::Move(e.guid)),
-        (Action::Target, CommandTarget::Entity(e, _)) => Some(CommandHandler::Target(e.guid)),
+        (Action::Debug, target) => match target {
+            CommandTarget::Spell(sid) => Some(UIEffect::ActivateDebugSpell(*sid)),
+            CommandTarget::Entity(e, _) => Some(UIEffect::ActivateDebugEntity(e.guid)),
+            _ => None,
+        },
+        (Action::Move, CommandTarget::Entity(e, _)) => Some(UIEffect::Move(e.guid)),
+        (Action::Target, CommandTarget::Entity(e, _)) => Some(UIEffect::Target(e.guid)),
         (Action::Confirm(_), target) => {
             if let Some(interaction) = active_interaction {
                 match interaction.mode {
                     InteractionMode::Healing => match target {
                         CommandTarget::Entity(e, _) => {
                             if e.guid == interaction.guid {
-                                player_guid.map(CommandHandler::ApplyHealing)
+                                player_guid.map(UIEffect::ApplyHealing)
                             } else {
-                                Some(CommandHandler::ApplyHealing(e.guid))
+                                Some(UIEffect::ApplyHealing(e.guid))
                             }
                         }
-                        _ => player_guid.map(CommandHandler::ApplyHealing),
+                        _ => player_guid.map(UIEffect::ApplyHealing),
                     },
                     InteractionMode::Moving => match target {
                         CommandTarget::Entity(e, _) if e.guid != interaction.guid => {
@@ -78,15 +84,15 @@ pub fn handle_base_action(
                             match class {
                                 classification::EntityClass::Container
                                 | classification::EntityClass::Chest => {
-                                    Some(CommandHandler::ApplyMoving(e.guid))
+                                    Some(UIEffect::ApplyMoving(e.guid))
                                 }
-                                _ => Some(CommandHandler::Give(e.guid)),
+                                _ => Some(UIEffect::Give(e.guid)),
                             }
                         }
-                        _ => player_guid.map(CommandHandler::ApplyMoving),
+                        _ => player_guid.map(UIEffect::ApplyMoving),
                     },
                     InteractionMode::Target => match target {
-                        CommandTarget::Entity(e, _) => Some(CommandHandler::Target(e.guid)),
+                        CommandTarget::Entity(e, _) => Some(UIEffect::Target(e.guid)),
                         _ => None,
                     },
                 }
@@ -94,7 +100,7 @@ pub fn handle_base_action(
                 None
             }
         }
-        (Action::Cancel, _) => Some(CommandHandler::CancelInteraction),
+        (Action::Cancel, _) => Some(UIEffect::CancelInteraction),
         _ => None,
     }
 }
@@ -257,13 +263,54 @@ pub fn get_interaction_verbs(
     }
 }
 
-/// Determines if the [D]ebug command should be available.
-pub fn should_show_debug(target: &CommandTarget) -> bool {
-    match target {
-        CommandTarget::Entity(_, _)
-        | CommandTarget::Enchantment(_)
-        | CommandTarget::Stat(_, _, _)
-        | CommandTarget::Spell(_) => true,
-        CommandTarget::None => false,
+/// Returns the context content based on the current context view state.
+pub fn get_context_content_for_view(state: &AppState) -> Vec<Line<'static>> {
+    match state.context_view {
+        ContextView::Assess(guid) => {
+            if let Some(e) = state.entities.get(&guid) {
+                return assess::get_assess_info(e);
+            }
+            vec![]
+        }
+        ContextView::Custom => {
+            let player_guid = state.player_guid;
+            let target_guid = state.current_debug_guid.or(player_guid);
+
+            if let Some(e) = target_guid.and_then(|guid| state.entities.get(&guid)) {
+                let guid = e.guid;
+                let target = CommandTarget::Entity(e, None);
+                let player_info = if Some(guid) == player_guid {
+                    Some(debug::PlayerDebugInfo {
+                        attributes: &state.attributes,
+                        vitals: &state.vitals,
+                        skills: &state.skills,
+                        enchantments: &state.player_enchantments,
+                    })
+                } else {
+                    None
+                };
+
+                return debug::get_debug_info(
+                    &target,
+                    |id| {
+                        state.entities.get(&id).map(|e| e.name.clone()).or_else(|| {
+                            if Some(id) == player_guid {
+                                Some("You".to_string())
+                            } else {
+                                None
+                            }
+                        })
+                    },
+                    Some(&state.spell_info),
+                    player_info,
+                );
+            }
+            vec![]
+        }
+        ContextView::Spell(spell_id) => {
+            let target = CommandTarget::Spell(spell_id);
+            debug::get_debug_info(&target, |_| None, Some(&state.spell_info), None)
+        }
+        _ => vec![],
     }
 }

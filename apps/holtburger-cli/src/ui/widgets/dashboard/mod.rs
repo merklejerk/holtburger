@@ -135,6 +135,7 @@ pub fn render_entity_list_item(
     highlight: bool,
     use_emojis: bool,
     is_equipped: bool,
+    is_player: bool,
     prefix: Option<&str>,
     is_dimmed: bool,
 ) -> ListItem<'static> {
@@ -161,6 +162,8 @@ pub fn render_entity_list_item(
 
     let display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
+    } else if is_player {
+        format!("{} (YOU)", e.name)
     } else if is_equipped {
         format!("{} (EQUIPPED)", e.name)
     } else {

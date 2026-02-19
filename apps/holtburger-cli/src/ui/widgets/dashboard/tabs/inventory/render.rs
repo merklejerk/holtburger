@@ -46,12 +46,13 @@ pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let entities = state.get_filtered_inventory_tab();
+    let entities = super::tab::get_entities(state);
     let mut list_items = Vec::new();
 
     for (i, (e, _, depth)) in entities.iter().enumerate() {
         let is_equipped =
             state.equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
+        let is_player = state.player_guid == Some(e.guid);
         list_items.push(render_entity_list_item(
             e,
             None,
@@ -59,6 +60,7 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             i == state.selected_dashboard_index,
             state.use_emojis,
             is_equipped,
+            is_player,
             None,
             false,
         ));

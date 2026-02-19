@@ -17,8 +17,8 @@ use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::{EquipMask, magic::Enchantment};
 
 use super::types::{
-    ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
-    UIState,
+    ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Modal,
+    NET_PULSE_HISTORY_SIZE, UIState,
 };
 use ratatui::style::Color;
 use ratatui::text::Line;
@@ -56,6 +56,8 @@ pub struct AppState {
     pub characters: Vec<CharacterEntry>,
     /// Overall UI state (Chat, Character selection, etc.).
     pub state: UIState,
+    /// Active modal (blocks input if present).
+    pub modal: Option<Modal>,
     /// Which area of the screen currently has focus.
     pub focused_pane: FocusedPane,
     /// Previous focus, used for returning from modals.
@@ -151,8 +153,8 @@ impl Default for NetStats {
         Self {
             bytes_in: 0,
             bytes_out: 0,
-            history_in: vec![0; 64],
-            history_out: vec![0; 64],
+            history_in: vec![0; NET_PULSE_HISTORY_SIZE],
+            history_out: vec![0; NET_PULSE_HISTORY_SIZE],
             last_update: None,
         }
     }
@@ -226,6 +228,16 @@ impl AppState {
         let max_scroll = current_total.saturating_sub(height);
         *scroll_offset = (*scroll_offset).min(max_scroll);
         *old_total = current_total;
+    }
+
+    pub fn get_container_counts(&self) -> HashMap<Guid, usize> {
+        let mut counts = HashMap::new();
+        for e in self.entities.values() {
+            if let Some(cid) = e.container_id {
+                *counts.entry(cid).or_default() += 1;
+            }
+        }
+        counts
     }
 
     pub fn refresh_context_buffer(&mut self) {

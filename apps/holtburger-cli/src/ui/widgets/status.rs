@@ -35,21 +35,12 @@ fn render_status_panel(f: &mut Frame, state: &AppState, area: Rect) {
     let status_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Fill(1),                  // Account:Character
-            Constraint::Min(32),                  // Combined Coords + Compass
+            Constraint::Fill(1),                  // Combined Coords + Compass
             Constraint::Length(CHRONO_WIDTH + 2), // Time (Right-most)
         ])
         .split(inner_status_area);
 
-    // 1. Account / Character
-    let current_char = state.character_name.as_deref().unwrap_or("Selecting...");
-    let account_char_str = format!("{}:{}", state.account_name, current_char);
-    f.render_widget(
-        Paragraph::new(account_char_str).alignment(ratatui::layout::Alignment::Left),
-        status_layout[0],
-    );
-
-    // 2. Coords + Compass
+    // 1. Coords + Compass
     let retry_info = get_retry_info(state);
     let pos_info = state
         .player_pos
@@ -59,15 +50,15 @@ fn render_status_panel(f: &mut Frame, state: &AppState, area: Rect) {
     let compass_str = get_compass_str(state);
     let pos_compass_str = format!("{} 🧭 {},{}", retry_info, pos_info, compass_str);
     f.render_widget(
-        Paragraph::new(pos_compass_str).alignment(ratatui::layout::Alignment::Right),
-        status_layout[1],
+        Paragraph::new(pos_compass_str).alignment(ratatui::layout::Alignment::Left),
+        status_layout[0],
     );
 
-    // 3. Chronometer
+    // 2. Chronometer
     let time_str = get_time_str(state);
     f.render_widget(
         Paragraph::new(time_str).alignment(ratatui::layout::Alignment::Right),
-        status_layout[2],
+        status_layout[1],
     );
 }
 

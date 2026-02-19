@@ -8,6 +8,7 @@
 - [x] Move vitae penalty to under "vitals" group. (Done)
 - [x] Reverse direction of netpulse animation.
 - [x] When navigating the spells list in dashboard a random non-selected spell will be rendered with a blue/cyan font color for some reason. Selection style also doesn't match other tabs. (Done)
+- [x] Just color the dynamic panel frame differently depending on combat mode. (Done)
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
@@ -16,7 +17,6 @@
 - [ ] Move compass to status bar.
 - [ ] Move nework time to status bar.
 - [ ] Move netpulse and client state icon to right of input.
-- [x] Just color the dynamic panel frame differently depending on combat mode. (Done)
 - [ ] Color portal entries purple.
 - [ ] Color all NPCs uniformly, regardless of RADAR_BLIP_COLOR.
 - [ ] Show enchantment source (caster) in enchantment debug.
@@ -58,7 +58,6 @@
 - [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest up there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 
-
 ### High
 - [x] Fail when spell/attack distance is too far.
 - [x] Just learned spells show up as "unknown spell" in spellbok. Requires restart.
@@ -78,6 +77,7 @@
 - [x] Make equipped items more obvious.
 - [x] Equip tab.
 - [x] TUI very slow in `-vv` mode despite few outputs.
+- [x] Pasting into the chat is slow.
 - [ ] DC detection.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -90,7 +90,7 @@
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
-- [ ] Pasting into the chat is slow.
+- [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 
 ### Critical
 

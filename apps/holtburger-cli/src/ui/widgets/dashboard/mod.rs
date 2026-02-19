@@ -1,4 +1,4 @@
-use self::tabs::classification::EntityClass;
+use self::tabs::classification::{EntityClass, classify_entity, get_entity_color};
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
@@ -140,9 +140,8 @@ pub fn render_entity_list_item(
     is_dimmed: bool,
     container_count: Option<usize>,
 ) -> ListItem<'static> {
-    use self::tabs::classification;
-    let class = classification::classify_entity(e);
-    let color = get_entity_color(e, class);
+    let class = classify_entity(e);
+    let color = get_entity_color(class);
     let item_style = if highlight {
         Style::default().bg(Color::DarkGray)
     } else {
@@ -150,6 +149,10 @@ pub fn render_entity_list_item(
     };
 
     let mut text_style = Style::default().fg(color);
+    if is_equipped {
+        text_style = text_style.add_modifier(Modifier::BOLD);
+    }
+
     if is_dimmed {
         // Use a darker gray for dimmed items instead of the DIM modifier, which can bleed into scrollbars.
         text_style = text_style.fg(Color::Gray);
@@ -193,25 +196,4 @@ pub fn render_entity_list_item(
     };
 
     ListItem::new(Line::styled(text, text_style)).style(item_style)
-}
-
-fn get_entity_color(e: &Entity, class: EntityClass) -> Color {
-    use holtburger_common::properties::RadarColor;
-    if class == EntityClass::Monster {
-        return Color::Red;
-    }
-
-    if let Some(color) = e.radar_blip_color {
-        return match color {
-            RadarColor::Blue => Color::Blue,
-            RadarColor::Gold => Color::Yellow,
-            RadarColor::Purple => Color::Magenta,
-            RadarColor::Red => Color::Red,
-            RadarColor::Green => Color::Green,
-            RadarColor::Yellow => Color::Yellow,
-            _ => Color::White,
-        };
-    }
-
-    Color::White
 }

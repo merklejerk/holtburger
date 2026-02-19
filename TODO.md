@@ -13,7 +13,7 @@
 - [x] Color all NPCs uniformly, regardless of RADAR_BLIP_COLOR.
 - [x] Move netpulse and client state icon to right of input.
 - [x] Move compass to status bar.
-- [x] Move nework time to status bar.
+- [x] Move network time to status bar.
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
@@ -42,7 +42,7 @@
 - [x] TUI gets really slow when chat buffer gets full.
 - [x] Remove `Equip` verb from inventory tab.
 - [x] Show self in nearby tab.
-- [x] Show capcity (`(x/X)`) indicators on containers.
+- [x] Show capacity (`(x/X)`) indicators on containers.
 - [x] Popup for "retrying..." mode.
 - [~] TUI client needs major refactors.
 - [ ] Approach verb is janky.

@@ -23,6 +23,9 @@ pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
 // Chat constants
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 
+// Net Pulse
+pub const NET_PULSE_HISTORY_SIZE: usize = 32;
+
 // Interaction constants
 pub const SCROLL_STEP: usize = 3;
 

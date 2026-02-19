@@ -18,7 +18,7 @@ use holtburger_protocol::messages::{EquipMask, magic::Enchantment};
 
 use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Modal,
-    UIState,
+    UIState, NET_PULSE_HISTORY_SIZE,
 };
 use ratatui::style::Color;
 use ratatui::text::Line;
@@ -153,8 +153,8 @@ impl Default for NetStats {
         Self {
             bytes_in: 0,
             bytes_out: 0,
-            history_in: vec![0; 32],
-            history_out: vec![0; 32],
+            history_in: vec![0; NET_PULSE_HISTORY_SIZE],
+            history_out: vec![0; NET_PULSE_HISTORY_SIZE],
             last_update: None,
         }
     }

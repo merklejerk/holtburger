@@ -6,20 +6,20 @@ use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::super::classification::{EntityClass, classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, get_entity_color, EntityClass};
 use crate::ui::model::AppState;
 use holtburger_common::properties::EquipMask;
 use holtburger_core::world::entity::Entity;
 
 pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     let mut bottom_area = area;
+    let counts = state.get_container_counts();
 
     // Sticky summary line for the player's main inventory container
     if let Some(player_guid) = state.player_guid
         && let Some(player_entity) = state.entities.get(&player_guid)
         && let Some(capacity) = player_entity.items_capacity
     {
-        let counts = state.get_container_counts();
         let count = counts.get(&player_guid).cloned().unwrap_or(0);
 
         let chunks = Layout::default()
@@ -38,7 +38,7 @@ pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
         f.render_widget(summary, top_area);
     }
 
-    let items = get_list_items(state);
+    let items = get_list_items(state, &counts);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -75,9 +75,8 @@ pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
-fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
+fn get_list_items(state: &AppState, container_counts: &std::collections::HashMap<holtburger_common::Guid, usize>) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(state);
-    let container_counts = state.get_container_counts();
     let mut list_items = Vec::new();
 
     for (i, (e, _, depth)) in entities.iter().enumerate() {

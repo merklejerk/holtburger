@@ -30,6 +30,16 @@ pub fn get_verbs(e: &Entity, state: &AppState) -> VerbSet {
 
     verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
 
+    let is_equipped = if let (Some(pguid), Some(wielder)) = (state.player_guid, e.wielder_id) {
+        pguid == wielder
+    } else {
+        false
+    };
+
+    if is_equipped {
+        verbs.push(Verb::new(Action::Unequip, 'q', "Unequip"));
+    }
+
     use holtburger_common::properties::ObjectDescriptionFlag;
     if !e
         .flags

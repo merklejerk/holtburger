@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::PseudoEquipMask;
 use holtburger_core::world::entity::Entity;
 
 use super::tabs::classification;
@@ -14,9 +15,9 @@ pub enum EntityFilter {
 
 pub fn filter_entities<'a>(
     entities: &'a HashMap<Guid, Entity>,
-    player_guid: Option<Guid>,
+    _player_guid: Option<Guid>,
     inventory: &HashSet<Guid>,
-    _equipment: &HashMap<Guid, holtburger_common::properties::EquipMask>,
+    equipment: &HashMap<Guid, holtburger_common::properties::EquipMask>,
     player_pos: Option<&'a WorldPosition>,
     filter: EntityFilter,
 ) -> Vec<(&'a Entity, f32, usize)> {
@@ -24,18 +25,18 @@ pub fn filter_entities<'a>(
         .values()
         .filter(|e| match filter {
             EntityFilter::World => {
-                if inventory.contains(&e.guid) {
-                    return false;
-                }
-                if let Some(pguid) = player_guid
-                    && e.guid == pguid
-                {
-                    return false;
-                }
-                classification::is_targetable(e) && e.position.landblock_id != Guid::NULL
+                let is_combat_implement = e
+                    .valid_locations
+                    .map(|loc| (loc.bits() & PseudoEquipMask::COMBAT_IMPLEMENTS.bits()) != 0)
+                    .unwrap_or(false);
+
+                classification::is_targetable(e)
+                    && (e.position.landblock_id != Guid::NULL
+                        || (e.wielder_id.is_some() && is_combat_implement)
+                        || e.physics_parent_id.is_some())
             }
             EntityFilter::Inventory => {
-                inventory.contains(&e.guid)
+                (inventory.contains(&e.guid) || equipment.contains_key(&e.guid))
                     && !e.name.is_empty()
             }
         })
@@ -58,11 +59,7 @@ pub fn filter_entities<'a>(
         };
 
         let is_root = if let Some(pid) = parent_id {
-            if Some(pid) == player_guid {
-                true
-            } else {
-                !candidate_guids.contains(&pid)
-            }
+            !candidate_guids.contains(&pid)
         } else {
             true
         };

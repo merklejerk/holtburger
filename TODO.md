@@ -79,6 +79,8 @@
 - [x] Equip tab.
 - [x] TUI very slow in `-vv` mode despite few outputs.
 - [x] Pasting into the chat is slow.
+- [x] Equipped items should still appear in Inv tab.
+- [ ] Show player in nearby tab.
 - [ ] DC detection.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -92,7 +94,6 @@
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
-- [ ] Equipped items should still appear in Inv tab.
 
 ### Critical
 

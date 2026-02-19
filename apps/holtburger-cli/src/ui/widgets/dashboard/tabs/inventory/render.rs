@@ -52,6 +52,7 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     for (i, (e, _, depth)) in entities.iter().enumerate() {
         let is_equipped =
             state.equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
+        let is_player = state.player_guid == Some(e.guid);
         list_items.push(render_entity_list_item(
             e,
             None,
@@ -59,6 +60,7 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             i == state.selected_dashboard_index,
             state.use_emojis,
             is_equipped,
+            is_player,
             None,
             false,
         ));

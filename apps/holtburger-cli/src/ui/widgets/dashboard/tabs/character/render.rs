@@ -55,7 +55,7 @@ pub fn render_character_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
         } else {
             format!(
                 "{} total | {} XP unspent | {} SP",
-                info.current_xp,
+                format_cost(info.current_xp),
                 format_cost(info.unspent_xp),
                 info.unspent_skill_points
             )

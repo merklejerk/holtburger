@@ -6,9 +6,15 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use directories::ProjectDirs;
-use holtburger_cli::ui::{self, AppState, ChatMessageKind};
-use holtburger_core::{Client, ClientCommand, ClientState, WireEvent};
+use holtburger_cli::ui::{
+    self, AppState, ChatMessageKind, ContextView, DashboardTab, FocusedPane, NetStats, UIState,
+};
+use holtburger_core::world::stats::Resistances;
+use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
+use holtburger_protocol::messages::combat::CombatMode;
+use ratatui::widgets::ListState;
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Mutex;
@@ -201,10 +207,10 @@ async fn main() -> Result<()> {
         character_name: None,
         player_guid: None,
         level_info: None,
-        attributes: std::collections::HashMap::new(),
-        vitals: std::collections::HashMap::new(),
-        skills: std::collections::HashMap::new(),
-        resistances: holtburger_core::world::stats::Resistances::default(),
+        attributes: HashMap::new(),
+        vitals: HashMap::new(),
+        skills: HashMap::new(),
+        resistances: Resistances::default(),
         armor: 0,
         vitae: 1.0,
         messages: Vec::new(),
@@ -212,45 +218,45 @@ async fn main() -> Result<()> {
         input_history: Vec::new(),
         history_index: None,
         characters: Vec::new(),
-        state: ui::UIState::Chat,
-        focused_pane: ui::FocusedPane::Dashboard,
-        previous_focused_pane: ui::FocusedPane::Dashboard,
+        state: UIState::Chat,
+        focused_pane: FocusedPane::Dashboard,
+        previous_focused_pane: FocusedPane::Dashboard,
         selected_character_index: 0,
         selected_dashboard_index: 0,
-        dashboard_list_state: ratatui::widgets::ListState::default().with_selected(Some(0)),
+        dashboard_list_state: ListState::default().with_selected(Some(0)),
         last_dashboard_height: 0,
         scroll_offset: 0,
         chat_total_lines: 0,
         chat_last_total_lines: 0,
         context_total_lines: 0,
         context_last_total_lines: 0,
-        dashboard_tab: ui::DashboardTab::Nearby,
+        dashboard_tab: DashboardTab::Nearby,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
-        context_view: ui::ContextView::Default,
+        context_view: ContextView::Default,
         current_debug_guid: None,
         active_interaction: None,
         account_password: args.password.clone(),
-        logon_retry: holtburger_core::RetryState::new(5),
-        enter_retry: holtburger_core::RetryState::new(5),
+        logon_retry: RetryState::new(5),
+        enter_retry: RetryState::new(5),
         core_state: ClientState::Connected,
         player_pos: None,
         player_enchantments: Vec::new(),
         player_spells: Vec::new(),
-        spell_names: std::collections::HashMap::new(),
-        spell_info: std::collections::HashMap::new(),
+        spell_names: HashMap::new(),
+        spell_info: HashMap::new(),
         skill_table: None,
-        entities: std::collections::HashMap::new(),
+        entities: HashMap::new(),
         server_time: None,
         chat_log,
         use_emojis: !args.no_emojis,
         verbosity: args.verbose,
-        net_stats: ui::NetStats::default(),
+        net_stats: NetStats::default(),
         world_name: String::new(),
-        combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+        combat_mode: CombatMode::NonCombat,
         noclip: false,
-        inventory: std::collections::HashSet::new(),
-        equipment: std::collections::HashMap::new(),
+        inventory: HashSet::new(),
+        equipment: HashMap::new(),
         wrapped_chat_cache: Vec::new(),
         last_chat_width: 0,
     };
@@ -274,10 +280,9 @@ async fn main() -> Result<()> {
     let tick_rate = std::time::Duration::from_millis(100);
     let frame_rate = std::time::Duration::from_millis(16); // ~60 FPS
     let mut last_draw = Instant::now();
+    let mut needs_redraw = true;
 
     loop {
-        let mut needs_redraw = false;
-
         // 1. Process Network Events (Drain batch)
         while let Ok(event) = wire_view_rx.try_recv() {
             if let WireEvent::GameMessage(msg) = &event {
@@ -317,47 +322,55 @@ async fn main() -> Result<()> {
             }
         }
 
-        // 2. Poll Input (Short timeout)
-        if event::poll(std::time::Duration::from_millis(10))? {
-            match event::read()? {
-                Event::Key(key) => {
-                    let size = terminal.size()?;
-                    let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                    let res = app_state.handle_action(ui::AppAction::KeyPress(
-                        key,
-                        size.width,
-                        size.height,
-                        main_chunks,
-                        dynamic_chunk,
-                    ));
-                    needs_redraw |= res.needs_redraw;
-                    let mut should_quit = false;
-                    for cmd in res.commands {
-                        if let ClientCommand::Quit = cmd {
-                            should_quit = true;
+        // 2. Poll Input (Short timeout, drain batch)
+        let mut should_quit = false;
+        let poll_timeout = if needs_redraw {
+            frame_rate.saturating_sub(last_draw.elapsed())
+        } else {
+            std::time::Duration::from_millis(10)
+        };
+
+        if event::poll(poll_timeout)? {
+            while event::poll(std::time::Duration::from_millis(0))? {
+                match event::read()? {
+                    Event::Key(key) => {
+                        let size = terminal.size()?;
+                        let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
+                        let res = app_state.handle_action(ui::AppAction::KeyPress(
+                            key,
+                            size.width,
+                            size.height,
+                            main_chunks,
+                            dynamic_chunk,
+                        ));
+                        needs_redraw |= res.needs_redraw;
+                        for cmd in res.commands {
+                            if let ClientCommand::Quit = cmd {
+                                should_quit = true;
+                            }
+                            let _ = command_tx.send(cmd);
                         }
-                        let _ = command_tx.send(cmd);
                     }
-                    if should_quit {
-                        break;
+                    Event::Mouse(mouse) => {
+                        let size = terminal.size()?;
+                        let (chunks, main_chunks, dynamic_chunk) = ui::get_layout(size);
+                        let res = app_state.handle_action(ui::AppAction::Mouse(
+                            mouse,
+                            chunks.to_vec(),
+                            main_chunks.to_vec(),
+                            dynamic_chunk,
+                        ));
+                        needs_redraw |= res.needs_redraw;
+                        for cmd in res.commands {
+                            let _ = command_tx.send(cmd);
+                        }
                     }
+                    _ => {}
                 }
-                Event::Mouse(mouse) => {
-                    let size = terminal.size()?;
-                    let (chunks, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                    let res = app_state.handle_action(ui::AppAction::Mouse(
-                        mouse,
-                        chunks.to_vec(),
-                        main_chunks.to_vec(),
-                        dynamic_chunk,
-                    ));
-                    needs_redraw |= res.needs_redraw;
-                    for cmd in res.commands {
-                        let _ = command_tx.send(cmd);
-                    }
-                }
-                _ => {}
             }
+        }
+        if should_quit {
+            break;
         }
 
         // 3. Tick
@@ -372,9 +385,13 @@ async fn main() -> Result<()> {
         }
 
         // 4. Draw (If needed and frame budget allows)
-        if needs_redraw && last_draw.elapsed() >= frame_rate {
-            terminal.draw(|f| ui::ui(f, &mut app_state))?;
-            last_draw = Instant::now();
+        if needs_redraw {
+            let now = Instant::now();
+            if now.duration_since(last_draw) >= frame_rate {
+                terminal.draw(|f| ui::ui(f, &mut app_state))?;
+                last_draw = now;
+                needs_redraw = false;
+            }
         }
     }
 

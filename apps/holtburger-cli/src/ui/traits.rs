@@ -4,8 +4,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::ui::model::AppState;
-use crate::ui::types::{CommandTarget, CommandHandler, ActiveInteraction};
-use crate::ui::widgets::dashboard::{Verb, Action};
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
+use crate::ui::widgets::dashboard::{Action, Verb};
 use holtburger_common::Guid;
 
 pub trait TabController {

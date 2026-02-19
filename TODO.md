@@ -40,6 +40,7 @@
 - [x] Use meta `EquipMask` flags for more intelligent equipping.
 - [x] Combine the clothing slots into Top Clothing and Bottom Clothing pseudo-slots.
 - [x] TUI gets really slow when chat buffer gets full.
+- [x] Remove `Equip` verb from inventory tab.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have synonymous slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -54,7 +55,6 @@
 - [ ] Auto-follow.
 - [ ] Show capcity (`(x/X)`) indicators on containers.
 - [ ] Show self in nearby tab.
-- [x] Remove `Equip` verb from inventory tab.
 - [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest up there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 

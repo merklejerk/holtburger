@@ -18,7 +18,10 @@ pub fn get_verbs(e: &Entity, state: &AppState) -> VerbSet {
     verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
 
     use holtburger_common::properties::ObjectDescriptionFlag;
-    if !e.flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
+    if !e
+        .flags
+        .intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
+    {
         verbs.push(Verb::new(Action::Move, 'm', "Move"));
     }
 

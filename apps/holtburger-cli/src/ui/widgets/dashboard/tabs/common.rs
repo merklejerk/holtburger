@@ -58,9 +58,7 @@ pub fn handle_base_action(
         }
         (Action::Debug, _) => Some(CommandHandler::ToggleDebug),
         (Action::Move, CommandTarget::Entity(e, _)) => Some(CommandHandler::Move(e.guid)),
-        (Action::Target, CommandTarget::Entity(e, _)) => {
-            Some(CommandHandler::Target(e.guid))
-        }
+        (Action::Target, CommandTarget::Entity(e, _)) => Some(CommandHandler::Target(e.guid)),
         (Action::Confirm(_), target) => {
             if let Some(interaction) = active_interaction {
                 match interaction.mode {
@@ -152,7 +150,11 @@ pub fn get_base_entity_verbs(e: &Entity) -> Vec<Verb> {
         | EntityClass::Chest => {
             verbs.push(Verb::new(Action::Use, 'u', "Use"));
         }
-        EntityClass::Weapon | EntityClass::Apparel | EntityClass::Wand | EntityClass::Tool | EntityClass::Container => {
+        EntityClass::Weapon
+        | EntityClass::Apparel
+        | EntityClass::Wand
+        | EntityClass::Tool
+        | EntityClass::Container => {
             verbs.push(Verb::new(Action::Use, 'u', "Use"));
         }
         _ => {}
@@ -191,11 +193,23 @@ pub fn get_interaction_verbs(
                         let is_in_main_pack = e.container_id == player_guid;
 
                         if is_subject && !is_in_main_pack {
-                            verbs.push(Verb::new(Action::Confirm("Move to main pack".to_string()), '\r', "Move to main pack"));
+                            verbs.push(Verb::new(
+                                Action::Confirm("Move to main pack".to_string()),
+                                '\r',
+                                "Move to main pack",
+                            ));
                         } else if is_container {
-                            verbs.push(Verb::new(Action::Confirm(format!("Move to {}", e.name)), '\r', format!("Move to {}", e.name)));
+                            verbs.push(Verb::new(
+                                Action::Confirm(format!("Move to {}", e.name)),
+                                '\r',
+                                format!("Move to {}", e.name),
+                            ));
                         } else if is_creature {
-                            verbs.push(Verb::new(Action::Confirm(format!("Give to {}", e.name)), '\r', format!("Give to {}", e.name)));
+                            verbs.push(Verb::new(
+                                Action::Confirm(format!("Give to {}", e.name)),
+                                '\r',
+                                format!("Give to {}", e.name),
+                            ));
                         }
                     }
                 }
@@ -223,7 +237,11 @@ pub fn get_interaction_verbs(
         CommandTarget::Spell(_) => {
             let is_targeted = interaction.mode == InteractionMode::Target
                 || interaction.mode == InteractionMode::Healing;
-            let label = if is_targeted { "Cast on target" } else { "Cast on self" };
+            let label = if is_targeted {
+                "Cast on target"
+            } else {
+                "Cast on self"
+            };
             Some(vec![
                 Verb::new(Action::Cast(is_targeted), 'c', label),
                 Verb::new(Action::Debug, 'b', "Debug"),

@@ -2,8 +2,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::common::{Action, VerbSet};
-use super::verbs;
 use super::render::render_inventory_tab;
+use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
@@ -19,9 +19,11 @@ impl TabController for InventoryTab {
 
     fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let target = self.get_target_at_index(state, index);
-        if let Some(interaction_verbs) =
-            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
-        {
+        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
+            &target,
+            state.player_guid,
+            state.active_interaction,
+        ) {
             return interaction_verbs;
         }
 
@@ -53,7 +55,12 @@ impl TabController for InventoryTab {
                     placement: 0,
                 })
             }),
-            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
+            _ => super::super::common::handle_base_action(
+                action,
+                target,
+                player_guid,
+                active_interaction,
+            ),
         }
     }
 

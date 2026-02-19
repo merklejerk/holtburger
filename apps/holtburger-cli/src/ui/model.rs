@@ -26,61 +26,117 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 pub struct AppState {
+    /// Account name used for login.
     pub account_name: String,
+    /// Current character name once selected.
     pub character_name: Option<String>,
+    /// Unique ID of the player character.
     pub player_guid: Option<Guid>,
+    /// Info about level, luminance, and XP.
     pub level_info: Option<CharacterLevelInfo>,
+    /// Base and current values for Strength, Endurance, etc.
     pub attributes: HashMap<AttributeType, Attribute>,
+    /// Health, Stamina, and Mana values.
     pub vitals: HashMap<VitalType, Vital>,
+    /// Skills like Sword, Mace, Magic Defense.
     pub skills: HashMap<SkillType, Skill>,
+    /// Calculated damage resistance values.
     pub resistances: holtburger_core::world::stats::Resistances,
+    /// Total armor value.
     pub armor: i32,
+    /// Current vitae penalty (0.0 to 1.0, where 1.0 is no penalty).
     pub vitae: f32,
+    /// Historical chat and system messages.
     pub messages: Vec<ChatMessage>,
+    /// Current text being typed in the input field.
     pub input: String,
+    /// History of previous commands.
     pub input_history: Vec<String>,
+    /// Current position in the input history.
     pub history_index: Option<usize>,
+    /// List of available characters for selection.
     pub characters: Vec<CharacterEntry>,
+    /// Overall UI state (Chat, Character selection, etc.).
     pub state: UIState,
+    /// Which area of the screen currently has focus.
     pub focused_pane: FocusedPane,
+    /// Previous focus, used for returning from modals.
     pub previous_focused_pane: FocusedPane,
+    /// Index of character currently selected in selection screen.
     pub selected_character_index: usize,
+    /// Index of item currently selected in the dashboard.
     pub selected_dashboard_index: usize,
+    /// Internal state for the dashboard's ratatui List widget.
     pub dashboard_list_state: ratatui::widgets::ListState,
+    /// Used to keep track of height for scrolling.
     pub last_dashboard_height: usize,
+    /// Current vertical scroll position of the chat.
     pub scroll_offset: usize,
+    /// Cached total line count for chat.
     pub chat_total_lines: usize,
+    /// Used to detect chat resizing.
     pub chat_last_total_lines: usize,
+    /// Cached total line count for context/debug view.
     pub context_total_lines: usize,
+    /// Used to detect context resizing.
     pub context_last_total_lines: usize,
+    /// Current active tab in the dashboard.
     pub dashboard_tab: DashboardTab,
+    /// Pre-wrapped lines of text for the right-hand panel.
     pub context_buffer: Vec<Line<'static>>,
+    /// Current vertical scroll position of the context panel.
     pub context_scroll_offset: usize,
+    /// What information should be displayed in the context panel.
     pub context_view: ContextView,
+    /// GUID of the entity we are currently "debugging".
     pub current_debug_guid: Option<Guid>,
+    /// State of current interaction like vendor transactions.
     pub active_interaction: Option<ActiveInteraction>,
+    /// Remembered password for potential reconnects.
     pub account_password: String,
+    /// State tracking logon attempts.
     pub logon_retry: RetryState,
+    /// State tracking world entry attempts.
     pub enter_retry: RetryState,
+    /// The internal state from the client's core networking logic.
     pub core_state: ClientState,
+    /// The current position of the player in the world.
     pub player_pos: Option<WorldPosition>,
+    /// List of active enchantments affecting the player.
     pub player_enchantments: Vec<Enchantment>,
+    /// List of spell IDs the character knows.
     pub player_spells: Vec<u32>,
+    /// Lookup table from ID to name.
     pub spell_names: HashMap<u32, String>,
+    /// Detailed spell data from dats.
     pub spell_info: HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
+    /// Shared master skill information from dats.
     pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
+    /// All game objects known to the client.
     pub entities: HashMap<Guid, Entity>,
+    /// Latest server timestamp and local time sync point.
     pub server_time: Option<(f64, Instant)>,
+    /// Handle to a local file for persistent chat logging.
     pub chat_log: Option<Mutex<File>>,
+    /// Whether to show emojis in the chat.
     pub use_emojis: bool,
+    /// Log verbosity level for system messages.
     pub verbosity: u8,
+    /// Trackers for bandwidth usage.
     pub net_stats: NetStats,
+    /// Name of the world we are on.
     pub world_name: String,
+    /// Current combat stance.
     pub combat_mode: CombatMode,
+    /// Debugging state for movement.
     pub noclip: bool,
+    /// Set of GUIDs currently owned by the player.
     pub inventory: HashSet<Guid>,
+    /// Map of GUIDs currently equipped by the player.
     pub equipment: HashMap<Guid, EquipMask>,
+    /// Cached chat rendering with color/wrap info.
     pub wrapped_chat_cache: Vec<Vec<(String, Color)>>,
+    /// Width used for the current chat cache.
     pub last_chat_width: usize,
 }
 
@@ -466,8 +522,17 @@ impl AppState {
         let mut best = CombatMode::Melee;
         for guid in self.equipment.keys() {
             if let Some(it) = self.entities.get(guid).and_then(|e| e.item_type) {
-                let name = self.entities.get(guid).map(|e| e.name.as_str()).unwrap_or("Unknown");
-                log::info!(">>> Checking equipped item {:#010X} ({}) for combat mode suggestion: {:?}", guid.0, name, it);
+                let name = self
+                    .entities
+                    .get(guid)
+                    .map(|e| e.name.as_str())
+                    .unwrap_or("Unknown");
+                log::info!(
+                    ">>> Checking equipped item {:#010X} ({}) for combat mode suggestion: {:?}",
+                    guid.0,
+                    name,
+                    it
+                );
                 if it.intersects(ItemType::CASTER) {
                     return CombatMode::Magic;
                 }

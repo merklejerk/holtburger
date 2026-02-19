@@ -27,9 +27,15 @@ const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the la
 
 pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     let (combat_color, combat_title) = match state.combat_mode {
-        holtburger_protocol::messages::combat::CombatMode::Melee => (Some(Color::LightRed), Some(" MELEE ")),
-        holtburger_protocol::messages::combat::CombatMode::Missile => (Some(Color::LightRed), Some(" MISSILE ")),
-        holtburger_protocol::messages::combat::CombatMode::Magic => (Some(Color::Cyan), Some(" MAGIC ")),
+        holtburger_protocol::messages::combat::CombatMode::Melee => {
+            (Some(Color::LightRed), Some(" MELEE "))
+        }
+        holtburger_protocol::messages::combat::CombatMode::Missile => {
+            (Some(Color::LightRed), Some(" MISSILE "))
+        }
+        holtburger_protocol::messages::combat::CombatMode::Magic => {
+            (Some(Color::Cyan), Some(" MAGIC "))
+        }
         _ => (None, None),
     };
 
@@ -41,9 +47,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         Style::default()
     };
 
-    let mut block = Block::default()
-        .borders(Borders::ALL)
-        .style(style);
+    let mut block = Block::default().borders(Borders::ALL).style(style);
 
     // Left title: Interaction Info / World Name (if needed)
     if let Some(interaction) = state.active_interaction {
@@ -52,7 +56,10 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
             InteractionMode::Healing => " Healing | [ESC] to cancel ",
             InteractionMode::Target => " Targeting | [ESC] to cancel ",
         };
-        block = block.title(ratatui::widgets::block::Title::from(Span::raw(title_text)).alignment(ratatui::layout::Alignment::Left));
+        block = block.title(
+            ratatui::widgets::block::Title::from(Span::raw(title_text))
+                .alignment(ratatui::layout::Alignment::Left),
+        );
     }
 
     // Right title: Combat Mode
@@ -190,5 +197,4 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         Paragraph::new(Line::from(net_spans)).alignment(ratatui::layout::Alignment::Right),
         chunks[3],
     );
-
 }

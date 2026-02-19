@@ -3,9 +3,9 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use holtburger_common::properties::EquipMask;
 use super::super::super::render_entity_list_item;
 use crate::ui::model::AppState;
+use holtburger_common::properties::EquipMask;
 
 pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     let items = get_list_items(state);

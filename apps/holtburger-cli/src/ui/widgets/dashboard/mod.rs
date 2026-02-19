@@ -29,17 +29,27 @@ pub fn handle_action_for_tab(
     active_interaction: Option<ActiveInteraction>,
 ) -> Option<CommandHandler> {
     match tab {
-        DashboardTab::Equip => EquipTab.handle_action(action, target, player_guid, active_interaction),
-        DashboardTab::Nearby => NearbyTab.handle_action(action, target, player_guid, active_interaction),
-        DashboardTab::Inventory => InventoryTab.handle_action(action, target, player_guid, active_interaction),
-        DashboardTab::Character => CharacterTab.handle_action(action, target, player_guid, active_interaction),
-        DashboardTab::Spells => SpellsTab.handle_action(action, target, player_guid, active_interaction),
+        DashboardTab::Equip => {
+            EquipTab.handle_action(action, target, player_guid, active_interaction)
+        }
+        DashboardTab::Nearby => {
+            NearbyTab.handle_action(action, target, player_guid, active_interaction)
+        }
+        DashboardTab::Inventory => {
+            InventoryTab.handle_action(action, target, player_guid, active_interaction)
+        }
+        DashboardTab::Character => {
+            CharacterTab.handle_action(action, target, player_guid, active_interaction)
+        }
+        DashboardTab::Spells => {
+            SpellsTab.handle_action(action, target, player_guid, active_interaction)
+        }
     }
 }
 pub mod tabs;
 
-pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab};
 pub use self::tabs::common::{Action, Verb};
+pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab};
 
 pub mod assess;
 pub mod debug;
@@ -201,8 +211,8 @@ pub fn render_entity_list_item(
 }
 
 fn get_entity_color(e: &Entity, class: self::tabs::classification::EntityClass) -> Color {
-    use holtburger_common::properties::RadarColor;
     use self::tabs::classification::EntityClass;
+    use holtburger_common::properties::RadarColor;
     if class == EntityClass::Monster {
         return Color::Red;
     }

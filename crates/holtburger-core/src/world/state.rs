@@ -729,9 +729,6 @@ impl WorldState {
                 } else {
                     data.guid
                 };
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.int_properties.insert(data.property, data.value);
-                }
                 if target_guid == self.player.guid {
                     self.player.int_properties.insert(data.property, data.value);
                     match data.property {
@@ -756,9 +753,15 @@ impl WorldState {
                         _ => {}
                     }
                     self.player.emit_derived_stats(&mut events);
+                } else if let Some(entity) = self.entities.get_mut(target_guid) {
+                    entity.int_properties.insert(data.property, data.value);
+                    if data.property == PropertyInt::CurrentWieldedLocation as u32 {
+                        entity.currently_wielded_location =
+                            Some(EquipMask::from_bits_truncate(data.value as u32));
+                    }
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     property_id: data.property,
                     value: PropertyValue::Int(data.value),
                 });

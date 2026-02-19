@@ -9,38 +9,35 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, ListItem};
 
-use self::verbs::EntityVerb;
-
-pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<EntityVerb> {
-    match tab {
-        DashboardTab::Equip => EquipTab.get_verbs(state, index),
-        DashboardTab::Nearby => NearbyTab.get_verbs(state, index),
-        DashboardTab::Inventory => InventoryTab.get_verbs(state, index),
-        DashboardTab::Character => CharacterTab.get_verbs(state, index),
-        DashboardTab::Spells => SpellsTab.get_verbs(state, index),
-    }
+pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<Verb> {
+    get_tab_controller(tab).get_verbs(state, index)
 }
+
+pub mod input;
 pub mod tabs;
 
+pub use self::tabs::common::{Action, Verb};
 pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab};
 
 pub mod assess;
-pub mod classification;
 pub mod debug;
 pub mod filter;
-pub mod verbs;
 
 pub fn get_target_at_index<'a>(
     state: &'a AppState,
     tab: DashboardTab,
     index: usize,
 ) -> CommandTarget<'a> {
+    get_tab_controller(tab).get_target_at_index(state, index)
+}
+
+pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
     match tab {
-        DashboardTab::Equip => EquipTab.get_target_at_index(state, index),
-        DashboardTab::Nearby => NearbyTab.get_target_at_index(state, index),
-        DashboardTab::Inventory => InventoryTab.get_target_at_index(state, index),
-        DashboardTab::Character => CharacterTab.get_target_at_index(state, index),
-        DashboardTab::Spells => SpellsTab.get_target_at_index(state, index),
+        DashboardTab::Equip => Box::new(EquipTab),
+        DashboardTab::Nearby => Box::new(NearbyTab),
+        DashboardTab::Inventory => Box::new(InventoryTab),
+        DashboardTab::Character => Box::new(CharacterTab),
+        DashboardTab::Spells => Box::new(SpellsTab),
     }
 }
 
@@ -141,7 +138,7 @@ pub fn render_entity_list_item(
     prefix: Option<&str>,
     is_dimmed: bool,
 ) -> ListItem<'static> {
-    use self::classification;
+    use self::tabs::classification;
     let class = classification::classify_entity(e);
     let color = get_entity_color(e, class);
     let item_style = if highlight {
@@ -185,9 +182,10 @@ pub fn render_entity_list_item(
     ListItem::new(Line::styled(text, text_style)).style(item_style)
 }
 
-fn get_entity_color(e: &Entity, class: classification::EntityClass) -> Color {
+fn get_entity_color(e: &Entity, class: self::tabs::classification::EntityClass) -> Color {
+    use self::tabs::classification::EntityClass;
     use holtburger_common::properties::RadarColor;
-    if class == classification::EntityClass::Monster {
+    if class == EntityClass::Monster {
         return Color::Red;
     }
 

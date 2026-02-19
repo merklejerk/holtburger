@@ -1,17 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 use holtburger_common::math::Quaternion;
-use holtburger_common::properties::PropertyInt;
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
 use crate::ui;
 use crate::ui::model::AppState;
-use crate::ui::types::{
-    ActiveInteraction, ChatMessageKind, CommandHandler, CommandTarget, ContextView, DashboardTab,
-    FocusedPane, InteractionMode, UIState,
-};
+use crate::ui::types::{ChatMessageKind, FocusedPane, UIState};
 use crate::ui::utils::get_adjacent_pane;
-use crate::ui::widgets::dashboard::debug;
 
 impl AppState {
     pub(super) fn handle_key_press(
@@ -23,6 +18,16 @@ impl AppState {
         _dynamic_chunk: Rect,
     ) -> Vec<ClientCommand> {
         let mut commands = Vec::new();
+
+        if matches!(self.state, UIState::Chat) && self.focused_pane == FocusedPane::Dashboard {
+            let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.dashboard_tab);
+            if let Some(mut tab_commands) = active_tab.handle_input(key, self) {
+                commands.append(&mut tab_commands);
+                self.refresh_context_buffer();
+                return commands;
+            }
+        }
+
         match key.code {
             KeyCode::Char('q') | KeyCode::Char('Q')
                 if key
@@ -54,86 +59,6 @@ impl AppState {
             }
             KeyCode::Enter => match self.state {
                 UIState::Chat => {
-                    if self.active_interaction.is_some() && self.focused_pane != FocusedPane::Input
-                    {
-                        // Find the Enter verb for the currently focused target
-                        let target = if self.focused_pane == FocusedPane::Dashboard {
-                            crate::ui::widgets::dashboard::get_target_at_index(
-                                self,
-                                self.dashboard_tab,
-                                self.selected_dashboard_index,
-                            )
-                        } else {
-                            CommandTarget::None
-                        };
-
-                        let player_guid = self.player_guid;
-                        let entity_verbs = if self.focused_pane == FocusedPane::Dashboard {
-                            crate::ui::widgets::dashboard::get_verbs_for_tab(
-                                self,
-                                self.dashboard_tab,
-                                self.selected_dashboard_index,
-                            )
-                        } else {
-                            Vec::new()
-                        };
-
-                        let handler = entity_verbs
-                            .iter()
-                            .find(|v| v.shortcut_char() == '\r')
-                            .and_then(|verb| {
-                                verb.handler(&target, player_guid, self.active_interaction)
-                            });
-
-                        if let Some(handler) = handler {
-                            match handler {
-                                CommandHandler::Command(cmd) => {
-                                    commands.push(cmd);
-                                }
-                                CommandHandler::ApplyHealing(target_guid) => {
-                                    if let Some(interaction) = self.active_interaction {
-                                        commands.push(ClientCommand::UseWithTarget {
-                                            item: interaction.guid,
-                                            target: target_guid,
-                                        });
-                                        self.active_interaction = None;
-                                    }
-                                }
-                                CommandHandler::ApplyMoving(container_guid) => {
-                                    if let Some(interaction) = self.active_interaction {
-                                        commands.push(ClientCommand::MoveItem {
-                                            item: interaction.guid,
-                                            container: container_guid,
-                                            placement: 0,
-                                        });
-                                        self.active_interaction = None;
-                                    }
-                                }
-                                CommandHandler::CancelInteraction => {
-                                    self.active_interaction = None;
-                                }
-                                CommandHandler::Target(guid) => {
-                                    self.active_interaction = Some(ActiveInteraction {
-                                        guid,
-                                        mode: InteractionMode::Target,
-                                    });
-                                }
-                                CommandHandler::Give(receiver_guid) => {
-                                    if let Some(interaction) = self.active_interaction {
-                                        commands.push(ClientCommand::GiveObjectRequest {
-                                            target: receiver_guid,
-                                            item: interaction.guid,
-                                            amount: 1, // TODO: Amount selection
-                                        });
-                                        self.active_interaction = None;
-                                    }
-                                }
-                                _ => {}
-                            }
-                            return commands;
-                        }
-                    }
-
                     if self.focused_pane == FocusedPane::Input {
                         let input = self.input.drain(..).collect::<String>();
                         if input.is_empty() {
@@ -210,9 +135,15 @@ impl AppState {
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
-                        if input == "/peace" {
+                        if input == "/combat" {
                             use holtburger_protocol::messages::combat::CombatMode;
-                            commands.push(ClientCommand::SetCombatMode(CombatMode::NonCombat));
+                            let mode = if self.combat_mode != CombatMode::NonCombat {
+                                CombatMode::NonCombat
+                            } else {
+                                self.get_suggested_combat_mode()
+                            };
+
+                            commands.push(ClientCommand::SetCombatMode(mode));
                             self.input_history.push(input.clone());
                             self.history_index = None;
                             self.focused_pane = self.previous_focused_pane;
@@ -245,7 +176,7 @@ impl AppState {
                         if input == "/help" {
                             self.log_chat(
                                 ChatMessageKind::System,
-                                "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /peace, /noclip <on|off>"
+                                "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>"
                                     .to_string(),
                             );
                             self.log_chat(
@@ -323,11 +254,7 @@ impl AppState {
                     FocusedPane::Context => {
                         self.context_scroll_offset = self.context_scroll_offset.saturating_add(1);
                     }
-                    FocusedPane::Dashboard => {
-                        if self.selected_dashboard_index > 0 {
-                            self.selected_dashboard_index -= 1;
-                        }
-                    }
+                    FocusedPane::Dashboard => {}
                     FocusedPane::Dynamic => {
                         // TODO: Handle dynamic selection scroll/cycling
                     }
@@ -358,14 +285,7 @@ impl AppState {
                     FocusedPane::Context => {
                         self.context_scroll_offset = self.context_scroll_offset.saturating_sub(1);
                     }
-                    FocusedPane::Dashboard => {
-                        let dashboard_count = self.dashboard_item_count();
-                        if dashboard_count > 0
-                            && self.selected_dashboard_index + 1 < dashboard_count
-                        {
-                            self.selected_dashboard_index += 1;
-                        }
-                    }
+                    FocusedPane::Dashboard => {}
                     FocusedPane::Dynamic => {
                         // TODO: Handle dynamic selection scroll/cycling
                     }
@@ -392,12 +312,7 @@ impl AppState {
                             self.context_scroll_offset =
                                 self.context_scroll_offset.saturating_add(step);
                         }
-                        FocusedPane::Dashboard => {
-                            let h = self.last_dashboard_height;
-                            let step = (h / 2) + 1;
-                            self.selected_dashboard_index =
-                                self.selected_dashboard_index.saturating_sub(step);
-                        }
+                        FocusedPane::Dashboard => {}
                         _ => {}
                     }
                 }
@@ -416,13 +331,7 @@ impl AppState {
                             self.context_scroll_offset =
                                 self.context_scroll_offset.saturating_sub(step);
                         }
-                        FocusedPane::Dashboard => {
-                            let h = self.last_dashboard_height;
-                            let step = (h / 2) + 1;
-                            let count = self.dashboard_item_count();
-                            self.selected_dashboard_index =
-                                (self.selected_dashboard_index + step).min(count.saturating_sub(1));
-                        }
+                        FocusedPane::Dashboard => {}
                         _ => {}
                     }
                 }
@@ -449,279 +358,12 @@ impl AppState {
                         | FocusedPane::Context
                         | FocusedPane::Dashboard
                         | FocusedPane::Dynamic => {
-                            if self.focused_pane == FocusedPane::Dashboard {
-                                match c {
-                                    '1' => {
-                                        self.dashboard_tab = DashboardTab::Nearby;
-                                        self.selected_dashboard_index = 0;
-                                        return commands;
-                                    }
-                                    '2' => {
-                                        self.dashboard_tab = DashboardTab::Inventory;
-                                        self.selected_dashboard_index = 0;
-                                        return commands;
-                                    }
-                                    '3' => {
-                                        self.dashboard_tab = DashboardTab::Character;
-                                        self.selected_dashboard_index = 0;
-                                        return commands;
-                                    }
-                                    '4' => {
-                                        self.dashboard_tab = DashboardTab::Spells;
-                                        self.selected_dashboard_index = 0;
-                                        return commands;
-                                    }
-                                    '5' => {
-                                        self.dashboard_tab = DashboardTab::Equip;
-                                        self.selected_dashboard_index = 0;
-                                        return commands;
-                                    }
-                                    _ => {}
-                                }
-                            }
-
                             match c {
                                 'x' | 'X' => {
-                                    self.context_view = ContextView::Default;
-                                    self.current_debug_guid = None;
-                                    self.refresh_context_buffer();
+                                    // dashboard input is now handled by early return.
                                 }
                                 _ => {
-                                    // Action processing
-                                    let (handler, debug_lines, target_guid, is_spell_id) = {
-                                        let target =
-                                            crate::ui::widgets::dashboard::get_target_at_index(
-                                                self,
-                                                self.dashboard_tab,
-                                                self.selected_dashboard_index,
-                                            );
-
-                                        let player_guid = self.player_guid;
-                                        let entity_verbs =
-                                            crate::ui::widgets::dashboard::get_verbs_for_tab(
-                                                self,
-                                                self.dashboard_tab,
-                                                self.selected_dashboard_index,
-                                            );
-                                        let handler = entity_verbs
-                                            .iter()
-                                            .find(|verb| {
-                                                verb.shortcut_char() == c.to_ascii_lowercase()
-                                            })
-                                            .and_then(|verb| {
-                                                verb.handler(
-                                                    &target,
-                                                    player_guid,
-                                                    self.active_interaction,
-                                                )
-                                            });
-
-                                        let (debug_lines, guid, is_spell_id) = if let Some(
-                                            CommandHandler::ToggleDebug,
-                                        ) = &handler
-                                        {
-                                            let (guid, spell_id) = match &target {
-                                                CommandTarget::Entity(e, _) => (Some(e.guid), None),
-                                                CommandTarget::Spell(id) => (None, Some(*id)),
-                                                _ => (None, None),
-                                            };
-                                            let player_info = if let CommandTarget::Entity(e, _) =
-                                                &target
-                                                && Some(e.guid) == player_guid
-                                            {
-                                                Some(debug::PlayerDebugInfo {
-                                                    attributes: &self.attributes,
-                                                    vitals: &self.vitals,
-                                                    skills: &self.skills,
-                                                    enchantments: &self.player_enchantments,
-                                                })
-                                            } else {
-                                                None
-                                            };
-
-                                            let lines = debug::get_debug_info(
-                                                &target,
-                                                |id| {
-                                                    self.entities
-                                                        .get(&id)
-                                                        .map(|e| e.name.clone())
-                                                        .or_else(|| {
-                                                            if Some(id) == player_guid {
-                                                                Some("You".to_string())
-                                                            } else {
-                                                                None
-                                                            }
-                                                        })
-                                                },
-                                                Some(&self.spell_info),
-                                                player_info,
-                                            );
-                                            (Some(lines), guid, spell_id)
-                                        } else {
-                                            (None, None, None)
-                                        };
-
-                                        (handler, debug_lines, guid, is_spell_id)
-                                    };
-
-                                    if let Some(handler) = handler {
-                                        match handler {
-                                            CommandHandler::Command(cmd) => {
-                                                if matches!(
-                                                    cmd,
-                                                    ClientCommand::CastTargetedSpell { .. }
-                                                        | ClientCommand::CastUntargetedSpell { .. }
-                                                ) {
-                                                    if !self.is_wielding_caster() {
-                                                        self.log_chat(
-                                                            ChatMessageKind::Error,
-                                                            "You must be wielding a caster to cast spells!"
-                                                                .to_string(),
-                                                        );
-                                                    } else {
-                                                        if self.combat_mode
-                                                            != holtburger_protocol::messages::combat::CombatMode::Magic
-                                                        {
-                                                            commands.push(
-                                                                ClientCommand::SetCombatMode(
-                                                                    holtburger_protocol::messages::combat::CombatMode::Magic,
-                                                                ),
-                                                            );
-                                                        }
-
-                                                        let final_cmd = if let ClientCommand::CastUntargetedSpell { spell_id } = cmd
-                                                            && let Some(guid) = self.player_guid
-                                                        {
-                                                            ClientCommand::CastTargetedSpell { target: guid, spell_id }
-                                                        } else {
-                                                            cmd
-                                                        };
-
-                                                        commands.push(final_cmd);
-                                                    }
-                                                } else {
-                                                    commands.push(cmd);
-                                                }
-                                            }
-                                            CommandHandler::ToggleDebug => {
-                                                if let Some(spell_id) = is_spell_id {
-                                                    self.context_view =
-                                                        ContextView::Spell(spell_id);
-                                                    self.context_scroll_offset = 0;
-                                                    self.refresh_context_buffer();
-                                                } else {
-                                                    self.current_debug_guid = target_guid;
-                                                    if let Some(lines) = debug_lines {
-                                                        self.context_view = ContextView::Custom;
-                                                        self.context_buffer = lines;
-                                                        self.context_scroll_offset = 0;
-                                                    }
-                                                }
-                                            }
-                                            CommandHandler::Move(guid) => {
-                                                self.active_interaction =
-                                                    Some(ui::types::ActiveInteraction {
-                                                        guid,
-                                                        mode: ui::types::InteractionMode::Moving,
-                                                    });
-                                            }
-                                            CommandHandler::Target(guid) => {
-                                                self.active_interaction =
-                                                    Some(ui::types::ActiveInteraction {
-                                                        guid,
-                                                        mode: ui::types::InteractionMode::Target,
-                                                    });
-                                            }
-                                            CommandHandler::Give(target_guid) => {
-                                                if let Some(ui::types::ActiveInteraction {
-                                                    guid: item_guid,
-                                                    mode: ui::types::InteractionMode::Moving,
-                                                }) = self.active_interaction
-                                                {
-                                                    let item_entity = self.entities.get(&item_guid);
-                                                    let amount = item_entity
-                                                        .and_then(|e| {
-                                                            e.int_properties.get(
-                                                                &(PropertyInt::StackSize as u32),
-                                                            )
-                                                        })
-                                                        .cloned()
-                                                        .unwrap_or(1);
-
-                                                    let target_entity =
-                                                        self.entities.get(&target_guid);
-                                                    let class = target_entity.map(|e| {
-                                                        crate::ui::widgets::dashboard::classification::classify_entity(e)
-                                                    });
-
-                                                    let is_self =
-                                                        Some(target_guid) == self.player_guid;
-
-                                                    if !is_self
-                                                        && matches!(
-                                                            class,
-                                                            Some(crate::ui::widgets::dashboard::classification::EntityClass::Container)
-                                                                | Some(
-                                                                    crate::ui::widgets::dashboard::classification::EntityClass::Chest,
-                                                                )
-                                                        )
-                                                    {
-                                                        commands.push(ClientCommand::MoveItem {
-                                                            item: item_guid,
-                                                            container: target_guid,
-                                                            placement: 0,
-                                                        });
-                                                    } else {
-                                                        commands.push(
-                                                            ClientCommand::GiveObjectRequest {
-                                                                target: target_guid,
-                                                                item: item_guid,
-                                                                amount,
-                                                            },
-                                                        );
-                                                    }
-                                                    self.active_interaction = None;
-                                                }
-                                            }
-                                            CommandHandler::Heal(guid) => {
-                                                self.active_interaction =
-                                                    Some(ui::types::ActiveInteraction {
-                                                        guid,
-                                                        mode: ui::types::InteractionMode::Healing,
-                                                    });
-                                            }
-                                            CommandHandler::ApplyHealing(target_guid) => {
-                                                if let Some(ui::types::ActiveInteraction {
-                                                    guid: kit_guid,
-                                                    mode: ui::types::InteractionMode::Healing,
-                                                }) = self.active_interaction
-                                                {
-                                                    commands.push(ClientCommand::UseWithTarget {
-                                                        item: kit_guid,
-                                                        target: target_guid,
-                                                    });
-                                                    self.active_interaction = None;
-                                                }
-                                            }
-                                            CommandHandler::ApplyMoving(container_guid) => {
-                                                if let Some(ui::types::ActiveInteraction {
-                                                    guid: item_guid,
-                                                    mode: ui::types::InteractionMode::Moving,
-                                                }) = self.active_interaction
-                                                {
-                                                    commands.push(ClientCommand::MoveItem {
-                                                        item: item_guid,
-                                                        container: container_guid,
-                                                        placement: 0,
-                                                    });
-                                                    self.active_interaction = None;
-                                                }
-                                            }
-                                            CommandHandler::CancelInteraction => {
-                                                self.active_interaction = None;
-                                            }
-                                        }
-                                    }
+                                    // dashboard actions are now handled by early return.
                                 }
                             }
                         }
@@ -739,9 +381,7 @@ impl AppState {
                             let max_scroll = self.context_buffer.len().saturating_sub(1);
                             self.context_scroll_offset = max_scroll;
                         }
-                        FocusedPane::Dashboard => {
-                            self.selected_dashboard_index = 0;
-                        }
+                        FocusedPane::Dashboard => {}
                         _ => {}
                     }
                 }
@@ -751,10 +391,7 @@ impl AppState {
                     match self.focused_pane {
                         FocusedPane::Chat => self.scroll_offset = 0,
                         FocusedPane::Context => self.context_scroll_offset = 0,
-                        FocusedPane::Dashboard => {
-                            let dashboard_count = self.dashboard_item_count();
-                            self.selected_dashboard_index = dashboard_count.saturating_sub(1);
-                        }
+                        FocusedPane::Dashboard => {}
                         _ => {}
                     }
                 }

@@ -43,6 +43,7 @@
 - [x] Remove `Equip` verb from inventory tab.
 - [x] Show self in nearby tab.
 - [x] Show capcity (`(x/X)`) indicators on containers.
+- [x] Popup for "retrying..." mode.
 - [~] TUI client needs major refactors.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
@@ -58,7 +59,6 @@
 - [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
-- [ ] Popup for "retrying..." mode.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

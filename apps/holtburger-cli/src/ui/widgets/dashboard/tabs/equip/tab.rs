@@ -8,7 +8,8 @@ use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::world::entity::Entity;
 
-use super::super::verbs;
+use super::super::common::VerbSet;
+use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
@@ -59,7 +60,7 @@ impl TabController for EquipTab {
         }
     }
 
-    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<verbs::EntityVerb> {
+    fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let lines = self.get_lines(state);
         let target = match lines.get(index) {
             Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::Entity(e, *slot),
@@ -67,24 +68,14 @@ impl TabController for EquipTab {
         };
 
         if let Some(interaction_verbs) =
-            verbs::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
+            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
         {
             return interaction_verbs;
         }
 
         match lines.get(index) {
             Some(EquipTabLine::Item(e, is_here, _, slot)) => {
-                let mut verbs = verbs::get_base_entity_verbs(e);
-
-                if *is_here {
-                    verbs.push(verbs::EntityVerb::Unequip);
-                } else if let Some(s) = slot {
-                    verbs.push(verbs::EntityVerb::Equip(*s));
-                }
-
-                verbs.push(verbs::EntityVerb::Drop);
-                verbs.push(verbs::EntityVerb::Debug);
-                verbs
+                verbs::get_verbs(e, *is_here, *slot)
             }
             _ => vec![],
         }

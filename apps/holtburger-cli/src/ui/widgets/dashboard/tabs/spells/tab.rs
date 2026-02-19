@@ -4,7 +4,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use super::super::verbs;
+use super::super::common::VerbSet;
+use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
@@ -50,19 +51,15 @@ impl TabController for SpellsTab {
         }
     }
 
-    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<verbs::EntityVerb> {
+    fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let target = self.get_target_at_index(state, index);
         if let Some(interaction_verbs) =
-            verbs::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
+            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
         {
             return interaction_verbs;
         }
 
-        let is_targeted = false; // By default in spellbook, cast on self or last target
-        vec![
-            verbs::EntityVerb::Cast(is_targeted),
-            verbs::EntityVerb::Debug,
-        ]
+        verbs::get_verbs(false)
     }
 
     fn get_target_at_index<'a>(&self, state: &'a AppState, index: usize) -> CommandTarget<'a> {

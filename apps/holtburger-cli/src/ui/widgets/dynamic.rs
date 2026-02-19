@@ -9,7 +9,6 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 const COMPASS_WIDTH: u16 = 11;
 const CHRONO_WIDTH: u16 = 9;
-const COMBAT_WIDTH: u16 = 11;
 const NETSTATS_WIDTH: u16 = 11;
 const SPARK_WIDTH: usize = 8;
 const SPARK_CHARS: &[&str] = &[" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
@@ -27,21 +26,44 @@ const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the la
 // Environment Constants
 
 pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
-    let style = if state.focused_pane == FocusedPane::Dynamic {
+    let (combat_color, combat_title) = match state.combat_mode {
+        holtburger_protocol::messages::combat::CombatMode::Melee => (Some(Color::LightRed), Some(" MELEE ")),
+        holtburger_protocol::messages::combat::CombatMode::Missile => (Some(Color::LightRed), Some(" MISSILE ")),
+        holtburger_protocol::messages::combat::CombatMode::Magic => (Some(Color::Cyan), Some(" MAGIC ")),
+        _ => (None, None),
+    };
+
+    let style = if let Some(color) = combat_color {
+        Style::default().fg(color).add_modifier(Modifier::BOLD)
+    } else if state.focused_pane == FocusedPane::Dynamic {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default()
     };
 
-    let mut block = Block::default().borders(Borders::ALL).border_style(style);
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .style(style);
 
+    // Left title: Interaction Info / World Name (if needed)
     if let Some(interaction) = state.active_interaction {
-        let title = match interaction.mode {
+        let title_text = match interaction.mode {
             InteractionMode::Moving => " Moving Item | [ESC] to cancel ",
             InteractionMode::Healing => " Healing | [ESC] to cancel ",
             InteractionMode::Target => " Targeting | [ESC] to cancel ",
         };
-        block = block.title(title);
+        block = block.title(ratatui::widgets::block::Title::from(Span::raw(title_text)).alignment(ratatui::layout::Alignment::Left));
+    }
+
+    // Right title: Combat Mode
+    if let Some(title_text) = combat_title {
+        block = block.title(
+            ratatui::widgets::block::Title::from(Span::styled(
+                title_text,
+                Style::default().add_modifier(Modifier::BOLD),
+            ))
+            .alignment(ratatui::layout::Alignment::Right),
+        );
     }
 
     let inner = block.inner(area);
@@ -53,8 +75,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
             Constraint::Fill(1),                // 1. Interaction Info / World Name
             Constraint::Length(COMPASS_WIDTH),  // 2. Compass
             Constraint::Length(CHRONO_WIDTH),   // 3. Chronometer
-            Constraint::Length(COMBAT_WIDTH),   // 4. Combat Mode Indicator
-            Constraint::Length(NETSTATS_WIDTH), // 5. Net Stats
+            Constraint::Length(NETSTATS_WIDTH), // 4. Net Stats
         ])
         .split(inner);
 
@@ -120,28 +141,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     };
     f.render_widget(Paragraph::new(time_str), chunks[2]);
 
-    // --- 4. Combat Mode Indicator ---
-    let combat_span = match state.combat_mode {
-        holtburger_protocol::messages::combat::CombatMode::NonCombat
-        | holtburger_protocol::messages::combat::CombatMode::Undef => {
-            Span::styled("👼 PEACE", Style::default().fg(Color::Green))
-        }
-        holtburger_protocol::messages::combat::CombatMode::Melee => {
-            Span::styled("⚔️ MELEE", Style::default().fg(Color::Red))
-        }
-        holtburger_protocol::messages::combat::CombatMode::Missile => {
-            Span::styled("🏹 MISSILE", Style::default().fg(Color::Red))
-        }
-        holtburger_protocol::messages::combat::CombatMode::Magic => {
-            Span::styled("✨ MAGIC", Style::default().fg(Color::Cyan))
-        }
-    };
-    f.render_widget(
-        Paragraph::new(Line::from(vec![combat_span, Span::raw(" ")])),
-        chunks[3],
-    );
-
-    // --- 5. Right Net Stats (Sparklines) ---
+    // --- 4. Right Net Stats (Sparklines) ---
     let mut net_spans = vec![Span::raw("📈 ")];
 
     let history_in = &state.net_stats.history_in;
@@ -188,6 +188,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
 
     f.render_widget(
         Paragraph::new(Line::from(net_spans)).alignment(ratatui::layout::Alignment::Right),
-        chunks[4],
+        chunks[3],
     );
+
 }

@@ -3,8 +3,9 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use super::super::render_entity_list_item;
-use super::super::verbs;
+use super::super::super::render_entity_list_item;
+use super::super::common::VerbSet;
+use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
@@ -50,36 +51,16 @@ impl TabController for NearbyTab {
         }
     }
 
-    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<verbs::EntityVerb> {
+    fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let target = self.get_target_at_index(state, index);
         if let Some(interaction_verbs) =
-            verbs::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
+            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
         {
             return interaction_verbs;
         }
 
         if let CommandTarget::Entity(e, _) = target {
-            let mut ent_verbs = verbs::get_base_entity_verbs(e);
-
-            // Nearby entities allow Approach and PickUp (if not stuck)
-            ent_verbs.push(verbs::EntityVerb::Approach);
-
-            use holtburger_common::properties::ObjectDescriptionFlag;
-            if !e.flags.intersects(ObjectDescriptionFlag::STUCK) {
-                ent_verbs.push(verbs::EntityVerb::PickUp);
-                if let Some(pguid) = state.player_guid
-                    && matches!(
-                        super::super::classification::classify_entity(e),
-                        super::super::classification::EntityClass::Container
-                    )
-                {
-                    ent_verbs.push(verbs::EntityVerb::MoveToSlot(pguid));
-                }
-            }
-
-            ent_verbs.push(verbs::EntityVerb::Debug);
-            ent_verbs.dedup();
-            return ent_verbs;
+            return verbs::get_verbs(e, state);
         }
 
         vec![]

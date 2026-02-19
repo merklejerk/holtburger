@@ -5,14 +5,14 @@ use ratatui::layout::Rect;
 
 use crate::ui::model::AppState;
 use crate::ui::types::CommandTarget;
-use crate::ui::widgets::dashboard::verbs::EntityVerb;
+use crate::ui::widgets::dashboard::Verb;
 
 pub trait TabController {
     /// Renders the tab's content into the given area.
     fn render(&self, f: &mut Frame, state: &mut AppState, area: Rect);
 
     /// Returns the list of available verbs for the item at the specified index.
-    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<EntityVerb>;
+    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<Verb>;
 
     /// Returns the command target (e.g. Entity, Spell) at the specified index.
     fn get_target_at_index<'a>(&self, state: &'a AppState, index: usize) -> CommandTarget<'a>;

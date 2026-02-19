@@ -4,7 +4,7 @@ use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::world::entity::Entity;
 
-use super::classification;
+use super::tabs::classification;
 
 #[derive(Clone, Copy)]
 pub enum EntityFilter {

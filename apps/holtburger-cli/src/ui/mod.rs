@@ -140,8 +140,12 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
     f.render_widget(input_para, chunks[2]);
 
     if state.focused_pane == FocusedPane::Input {
+        let input_width = state.input.as_str().width() as u16;
+        let max_visible_width = chunks[2].width.saturating_sub(2);
+        let cursor_col = input_width.min(max_visible_width);
+
         f.set_cursor(
-            chunks[2].x + state.input.as_str().width() as u16 + 1,
+            chunks[2].x + 1 + cursor_col,
             chunks[2].y + 1,
         );
     }

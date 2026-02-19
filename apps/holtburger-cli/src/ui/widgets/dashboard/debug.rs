@@ -1,4 +1,4 @@
-use super::classification;
+use super::tabs::classification;
 use crate::ui::types::CommandTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{

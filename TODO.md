@@ -8,6 +8,7 @@
 - [x] Move vitae penalty to under "vitals" group. (Done)
 - [x] Reverse direction of netpulse animation.
 - [x] When navigating the spells list in dashboard a random non-selected spell will be rendered with a blue/cyan font color for some reason. Selection style also doesn't match other tabs. (Done)
+- [x] Just color the dynamic panel frame differently depending on combat mode. (Done)
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
@@ -16,7 +17,6 @@
 - [ ] Move compass to status bar.
 - [ ] Move nework time to status bar.
 - [ ] Move netpulse and client state icon to right of input.
-- [ ] Just color the dynamic panel frame differently depending on combat mode.
 - [ ] Color portal entries purple.
 - [ ] Color all NPCs uniformly, regardless of RADAR_BLIP_COLOR.
 - [ ] Show enchantment source (caster) in enchantment debug.
@@ -40,6 +40,7 @@
 - [x] Use meta `EquipMask` flags for more intelligent equipping.
 - [x] Combine the clothing slots into Top Clothing and Bottom Clothing pseudo-slots.
 - [x] TUI gets really slow when chat buffer gets full.
+- [x] Remove `Equip` verb from inventory tab.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have synonymous slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -54,6 +55,9 @@
 - [ ] Auto-follow.
 - [ ] Show capcity (`(x/X)`) indicators on containers.
 - [ ] Show self in nearby tab.
+- [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest up there.
+- [ ] Weenie errors are just showing the first word or something in chat.
+- [ ] Add a movable cursor to the chat input.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -74,6 +78,7 @@
 - [x] Make equipped items more obvious.
 - [x] Equip tab.
 - [x] TUI very slow in `-vv` mode despite few outputs.
+- [x] Pasting into the chat is slow.
 - [ ] DC detection.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -83,6 +88,10 @@
 - [ ] Trade tab.
 - [ ] Manage in-world containers.
 - [ ] Stacking/Splitting.
+- [ ] Character creation
+- [ ] Some equipment swapping jank going on.
+- [ ] Should toggle combat off before switching weapons.
+- [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 
 ### Critical
 
@@ -92,4 +101,4 @@
 ### Investigate
 - [x] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
-
+- [ ] Do we prune entities?

@@ -172,21 +172,27 @@ impl AppState {
                 }
 
                 // Update equipment tracking
-                if let Some(mask) = entity.currently_wielded_location {
-                    if mask.is_empty() {
-                        self.equipment.remove(&guid);
-                    } else {
-                        self.equipment.insert(guid, mask);
-                    }
-                } else if let Some(&loc) = entity
-                    .int_properties
-                    .get(&(PropertyInt::CurrentWieldedLocation as u32))
+                if let Some(pguid) = self.player_guid
+                    && entity.wielder_id == Some(pguid)
                 {
-                    let mask = EquipMask::from_bits_truncate(loc as u32);
-                    if mask.is_empty() {
-                        self.equipment.remove(&guid);
+                    if let Some(mask) = entity.currently_wielded_location {
+                        if mask.is_empty() {
+                            self.equipment.remove(&guid);
+                        } else {
+                            self.equipment.insert(guid, mask);
+                        }
+                    } else if let Some(&loc) = entity
+                        .int_properties
+                        .get(&(PropertyInt::CurrentWieldedLocation as u32))
+                    {
+                        let mask = EquipMask::from_bits_truncate(loc as u32);
+                        if mask.is_empty() {
+                            self.equipment.remove(&guid);
+                        } else {
+                            self.equipment.insert(guid, mask);
+                        }
                     } else {
-                        self.equipment.insert(guid, mask);
+                        self.equipment.remove(&guid);
                     }
                 } else {
                     self.equipment.remove(&guid);

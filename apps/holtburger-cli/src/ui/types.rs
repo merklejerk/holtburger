@@ -41,9 +41,12 @@ pub enum CommandTarget<'a> {
 }
 
 #[derive(Debug)]
-pub enum CommandHandler {
+pub enum UIEffect {
     Command(ClientCommand),
-    ToggleDebug,
+    Commands(Vec<ClientCommand>),
+    Assess(Guid),
+    ActivateDebugSpell(u32),
+    ActivateDebugEntity(Guid),
     Move(Guid),
     Give(Guid),
     Heal(Guid),

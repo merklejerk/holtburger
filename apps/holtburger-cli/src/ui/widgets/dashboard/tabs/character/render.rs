@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -7,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
+use std::collections::HashMap;
 
 use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::PropertyFloat;
@@ -14,118 +13,95 @@ use holtburger_core::world::magic::get_enchantment_name;
 use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
 
-use super::super::verbs;
 use crate::ui::model::AppState;
-use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, StatType};
+use crate::ui::types::StatType;
 use crate::ui::utils::format_cost;
 
-pub struct CharacterTab;
+pub enum CharTabLine {
+    Header(&'static str),
+    Stat {
+        label: String,
+        value: String,
+        xp_cost: Option<u64>,
+        sp_cost: Option<u32>,
+        stat_type: Option<StatType>,
+        training: Option<TrainingLevel>,
+    },
+    Enchantment(Enchantment),
+    Miscellaneous(Enchantment),
+    Spacer,
+}
 
-impl TabController for CharacterTab {
-    fn render(&self, f: &mut Frame, state: &mut AppState, area: Rect) {
-        let mut bottom_area = area;
+pub fn render_character_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
+    let mut bottom_area = area;
 
-        if let Some(info) = &state.level_info {
-            let summary_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(1), Constraint::Min(0)])
-                .split(area);
+    if let Some(info) = &state.level_info {
+        let summary_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
 
-            let top_area = summary_chunks[0];
-            bottom_area = summary_chunks[1];
+        let top_area = summary_chunks[0];
+        bottom_area = summary_chunks[1];
 
-            let text = if info.xp_for_next_level > 0 {
-                format!(
-                    "{} XP until {} | {} XP unspent | {} SP",
-                    format_cost(info.xp_for_next_level.saturating_sub(info.xp_into_level)),
-                    info.level + 1,
-                    format_cost(info.unspent_xp),
-                    info.unspent_skill_points
-                )
-            } else {
-                format!(
-                    "{} total | {} XP unspent | {} SP",
-                    info.current_xp,
-                    format_cost(info.unspent_xp),
-                    info.unspent_skill_points
-                )
-            };
+        let text = if info.xp_for_next_level > 0 {
+            format!(
+                "{} XP until {} | {} XP unspent | {} SP",
+                format_cost(info.xp_for_next_level.saturating_sub(info.xp_into_level)),
+                info.level + 1,
+                format_cost(info.unspent_xp),
+                info.unspent_skill_points
+            )
+        } else {
+            format!(
+                "{} total | {} XP unspent | {} SP",
+                info.current_xp,
+                format_cost(info.unspent_xp),
+                info.unspent_skill_points
+            )
+        };
 
-            let summary = Paragraph::new(Line::from(vec![Span::styled(
-                text,
-                Style::default().fg(Color::Cyan),
-            )]));
-            f.render_widget(summary, top_area);
-        }
-
-        let items = get_stats_list_items(state);
-        let total = items.len();
-        let dashboard_list = List::new(items)
-            .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-            .highlight_symbol("> ");
-
-        state
-            .dashboard_list_state
-            .select(Some(state.selected_dashboard_index));
-        f.render_stateful_widget(dashboard_list, bottom_area, &mut state.dashboard_list_state);
-
-        // Render Scrollbar
-        let height = bottom_area.height as usize;
-        state.last_dashboard_height = height;
-
-        if total > height {
-            let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-                state
-                    .selected_dashboard_index
-                    .min(total.saturating_sub(height)),
-            );
-            f.render_stateful_widget(
-                Scrollbar::default()
-                    .orientation(ScrollbarOrientation::VerticalRight)
-                    .begin_symbol(Some("▲"))
-                    .track_symbol(Some(" "))
-                    .thumb_symbol("█")
-                    .end_symbol(Some("▼"))
-                    .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                    .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                    .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
-                bottom_area,
-                &mut scrollbar_state,
-            );
-        }
+        let summary = Paragraph::new(Line::from(vec![Span::styled(
+            text,
+            Style::default().fg(Color::Cyan),
+        )]));
+        f.render_widget(summary, top_area);
     }
 
-    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<verbs::EntityVerb> {
-        let target = self.get_target_at_index(state, index);
-        if let Some(interaction_verbs) =
-            verbs::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
-        {
-            return interaction_verbs;
-        }
+    let items = get_stats_list_items(state);
+    let total = items.len();
+    let dashboard_list = List::new(items)
+        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
+        .highlight_symbol("> ");
 
-        match target {
-            CommandTarget::Stat(_, xp_cost, sp_cost) => {
-                let mut v = Vec::new();
-                if xp_cost.is_some() {
-                    v.push(verbs::EntityVerb::LevelUp);
-                }
-                if sp_cost.is_some() {
-                    v.push(verbs::EntityVerb::Train);
-                }
-                v.push(verbs::EntityVerb::Debug);
-                v
-            }
-            _ => vec![verbs::EntityVerb::Debug],
-        }
-    }
+    state
+        .dashboard_list_state
+        .select(Some(state.selected_dashboard_index));
+    f.render_stateful_widget(dashboard_list, bottom_area, &mut state.dashboard_list_state);
 
-    fn get_target_at_index<'a>(&self, state: &'a AppState, index: usize) -> CommandTarget<'a> {
-        get_command_target_at_index(state, index).unwrap_or(CommandTarget::None)
-    }
+    // Render Scrollbar
+    let height = bottom_area.height as usize;
+    state.last_dashboard_height = height;
 
-    fn get_item_count(&self, state: &AppState) -> usize {
-        get_item_count(state)
+    if total > height {
+        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
+            state
+                .selected_dashboard_index
+                .min(total.saturating_sub(height)),
+        );
+        f.render_stateful_widget(
+            Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .track_symbol(Some(" "))
+                .thumb_symbol("█")
+                .end_symbol(Some("▼"))
+                .style(Style::default().fg(Color::Gray).bg(Color::Black))
+                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
+                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+            bottom_area,
+            &mut scrollbar_state,
+        );
     }
 }
 
@@ -288,22 +264,7 @@ fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     list_items
 }
 
-enum CharTabLine {
-    Header(&'static str),
-    Stat {
-        label: String,
-        value: String,
-        xp_cost: Option<u64>,
-        sp_cost: Option<u32>,
-        stat_type: Option<StatType>,
-        training: Option<TrainingLevel>,
-    },
-    Enchantment(Enchantment),
-    Miscellaneous(Enchantment),
-    Spacer,
-}
-
-fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
+pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     let mut lines = Vec::new();
 
     let resists_props = [
@@ -606,26 +567,6 @@ fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     }
 
     lines
-}
-
-fn get_command_target_at_index<'a>(state: &'a AppState, index: usize) -> Option<CommandTarget<'a>> {
-    let lines = get_char_tab_lines(state);
-    lines.get(index).map(|line| match line {
-        CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => {
-            CommandTarget::Enchantment(*e)
-        }
-        CharTabLine::Stat {
-            stat_type: Some(st),
-            xp_cost,
-            sp_cost,
-            ..
-        } => CommandTarget::Stat(st.clone(), *xp_cost, *sp_cost),
-        _ => CommandTarget::None,
-    })
-}
-
-fn get_item_count(state: &AppState) -> usize {
-    get_char_tab_lines(state).len()
 }
 
 fn format_duration(start: f64, duration: f64) -> String {

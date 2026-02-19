@@ -6,7 +6,7 @@ use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::super::classification::{classify_entity, get_entity_color, EntityClass};
+use super::super::classification::{EntityClass, classify_entity, get_entity_color};
 use crate::ui::model::AppState;
 use holtburger_common::properties::EquipMask;
 use holtburger_core::world::entity::Entity;
@@ -75,7 +75,10 @@ pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
-fn get_list_items(state: &AppState, container_counts: &std::collections::HashMap<holtburger_common::Guid, usize>) -> Vec<ListItem<'static>> {
+fn get_list_items(
+    state: &AppState,
+    container_counts: &std::collections::HashMap<holtburger_common::Guid, usize>,
+) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(state);
     let mut list_items = Vec::new();
 

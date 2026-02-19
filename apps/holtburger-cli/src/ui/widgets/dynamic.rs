@@ -80,11 +80,13 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
 
         f.render_widget(Paragraph::new(line), chunks[0]);
     } else {
-        let world_content = if !state.world_name.is_empty() {
-            vec![Span::raw(format!(" {} ", state.world_name))]
+        let current_char = state.character_name.as_deref().unwrap_or("Selecting...");
+        let server = if state.world_name.is_empty() {
+            "Unknown Server"
         } else {
-            vec![]
+            &state.world_name
         };
-        f.render_widget(Paragraph::new(Line::from(world_content)), chunks[0]);
+        let info = format!(" {}:{} on {} ", state.account_name, current_char, server);
+        f.render_widget(Paragraph::new(info), chunks[0]);
     }
 }

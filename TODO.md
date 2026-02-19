@@ -9,16 +9,16 @@
 - [x] Reverse direction of netpulse animation.
 - [x] When navigating the spells list in dashboard a random non-selected spell will be rendered with a blue/cyan font color for some reason. Selection style also doesn't match other tabs. (Done)
 - [x] Just color the dynamic panel frame differently depending on combat mode. (Done)
+- [x] Color portal entries purple.
+- [x] Color all NPCs uniformly, regardless of RADAR_BLIP_COLOR.
+- [x] Move netpulse and client state icon to right of input.
+- [x] Move compass to status bar.
+- [x] Move network time to status bar.
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
 - [ ] Chat tabs (Chat vs combat vs all).
 - [ ] Shift+backspace to clear chat input buffer.
-- [ ] Move compass to status bar.
-- [ ] Move nework time to status bar.
-- [ ] Move netpulse and client state icon to right of input.
-- [ ] Color portal entries purple.
-- [ ] Color all NPCs uniformly, regardless of RADAR_BLIP_COLOR.
 - [ ] Show enchantment source (caster) in enchantment debug.
 
 ### Medium
@@ -41,20 +41,21 @@
 - [x] Combine the clothing slots into Top Clothing and Bottom Clothing pseudo-slots.
 - [x] TUI gets really slow when chat buffer gets full.
 - [x] Remove `Equip` verb from inventory tab.
+- [x] Show self in nearby tab.
+- [x] Show capacity (`(x/X)`) indicators on containers.
+- [x] Popup for "retrying..." mode.
+- [~] TUI client needs major refactors.
 - [ ] Approach verb is janky.
-- [ ] All verbs should have synonymous slash chat commands.
+- [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] [C]ombine verb (crafting).
 - [ ] [U]se for Mana charges.
 - [ ] Search/filter on list tabs.
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
-- [ ] TUI client needs major refactors.
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
 - [ ] Startup is slow. Slow DAT parsing?
 - [ ] Auto-follow.
-- [ ] Show capcity (`(x/X)`) indicators on containers.
-- [ ] Show self in nearby tab.
 - [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
@@ -81,7 +82,7 @@
 - [x] Pasting into the chat is slow.
 - [x] Equipped items should still appear in Inv tab.
 - [x] Show player in nearby tab.
-- [ ] DC detection.
+- [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.

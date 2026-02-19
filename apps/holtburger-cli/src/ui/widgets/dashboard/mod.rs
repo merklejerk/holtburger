@@ -2,16 +2,11 @@ use super::super::types::{DashboardTab, FocusedPane};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
-use holtburger_core::world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, ListItem};
-
-pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<Verb> {
-    get_tab_controller(tab).get_verbs(state, index)
-}
+use ratatui::widgets::{Block, Borders};
 
 pub mod input;
 pub mod tabs;
@@ -22,6 +17,10 @@ pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab}
 pub mod assess;
 pub mod debug;
 pub mod filter;
+
+pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<Verb> {
+    get_tab_controller(tab).get_verbs(state, index)
+}
 
 pub fn get_target_at_index<'a>(
     state: &'a AppState,
@@ -125,84 +124,4 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     if let Some(action_bar) = crate::ui::utils::render_action_bar(state) {
         f.render_widget(action_bar, dashboard_inner_chunks[1]);
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn render_entity_list_item(
-    e: &Entity,
-    dist: Option<f32>,
-    depth: usize,
-    highlight: bool,
-    use_emojis: bool,
-    is_equipped: bool,
-    is_player: bool,
-    prefix: Option<&str>,
-    is_dimmed: bool,
-) -> ListItem<'static> {
-    use self::tabs::classification;
-    let class = classification::classify_entity(e);
-    let color = get_entity_color(e, class);
-    let item_style = if highlight {
-        Style::default().bg(Color::DarkGray)
-    } else {
-        Style::default()
-    };
-
-    let mut text_style = Style::default().fg(color);
-    if is_dimmed {
-        // Use a darker gray for dimmed items instead of the DIM modifier, which can bleed into scrollbars.
-        text_style = text_style.fg(Color::Gray);
-    }
-
-    let type_marker = if use_emojis {
-        class.emoji()
-    } else {
-        class.label()
-    };
-
-    let display_name = if e.name.trim().is_empty() {
-        format!("<{:08X}>", e.guid)
-    } else if is_player {
-        format!("{} (YOU)", e.name)
-    } else if is_equipped {
-        format!("{} (EQUIPPED)", e.name)
-    } else {
-        e.name.clone()
-    };
-
-    let indent = "  ".repeat(depth);
-    let pre = prefix.unwrap_or("");
-
-    let text = if let Some(d) = dist {
-        format!(
-            "{}{}[{}] {:<15} [{:.1}m]",
-            indent, pre, type_marker, display_name, d
-        )
-    } else {
-        format!("{}{}[{}] {:<15}", indent, pre, type_marker, display_name)
-    };
-
-    ListItem::new(Line::styled(text, text_style)).style(item_style)
-}
-
-fn get_entity_color(e: &Entity, class: self::tabs::classification::EntityClass) -> Color {
-    use self::tabs::classification::EntityClass;
-    use holtburger_common::properties::RadarColor;
-    if class == EntityClass::Monster {
-        return Color::Red;
-    }
-
-    if let Some(color) = e.radar_blip_color {
-        return match color {
-            RadarColor::Blue => Color::Blue,
-            RadarColor::Gold => Color::Yellow,
-            RadarColor::Purple => Color::Magenta,
-            RadarColor::Red => Color::Red,
-            RadarColor::Green => Color::Green,
-            RadarColor::Yellow => Color::Yellow,
-            _ => Color::White,
-        };
-    }
-
-    Color::White
 }

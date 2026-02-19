@@ -1,8 +1,15 @@
+use holtburger_common::Guid;
+use holtburger_core::client::types::{ClientCommand, TargetSlot};
+use holtburger_core::world::entity::Entity;
+use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
+use holtburger_protocol::messages::magic::Enchantment;
+use std::time::Instant;
+
 // Layout constants
 pub const STATUS_BAR_HEIGHT: u16 = 3;
 pub const DYNAMIC_PANEL_HEIGHT: u16 = 3;
-use holtburger_common::Guid;
 pub const INPUT_AREA_HEIGHT: u16 = 3;
+pub const PULSE_PANEL_WIDTH: u16 = 16;
 pub const MIN_MAIN_AREA_HEIGHT: u16 = 10;
 pub const WIDTH_BREAKPOINT: u16 = 150;
 
@@ -16,13 +23,11 @@ pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
 // Chat constants
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 
+// Net Pulse
+pub const NET_PULSE_HISTORY_SIZE: usize = 32;
+
 // Interaction constants
 pub const SCROLL_STEP: usize = 3;
-
-use holtburger_core::client::types::{ClientCommand, TargetSlot};
-use holtburger_core::world::entity::Entity;
-use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
-use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
 pub enum StatType {
@@ -91,6 +96,11 @@ pub struct ChatMessage {
 pub enum UIState {
     Chat,
     CharacterSelection,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Modal {
+    Retry { message: String, end_time: Instant },
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

@@ -4,6 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
+use super::super::classification::{classify_entity, get_entity_color};
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::world::entity::Entity;
@@ -82,16 +83,10 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
                 spans.push(Span::styled(
                     item.name.clone(),
-                    Style::default().fg(
-                        if let Some(color) = item
-                            .radar_blip_color
-                            .and_then(super::super::classification::radar_color_to_tui_color)
-                        {
-                            color
-                        } else {
-                            Color::White
-                        },
-                    ),
+                    Style::default().fg({
+                        let class = classify_entity(item);
+                        get_entity_color(class)
+                    }),
                 ));
 
                 list_items.push(ListItem::new(Line::from(spans)));

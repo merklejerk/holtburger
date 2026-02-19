@@ -15,7 +15,6 @@ pub enum EntityFilter {
 
 pub fn filter_entities<'a>(
     entities: &'a HashMap<Guid, Entity>,
-    _player_guid: Option<Guid>,
     inventory: &HashSet<Guid>,
     equipment: &HashMap<Guid, holtburger_common::properties::EquipMask>,
     player_pos: Option<&'a WorldPosition>,

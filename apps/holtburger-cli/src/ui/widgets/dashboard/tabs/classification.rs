@@ -1,15 +1,20 @@
 use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, WeenieType};
 use holtburger_core::world::entity::Entity;
+use ratatui::style::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EntityClass {
     Player,
     Npc,
     Monster,
-    Weapon,    // Includes shields
-    Apparel,   // Clothing, Jewelry, Chest, etc.
-    Container, // Bags, Packs
-    Item,      // General attackable but not stuck item
+    Weapon,     // Includes shields
+    Apparel,    // Clothing, Jewelry, Chest, etc.
+    Container,  // Bags, Packs
+    Item,       // General attackable but not stuck item
+    Consumable, // Food, Gems, Spell Components, Mana Stones
+    Money,      // Pyreals, Notes
+    Key,        // Keys, Lockpicks
+    Writable,   // Books, Scrolls
     Door,
     Portal,
     LifeStone,
@@ -31,6 +36,10 @@ impl EntityClass {
             EntityClass::Apparel => "👕",
             EntityClass::Container => "💼",
             EntityClass::Item => "📦️",
+            EntityClass::Consumable => "🍗",
+            EntityClass::Money => "💰",
+            EntityClass::Key => "🔑",
+            EntityClass::Writable => "📖",
             EntityClass::Door => "🚪",
             EntityClass::Portal => "🌀",
             EntityClass::LifeStone => "🪦",
@@ -51,6 +60,10 @@ impl EntityClass {
             EntityClass::Apparel => "Apparel",
             EntityClass::Container => "Container",
             EntityClass::Item => "Item",
+            EntityClass::Consumable => "Eat",
+            EntityClass::Money => "Pyreal",
+            EntityClass::Key => "Key",
+            EntityClass::Writable => "Note",
             EntityClass::Door => "Door",
             EntityClass::Portal => "Portal",
             EntityClass::LifeStone => "LifeStone",
@@ -62,19 +75,17 @@ impl EntityClass {
     }
 }
 
-pub fn radar_color_to_tui_color(
-    color: holtburger_common::properties::RadarColor,
-) -> Option<ratatui::style::Color> {
-    use holtburger_common::properties::RadarColor;
-    use ratatui::style::Color;
-    match color {
-        RadarColor::Blue => Some(Color::Blue),
-        RadarColor::Gold => Some(Color::Yellow),
-        RadarColor::Purple => Some(Color::Magenta),
-        RadarColor::Red => Some(Color::Red),
-        RadarColor::Green => Some(Color::Green),
-        RadarColor::Yellow => Some(Color::Yellow),
-        _ => None,
+pub fn get_entity_color(class: EntityClass) -> Color {
+    match class {
+        EntityClass::Player => Color::White,
+        EntityClass::Npc => Color::LightGreen,
+        EntityClass::Monster => Color::Red,
+        EntityClass::Container | EntityClass::Chest => Color::Yellow,
+        EntityClass::LifeStone => Color::Blue,
+        EntityClass::Portal => Color::LightMagenta,
+        EntityClass::Door | EntityClass::StaticObject => Color::LightYellow,
+        EntityClass::Unknown => Color::DarkGray,
+        _ => Color::White,
     }
 }
 
@@ -125,9 +136,6 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
         } else if it.intersects(ItemType::CASTER) {
             refined_class = Some(EntityClass::Wand);
         } else if it.intersects(ItemType::ARMOR | ItemType::CLOTHING | ItemType::JEWELRY) {
-            // Apparel covers non-weapon/shield wearables.
-            // For now, Shields also have ItemType::ARMOR, but we'll categorize them as Apparel
-            // unless we add specific shield detection.
             refined_class = Some(EntityClass::Apparel);
         } else if it.intersects(ItemType::CONTAINER) {
             refined_class = Some(EntityClass::Container);
@@ -135,6 +143,26 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
             refined_class = Some(EntityClass::Portal);
         } else if it.intersects(ItemType::LIFE_STONE) {
             refined_class = Some(EntityClass::LifeStone);
+        } else if it.intersects(
+            ItemType::FOOD
+                | ItemType::GEM
+                | ItemType::SPELL_COMPONENTS
+                | ItemType::MANA_STONE
+                | ItemType::CRAFT_COOKING_BASE
+                | ItemType::CRAFT_ALCHEMY_BASE
+                | ItemType::CRAFT_FLETCHING_BASE
+                | ItemType::CRAFT_ALCHEMY_INTERMEDIATE
+                | ItemType::CRAFT_FLETCHING_INTERMEDIATE,
+        ) {
+            refined_class = Some(EntityClass::Consumable);
+        } else if it.intersects(ItemType::MONEY | ItemType::PROMISSORY_NOTE) {
+            refined_class = Some(EntityClass::Money);
+        } else if it.intersects(ItemType::KEY | ItemType::LOCKABLE) {
+            refined_class = Some(EntityClass::Key);
+        } else if it.intersects(ItemType::WRITABLE) {
+            refined_class = Some(EntityClass::Writable);
+        } else if it.intersects(ItemType::TINKERING_TOOL) {
+            refined_class = Some(EntityClass::Tool);
         }
     }
 
@@ -197,6 +225,10 @@ pub fn is_targetable(entity: &Entity) -> bool {
         | EntityClass::Apparel
         | EntityClass::Container
         | EntityClass::Item
+        | EntityClass::Consumable
+        | EntityClass::Money
+        | EntityClass::Key
+        | EntityClass::Writable
         | EntityClass::Door
         | EntityClass::Portal
         | EntityClass::LifeStone

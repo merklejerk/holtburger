@@ -9,9 +9,6 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 const COMPASS_WIDTH: u16 = 11;
 const CHRONO_WIDTH: u16 = 9;
-const NETSTATS_WIDTH: u16 = 11;
-const SPARK_WIDTH: usize = 8;
-const SPARK_CHARS: &[&str] = &[" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
 // Compass Math Constants
 const COMPASS_DIRECTIONS: &[&str] = &[
@@ -79,10 +76,9 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Fill(1),                // 1. Interaction Info / World Name
-            Constraint::Length(COMPASS_WIDTH),  // 2. Compass
-            Constraint::Length(CHRONO_WIDTH),   // 3. Chronometer
-            Constraint::Length(NETSTATS_WIDTH), // 4. Net Stats
+            Constraint::Fill(1),               // 1. Interaction Info / World Name
+            Constraint::Length(COMPASS_WIDTH), // 2. Compass
+            Constraint::Length(CHRONO_WIDTH),  // 3. Chronometer
         ])
         .split(inner);
 
@@ -147,54 +143,4 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         " ⏳ --:-- ".to_string()
     };
     f.render_widget(Paragraph::new(time_str), chunks[2]);
-
-    // --- 4. Right Net Stats (Sparklines) ---
-    let mut net_spans = vec![Span::raw("📈 ")];
-
-    let history_in = &state.net_stats.history_in;
-    let history_out = &state.net_stats.history_out;
-
-    // Take at most SPARK_WIDTH elements
-    let take_in = history_in.len().min(SPARK_WIDTH);
-    let take_out = history_out.len().min(SPARK_WIDTH);
-
-    let sub_in = &history_in[history_in.len() - take_in..];
-    let sub_out = &history_out[history_out.len() - take_out..];
-
-    let max_in = sub_in.iter().max().cloned().unwrap_or(1).max(1);
-    let max_out = sub_out.iter().max().cloned().unwrap_or(1).max(1);
-
-    let max_spark_idx = SPARK_CHARS.len() as u64 - 1;
-    for i in (0..SPARK_WIDTH).rev() {
-        // Inbound (Green)
-        let in_idx_offset = SPARK_WIDTH - take_in;
-        if i >= in_idx_offset {
-            let val = sub_in[i - in_idx_offset];
-            let char_idx = (val * max_spark_idx / max_in) as usize;
-            net_spans.push(Span::styled(
-                SPARK_CHARS[char_idx.min(max_spark_idx as usize)],
-                Style::default().fg(Color::Green),
-            ));
-        } else {
-            net_spans.push(Span::raw(" "));
-        }
-
-        // Outbound (LightRed)
-        let out_idx_offset = SPARK_WIDTH - take_out;
-        if i >= out_idx_offset {
-            let val = sub_out[i - out_idx_offset];
-            let char_idx = (val * max_spark_idx / max_out) as usize;
-            net_spans.push(Span::styled(
-                SPARK_CHARS[char_idx.min(max_spark_idx as usize)],
-                Style::default().fg(Color::LightRed),
-            ));
-        } else {
-            net_spans.push(Span::raw(" "));
-        }
-    }
-
-    f.render_widget(
-        Paragraph::new(Line::from(net_spans)).alignment(ratatui::layout::Alignment::Right),
-        chunks[3],
-    );
 }

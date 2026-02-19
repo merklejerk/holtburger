@@ -1,5 +1,4 @@
 use crate::ui::AppState;
-use holtburger_core::ClientState;
 use holtburger_core::world::stats::VitalType;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -117,17 +116,9 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         ));
     }
 
-    let status_emoji = match state.core_state {
-        ClientState::Connected => "🔌",
-        ClientState::CharacterSelection(_) => "👥",
-        ClientState::EnteringWorld => "🚪",
-        ClientState::InWorld => "🌍",
-        ClientState::Disconnected => "💀",
-    };
-
     let current_char = state.character_name.as_deref().unwrap_or("Selecting...");
     let account_char = format!("{}:{}", state.account_name, current_char);
-    let other_info = format!("<{}> {} {}", pos_info, status_emoji, retry_info);
+    let other_info = format!("<{}> {}", pos_info, retry_info);
 
     let status_block = Block::default().borders(Borders::ALL).title("Status");
     let inner_status_area = status_block.inner(chunks[1]);

@@ -18,7 +18,7 @@
 - [ ] Shift+backspace to clear chat input buffer.
 - [ ] Move compass to status bar.
 - [ ] Move nework time to status bar.
-- [ ] Move netpulse and client state icon to right of input.
+- [x] Move netpulse and client state icon to right of input.
 - [ ] Show enchantment source (caster) in enchantment debug.
 
 ### Medium
@@ -81,7 +81,7 @@
 - [x] Pasting into the chat is slow.
 - [x] Equipped items should still appear in Inv tab.
 - [x] Show player in nearby tab.
-- [ ] DC detection.
+- [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.

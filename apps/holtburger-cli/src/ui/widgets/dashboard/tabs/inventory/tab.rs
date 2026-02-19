@@ -16,7 +16,6 @@ pub struct InventoryTab;
 pub fn get_entities(state: &AppState) -> Vec<(&Entity, f32, usize)> {
     filter_entities(
         &state.entities,
-        state.player_guid,
         &state.inventory,
         &state.equipment,
         state.player_pos.as_ref(),

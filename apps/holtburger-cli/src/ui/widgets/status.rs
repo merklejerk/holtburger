@@ -1,10 +1,21 @@
 use crate::ui::AppState;
-use holtburger_core::world::stats::VitalType;
+use crate::ui::widgets::vitals::render_vitals;
+use holtburger_common::time::*;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+
+const CHRONO_WIDTH: u16 = 9;
+
+// Compass Math Constants
+const COMPASS_DIRECTIONS: &[&str] = &[
+    "W  ", "WNW", "NW ", "NNW", "N  ", "NNE", "NE ", "ENE", "E  ", "ESE", "SE ", "SSE", "S  ",
+    "SSW", "SW ", "WSW",
+];
+const COMPASS_POINTS: usize = COMPASS_DIRECTIONS.len();
+const DEGREES_IN_CIRCLE: f32 = 360.0;
+const DEGREES_PER_POINT: f32 = DEGREES_IN_CIRCLE / COMPASS_POINTS as f32; // 22.5° per segment
+const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the label
 
 pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
     let chunks = Layout::default()
@@ -12,87 +23,58 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    // 1. Render Vitals (Left Half)
-    let health = state
-        .vitals
-        .values()
-        .find(|v| v.vital_type == VitalType::Health);
-    let stamina = state
-        .vitals
-        .values()
-        .find(|v| v.vital_type == VitalType::Stamina);
-    let mana = state
-        .vitals
-        .values()
-        .find(|v| v.vital_type == VitalType::Mana);
+    render_vitals(f, state, chunks[0]);
+    render_status_panel(f, state, chunks[1]);
+}
 
-    let health_str = if let Some(h) = health {
-        format!("H {}/{}", h.current, h.buffed_max)
-    } else {
-        "H --/--".to_string()
-    };
-    let stamina_str = if let Some(s) = stamina {
-        format!("S {}/{}", s.current, s.buffed_max)
-    } else {
-        "S --/--".to_string()
-    };
-    let mana_str = if let Some(m) = mana {
-        format!("M {}/{}", m.current, m.buffed_max)
-    } else {
-        "M --/--".to_string()
-    };
+fn render_status_panel(f: &mut Frame, state: &AppState, area: Rect) {
+    let status_block = Block::default().borders(Borders::ALL).title("Status");
+    let inner_status_area = status_block.inner(area);
+    f.render_widget(status_block, area);
 
-    let vitals_block = Block::default().borders(Borders::ALL).title("Vitals");
-    let inner_area = vitals_block.inner(chunks[0]);
-    f.render_widget(vitals_block, chunks[0]);
-
-    let vitals_layout = Layout::default()
+    let status_layout = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Min(20),    // Bars
-            Constraint::Length(15), // Level/XP right aligned
+            Constraint::Fill(1),                  // Account:Character
+            Constraint::Min(32),                  // Combined Coords + Compass
+            Constraint::Length(CHRONO_WIDTH + 2), // Time (Right-most)
         ])
-        .split(inner_area);
+        .split(inner_status_area);
 
-    let bars_line = Line::from(vec![
-        Span::styled(health_str, Style::default().fg(Color::Red)),
-        Span::raw(" "),
-        Span::styled(stamina_str, Style::default().fg(Color::LightGreen)),
-        Span::raw(" "),
-        Span::styled(mana_str, Style::default().fg(Color::Blue)),
-    ]);
-    f.render_widget(Paragraph::new(bars_line), vitals_layout[0]);
+    // 1. Account / Character
+    let current_char = state.character_name.as_deref().unwrap_or("Selecting...");
+    let account_char_str = format!("{}:{}", state.account_name, current_char);
+    f.render_widget(
+        Paragraph::new(account_char_str).alignment(ratatui::layout::Alignment::Left),
+        status_layout[0],
+    );
 
-    if let Some(info) = &state.level_info {
-        let mut spans = vec![Span::styled(
-            format!("Lv {}", info.level),
-            Style::default().fg(Color::Cyan),
-        )];
+    // 2. Coords + Compass
+    let retry_info = get_retry_info(state);
+    let pos_info = state
+        .player_pos
+        .as_ref()
+        .map(|pos| pos.to_world_coords().to_string_with_precision(2))
+        .unwrap_or_else(|| "0.00N, 0.00E".to_string());
+    let compass_str = get_compass_str(state);
+    let pos_compass_str = format!("{} 🧭 {},{}", retry_info, pos_info, compass_str);
+    f.render_widget(
+        Paragraph::new(pos_compass_str).alignment(ratatui::layout::Alignment::Right),
+        status_layout[1],
+    );
 
-        if info.xp_for_next_level > 0 {
-            let pct = (info.xp_into_level as f64 / info.xp_for_next_level as f64) * 100.0;
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!("({:.2}%)", pct),
-                Style::default().fg(Color::Cyan),
-            ));
-        }
+    // 3. Chronometer
+    let time_str = get_time_str(state);
+    f.render_widget(
+        Paragraph::new(time_str).alignment(ratatui::layout::Alignment::Right),
+        status_layout[2],
+    );
+}
 
-        f.render_widget(
-            Paragraph::new(Line::from(spans)).alignment(ratatui::layout::Alignment::Right),
-            vitals_layout[1],
-        );
-    }
-
-    // 2. Render Info (Right Half)
-    let pos_info = if let Some(pos) = &state.player_pos {
-        pos.to_world_coords().to_string_with_precision(2)
-    } else {
-        "0.00N, 0.00E".to_string()
-    };
-
+fn get_retry_info(state: &AppState) -> String {
     let mut retry_info = String::new();
     let now = std::time::Instant::now();
+
     if state.logon_retry.active {
         let secs = state
             .logon_retry
@@ -104,6 +86,7 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
             state.logon_retry.attempts, state.logon_retry.max_attempts, secs
         ));
     }
+
     if state.enter_retry.active {
         let secs = state
             .enter_retry
@@ -116,25 +99,37 @@ pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
         ));
     }
 
-    let current_char = state.character_name.as_deref().unwrap_or("Selecting...");
-    let account_char = format!("{}:{}", state.account_name, current_char);
-    let other_info = format!("<{}> {}", pos_info, retry_info);
+    retry_info
+}
 
-    let status_block = Block::default().borders(Borders::ALL).title("Status");
-    let inner_status_area = status_block.inner(chunks[1]);
-    f.render_widget(status_block, chunks[1]);
+fn get_compass_str(state: &AppState) -> String {
+    let heading_rad = state
+        .player_pos
+        .as_ref()
+        .map(|p| p.rotation.to_heading())
+        .unwrap_or(0.0);
+    // Normalize 0-360
+    let heading_deg =
+        (heading_rad.to_degrees() % DEGREES_IN_CIRCLE + DEGREES_IN_CIRCLE) % DEGREES_IN_CIRCLE;
+    let dir_idx = ((heading_deg + COMPASS_OFFSET) / DEGREES_PER_POINT) as usize % COMPASS_POINTS;
+    format!("{:03.0}°{}", heading_deg, COMPASS_DIRECTIONS[dir_idx])
+}
 
-    let status_layout = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(inner_status_area);
+fn get_time_str(state: &AppState) -> String {
+    if let Some((st, inst)) = state.server_time {
+        let current_server_time = st + inst.elapsed().as_secs_f64();
+        let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);
+        let ticks_per_hour_24 = DERETH_DAY_LENGTH / 24.0;
+        let hour = (chrono_ticks / ticks_per_hour_24) as u32;
+        let minute = ((chrono_ticks % ticks_per_hour_24) / (ticks_per_hour_24 / 60.0)) as u32;
 
-    f.render_widget(
-        Paragraph::new(account_char).alignment(ratatui::layout::Alignment::Left),
-        status_layout[0],
-    );
-    f.render_widget(
-        Paragraph::new(other_info).alignment(ratatui::layout::Alignment::Right),
-        status_layout[1],
-    );
+        let icon = if (6..18).contains(&hour) {
+            "☀️ "
+        } else {
+            "🌙 "
+        };
+        format!("{}{:02}:{:02} ", icon, hour, minute)
+    } else {
+        " ⏳ --:-- ".to_string()
+    }
 }

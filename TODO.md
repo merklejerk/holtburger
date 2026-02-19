@@ -11,14 +11,14 @@
 - [x] Just color the dynamic panel frame differently depending on combat mode. (Done)
 - [x] Color portal entries purple.
 - [x] Color all NPCs uniformly, regardless of RADAR_BLIP_COLOR.
+- [x] Move netpulse and client state icon to right of input.
+- [x] Move compass to status bar.
+- [x] Move nework time to status bar.
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
 - [ ] Chat tabs (Chat vs combat vs all).
 - [ ] Shift+backspace to clear chat input buffer.
-- [ ] Move compass to status bar.
-- [ ] Move nework time to status bar.
-- [x] Move netpulse and client state icon to right of input.
 - [ ] Show enchantment source (caster) in enchantment debug.
 
 ### Medium
@@ -58,6 +58,7 @@
 - [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
+- [ ] Popup for "retrying..." mode.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

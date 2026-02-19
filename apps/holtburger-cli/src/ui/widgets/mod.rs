@@ -4,3 +4,4 @@ pub mod dynamic;
 pub mod pulse;
 pub mod selection;
 pub mod status;
+pub mod vitals;

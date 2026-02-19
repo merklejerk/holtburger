@@ -20,6 +20,7 @@ pub use self::update::*;
 use self::widgets::chat::{render_chat_pane, render_context_pane};
 use self::widgets::dashboard::render_dashboard_pane;
 use self::widgets::dynamic::render_dynamic_pane;
+use self::widgets::modal::render_modal;
 use self::widgets::pulse::render_pulse_panel;
 use self::widgets::selection::render_character_selection;
 use self::widgets::status::render_status_bar;
@@ -167,7 +168,10 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
     // 4. Pulse Panel
     render_pulse_panel(f, state, input_chunks[1]);
 
-    if state.focused_pane == FocusedPane::Input {
+    // 5. Modal
+    render_modal(f, state, f.size());
+
+    if state.modal.is_none() && state.focused_pane == FocusedPane::Input {
         let display_width = display_input.width() as u16;
         f.set_cursor(input_chunks[0].x + 1 + display_width, input_chunks[0].y + 1);
     }

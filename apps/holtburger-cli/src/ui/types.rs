@@ -3,6 +3,7 @@ use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
+use std::time::Instant;
 
 // Layout constants
 pub const STATUS_BAR_HEIGHT: u16 = 3;
@@ -92,6 +93,11 @@ pub struct ChatMessage {
 pub enum UIState {
     Chat,
     CharacterSelection,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Modal {
+    Retry { message: String, end_time: Instant },
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

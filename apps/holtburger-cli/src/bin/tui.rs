@@ -219,6 +219,7 @@ async fn main() -> Result<()> {
         history_index: None,
         characters: Vec::new(),
         state: UIState::Chat,
+        modal: None,
         focused_pane: FocusedPane::Dashboard,
         previous_focused_pane: FocusedPane::Dashboard,
         selected_character_index: 0,

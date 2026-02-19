@@ -4,7 +4,7 @@ pub mod world;
 
 use crate::ui::action::AppAction;
 use crate::ui::model::AppState;
-use crate::ui::types::{ChatMessageKind, UpdateResult};
+use crate::ui::types::{ChatMessageKind, Modal, UpdateResult};
 use holtburger_core::ClientCommand;
 
 impl AppState {
@@ -79,6 +79,35 @@ impl AppState {
 
             self.net_stats.last_update = Some(now);
             result.needs_redraw = true;
+        }
+
+        // Manage Modal State for Retries
+        if self.logon_retry.active {
+            if let Some(next_time) = self.logon_retry.next_time
+                && next_time > now
+            {
+                self.modal = Some(Modal::Retry {
+                    message: "Failed to login.".to_string(),
+                    end_time: next_time,
+                });
+                result.needs_redraw = true;
+            }
+        } else if self.enter_retry.active {
+            if let Some(next_time) = self.enter_retry.next_time
+                && next_time > now
+            {
+                self.modal = Some(Modal::Retry {
+                    message: "Failed to enter world.".to_string(),
+                    end_time: next_time,
+                });
+                result.needs_redraw = true;
+            }
+        } else {
+            // If we are showing a retry modal, but retry is no longer active (attempt underway), clear it
+            if let Some(Modal::Retry { .. }) = self.modal {
+                self.modal = None;
+                result.needs_redraw = true;
+            }
         }
 
         if self.logon_retry.tick(now) {

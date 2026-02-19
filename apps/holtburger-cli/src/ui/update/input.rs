@@ -19,6 +19,18 @@ impl AppState {
     ) -> Vec<ClientCommand> {
         let mut commands = Vec::new();
 
+        // Modal blocks all input except Quit
+        if self.modal.is_some() {
+            if let KeyCode::Char('q') | KeyCode::Char('Q') = key.code
+                && key
+                    .modifiers
+                    .contains(crossterm::event::KeyModifiers::CONTROL)
+            {
+                return vec![ClientCommand::Quit];
+            }
+            return vec![];
+        }
+
         if matches!(self.state, UIState::Chat) && self.focused_pane == FocusedPane::Dashboard {
             let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.dashboard_tab);
             if let Some(mut tab_commands) = active_tab.handle_input(key, self) {
@@ -408,6 +420,10 @@ impl AppState {
         main_chunks: Vec<Rect>,
         _dynamic_chunk: Rect,
     ) -> Vec<ClientCommand> {
+        if self.modal.is_some() {
+            return Vec::new();
+        }
+
         let commands = Vec::new();
         match mouse.kind {
             MouseEventKind::ScrollUp => {

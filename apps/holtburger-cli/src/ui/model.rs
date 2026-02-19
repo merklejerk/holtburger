@@ -17,7 +17,7 @@ use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::{EquipMask, magic::Enchantment};
 
 use super::types::{
-    ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
+    ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Modal,
     UIState,
 };
 use ratatui::style::Color;
@@ -56,6 +56,8 @@ pub struct AppState {
     pub characters: Vec<CharacterEntry>,
     /// Overall UI state (Chat, Character selection, etc.).
     pub state: UIState,
+    /// Active modal (blocks input if present).
+    pub modal: Option<Modal>,
     /// Which area of the screen currently has focus.
     pub focused_pane: FocusedPane,
     /// Previous focus, used for returning from modals.

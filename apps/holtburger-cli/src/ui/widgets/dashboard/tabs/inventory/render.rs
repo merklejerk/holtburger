@@ -14,28 +14,27 @@ pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     let mut bottom_area = area;
 
     // Sticky summary line for the player's main inventory container
-    if let Some(player_guid) = state.player_guid {
-        if let Some(player_entity) = state.entities.get(&player_guid) {
-            if let Some(capacity) = player_entity.items_capacity {
-                let counts = state.get_container_counts();
-                let count = counts.get(&player_guid).cloned().unwrap_or(0);
+    if let Some(player_guid) = state.player_guid
+        && let Some(player_entity) = state.entities.get(&player_guid)
+        && let Some(capacity) = player_entity.items_capacity
+    {
+        let counts = state.get_container_counts();
+        let count = counts.get(&player_guid).cloned().unwrap_or(0);
 
-                let chunks = Layout::default()
-                    .direction(Direction::Vertical)
-                    .constraints([Constraint::Length(1), Constraint::Min(0)])
-                    .split(area);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(area);
 
-                let top_area = chunks[0];
-                bottom_area = chunks[1];
+        let top_area = chunks[0];
+        bottom_area = chunks[1];
 
-                let text = format!("Main Pack ({}/{})", count, capacity);
-                let summary = Paragraph::new(Line::from(vec![Span::styled(
-                    text,
-                    Style::default().fg(Color::Cyan),
-                )]));
-                f.render_widget(summary, top_area);
-            }
-        }
+        let text = format!("Main Pack ({}/{})", count, capacity);
+        let summary = Paragraph::new(Line::from(vec![Span::styled(
+            text,
+            Style::default().fg(Color::Cyan),
+        )]));
+        f.render_widget(summary, top_area);
     }
 
     let items = get_list_items(state);

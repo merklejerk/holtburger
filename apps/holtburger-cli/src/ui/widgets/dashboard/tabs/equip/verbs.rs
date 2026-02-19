@@ -22,7 +22,12 @@ pub fn get_verbs(e: &Entity, is_here: bool, slot: Option<TargetSlot>) -> VerbSet
         | EntityClass::Apparel
         | EntityClass::Wand
         | EntityClass::Tool
-        | EntityClass::Container => {
+        | EntityClass::Container
+        | EntityClass::Consumable
+        | EntityClass::Key
+        | EntityClass::Writable
+        | EntityClass::Money
+        | EntityClass::Item => {
             verbs.push(Verb::new(Action::Use, 'u', "Use"));
         }
         _ => {}

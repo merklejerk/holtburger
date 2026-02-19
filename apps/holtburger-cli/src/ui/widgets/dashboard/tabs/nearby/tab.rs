@@ -8,9 +8,22 @@ use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, UIEffect};
+use crate::ui::widgets::dashboard::filter::{filter_entities, EntityFilter};
 use holtburger_core::client::types::ClientCommand;
+use holtburger_core::world::entity::Entity;
 
 pub struct NearbyTab;
+
+pub fn get_entities(state: &AppState) -> Vec<(&Entity, f32, usize)> {
+    filter_entities(
+        &state.entities,
+        state.player_guid,
+        &state.inventory,
+        &state.equipment,
+        state.player_pos.as_ref(),
+        EntityFilter::World,
+    )
+}
 
 impl TabController for NearbyTab {
     fn render(&self, f: &mut Frame, state: &mut AppState, area: Rect) {
@@ -79,7 +92,7 @@ impl TabController for NearbyTab {
     }
 
     fn get_target_at_index<'a>(&self, state: &'a AppState, index: usize) -> CommandTarget<'a> {
-        let entities = state.get_filtered_nearby_tab();
+        let entities = get_entities(state);
         entities
             .get(index)
             .map(|(e, _, _)| CommandTarget::Entity(e, None))
@@ -87,6 +100,6 @@ impl TabController for NearbyTab {
     }
 
     fn get_item_count(&self, state: &AppState) -> usize {
-        state.get_filtered_nearby_tab().len()
+        get_entities(state).len()
     }
 }

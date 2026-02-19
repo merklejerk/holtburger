@@ -45,7 +45,7 @@ pub fn render_nearby_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let entities = state.get_filtered_nearby_tab();
+    let entities = super::tab::get_entities(state);
     let mut list_items = Vec::new();
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {

@@ -20,7 +20,6 @@ use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
     UIState,
 };
-use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
 use ratatui::style::Color;
 use ratatui::text::Line;
 
@@ -255,59 +254,6 @@ impl AppState {
     pub fn dashboard_item_count(&self) -> usize {
         let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.dashboard_tab);
         active_tab.get_item_count(self)
-    }
-
-    pub fn get_filtered_nearby_tab(&self) -> Vec<(&Entity, f32, usize)> {
-        filter_entities(
-            &self.entities,
-            self.player_guid,
-            &self.inventory,
-            &self.equipment,
-            self.player_pos.as_ref(),
-            EntityFilter::World,
-        )
-    }
-
-    pub fn get_filtered_inventory_tab(&self) -> Vec<(&Entity, f32, usize)> {
-        filter_entities(
-            &self.entities,
-            self.player_guid,
-            &self.inventory,
-            &self.equipment,
-            self.player_pos.as_ref(),
-            EntityFilter::Inventory,
-        )
-    }
-
-    pub fn get_effects_list_enchantments(&self) -> Vec<(&Enchantment, bool)> {
-        let mut by_category: HashMap<u16, Vec<&Enchantment>> = HashMap::new();
-        for e in &self.player_enchantments {
-            by_category.entry(e.spell_category).or_default().push(e);
-        }
-
-        let mut categories: Vec<_> = by_category.into_iter().collect();
-
-        // Sort enchantments within each category (winner first: Power -> StartTime)
-        for (_, list) in categories.iter_mut() {
-            list.sort_by(|a, b| b.compare_priority(a));
-        }
-
-        // Sort categories by the winner's mod name
-        categories.sort_by(|(_, a_list), (_, b_list)| {
-            let a_name =
-                holtburger_core::world::magic::get_enchantment_name(a_list[0], &self.spell_names);
-            let b_name =
-                holtburger_core::world::magic::get_enchantment_name(b_list[0], &self.spell_names);
-            a_name.cmp(&b_name)
-        });
-
-        let mut flattened = Vec::new();
-        for (_, list) in categories {
-            for (i, &enchant) in list.iter().enumerate() {
-                flattened.push((enchant, i > 0));
-            }
-        }
-        flattened
     }
 
     pub fn display_client_info(&mut self) {

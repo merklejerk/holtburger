@@ -263,3 +263,25 @@ fn test_private_update_combat_mode_parity() {
     msg.pack(&mut packed);
     assert_eq!(packed, fixture);
 }
+
+#[test]
+fn test_dispatch_parent_event_with_full_payload() {
+    let fixture = hex::decode("49f700000100005020030080010000000100000011030100").unwrap();
+    let mut offset = 0;
+    let msg = GameMessage::unpack(&fixture, &mut offset).expect("failed to unpack GameMessage");
+
+    if let GameMessage::ParentEvent(ref data) = msg {
+        assert_eq!(data.parent_guid.0, 0x50000001);
+        assert_eq!(data.child_guid.0, 0x80000320);
+        assert_eq!(data.location, 1);
+        assert_eq!(data.placement, 1);
+        assert_eq!(data.parent_instance_sequence, 0x311);
+        assert_eq!(data.child_position_sequence, 1);
+    } else {
+        panic!("expected ParentEvent, got {:?}", msg);
+    }
+
+    let mut packed = Vec::new();
+    msg.pack(&mut packed);
+    assert_eq!(packed, fixture);
+}

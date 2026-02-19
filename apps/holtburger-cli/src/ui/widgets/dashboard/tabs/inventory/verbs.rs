@@ -1,9 +1,34 @@
-use super::super::common::{self, Action, Verb, VerbSet};
+use super::super::classification::{self, EntityClass};
+use super::super::common::{Action, Verb, VerbSet};
 use crate::ui::model::AppState;
 use holtburger_core::world::entity::Entity;
 
 pub fn get_verbs(e: &Entity, state: &AppState) -> VerbSet {
-    let mut verbs = common::get_base_entity_verbs(e);
+    let mut verbs = vec![
+        Verb::new(Action::Assess, 'a', "Assess"),
+        Verb::new(Action::Target, 't', "Target"),
+    ];
+    let class = classification::classify_entity(e);
+
+    match class {
+        EntityClass::Npc
+        | EntityClass::Portal
+        | EntityClass::Door
+        | EntityClass::LifeStone
+        | EntityClass::Chest => {
+            verbs.push(Verb::new(Action::Use, 'u', "Use"));
+        }
+        EntityClass::Weapon
+        | EntityClass::Apparel
+        | EntityClass::Wand
+        | EntityClass::Tool
+        | EntityClass::Container => {
+            verbs.push(Verb::new(Action::Use, 'u', "Use"));
+        }
+        _ => {}
+    }
+
+    verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
 
     let is_equipped = if let (Some(pguid), Some(wielder)) = (state.player_guid, e.wielder_id) {
         pguid == wielder
@@ -15,8 +40,6 @@ pub fn get_verbs(e: &Entity, state: &AppState) -> VerbSet {
         verbs.push(Verb::new(Action::Unequip, 'q', "Unequip"));
     }
 
-    verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
-
     use holtburger_common::properties::ObjectDescriptionFlag;
     if !e
         .flags
@@ -27,7 +50,5 @@ pub fn get_verbs(e: &Entity, state: &AppState) -> VerbSet {
 
     verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
 
-    // Ensure uniqueness based on Action (not label/shortcut since they can be reused now)
-    // But actually, we just want to make sure we don't have duplicate shortcuts in the final list.
     verbs
 }

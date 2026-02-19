@@ -156,33 +156,50 @@ impl ProtocolPack for SetStateData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParentEventData {
-    pub child_guid: Guid,
     pub parent_guid: Guid,
+    pub child_guid: Guid,
     pub location: u32,
+    pub placement: u32,
+    pub parent_instance_sequence: u16,
+    pub child_position_sequence: u16,
 }
 
 impl ProtocolUnpack for ParentEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let child_guid = Guid::unpack(data, offset)?;
         let parent_guid = Guid::unpack(data, offset)?;
-        if *offset + 4 > data.len() {
+        let child_guid = Guid::unpack(data, offset)?;
+        if *offset + 12 > data.len() {
             return None;
         }
         let location = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
+        let placement = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let parent_instance_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
+        let child_position_sequence = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        *offset += 2;
         Some(ParentEventData {
-            child_guid,
             parent_guid,
+            child_guid,
             location,
+            placement,
+            parent_instance_sequence,
+            child_position_sequence,
         })
     }
 }
 
 impl ProtocolPack for ParentEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        self.child_guid.pack(buf);
         self.parent_guid.pack(buf);
+        self.child_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.location).unwrap();
+        buf.write_u32::<LittleEndian>(self.placement).unwrap();
+        buf.write_u16::<LittleEndian>(self.parent_instance_sequence)
+            .unwrap();
+        buf.write_u16::<LittleEndian>(self.child_position_sequence)
+            .unwrap();
     }
 }
 

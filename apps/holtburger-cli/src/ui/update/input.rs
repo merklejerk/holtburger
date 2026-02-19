@@ -80,9 +80,9 @@ impl AppState {
 
                         let handler = entity_verbs
                             .iter()
-                            .find(|v| v.shortcut_char() == '\r')
+                            .find(|v| v.shortcut == '\r')
                             .and_then(|verb| {
-                                verb.handler(&target, player_guid, self.active_interaction)
+                                verb.action.handler(&target, player_guid, self.active_interaction)
                             });
 
                         if let Some(handler) = handler {
@@ -210,9 +210,15 @@ impl AppState {
                             self.focused_pane = self.previous_focused_pane;
                             return commands;
                         }
-                        if input == "/peace" {
+                        if input == "/combat" {
                             use holtburger_protocol::messages::combat::CombatMode;
-                            commands.push(ClientCommand::SetCombatMode(CombatMode::NonCombat));
+                            let mode = if self.combat_mode != CombatMode::NonCombat {
+                                CombatMode::NonCombat
+                            } else {
+                                self.get_suggested_combat_mode()
+                            };
+
+                            commands.push(ClientCommand::SetCombatMode(mode));
                             self.input_history.push(input.clone());
                             self.history_index = None;
                             self.focused_pane = self.previous_focused_pane;
@@ -245,7 +251,7 @@ impl AppState {
                         if input == "/help" {
                             self.log_chat(
                                 ChatMessageKind::System,
-                                "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /peace, /noclip <on|off>"
+                                "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>"
                                     .to_string(),
                             );
                             self.log_chat(
@@ -506,10 +512,10 @@ impl AppState {
                                         let handler = entity_verbs
                                             .iter()
                                             .find(|verb| {
-                                                verb.shortcut_char() == c.to_ascii_lowercase()
+                                                verb.shortcut == c.to_ascii_lowercase()
                                             })
                                             .and_then(|verb| {
-                                                verb.handler(
+                                                verb.action.handler(
                                                     &target,
                                                     player_guid,
                                                     self.active_interaction,
@@ -651,7 +657,7 @@ impl AppState {
                                                     let target_entity =
                                                         self.entities.get(&target_guid);
                                                     let class = target_entity.map(|e| {
-                                                        crate::ui::widgets::dashboard::classification::classify_entity(e)
+                                                        crate::ui::widgets::dashboard::tabs::classification::classify_entity(e)
                                                     });
 
                                                     let is_self =
@@ -660,9 +666,9 @@ impl AppState {
                                                     if !is_self
                                                         && matches!(
                                                             class,
-                                                            Some(crate::ui::widgets::dashboard::classification::EntityClass::Container)
+                                                            Some(crate::ui::widgets::dashboard::tabs::classification::EntityClass::Container)
                                                                 | Some(
-                                                                    crate::ui::widgets::dashboard::classification::EntityClass::Chest,
+                                                                    crate::ui::widgets::dashboard::tabs::classification::EntityClass::Chest,
                                                                 )
                                                         )
                                                     {

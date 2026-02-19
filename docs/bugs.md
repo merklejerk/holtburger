@@ -28,6 +28,10 @@ This file documents bugs discovered in the ACE Server during development of Holt
 - You can cast Drain Health on yourself. The DMG:HEAL ratio starts at 0.25:2 and goes up to 0.6:0.35  so lvl 1 is the most efficient?
 
 
+## Cast with weapons.
+- So long as a you send a `SetCombatMode = Magic` action right before casting, you can cast a spell (no wand modifiers obv).
+- Also can do a melee attack with a wand a similar fashion (punch).
+
 # Investigate
 
 ## Door Noclip

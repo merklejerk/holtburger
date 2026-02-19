@@ -16,7 +16,7 @@
 - [ ] Move compass to status bar.
 - [ ] Move nework time to status bar.
 - [ ] Move netpulse and client state icon to right of input.
-- [ ] Just color the dynamic panel frame differently depending on combat mode.
+- [x] Just color the dynamic panel frame differently depending on combat mode. (Done)
 - [ ] Color portal entries purple.
 - [ ] Color all NPCs uniformly, regardless of RADAR_BLIP_COLOR.
 - [ ] Show enchantment source (caster) in enchantment debug.
@@ -54,6 +54,10 @@
 - [ ] Auto-follow.
 - [ ] Show capcity (`(x/X)`) indicators on containers.
 - [ ] Show self in nearby tab.
+- [x] Remove `Equip` verb from inventory tab.
+- [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest up there.
+- [ ] Weenie errors are just showing the first word or something in chat.
+
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -83,6 +87,10 @@
 - [ ] Trade tab.
 - [ ] Manage in-world containers.
 - [ ] Stacking/Splitting.
+- [ ] Character creation
+- [ ] Some equipment swapping jank going on.
+- [ ] Should toggle combat off before switching weapons.
+- [ ] Pasting into the chat is slow.
 
 ### Critical
 
@@ -92,4 +100,4 @@
 ### Investigate
 - [x] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
-
+- [ ] Do we prune entities?

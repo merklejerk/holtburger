@@ -3,8 +3,9 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use super::super::render_entity_list_item;
-use super::super::verbs;
+use super::super::super::render_entity_list_item;
+use super::super::common::VerbSet;
+use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
@@ -51,53 +52,16 @@ impl TabController for InventoryTab {
         }
     }
 
-    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<verbs::EntityVerb> {
+    fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let target = self.get_target_at_index(state, index);
         if let Some(interaction_verbs) =
-            verbs::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
+            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
         {
             return interaction_verbs;
         }
 
         if let CommandTarget::Entity(e, _) = target {
-            let mut ent_verbs = verbs::get_base_entity_verbs(e);
-
-            let is_equipped =
-                if let (Some(pguid), Some(wielder)) = (state.player_guid, e.wielder_id) {
-                    pguid == wielder
-                } else {
-                    false
-                };
-
-            if is_equipped {
-                ent_verbs.push(verbs::EntityVerb::Unequip);
-            } else if let Some(mask) = e.valid_locations
-                && !mask.is_empty()
-            {
-                use holtburger_common::properties::PseudoEquipMask;
-                use holtburger_core::client::types::TargetSlot;
-                let mut slot = TargetSlot::EquipMask(mask);
-                if mask.intersects(PseudoEquipMask::TOP_CLOTHES.into()) {
-                    slot = TargetSlot::TopClothes;
-                } else if mask.intersects(PseudoEquipMask::BOTTOM_CLOTHES.into()) {
-                    slot = TargetSlot::BottomClothes;
-                }
-                ent_verbs.push(verbs::EntityVerb::Equip(slot));
-            }
-
-            ent_verbs.push(verbs::EntityVerb::Drop);
-
-            use holtburger_common::properties::ObjectDescriptionFlag;
-            if !e
-                .flags
-                .intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
-            {
-                ent_verbs.push(verbs::EntityVerb::Move);
-            }
-
-            ent_verbs.push(verbs::EntityVerb::Debug);
-            ent_verbs.dedup();
-            return ent_verbs;
+            return verbs::get_verbs(e, state);
         }
 
         vec![]

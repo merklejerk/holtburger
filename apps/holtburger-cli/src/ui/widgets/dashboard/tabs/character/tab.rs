@@ -14,7 +14,8 @@ use holtburger_core::world::magic::get_enchantment_name;
 use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
 
-use super::super::verbs;
+use super::super::common::{Action, Verb, VerbSet};
+use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, StatType};
@@ -96,27 +97,19 @@ impl TabController for CharacterTab {
         }
     }
 
-    fn get_verbs(&self, state: &AppState, index: usize) -> Vec<verbs::EntityVerb> {
+    fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let target = self.get_target_at_index(state, index);
         if let Some(interaction_verbs) =
-            verbs::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
+            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
         {
             return interaction_verbs;
         }
 
         match target {
             CommandTarget::Stat(_, xp_cost, sp_cost) => {
-                let mut v = Vec::new();
-                if xp_cost.is_some() {
-                    v.push(verbs::EntityVerb::LevelUp);
-                }
-                if sp_cost.is_some() {
-                    v.push(verbs::EntityVerb::Train);
-                }
-                v.push(verbs::EntityVerb::Debug);
-                v
+                verbs::get_verbs(xp_cost.is_some(), sp_cost.is_some())
             }
-            _ => vec![verbs::EntityVerb::Debug],
+            _ => vec![Verb::new(Action::Debug, 'b', "Debug")],
         }
     }
 

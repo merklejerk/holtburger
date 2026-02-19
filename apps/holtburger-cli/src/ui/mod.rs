@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub mod action;
 pub mod model;
@@ -136,14 +136,30 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         } else {
             Style::default()
         });
-    let input_para = ratatui::widgets::Paragraph::new(state.input.as_str()).block(input_block);
+    let input_width = state.input.as_str().width() as u16;
+    let max_visible_width = chunks[2].width.saturating_sub(2);
+
+    let display_input = if input_width > max_visible_width {
+        let mut width = 0;
+        let mut start_index = state.input.len();
+        for (i, c) in state.input.char_indices().rev() {
+            let c_width = c.width().unwrap_or(0);
+            if width + c_width > max_visible_width as usize {
+                break;
+            }
+            width += c_width;
+            start_index = i;
+        }
+        &state.input[start_index..]
+    } else {
+        state.input.as_str()
+    };
+
+    let input_para = ratatui::widgets::Paragraph::new(display_input).block(input_block);
     f.render_widget(input_para, chunks[2]);
 
     if state.focused_pane == FocusedPane::Input {
-        let input_width = state.input.as_str().width() as u16;
-        let max_visible_width = chunks[2].width.saturating_sub(2);
-        let cursor_col = input_width.min(max_visible_width);
-
-        f.set_cursor(chunks[2].x + 1 + cursor_col, chunks[2].y + 1);
+        let display_width = display_input.width() as u16;
+        f.set_cursor(chunks[2].x + 1 + display_width, chunks[2].y + 1);
     }
 }

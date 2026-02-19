@@ -57,6 +57,7 @@
 - [ ] Show self in nearby tab.
 - [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest up there.
 - [ ] Weenie errors are just showing the first word or something in chat.
+- [ ] Add a movable cursor to the chat input.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

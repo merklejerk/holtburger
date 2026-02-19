@@ -46,11 +46,13 @@ pub fn render_nearby_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
 
 fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(state);
+    let container_counts = state.get_container_counts();
     let mut list_items = Vec::new();
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {
         let is_player = state.player_guid == Some(e.guid);
         let is_equipped = state.equipment.contains_key(&e.guid);
+        let container_count = container_counts.get(&e.guid).cloned();
 
         // Don't show distance for child/wielded items since they move with the parent
         let display_dist = if *depth > 0 { None } else { Some(*dist) };
@@ -65,6 +67,7 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             is_player,
             None,
             false,
+            container_count,
         ));
     }
 

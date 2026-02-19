@@ -1,3 +1,4 @@
+use self::tabs::classification::EntityClass;
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
@@ -9,10 +10,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, ListItem};
 
-pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<Verb> {
-    get_tab_controller(tab).get_verbs(state, index)
-}
-
 pub mod input;
 pub mod tabs;
 
@@ -22,6 +19,10 @@ pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab}
 pub mod assess;
 pub mod debug;
 pub mod filter;
+
+pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<Verb> {
+    get_tab_controller(tab).get_verbs(state, index)
+}
 
 pub fn get_target_at_index<'a>(
     state: &'a AppState,
@@ -138,6 +139,7 @@ pub fn render_entity_list_item(
     is_player: bool,
     prefix: Option<&str>,
     is_dimmed: bool,
+    container_count: Option<usize>,
 ) -> ListItem<'static> {
     use self::tabs::classification;
     let class = classification::classify_entity(e);
@@ -160,7 +162,7 @@ pub fn render_entity_list_item(
         class.label()
     };
 
-    let display_name = if e.name.trim().is_empty() {
+    let mut display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
     } else if is_player {
         format!("{} (YOU)", e.name)
@@ -169,6 +171,17 @@ pub fn render_entity_list_item(
     } else {
         e.name.clone()
     };
+
+    if class != EntityClass::Player {
+        if let Some(capacity) = e.items_capacity {
+            if capacity > 0 {
+                let count = container_count.unwrap_or(0);
+                display_name = format!("{} ({}/{})", display_name, count, capacity);
+            }
+        } else if let Some(count) = container_count.filter(|&c| c > 0) {
+            display_name = format!("{} ({})", display_name, count);
+        }
+    }
 
     let indent = "  ".repeat(depth);
     let pre = prefix.unwrap_or("");
@@ -185,8 +198,7 @@ pub fn render_entity_list_item(
     ListItem::new(Line::styled(text, text_style)).style(item_style)
 }
 
-fn get_entity_color(e: &Entity, class: self::tabs::classification::EntityClass) -> Color {
-    use self::tabs::classification::EntityClass;
+fn get_entity_color(e: &Entity, class: EntityClass) -> Color {
     use holtburger_common::properties::RadarColor;
     if class == EntityClass::Monster {
         return Color::Red;

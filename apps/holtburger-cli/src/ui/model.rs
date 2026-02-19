@@ -18,7 +18,7 @@ use holtburger_protocol::messages::{EquipMask, magic::Enchantment};
 
 use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Modal,
-    UIState, NET_PULSE_HISTORY_SIZE,
+    NET_PULSE_HISTORY_SIZE, UIState,
 };
 use ratatui::style::Color;
 use ratatui::text::Line;

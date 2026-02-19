@@ -151,8 +151,8 @@ impl Default for NetStats {
         Self {
             bytes_in: 0,
             bytes_out: 0,
-            history_in: vec![0; 64],
-            history_out: vec![0; 64],
+            history_in: vec![0; 32],
+            history_out: vec![0; 32],
             last_update: None,
         }
     }

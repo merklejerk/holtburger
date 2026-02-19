@@ -1,14 +1,12 @@
-use self::tabs::classification::{EntityClass, classify_entity, get_entity_color};
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
-use holtburger_core::world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, ListItem};
+use ratatui::widgets::{Block, Borders};
 
 pub mod input;
 pub mod tabs;
@@ -126,74 +124,4 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     if let Some(action_bar) = crate::ui::utils::render_action_bar(state) {
         f.render_widget(action_bar, dashboard_inner_chunks[1]);
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn render_entity_list_item(
-    e: &Entity,
-    dist: Option<f32>,
-    depth: usize,
-    highlight: bool,
-    use_emojis: bool,
-    is_equipped: bool,
-    prefix: Option<&str>,
-    is_dimmed: bool,
-    container_count: Option<usize>,
-) -> ListItem<'static> {
-    let class = classify_entity(e);
-    let color = get_entity_color(class);
-    let item_style = if highlight {
-        Style::default().bg(Color::DarkGray)
-    } else {
-        Style::default()
-    };
-
-    let mut text_style = Style::default().fg(color);
-    if is_equipped {
-        text_style = text_style.add_modifier(Modifier::BOLD);
-    }
-
-    if is_dimmed {
-        // Use a darker gray for dimmed items instead of the DIM modifier, which can bleed into scrollbars.
-        text_style = text_style.fg(Color::Gray);
-    }
-
-    let type_marker = if use_emojis {
-        class.emoji()
-    } else {
-        class.label()
-    };
-
-    let mut display_name = if e.name.trim().is_empty() {
-        format!("<{:08X}>", e.guid)
-    } else if is_equipped {
-        format!("{} (EQUIPPED)", e.name)
-    } else {
-        e.name.clone()
-    };
-
-    if class != EntityClass::Player {
-        if let Some(capacity) = e.items_capacity {
-            if capacity > 0 {
-                let count = container_count.unwrap_or(0);
-                display_name = format!("{} ({}/{})", display_name, count, capacity);
-            }
-        } else if let Some(count) = container_count.filter(|&c| c > 0) {
-            display_name = format!("{} ({})", display_name, count);
-        }
-    }
-
-    let indent = "  ".repeat(depth);
-    let pre = prefix.unwrap_or("");
-
-    let text = if let Some(d) = dist {
-        format!(
-            "{}{}[{}] {:<15} [{:.1}m]",
-            indent, pre, type_marker, display_name, d
-        )
-    } else {
-        format!("{}{}[{}] {:<15}", indent, pre, type_marker, display_name)
-    };
-
-    ListItem::new(Line::styled(text, text_style)).style(item_style)
 }

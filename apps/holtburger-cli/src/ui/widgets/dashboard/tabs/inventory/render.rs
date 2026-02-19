@@ -6,9 +6,10 @@ use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::super::super::render_entity_list_item;
+use super::super::classification::{EntityClass, classify_entity, get_entity_color};
 use crate::ui::model::AppState;
 use holtburger_common::properties::EquipMask;
+use holtburger_core::world::entity::Entity;
 
 pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     let mut bottom_area = area;
@@ -85,18 +86,68 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
 
         let container_count = container_counts.get(&e.guid).cloned();
 
-        list_items.push(render_entity_list_item(
+        list_items.push(render_inventory_item(
             e,
-            None,
             *depth,
             i == state.selected_dashboard_index,
             state.use_emojis,
             is_equipped,
-            None,
-            false,
             container_count,
         ));
     }
 
     list_items
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_inventory_item(
+    e: &Entity,
+    depth: usize,
+    highlight: bool,
+    use_emojis: bool,
+    is_equipped: bool,
+    container_count: Option<usize>,
+) -> ListItem<'static> {
+    let class = classify_entity(e);
+    let color = get_entity_color(class);
+    let item_style = if highlight {
+        Style::default().bg(Color::DarkGray)
+    } else {
+        Style::default()
+    };
+
+    let mut text_style = Style::default().fg(color);
+    if is_equipped {
+        text_style = text_style.add_modifier(Modifier::BOLD);
+    }
+
+    let type_marker = if use_emojis {
+        class.emoji()
+    } else {
+        class.label()
+    };
+
+    let mut display_name = if e.name.trim().is_empty() {
+        format!("<{:08X}>", e.guid)
+    } else if is_equipped {
+        format!("{} (EQUIPPED)", e.name)
+    } else {
+        e.name.clone()
+    };
+
+    if class != EntityClass::Player {
+        if let Some(capacity) = e.items_capacity {
+            if capacity > 0 {
+                let count = container_count.unwrap_or(0);
+                display_name = format!("{} ({}/{})", display_name, count, capacity);
+            }
+        } else if let Some(count) = container_count.filter(|&c| c > 0) {
+            display_name = format!("{} ({})", display_name, count);
+        }
+    }
+
+    let indent = "  ".repeat(depth);
+    let text = format!("{}[{}] {:<15}", indent, type_marker, display_name);
+
+    ListItem::new(Line::styled(text, text_style)).style(item_style)
 }

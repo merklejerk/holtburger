@@ -20,6 +20,7 @@ pub use self::update::*;
 use self::widgets::chat::{render_chat_pane, render_context_pane};
 use self::widgets::dashboard::render_dashboard_pane;
 use self::widgets::dynamic::render_dynamic_pane;
+use self::widgets::pulse::render_pulse_panel;
 use self::widgets::selection::render_character_selection;
 use self::widgets::status::render_status_bar;
 
@@ -115,6 +116,11 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
     }
 
     // 3. Input Area
+    let input_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(PULSE_PANEL_WIDTH)])
+        .split(chunks[2]);
+
     let input_style = if state.focused_pane == FocusedPane::Input {
         Style::default().fg(Color::Yellow)
     } else {
@@ -137,7 +143,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
             Style::default()
         });
     let input_width = state.input.as_str().width() as u16;
-    let max_visible_width = chunks[2].width.saturating_sub(2);
+    let max_visible_width = input_chunks[0].width.saturating_sub(2);
 
     let display_input = if input_width > max_visible_width {
         let mut width = 0;
@@ -156,10 +162,13 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
     };
 
     let input_para = ratatui::widgets::Paragraph::new(display_input).block(input_block);
-    f.render_widget(input_para, chunks[2]);
+    f.render_widget(input_para, input_chunks[0]);
+
+    // 4. Pulse Panel
+    render_pulse_panel(f, state, input_chunks[1]);
 
     if state.focused_pane == FocusedPane::Input {
         let display_width = display_input.width() as u16;
-        f.set_cursor(chunks[2].x + 1 + display_width, chunks[2].y + 1);
+        f.set_cursor(input_chunks[0].x + 1 + display_width, input_chunks[0].y + 1);
     }
 }

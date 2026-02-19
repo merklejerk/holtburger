@@ -48,7 +48,7 @@ fn render_status_panel(f: &mut Frame, state: &AppState, area: Rect) {
         .map(|pos| pos.to_world_coords().to_string_with_precision(2))
         .unwrap_or_else(|| "0.00N, 0.00E".to_string());
     let compass_str = get_compass_str(state);
-    let pos_compass_str = format!("{} 🧭 {},{}", retry_info, pos_info, compass_str);
+    let pos_compass_str = format!("{} 🧭 {} > {}", retry_info, pos_info, compass_str);
     f.render_widget(
         Paragraph::new(pos_compass_str).alignment(ratatui::layout::Alignment::Left),
         status_layout[0],
@@ -115,7 +115,7 @@ fn get_time_str(state: &AppState) -> String {
         let minute = ((chrono_ticks % ticks_per_hour_24) / (ticks_per_hour_24 / 60.0)) as u32;
 
         let icon = if (6..18).contains(&hour) {
-            "☀️ "
+            "🌞 "
         } else {
             "🌙 "
         };

@@ -2,6 +2,7 @@ pub mod effect;
 pub mod input;
 pub mod world;
 
+use crate::ui::NET_PULSE_HISTORY_SIZE;
 use crate::ui::action::AppAction;
 use crate::ui::model::AppState;
 use crate::ui::types::{ChatMessageKind, Modal, UpdateResult};
@@ -67,47 +68,18 @@ impl AppState {
         if now.duration_since(*last_update).as_secs() >= 1 {
             self.net_stats.history_in.push(self.net_stats.bytes_in);
             self.net_stats.bytes_in = 0;
-            if self.net_stats.history_in.len() > 64 {
+            if self.net_stats.history_in.len() > NET_PULSE_HISTORY_SIZE {
                 self.net_stats.history_in.remove(0);
             }
 
             self.net_stats.history_out.push(self.net_stats.bytes_out);
             self.net_stats.bytes_out = 0;
-            if self.net_stats.history_out.len() > 64 {
+            if self.net_stats.history_out.len() > NET_PULSE_HISTORY_SIZE {
                 self.net_stats.history_out.remove(0);
             }
 
             self.net_stats.last_update = Some(now);
             result.needs_redraw = true;
-        }
-
-        // Manage Modal State for Retries
-        if self.logon_retry.active {
-            if let Some(next_time) = self.logon_retry.next_time
-                && next_time > now
-            {
-                self.modal = Some(Modal::Retry {
-                    message: "Failed to login.".to_string(),
-                    end_time: next_time,
-                });
-                result.needs_redraw = true;
-            }
-        } else if self.enter_retry.active {
-            if let Some(next_time) = self.enter_retry.next_time
-                && next_time > now
-            {
-                self.modal = Some(Modal::Retry {
-                    message: "Failed to enter world.".to_string(),
-                    end_time: next_time,
-                });
-                result.needs_redraw = true;
-            }
-        } else {
-            // If we are showing a retry modal, but retry is no longer active (attempt underway), clear it
-            if let Some(Modal::Retry { .. }) = self.modal {
-                self.modal = None;
-                result.needs_redraw = true;
-            }
         }
 
         if self.logon_retry.tick(now) {
@@ -133,6 +105,43 @@ impl AppState {
             );
             result.commands.push(ClientCommand::EnterWorld);
             result.needs_redraw = true;
+        }
+
+        // Manage Modal State for Retries
+        if self.logon_retry.active {
+            if let Some(next_time) = self.logon_retry.next_time {
+                if next_time > now {
+                    self.modal = Some(Modal::Retry {
+                        message: "Failed to login.".to_string(),
+                        end_time: next_time,
+                    });
+                    result.needs_redraw = true;
+                } else if let Some(Modal::Retry { .. }) = self.modal {
+                    // Retry is active but the next_time has passed; clear any stale retry modal
+                    self.modal = None;
+                    result.needs_redraw = true;
+                }
+            }
+        } else if self.enter_retry.active {
+            if let Some(next_time) = self.enter_retry.next_time {
+                if next_time > now {
+                    self.modal = Some(Modal::Retry {
+                        message: "Failed to enter world.".to_string(),
+                        end_time: next_time,
+                    });
+                    result.needs_redraw = true;
+                } else if let Some(Modal::Retry { .. }) = self.modal {
+                    // Retry is active but the next_time has passed; clear any stale retry modal
+                    self.modal = None;
+                    result.needs_redraw = true;
+                }
+            }
+        } else {
+            // If we are showing a retry modal, but retry is no longer active (attempt underway), clear it
+            if let Some(Modal::Retry { .. }) = self.modal {
+                self.modal = None;
+                result.needs_redraw = true;
+            }
         }
 
         // Enforce dashboard index bounds

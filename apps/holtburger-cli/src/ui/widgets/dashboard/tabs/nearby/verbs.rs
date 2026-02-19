@@ -9,6 +9,10 @@ pub fn get_verbs(e: &Entity, state: &AppState) -> VerbSet {
         Verb::new(Action::Assess, 'a', "Assess"),
         Verb::new(Action::Target, 't', "Target"),
     ];
+    if e.wielder_id.is_some() || e.physics_parent_id.is_some() {
+        return verbs;
+    }
+
     let is_player = state.player_guid == Some(e.guid);
     let class = classification::classify_entity(e);
 
@@ -24,7 +28,12 @@ pub fn get_verbs(e: &Entity, state: &AppState) -> VerbSet {
         | EntityClass::Apparel
         | EntityClass::Wand
         | EntityClass::Tool
-        | EntityClass::Container => {
+        | EntityClass::Container
+        | EntityClass::Consumable
+        | EntityClass::Key
+        | EntityClass::Writable
+        | EntityClass::Money
+        | EntityClass::Item => {
             verbs.push(Verb::new(Action::Use, 'u', "Use"));
         }
         _ => {}

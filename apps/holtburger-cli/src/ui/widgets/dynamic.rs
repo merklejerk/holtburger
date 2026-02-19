@@ -1,26 +1,10 @@
 use crate::ui::AppState;
 use crate::ui::types::{FocusedPane, InteractionMode};
-use holtburger_common::time::*;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-
-const COMPASS_WIDTH: u16 = 11;
-const CHRONO_WIDTH: u16 = 9;
-
-// Compass Math Constants
-const COMPASS_DIRECTIONS: &[&str] = &[
-    "W  ", "WNW", "NW ", "NNW", "N  ", "NNE", "NE ", "ENE", "E  ", "ESE", "SE ", "SSE", "S  ",
-    "SSW", "SW ", "WSW",
-];
-const COMPASS_POINTS: f32 = COMPASS_DIRECTIONS.len() as f32;
-const DEGREES_IN_CIRCLE: f32 = 360.0;
-const DEGREES_PER_POINT: f32 = DEGREES_IN_CIRCLE / COMPASS_POINTS; // 22.5° per segment
-const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the label
-
-// Environment Constants
 
 pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     let (combat_color, combat_title) = match state.combat_mode {
@@ -76,9 +60,7 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Fill(1),               // 1. Interaction Info / World Name
-            Constraint::Length(COMPASS_WIDTH), // 2. Compass
-            Constraint::Length(CHRONO_WIDTH),  // 3. Chronometer
+            Constraint::Fill(1), // Interaction Info / World Name
         ])
         .split(inner);
 
@@ -105,42 +87,4 @@ pub fn render_dynamic_pane(f: &mut Frame, state: &AppState, area: Rect) {
         };
         f.render_widget(Paragraph::new(Line::from(world_content)), chunks[0]);
     }
-
-    // --- 2. Compass ---
-    let heading_rad = state
-        .player_pos
-        .as_ref()
-        .map(|p| p.rotation.to_heading())
-        .unwrap_or(0.0);
-    let mut heading_deg = heading_rad.to_degrees();
-
-    // Normalize 0-360
-    heading_deg = (heading_deg % DEGREES_IN_CIRCLE + DEGREES_IN_CIRCLE) % DEGREES_IN_CIRCLE;
-
-    let dir_idx =
-        ((heading_deg + COMPASS_OFFSET) / DEGREES_PER_POINT) as usize % COMPASS_POINTS as usize;
-
-    let compass_str = format!("🧭 {:03.0}°{}", heading_deg, COMPASS_DIRECTIONS[dir_idx]);
-    f.render_widget(Paragraph::new(compass_str), chunks[1]);
-
-    // --- 3. Chronometer ---
-    let time_str = if let Some((st, inst)) = state.server_time {
-        let current_server_time = st + inst.elapsed().as_secs_f64();
-        let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);
-
-        // Normalize 16-hour Dereth day to 24-hour "human" display
-        let ticks_per_hour_24 = DERETH_DAY_LENGTH / 24.0;
-        let hour = (chrono_ticks / ticks_per_hour_24) as u32;
-        let minute = ((chrono_ticks % ticks_per_hour_24) / (ticks_per_hour_24 / 60.0)) as u32;
-
-        let icon = if (6..18).contains(&hour) {
-            "☀️ "
-        } else {
-            "🌙 "
-        };
-        format!("{}{:02}:{:02} ", icon, hour, minute)
-    } else {
-        " ⏳ --:-- ".to_string()
-    };
-    f.render_widget(Paragraph::new(time_str), chunks[2]);
 }

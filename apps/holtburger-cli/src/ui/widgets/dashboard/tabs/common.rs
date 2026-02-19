@@ -1,13 +1,13 @@
-use super::classification::{self, EntityClass};
-use super::super::debug;
 use super::super::assess;
-use crate::ui::types::{ActiveInteraction, UIEffect, CommandTarget, InteractionMode, ContextView};
+use super::super::debug;
+use super::classification::{self, EntityClass};
+use crate::ui::model::AppState;
+use crate::ui::types::{ActiveInteraction, CommandTarget, ContextView, InteractionMode, UIEffect};
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use holtburger_core::world::entity::Entity;
 use ratatui::text::Line;
-use crate::ui::model::AppState;
 use std::borrow::Cow;
 
 pub type VerbSet = Vec<Verb>;

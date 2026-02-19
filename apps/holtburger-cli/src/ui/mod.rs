@@ -144,9 +144,6 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         let max_visible_width = chunks[2].width.saturating_sub(2);
         let cursor_col = input_width.min(max_visible_width);
 
-        f.set_cursor(
-            chunks[2].x + 1 + cursor_col,
-            chunks[2].y + 1,
-        );
+        f.set_cursor(chunks[2].x + 1 + cursor_col, chunks[2].y + 1);
     }
 }

@@ -447,14 +447,14 @@ impl AppState {
     pub fn get_suggested_combat_mode(&self) -> CombatMode {
         let mut best = CombatMode::Melee;
         for guid in self.equipment.keys() {
-            if let Some(entity) = self.entities.get(guid) {
-                if let Some(it) = entity.item_type {
-                    if it.intersects(ItemType::CASTER) {
-                        return CombatMode::Magic;
-                    }
-                    if it.intersects(ItemType::MISSILE_WEAPON) {
-                        best = CombatMode::Missile;
-                    }
+            if let Some(entity) = self.entities.get(guid)
+                && let Some(it) = entity.item_type
+            {
+                if it.intersects(ItemType::CASTER) {
+                    return CombatMode::Magic;
+                }
+                if it.intersects(ItemType::MISSILE_WEAPON) {
+                    best = CombatMode::Missile;
                 }
             }
         }

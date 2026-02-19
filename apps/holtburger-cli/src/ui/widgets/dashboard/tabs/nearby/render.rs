@@ -50,7 +50,6 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     let mut list_items = Vec::new();
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {
-        let is_player = state.player_guid == Some(e.guid);
         let is_equipped = state.equipment.contains_key(&e.guid);
         let container_count = container_counts.get(&e.guid).cloned();
 
@@ -64,7 +63,6 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             i == state.selected_dashboard_index,
             state.use_emojis,
             is_equipped,
-            is_player,
             None,
             false,
             container_count,

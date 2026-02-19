@@ -20,67 +20,122 @@ use super::types::{
     ActiveInteraction, ChatMessage, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
     UIState,
 };
-use crate::ui::traits::TabController;
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Color;
+use ratatui::text::Line;
 
 pub struct AppState {
+    /// Account name used for login.
     pub account_name: String,
+    /// Current character name once selected.
     pub character_name: Option<String>,
+    /// Unique ID of the player character.
     pub player_guid: Option<Guid>,
+    /// Info about level, luminance, and XP.
     pub level_info: Option<CharacterLevelInfo>,
+    /// Base and current values for Strength, Endurance, etc.
     pub attributes: HashMap<AttributeType, Attribute>,
+    /// Health, Stamina, and Mana values.
     pub vitals: HashMap<VitalType, Vital>,
+    /// Skills like Sword, Mace, Magic Defense.
     pub skills: HashMap<SkillType, Skill>,
+    /// Calculated damage resistance values.
     pub resistances: holtburger_core::world::stats::Resistances,
+    /// Total armor value.
     pub armor: i32,
+    /// Current vitae penalty (0.0 to 1.0, where 1.0 is no penalty).
     pub vitae: f32,
+    /// Historical chat and system messages.
     pub messages: Vec<ChatMessage>,
+    /// Current text being typed in the input field.
     pub input: String,
+    /// History of previous commands.
     pub input_history: Vec<String>,
+    /// Current position in the input history.
     pub history_index: Option<usize>,
+    /// List of available characters for selection.
     pub characters: Vec<CharacterEntry>,
+    /// Overall UI state (Chat, Character selection, etc.).
     pub state: UIState,
+    /// Which area of the screen currently has focus.
     pub focused_pane: FocusedPane,
+    /// Previous focus, used for returning from modals.
     pub previous_focused_pane: FocusedPane,
+    /// Index of character currently selected in selection screen.
     pub selected_character_index: usize,
+    /// Index of item currently selected in the dashboard.
     pub selected_dashboard_index: usize,
+    /// Internal state for the dashboard's ratatui List widget.
     pub dashboard_list_state: ratatui::widgets::ListState,
+    /// Used to keep track of height for scrolling.
     pub last_dashboard_height: usize,
+    /// Current vertical scroll position of the chat.
     pub scroll_offset: usize,
+    /// Cached total line count for chat.
     pub chat_total_lines: usize,
+    /// Used to detect chat resizing.
     pub chat_last_total_lines: usize,
+    /// Cached total line count for context/debug view.
     pub context_total_lines: usize,
+    /// Used to detect context resizing.
     pub context_last_total_lines: usize,
+    /// Current active tab in the dashboard.
     pub dashboard_tab: DashboardTab,
+    /// Pre-wrapped lines of text for the right-hand panel.
     pub context_buffer: Vec<Line<'static>>,
+    /// Current vertical scroll position of the context panel.
     pub context_scroll_offset: usize,
+    /// What information should be displayed in the context panel.
     pub context_view: ContextView,
+    /// GUID of the entity we are currently "debugging".
     pub current_debug_guid: Option<Guid>,
+    /// State of current interaction like vendor transactions.
     pub active_interaction: Option<ActiveInteraction>,
+    /// Remembered password for potential reconnects.
     pub account_password: String,
+    /// State tracking logon attempts.
     pub logon_retry: RetryState,
+    /// State tracking world entry attempts.
     pub enter_retry: RetryState,
+    /// The internal state from the client's core networking logic.
     pub core_state: ClientState,
+    /// The current position of the player in the world.
     pub player_pos: Option<WorldPosition>,
+    /// List of active enchantments affecting the player.
     pub player_enchantments: Vec<Enchantment>,
+    /// List of spell IDs the character knows.
     pub player_spells: Vec<u32>,
+    /// Lookup table from ID to name.
     pub spell_names: HashMap<u32, String>,
+    /// Detailed spell data from dats.
     pub spell_info: HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
+    /// Shared master skill information from dats.
     pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
+    /// All game objects known to the client.
     pub entities: HashMap<Guid, Entity>,
+    /// Latest server timestamp and local time sync point.
     pub server_time: Option<(f64, Instant)>,
+    /// Handle to a local file for persistent chat logging.
     pub chat_log: Option<Mutex<File>>,
+    /// Whether to show emojis in the chat.
     pub use_emojis: bool,
+    /// Log verbosity level for system messages.
     pub verbosity: u8,
+    /// Trackers for bandwidth usage.
     pub net_stats: NetStats,
+    /// Name of the world we are on.
     pub world_name: String,
+    /// Current combat stance.
     pub combat_mode: CombatMode,
+    /// Debugging state for movement.
     pub noclip: bool,
+    /// Set of GUIDs currently owned by the player.
     pub inventory: HashSet<Guid>,
+    /// Map of GUIDs currently equipped by the player.
     pub equipment: HashMap<Guid, EquipMask>,
+    /// Cached chat rendering with color/wrap info.
     pub wrapped_chat_cache: Vec<Vec<(String, Color)>>,
+    /// Width used for the current chat cache.
     pub last_chat_width: usize,
 }
 
@@ -175,66 +230,13 @@ impl AppState {
     }
 
     pub fn refresh_context_buffer(&mut self) {
-        match self.context_view {
-            ContextView::Custom => {
-                if let Some(guid) = self.current_debug_guid
-                    && let Some(entity) = self.entities.get(&guid)
-                {
-                    let target = crate::ui::types::CommandTarget::Entity(entity, None);
-                    let player_guid = self.player_guid;
-                    let entities_ref = &self.entities;
-
-                    let player_info = if Some(guid) == player_guid {
-                        Some(crate::ui::widgets::dashboard::debug::PlayerDebugInfo {
-                            attributes: &self.attributes,
-                            vitals: &self.vitals,
-                            skills: &self.skills,
-                            enchantments: &self.player_enchantments,
-                        })
-                    } else {
-                        None
-                    };
-
-                    self.context_buffer = crate::ui::widgets::dashboard::debug::get_debug_info(
-                        &target,
-                        |id| {
-                            entities_ref.get(&id).map(|e| e.name.clone()).or_else(|| {
-                                if Some(id) == player_guid {
-                                    Some("You".to_string())
-                                } else {
-                                    None
-                                }
-                            })
-                        },
-                        Some(&self.spell_info),
-                        player_info,
-                    );
-                }
-            }
-            ContextView::Assess(guid) => {
-                if let Some(entity) = self.entities.get(&guid) {
-                    self.context_buffer =
-                        crate::ui::widgets::dashboard::assess::get_assess_info(entity);
-                } else {
-                    self.context_buffer = vec![Line::from(vec![
-                        Span::styled("Error: ", Style::default().fg(Color::Red)),
-                        Span::styled("Entity data missing", Style::default().fg(Color::Gray)),
-                    ])];
-                }
-            }
-            ContextView::Spell(spell_id) => {
-                let target = crate::ui::types::CommandTarget::Spell(spell_id);
-                self.context_buffer = crate::ui::widgets::dashboard::debug::get_debug_info(
-                    &target,
-                    |_| None,
-                    Some(&self.spell_info),
-                    None,
-                );
-            }
-            ContextView::Default => {
-                self.context_buffer.clear();
-            }
+        if self.context_view == ContextView::Default {
+            self.context_buffer.clear();
+            return;
         }
+
+        let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.dashboard_tab);
+        self.context_buffer = active_tab.get_context_panel_content(self);
     }
 
     pub fn current_server_time(&self) -> f64 {
@@ -251,28 +253,8 @@ impl AppState {
     }
 
     pub fn dashboard_item_count(&self) -> usize {
-        match self.dashboard_tab {
-            DashboardTab::Nearby => {
-                use crate::ui::widgets::dashboard::NearbyTab;
-                NearbyTab.get_item_count(self)
-            }
-            DashboardTab::Inventory => {
-                use crate::ui::widgets::dashboard::InventoryTab;
-                InventoryTab.get_item_count(self)
-            }
-            DashboardTab::Equip => {
-                use crate::ui::widgets::dashboard::EquipTab;
-                EquipTab.get_item_count(self)
-            }
-            DashboardTab::Spells => {
-                use crate::ui::widgets::dashboard::SpellsTab;
-                SpellsTab.get_item_count(self)
-            }
-            DashboardTab::Character => {
-                use crate::ui::widgets::dashboard::CharacterTab;
-                CharacterTab.get_item_count(self)
-            }
-        }
+        let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.dashboard_tab);
+        active_tab.get_item_count(self)
     }
 
     pub fn get_filtered_nearby_tab(&self) -> Vec<(&Entity, f32, usize)> {
@@ -462,15 +444,24 @@ impl AppState {
         self.log_chat(ChatMessageKind::System, "═══════════════════".to_string());
     }
 
-    pub fn is_wielding_caster(&self) -> bool {
+    pub fn get_suggested_combat_mode(&self) -> CombatMode {
+        let mut best = CombatMode::Melee;
         for guid in self.equipment.keys() {
             if let Some(entity) = self.entities.get(guid)
                 && let Some(it) = entity.item_type
-                && it.intersects(ItemType::CASTER)
             {
-                return true;
+                if it.intersects(ItemType::CASTER) {
+                    return CombatMode::Magic;
+                }
+                if it.intersects(ItemType::MISSILE_WEAPON) {
+                    best = CombatMode::Missile;
+                }
             }
         }
-        false
+        best
+    }
+
+    pub fn is_wielding_caster(&self) -> bool {
+        self.get_suggested_combat_mode() == CombatMode::Magic
     }
 }

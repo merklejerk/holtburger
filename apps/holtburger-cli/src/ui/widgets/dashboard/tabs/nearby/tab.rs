@@ -8,7 +8,7 @@ use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, UIEffect};
-use crate::ui::widgets::dashboard::filter::{filter_entities, EntityFilter};
+use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::world::entity::Entity;
 

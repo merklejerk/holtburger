@@ -82,7 +82,14 @@ impl AppState {
                             .iter()
                             .find(|v| v.shortcut == '\r')
                             .and_then(|verb| {
-                                verb.action.handler(&target, player_guid, self.active_interaction)
+                                crate::ui::widgets::dashboard::handle_action_for_tab(
+                                    self,
+                                    self.dashboard_tab,
+                                    &verb.action,
+                                    &target,
+                                    player_guid,
+                                    self.active_interaction,
+                                )
                             });
 
                         if let Some(handler) = handler {
@@ -515,7 +522,10 @@ impl AppState {
                                                 verb.shortcut == c.to_ascii_lowercase()
                                             })
                                             .and_then(|verb| {
-                                                verb.action.handler(
+                                                crate::ui::widgets::dashboard::handle_action_for_tab(
+                                                    self,
+                                                    self.dashboard_tab,
+                                                    &verb.action,
                                                     &target,
                                                     player_guid,
                                                     self.active_interaction,

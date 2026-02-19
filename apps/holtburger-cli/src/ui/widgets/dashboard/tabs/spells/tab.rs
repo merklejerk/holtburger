@@ -4,11 +4,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use super::super::common::VerbSet;
+use super::super::common::{Action, VerbSet};
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
+use holtburger_common::Guid;
+use holtburger_core::client::types::ClientCommand;
 
 pub struct SpellsTab;
 
@@ -60,6 +62,34 @@ impl TabController for SpellsTab {
         }
 
         verbs::get_verbs(false)
+    }
+
+    fn handle_action(
+        &self,
+        action: &Action,
+        target: &CommandTarget,
+        player_guid: Option<Guid>,
+        active_interaction: Option<ActiveInteraction>,
+    ) -> Option<CommandHandler> {
+        match (action, target) {
+            (Action::Cast(_), CommandTarget::Spell(spell_id)) => {
+                use crate::ui::types::InteractionMode;
+                if let Some(interaction) = active_interaction
+                    && (interaction.mode == InteractionMode::Target
+                        || interaction.mode == InteractionMode::Healing)
+                {
+                    Some(CommandHandler::Command(ClientCommand::CastTargetedSpell {
+                        target: interaction.guid,
+                        spell_id: *spell_id,
+                    }))
+                } else {
+                    Some(CommandHandler::Command(ClientCommand::CastUntargetedSpell {
+                        spell_id: *spell_id,
+                    }))
+                }
+            }
+            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
+        }
     }
 
     fn get_target_at_index<'a>(&self, state: &'a AppState, index: usize) -> CommandTarget<'a> {

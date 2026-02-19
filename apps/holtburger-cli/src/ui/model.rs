@@ -228,6 +228,16 @@ impl AppState {
         *old_total = current_total;
     }
 
+    pub fn get_container_counts(&self) -> HashMap<Guid, usize> {
+        let mut counts = HashMap::new();
+        for e in self.entities.values() {
+            if let Some(cid) = e.container_id {
+                *counts.entry(cid).or_default() += 1;
+            }
+        }
+        counts
+    }
+
     pub fn refresh_context_buffer(&mut self) {
         if self.context_view == ContextView::Default {
             self.context_buffer.clear();

@@ -180,9 +180,12 @@ Signals that an object has been physically linked to another object. This primar
 
 | Type | Name | Description |
 | :--- | :--- | :--- |
-| `uint32` | `ChildGUID` | The object being linked. |
-| `uint32` | `ParentGUID` | The physical parent. |
+| `uint32` | `ParentGUID` | The physical parent (typically the creature/wielder). |
+| `uint32` | `ChildGUID` | The attached object being linked. |
 | `uint32` | `LocationID` | The attachment point/slot. |
+| `uint32` | `Placement` | Placement enum used for render/attach behavior. |
+| `uint16` | `ParentInstanceSeq` | Parent object-instance sequence. |
+| `uint16` | `ChildPositionSeq` | Child object-position sequence. |
 
 ### `0xF748` UpdatePosition (S2C)
 Sent frequently to sync object locations. Contains `PositionPack`.

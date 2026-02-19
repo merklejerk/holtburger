@@ -359,9 +359,16 @@ impl WorldState {
             }
             GameMessage::ParentEvent(data) => {
                 if let Some(entity) = self.entities.get_mut(data.child_guid) {
-                    entity.physics_parent_id = Some(data.parent_guid);
+                    entity.physics_parent_id = if data.parent_guid == Guid::NULL {
+                        None
+                    } else {
+                        Some(data.parent_guid)
+                    };
+
                     // When parented, we keep it in the entities list but it's no longer a root object in the world
-                    entity.position.landblock_id = Guid::NULL;
+                    if data.parent_guid != Guid::NULL && data.child_guid != self.player.guid {
+                        entity.position.landblock_id = Guid::NULL;
+                    }
                 }
             }
             GameMessage::PickupEvent(data) => {
@@ -1024,34 +1031,27 @@ impl WorldState {
                                 } else {
                                     Some(data.value)
                                 };
-                                if data.value != Guid::NULL {
+                                if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
-                                    if target_guid == self.player.guid {
-                                        events.extend(self.set_player_position(pos));
-                                    } else {
-                                        let old_lb = entity.position.landblock_id;
-                                        entity.position = pos;
-                                        self.scene.remove_entity(entity.guid, old_lb);
-                                    }
+                                    let old_lb = entity.position.landblock_id;
+                                    entity.position = pos;
+                                    self.scene.remove_entity(entity.guid, old_lb);
                                 }
                             }
                             PropertyInstanceId::Wielder => {
                                 entity.wielder_id = if data.value == Guid::NULL {
+                                    entity.physics_parent_id = None;
                                     None
                                 } else {
                                     Some(data.value)
                                 };
-                                if data.value != Guid::NULL {
+                                if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
-                                    if target_guid == self.player.guid {
-                                        events.extend(self.set_player_position(pos));
-                                    } else {
-                                        let old_lb = entity.position.landblock_id;
-                                        entity.position = pos;
-                                        self.scene.remove_entity(entity.guid, old_lb);
-                                    }
+                                    let old_lb = entity.position.landblock_id;
+                                    entity.position = pos;
+                                    self.scene.remove_entity(entity.guid, old_lb);
                                 }
                             }
                             _ => {}
@@ -1084,34 +1084,27 @@ impl WorldState {
                                 } else {
                                     Some(data.value)
                                 };
-                                if data.value != Guid::NULL {
+                                if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
-                                    if target_guid == self.player.guid {
-                                        events.extend(self.set_player_position(pos));
-                                    } else {
-                                        let old_lb = entity.position.landblock_id;
-                                        entity.position = pos;
-                                        self.scene.remove_entity(entity.guid, old_lb);
-                                    }
+                                    let old_lb = entity.position.landblock_id;
+                                    entity.position = pos;
+                                    self.scene.remove_entity(entity.guid, old_lb);
                                 }
                             }
                             PropertyInstanceId::Wielder => {
                                 entity.wielder_id = if data.value == Guid::NULL {
+                                    entity.physics_parent_id = None;
                                     None
                                 } else {
                                     Some(data.value)
                                 };
-                                if data.value != Guid::NULL {
+                                if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
-                                    if target_guid == self.player.guid {
-                                        events.extend(self.set_player_position(pos));
-                                    } else {
-                                        let old_lb = entity.position.landblock_id;
-                                        entity.position = pos;
-                                        self.scene.remove_entity(entity.guid, old_lb);
-                                    }
+                                    let old_lb = entity.position.landblock_id;
+                                    entity.position = pos;
+                                    self.scene.remove_entity(entity.guid, old_lb);
                                 }
                             }
                             _ => {}
@@ -1635,5 +1628,85 @@ mod tests {
 
         assert_eq!(state.player.guid, player_guid);
         assert_eq!(state.player.name, player_name);
+    }
+
+    #[test]
+    fn test_parent_event_does_not_null_player_landblock() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000001);
+        let initial_pos = WorldPosition {
+            landblock_id: Guid(0xDA55001C),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+
+        state.player.guid = player_guid;
+        state.player.position = initial_pos;
+        state
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), initial_pos));
+
+        let msg = GameMessage::ParentEvent(Box::new(ParentEventData {
+            parent_guid: Guid(0x8000031B),
+            child_guid: player_guid,
+            location: 1,
+            placement: 1,
+            parent_instance_sequence: 0,
+            child_position_sequence: 0,
+        }));
+
+        state.handle_message(&msg);
+
+        assert_eq!(state.player.position.landblock_id, initial_pos.landblock_id);
+        assert_eq!(
+            state
+                .entities
+                .get(player_guid)
+                .unwrap()
+                .position
+                .landblock_id,
+            initial_pos.landblock_id
+        );
+    }
+
+    #[test]
+    fn test_player_wielder_iid_update_keeps_position() {
+        let mut state = WorldState::new(None, None);
+        let player_guid = Guid(0x50000001);
+        let initial_pos = WorldPosition {
+            landblock_id: Guid(0xDA55001C),
+            coords: Vector3::new(1.0, 2.0, 3.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        };
+
+        state.player.guid = player_guid;
+        state.player.position = initial_pos;
+        state
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), initial_pos));
+
+        let msg = GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
+            sequence: 0,
+            guid: player_guid,
+            property: PropertyInstanceId::Wielder as u32,
+            value: Guid(0x8000031B),
+        }));
+
+        state.handle_message(&msg);
+
+        assert_eq!(state.player.position.landblock_id, initial_pos.landblock_id);
+        assert_eq!(
+            state
+                .entities
+                .get(player_guid)
+                .unwrap()
+                .position
+                .landblock_id,
+            initial_pos.landblock_id
+        );
+        assert_eq!(
+            state.entities.get(player_guid).unwrap().wielder_id,
+            Some(Guid(0x8000031B))
+        );
     }
 }

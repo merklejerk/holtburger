@@ -55,7 +55,7 @@
 - [ ] Auto-follow.
 - [ ] Show capcity (`(x/X)`) indicators on containers.
 - [ ] Show self in nearby tab.
-- [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest up there.
+- [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
 
@@ -79,6 +79,8 @@
 - [x] Equip tab.
 - [x] TUI very slow in `-vv` mode despite few outputs.
 - [x] Pasting into the chat is slow.
+- [x] Equipped items should still appear in Inv tab.
+- [x] Show player in nearby tab.
 - [ ] DC detection.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.

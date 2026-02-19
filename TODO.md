@@ -92,6 +92,7 @@
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
+- [ ] Equipped items should still appear in Inv tab.
 
 ### Critical
 

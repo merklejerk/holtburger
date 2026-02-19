@@ -2,11 +2,11 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use holtburger_common::Guid;
-use holtburger_core::client::types::{ClientCommand};
+use holtburger_core::client::types::ClientCommand;
 
 use super::super::common::{Action, VerbSet};
+use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use super::verbs;
-use super::render::{render_equip_tab, get_lines, EquipTabLine};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
@@ -25,16 +25,16 @@ impl TabController for EquipTab {
             _ => CommandTarget::None,
         };
 
-        if let Some(interaction_verbs) =
-            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
-        {
+        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
+            &target,
+            state.player_guid,
+            state.active_interaction,
+        ) {
             return interaction_verbs;
         }
 
         match lines.get(index) {
-            Some(EquipTabLine::Item(e, is_here, _, slot)) => {
-                verbs::get_verbs(e, *is_here, *slot)
-            }
+            Some(EquipTabLine::Item(e, is_here, _, slot)) => verbs::get_verbs(e, *is_here, *slot),
             _ => vec![],
         }
     }
@@ -60,7 +60,12 @@ impl TabController for EquipTab {
                     placement: 0,
                 })
             }),
-            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
+            _ => super::super::common::handle_base_action(
+                action,
+                target,
+                player_guid,
+                active_interaction,
+            ),
         }
     }
 

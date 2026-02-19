@@ -2,8 +2,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::common::{Action, VerbSet};
-use super::verbs;
 use super::render::render_spells_tab;
+use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
@@ -19,9 +19,11 @@ impl TabController for SpellsTab {
 
     fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let target = self.get_target_at_index(state, index);
-        if let Some(interaction_verbs) =
-            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
-        {
+        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
+            &target,
+            state.player_guid,
+            state.active_interaction,
+        ) {
             return interaction_verbs;
         }
 
@@ -47,12 +49,19 @@ impl TabController for SpellsTab {
                         spell_id: *spell_id,
                     }))
                 } else {
-                    Some(CommandHandler::Command(ClientCommand::CastUntargetedSpell {
-                        spell_id: *spell_id,
-                    }))
+                    Some(CommandHandler::Command(
+                        ClientCommand::CastUntargetedSpell {
+                            spell_id: *spell_id,
+                        },
+                    ))
                 }
             }
-            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
+            _ => super::super::common::handle_base_action(
+                action,
+                target,
+                player_guid,
+                active_interaction,
+            ),
         }
     }
 

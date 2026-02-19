@@ -1,6 +1,6 @@
 use super::super::common::{self, Action, Verb, VerbSet};
-use holtburger_core::world::entity::Entity;
 use holtburger_core::client::types::TargetSlot;
+use holtburger_core::world::entity::Entity;
 
 pub fn get_verbs(e: &Entity, is_here: bool, slot: Option<TargetSlot>) -> VerbSet {
     let mut verbs = common::get_base_entity_verbs(e);

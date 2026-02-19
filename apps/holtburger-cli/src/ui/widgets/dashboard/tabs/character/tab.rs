@@ -1,9 +1,9 @@
 use ratatui::Frame;
-use ratatui::layout::{Rect};
+use ratatui::layout::Rect;
 
 use super::super::common::{Action, Verb, VerbSet};
+use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use super::verbs;
-use super::render::{render_character_tab, CharTabLine, get_char_tab_lines};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, StatType};
@@ -19,9 +19,11 @@ impl TabController for CharacterTab {
 
     fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
         let target = self.get_target_at_index(state, index);
-        if let Some(interaction_verbs) =
-            super::super::common::get_interaction_verbs(&target, state.player_guid, state.active_interaction)
-        {
+        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
+            &target,
+            state.player_guid,
+            state.active_interaction,
+        ) {
             return interaction_verbs;
         }
 
@@ -50,14 +52,18 @@ impl TabController for CharacterTab {
                             xp_spent,
                         }))
                     }
-                    StatType::Vital(vt) => Some(CommandHandler::Command(ClientCommand::RaiseVital {
-                        vital: *vt,
-                        xp_spent,
-                    })),
-                    StatType::Skill(st) => Some(CommandHandler::Command(ClientCommand::RaiseSkill {
-                        skill: *st,
-                        xp_spent,
-                    })),
+                    StatType::Vital(vt) => {
+                        Some(CommandHandler::Command(ClientCommand::RaiseVital {
+                            vital: *vt,
+                            xp_spent,
+                        }))
+                    }
+                    StatType::Skill(st) => {
+                        Some(CommandHandler::Command(ClientCommand::RaiseSkill {
+                            skill: *st,
+                            xp_spent,
+                        }))
+                    }
                 }
             }
             (Action::Train, CommandTarget::Stat(st, _, Some(credits))) => {
@@ -70,7 +76,12 @@ impl TabController for CharacterTab {
                     None
                 }
             }
-            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
+            _ => super::super::common::handle_base_action(
+                action,
+                target,
+                player_guid,
+                active_interaction,
+            ),
         }
     }
 

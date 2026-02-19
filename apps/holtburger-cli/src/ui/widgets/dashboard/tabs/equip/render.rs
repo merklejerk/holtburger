@@ -83,9 +83,10 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 spans.push(Span::styled(
                     item.name.clone(),
                     Style::default().fg(
-                        if let Some(color) = item.radar_blip_color.and_then(|c| {
-                            super::super::classification::radar_color_to_tui_color(c)
-                        }) {
+                        if let Some(color) = item
+                            .radar_blip_color
+                            .and_then(super::super::classification::radar_color_to_tui_color)
+                        {
                             color
                         } else {
                             Color::White

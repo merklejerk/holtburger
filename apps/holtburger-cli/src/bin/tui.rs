@@ -6,9 +6,15 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use directories::ProjectDirs;
-use holtburger_cli::ui::{self, AppState, ChatMessageKind};
-use holtburger_core::{Client, ClientCommand, ClientState, WireEvent};
+use holtburger_cli::ui::{
+    self, AppState, ChatMessageKind, ContextView, DashboardTab, FocusedPane, NetStats, UIState,
+};
+use holtburger_core::world::stats::Resistances;
+use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
+use holtburger_protocol::messages::combat::CombatMode;
+use ratatui::widgets::ListState;
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Mutex;
@@ -201,10 +207,10 @@ async fn main() -> Result<()> {
         character_name: None,
         player_guid: None,
         level_info: None,
-        attributes: std::collections::HashMap::new(),
-        vitals: std::collections::HashMap::new(),
-        skills: std::collections::HashMap::new(),
-        resistances: holtburger_core::world::stats::Resistances::default(),
+        attributes: HashMap::new(),
+        vitals: HashMap::new(),
+        skills: HashMap::new(),
+        resistances: Resistances::default(),
         armor: 0,
         vitae: 1.0,
         messages: Vec::new(),
@@ -212,45 +218,45 @@ async fn main() -> Result<()> {
         input_history: Vec::new(),
         history_index: None,
         characters: Vec::new(),
-        state: ui::UIState::Chat,
-        focused_pane: ui::FocusedPane::Dashboard,
-        previous_focused_pane: ui::FocusedPane::Dashboard,
+        state: UIState::Chat,
+        focused_pane: FocusedPane::Dashboard,
+        previous_focused_pane: FocusedPane::Dashboard,
         selected_character_index: 0,
         selected_dashboard_index: 0,
-        dashboard_list_state: ratatui::widgets::ListState::default().with_selected(Some(0)),
+        dashboard_list_state: ListState::default().with_selected(Some(0)),
         last_dashboard_height: 0,
         scroll_offset: 0,
         chat_total_lines: 0,
         chat_last_total_lines: 0,
         context_total_lines: 0,
         context_last_total_lines: 0,
-        dashboard_tab: ui::DashboardTab::Nearby,
+        dashboard_tab: DashboardTab::Nearby,
         context_buffer: Vec::new(),
         context_scroll_offset: 0,
-        context_view: ui::ContextView::Default,
+        context_view: ContextView::Default,
         current_debug_guid: None,
         active_interaction: None,
         account_password: args.password.clone(),
-        logon_retry: holtburger_core::RetryState::new(5),
-        enter_retry: holtburger_core::RetryState::new(5),
+        logon_retry: RetryState::new(5),
+        enter_retry: RetryState::new(5),
         core_state: ClientState::Connected,
         player_pos: None,
         player_enchantments: Vec::new(),
         player_spells: Vec::new(),
-        spell_names: std::collections::HashMap::new(),
-        spell_info: std::collections::HashMap::new(),
+        spell_names: HashMap::new(),
+        spell_info: HashMap::new(),
         skill_table: None,
-        entities: std::collections::HashMap::new(),
+        entities: HashMap::new(),
         server_time: None,
         chat_log,
         use_emojis: !args.no_emojis,
         verbosity: args.verbose,
-        net_stats: ui::NetStats::default(),
+        net_stats: NetStats::default(),
         world_name: String::new(),
-        combat_mode: holtburger_protocol::messages::combat::CombatMode::NonCombat,
+        combat_mode: CombatMode::NonCombat,
         noclip: false,
-        inventory: std::collections::HashSet::new(),
-        equipment: std::collections::HashMap::new(),
+        inventory: HashSet::new(),
+        equipment: HashMap::new(),
         wrapped_chat_cache: Vec::new(),
         last_chat_width: 0,
     };

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -6,6 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
+use std::collections::HashMap;
 
 use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::PropertyFloat;
@@ -14,7 +14,7 @@ use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, Vit
 use holtburger_protocol::messages::magic::Enchantment;
 
 use crate::ui::model::AppState;
-use crate::ui::types::{StatType};
+use crate::ui::types::StatType;
 use crate::ui::utils::format_cost;
 
 pub enum CharTabLine {

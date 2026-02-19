@@ -78,19 +78,20 @@ impl AppState {
                             Vec::new()
                         };
 
-                        let handler = entity_verbs
-                            .iter()
-                            .find(|v| v.shortcut == '\r')
-                            .and_then(|verb| {
-                                crate::ui::widgets::dashboard::handle_action_for_tab(
-                                    self,
-                                    self.dashboard_tab,
-                                    &verb.action,
-                                    &target,
-                                    player_guid,
-                                    self.active_interaction,
-                                )
-                            });
+                        let handler =
+                            entity_verbs
+                                .iter()
+                                .find(|v| v.shortcut == '\r')
+                                .and_then(|verb| {
+                                    crate::ui::widgets::dashboard::handle_action_for_tab(
+                                        self,
+                                        self.dashboard_tab,
+                                        &verb.action,
+                                        &target,
+                                        player_guid,
+                                        self.active_interaction,
+                                    )
+                                });
 
                         if let Some(handler) = handler {
                             match handler {

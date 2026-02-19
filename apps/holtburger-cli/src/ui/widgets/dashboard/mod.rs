@@ -1,7 +1,8 @@
 use super::super::types::{DashboardTab, FocusedPane};
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
+use holtburger_common::Guid;
 use holtburger_core::world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -16,6 +17,23 @@ pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> V
         DashboardTab::Inventory => InventoryTab.get_verbs(state, index),
         DashboardTab::Character => CharacterTab.get_verbs(state, index),
         DashboardTab::Spells => SpellsTab.get_verbs(state, index),
+    }
+}
+
+pub fn handle_action_for_tab(
+    _state: &AppState,
+    tab: DashboardTab,
+    action: &Action,
+    target: &CommandTarget,
+    player_guid: Option<Guid>,
+    active_interaction: Option<ActiveInteraction>,
+) -> Option<CommandHandler> {
+    match tab {
+        DashboardTab::Equip => EquipTab.handle_action(action, target, player_guid, active_interaction),
+        DashboardTab::Nearby => NearbyTab.handle_action(action, target, player_guid, active_interaction),
+        DashboardTab::Inventory => InventoryTab.handle_action(action, target, player_guid, active_interaction),
+        DashboardTab::Character => CharacterTab.handle_action(action, target, player_guid, active_interaction),
+        DashboardTab::Spells => SpellsTab.handle_action(action, target, player_guid, active_interaction),
     }
 }
 pub mod tabs;

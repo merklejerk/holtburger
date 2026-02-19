@@ -4,15 +4,16 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
+use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
-use holtburger_core::client::types::TargetSlot;
+use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use holtburger_core::world::entity::Entity;
 
-use super::super::common::VerbSet;
+use super::super::common::{Action, VerbSet};
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
 
 pub struct EquipTab;
 
@@ -78,6 +79,31 @@ impl TabController for EquipTab {
                 verbs::get_verbs(e, *is_here, *slot)
             }
             _ => vec![],
+        }
+    }
+
+    fn handle_action(
+        &self,
+        action: &Action,
+        target: &CommandTarget,
+        player_guid: Option<Guid>,
+        active_interaction: Option<ActiveInteraction>,
+    ) -> Option<CommandHandler> {
+        match (action, target) {
+            (Action::Equip(slot), CommandTarget::Entity(e, _)) => {
+                Some(CommandHandler::Command(ClientCommand::GetAndWield {
+                    item: e.guid,
+                    slot: Some(*slot),
+                }))
+            }
+            (Action::Unequip, CommandTarget::Entity(e, _)) => player_guid.map(|pguid| {
+                CommandHandler::Command(ClientCommand::MoveItem {
+                    item: e.guid,
+                    container: pguid,
+                    placement: 0,
+                })
+            }),
+            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
         }
     }
 

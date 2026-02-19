@@ -4,11 +4,14 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use super::super::super::render_entity_list_item;
-use super::super::common::VerbSet;
+use super::super::common::{Action, VerbSet};
+use super::super::classification::{self, EntityClass};
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget};
+use holtburger_common::Guid;
+use holtburger_core::client::types::ClientCommand;
 
 pub struct NearbyTab;
 
@@ -64,6 +67,44 @@ impl TabController for NearbyTab {
         }
 
         vec![]
+    }
+
+    fn handle_action(
+        &self,
+        action: &Action,
+        target: &CommandTarget,
+        player_guid: Option<Guid>,
+        active_interaction: Option<ActiveInteraction>,
+    ) -> Option<CommandHandler> {
+        match (action, target) {
+            (Action::PickUp, CommandTarget::Entity(e, _)) => {
+                if let (Some(pguid), EntityClass::Container) =
+                    (player_guid, classification::classify_entity(e))
+                {
+                    // Force the "MoveItem" variant for containers explicitly
+                    Some(CommandHandler::Command(ClientCommand::MoveItem {
+                        item: e.guid,
+                        container: pguid,
+                        placement: 0,
+                    }))
+                } else {
+                    Some(CommandHandler::Command(ClientCommand::Get(e.guid)))
+                }
+            }
+            (Action::Approach, CommandTarget::Entity(e, _)) => {
+                Some(CommandHandler::Command(ClientCommand::MoveTo {
+                    target: e.guid,
+                }))
+            }
+            (Action::MoveToSlot(slot_guid), CommandTarget::Entity(e, _)) => {
+                Some(CommandHandler::Command(ClientCommand::MoveItem {
+                    item: e.guid,
+                    container: *slot_guid,
+                    placement: 0,
+                }))
+            }
+            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
+        }
     }
 
     fn get_target_at_index<'a>(&self, state: &'a AppState, index: usize) -> CommandTarget<'a> {

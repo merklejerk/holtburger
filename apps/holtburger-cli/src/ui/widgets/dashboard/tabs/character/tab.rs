@@ -18,8 +18,10 @@ use super::super::common::{Action, Verb, VerbSet};
 use super::verbs;
 use crate::ui::model::AppState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, StatType};
+use crate::ui::types::{ActiveInteraction, CommandHandler, CommandTarget, StatType};
 use crate::ui::utils::format_cost;
+use holtburger_common::Guid;
+use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;
 
@@ -110,6 +112,47 @@ impl TabController for CharacterTab {
                 verbs::get_verbs(xp_cost.is_some(), sp_cost.is_some())
             }
             _ => vec![Verb::new(Action::Debug, 'b', "Debug")],
+        }
+    }
+
+    fn handle_action(
+        &self,
+        action: &Action,
+        target: &CommandTarget,
+        player_guid: Option<Guid>,
+        active_interaction: Option<ActiveInteraction>,
+    ) -> Option<CommandHandler> {
+        match (action, target) {
+            (Action::LevelUp, CommandTarget::Stat(st, Some(cost), _)) => {
+                let xp_spent = *cost as u32;
+                match st {
+                    StatType::Attribute(at) => {
+                        Some(CommandHandler::Command(ClientCommand::RaiseAttribute {
+                            attribute: *at,
+                            xp_spent,
+                        }))
+                    }
+                    StatType::Vital(vt) => Some(CommandHandler::Command(ClientCommand::RaiseVital {
+                        vital: *vt,
+                        xp_spent,
+                    })),
+                    StatType::Skill(st) => Some(CommandHandler::Command(ClientCommand::RaiseSkill {
+                        skill: *st,
+                        xp_spent,
+                    })),
+                }
+            }
+            (Action::Train, CommandTarget::Stat(st, _, Some(credits))) => {
+                if let StatType::Skill(skill) = st {
+                    Some(CommandHandler::Command(ClientCommand::TrainSkill {
+                        skill: *skill,
+                        credits: *credits,
+                    }))
+                } else {
+                    None
+                }
+            }
+            _ => super::super::common::handle_base_action(action, target, player_guid, active_interaction),
         }
     }
 

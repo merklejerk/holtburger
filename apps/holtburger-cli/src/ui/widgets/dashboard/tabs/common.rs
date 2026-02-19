@@ -35,161 +35,69 @@ pub struct Verb {
     pub label: Cow<'static, str>,
 }
 
-impl Action {
-    pub fn handler(
-        &self,
-        target: &CommandTarget,
-        player_guid: Option<Guid>,
-        active_interaction: Option<ActiveInteraction>,
-    ) -> Option<CommandHandler> {
-        match (self, target) {
-            (Action::Assess, CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::Identify(e.guid)))
-            }
-            (Action::Use, CommandTarget::Entity(e, _)) => {
-                if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
-                    Some(CommandHandler::Heal(e.guid))
-                } else {
-                    Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
-                }
-            }
-            (Action::Equip(slot), CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::GetAndWield {
-                    item: e.guid,
-                    slot: Some(*slot),
-                }))
-            }
-            (Action::Unequip, CommandTarget::Entity(e, _)) => player_guid.map(|pguid| {
-                CommandHandler::Command(ClientCommand::MoveItem {
-                    item: e.guid,
-                    container: pguid,
-                    placement: 0,
-                })
-            }),
-            (Action::Drop, CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::Drop(e.guid)))
-            }
-            (Action::PickUp, CommandTarget::Entity(e, _)) => {
-                if let (Some(pguid), EntityClass::Container) =
-                    (player_guid, classification::classify_entity(e))
-                {
-                    // Force the "MoveItem" variant for containers explicitly
-                    Some(CommandHandler::Command(ClientCommand::MoveItem {
-                        item: e.guid,
-                        container: pguid,
-                        placement: 0,
-                    }))
-                } else {
-                    Some(CommandHandler::Command(ClientCommand::Get(e.guid)))
-                }
-            }
-            (Action::Approach, CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::MoveTo {
-                    target: e.guid,
-                }))
-            }
-            (Action::Target, CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Target(e.guid))
-            }
-            (Action::MoveToSlot(slot_guid), CommandTarget::Entity(e, _)) => {
-                Some(CommandHandler::Command(ClientCommand::MoveItem {
-                    item: e.guid,
-                    container: *slot_guid,
-                    placement: 0,
-                }))
-            }
-            (Action::LevelUp, CommandTarget::Stat(st, Some(cost), _)) => {
-                let xp_spent = *cost as u32;
-                match st {
-                    crate::ui::types::StatType::Attribute(at) => {
-                        Some(CommandHandler::Command(ClientCommand::RaiseAttribute {
-                            attribute: *at,
-                            xp_spent,
-                        }))
-                    }
-                    crate::ui::types::StatType::Vital(vt) => {
-                        Some(CommandHandler::Command(ClientCommand::RaiseVital {
-                            vital: *vt,
-                            xp_spent,
-                        }))
-                    }
-                    crate::ui::types::StatType::Skill(st) => {
-                        Some(CommandHandler::Command(ClientCommand::RaiseSkill {
-                            skill: *st,
-                            xp_spent,
-                        }))
-                    }
-                }
-            }
-            (Action::Train, CommandTarget::Stat(st, _, Some(credits))) => {
-                if let crate::ui::types::StatType::Skill(skill) = st {
-                    Some(CommandHandler::Command(ClientCommand::TrainSkill {
-                        skill: *skill,
-                        credits: *credits,
-                    }))
-                } else {
-                    None
-                }
-            }
-            (Action::LevelUp, CommandTarget::Stat(_, None, _)) => None,
-            (Action::Debug, _) => Some(CommandHandler::ToggleDebug),
-            (Action::Move, CommandTarget::Entity(e, _)) => Some(CommandHandler::Move(e.guid)),
-            (Action::Cast(_), CommandTarget::Spell(spell_id)) => {
-                use crate::ui::types::InteractionMode;
-                if let Some(interaction) = active_interaction
-                    && (interaction.mode == InteractionMode::Target
-                        || interaction.mode == InteractionMode::Healing)
-                {
-                    Some(CommandHandler::Command(ClientCommand::CastTargetedSpell {
-                        target: interaction.guid,
-                        spell_id: *spell_id,
-                    }))
-                } else {
-                    Some(CommandHandler::Command(
-                        ClientCommand::CastUntargetedSpell {
-                            spell_id: *spell_id,
-                        },
-                    ))
-                }
-            }
-            (Action::Confirm(_), target) => {
-                if let Some(interaction) = active_interaction {
-                    match interaction.mode {
-                        InteractionMode::Healing => match target {
-                            CommandTarget::Entity(e, _) => {
-                                if e.guid == interaction.guid {
-                                    player_guid.map(CommandHandler::ApplyHealing)
-                                } else {
-                                    Some(CommandHandler::ApplyHealing(e.guid))
-                                }
-                            }
-                            _ => player_guid.map(CommandHandler::ApplyHealing),
-                        },
-                        InteractionMode::Moving => match target {
-                            CommandTarget::Entity(e, _) if e.guid != interaction.guid => {
-                                let class = classification::classify_entity(e);
-                                match class {
-                                    classification::EntityClass::Container
-                                    | classification::EntityClass::Chest => {
-                                        Some(CommandHandler::ApplyMoving(e.guid))
-                                    }
-                                    _ => Some(CommandHandler::Give(e.guid)),
-                                }
-                            }
-                            _ => player_guid.map(CommandHandler::ApplyMoving),
-                        },
-                        InteractionMode::Target => match target {
-                            CommandTarget::Entity(e, _) => Some(CommandHandler::Target(e.guid)),
-                            _ => None,
-                        },
-                    }
-                } else {
-                    None
-                }
-            }
-            (Action::Cancel, _) => Some(CommandHandler::CancelInteraction),
-            _ => None,
+/// Handles standard actions that are universally applicable.
+pub fn handle_base_action(
+    action: &Action,
+    target: &CommandTarget,
+    player_guid: Option<Guid>,
+    active_interaction: Option<ActiveInteraction>,
+) -> Option<CommandHandler> {
+    match (action, target) {
+        (Action::Assess, CommandTarget::Entity(e, _)) => {
+            Some(CommandHandler::Command(ClientCommand::Identify(e.guid)))
         }
+        (Action::Use, CommandTarget::Entity(e, _)) => {
+            if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
+                Some(CommandHandler::Heal(e.guid))
+            } else {
+                Some(CommandHandler::Command(ClientCommand::Use(e.guid)))
+            }
+        }
+        (Action::Drop, CommandTarget::Entity(e, _)) => {
+            Some(CommandHandler::Command(ClientCommand::Drop(e.guid)))
+        }
+        (Action::Debug, _) => Some(CommandHandler::ToggleDebug),
+        (Action::Move, CommandTarget::Entity(e, _)) => Some(CommandHandler::Move(e.guid)),
+        (Action::Target, CommandTarget::Entity(e, _)) => {
+            Some(CommandHandler::Target(e.guid))
+        }
+        (Action::Confirm(_), target) => {
+            if let Some(interaction) = active_interaction {
+                match interaction.mode {
+                    InteractionMode::Healing => match target {
+                        CommandTarget::Entity(e, _) => {
+                            if e.guid == interaction.guid {
+                                player_guid.map(CommandHandler::ApplyHealing)
+                            } else {
+                                Some(CommandHandler::ApplyHealing(e.guid))
+                            }
+                        }
+                        _ => player_guid.map(CommandHandler::ApplyHealing),
+                    },
+                    InteractionMode::Moving => match target {
+                        CommandTarget::Entity(e, _) if e.guid != interaction.guid => {
+                            let class = classification::classify_entity(e);
+                            match class {
+                                classification::EntityClass::Container
+                                | classification::EntityClass::Chest => {
+                                    Some(CommandHandler::ApplyMoving(e.guid))
+                                }
+                                _ => Some(CommandHandler::Give(e.guid)),
+                            }
+                        }
+                        _ => player_guid.map(CommandHandler::ApplyMoving),
+                    },
+                    InteractionMode::Target => match target {
+                        CommandTarget::Entity(e, _) => Some(CommandHandler::Target(e.guid)),
+                        _ => None,
+                    },
+                }
+            } else {
+                None
+            }
+        }
+        (Action::Cancel, _) => Some(CommandHandler::CancelInteraction),
+        _ => None,
     }
 }
 

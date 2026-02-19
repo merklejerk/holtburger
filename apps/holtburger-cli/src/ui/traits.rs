@@ -4,8 +4,9 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use crate::ui::model::AppState;
-use crate::ui::types::CommandTarget;
-use crate::ui::widgets::dashboard::Verb;
+use crate::ui::types::{CommandTarget, CommandHandler, ActiveInteraction};
+use crate::ui::widgets::dashboard::{Verb, Action};
+use holtburger_common::Guid;
 
 pub trait TabController {
     /// Renders the tab's content into the given area.
@@ -19,6 +20,15 @@ pub trait TabController {
 
     /// Returns the total number of items in the tab.
     fn get_item_count(&self, state: &AppState) -> usize;
+
+    /// Dispatches an action for the tab.
+    fn handle_action(
+        &self,
+        action: &Action,
+        target: &CommandTarget,
+        player_guid: Option<Guid>,
+        active_interaction: Option<ActiveInteraction>,
+    ) -> Option<CommandHandler>;
 
     /// Optional: Handles tab-specific input. Returns a list of commands to execute.
     fn handle_input(&self, _key: KeyEvent, _state: &mut AppState) -> Option<Vec<ClientCommand>> {

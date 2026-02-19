@@ -196,3 +196,18 @@ fn test_force_obj_desc_send_parity() {
     }));
     assert_pack_unpack_parity(test_fixtures::FORCE_OBJ_DESC_SEND, &expected);
 }
+
+#[test]
+fn test_parent_event_parity_full_payload() {
+    let data = hex::decode("0100005020030080010000000100000011030100").expect("valid hex");
+    let expected = ParentEventData {
+        parent_guid: Guid(0x50000001),
+        child_guid: Guid(0x80000320),
+        location: 1,
+        placement: 1,
+        parent_instance_sequence: 0x311,
+        child_position_sequence: 1,
+    };
+
+    assert_pack_unpack_parity(&data, &expected);
+}

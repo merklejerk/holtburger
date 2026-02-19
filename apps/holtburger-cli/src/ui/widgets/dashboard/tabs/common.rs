@@ -6,7 +6,6 @@ use crate::ui::types::{ActiveInteraction, CommandTarget, ContextView, Interactio
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
-use holtburger_core::world::entity::Entity;
 use ratatui::text::Line;
 use std::borrow::Cow;
 
@@ -139,34 +138,6 @@ impl Verb {
             format!("[{}] {}", shortcut_upper, label)
         }
     }
-}
-
-pub fn get_base_entity_verbs(e: &Entity) -> Vec<Verb> {
-    let mut verbs = vec![
-        Verb::new(Action::Assess, 'a', "Assess"),
-        Verb::new(Action::Target, 't', "Target"),
-    ];
-    let class = classification::classify_entity(e);
-
-    match class {
-        EntityClass::Npc
-        | EntityClass::Portal
-        | EntityClass::Door
-        | EntityClass::LifeStone
-        | EntityClass::Chest => {
-            verbs.push(Verb::new(Action::Use, 'u', "Use"));
-        }
-        EntityClass::Weapon
-        | EntityClass::Apparel
-        | EntityClass::Wand
-        | EntityClass::Tool
-        | EntityClass::Container => {
-            verbs.push(Verb::new(Action::Use, 'u', "Use"));
-        }
-        _ => {}
-    }
-
-    verbs
 }
 
 /// Helper to get verbs for a specific interaction mode (Moving, Healing, or Targeting).

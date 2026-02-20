@@ -25,7 +25,6 @@ impl Page {
         f: &mut Frame,
         area: Rect,
         chat: &mut ChatState,
-        use_emojis: bool,
         account_name: &str,
         input: &str,
         core_state: &ClientState,
@@ -40,7 +39,6 @@ impl Page {
                 f,
                 area,
                 chat,
-                use_emojis,
                 account_name,
                 input,
                 core_state,
@@ -103,7 +101,6 @@ impl GameState {
         f: &mut Frame,
         area: Rect,
         chat: &mut ChatState,
-        use_emojis: bool,
         account_name: &str,
         input: &str,
         core_state: &ClientState,
@@ -122,7 +119,7 @@ impl GameState {
         let main_chunks = &main_chunks_vec;
 
         // Dashboard Pane
-        render_dashboard_pane(f, self, use_emojis, main_chunks[0]);
+        render_dashboard_pane(f, self, main_chunks[0]);
 
         // Chat Pane
         render_chat_pane(f, self, chat, main_chunks[1]);

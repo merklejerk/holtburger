@@ -7,8 +7,8 @@ use super::super::classification::{EntityClass, classify_entity, get_entity_colo
 use crate::ui::state::GameState;
 use holtburger_core::world::entity::Entity;
 
-pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
-    let items = get_list_items(game, use_emojis);
+pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
+    let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -43,7 +43,7 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, 
     }
 }
 
-fn get_list_items(game: &GameState, use_emojis: bool) -> Vec<ListItem<'static>> {
+fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(game);
     let container_counts = game.data.get_container_counts();
     let mut list_items = Vec::new();
@@ -59,7 +59,6 @@ fn get_list_items(game: &GameState, use_emojis: bool) -> Vec<ListItem<'static>> 
             display_dist,
             *depth,
             i == game.view.selected_dashboard_index,
-            use_emojis,
             container_count,
         ));
     }
@@ -73,7 +72,7 @@ fn render_nearby_item(
     dist: Option<f32>,
     depth: usize,
     highlight: bool,
-    use_emojis: bool,
+
     container_count: Option<usize>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
@@ -86,11 +85,7 @@ fn render_nearby_item(
 
     let text_style = Style::default().fg(color);
 
-    let type_marker = if use_emojis {
-        class.emoji()
-    } else {
-        class.label()
-    };
+    let type_marker = class.emoji();
 
     let mut display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)

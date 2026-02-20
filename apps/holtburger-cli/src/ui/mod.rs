@@ -89,7 +89,6 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         f,
         f.size(),
         &mut state.chat,
-        state.use_emojis,
         &state.account_name,
         &state.input,
         &state.core_state,

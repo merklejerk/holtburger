@@ -93,8 +93,6 @@ struct Args {
     debug_log: Option<String>,
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
-    #[arg(long)]
-    no_emojis: bool,
     #[arg(short, long)]
     dats: Option<String>,
 }
@@ -211,7 +209,6 @@ async fn main() -> Result<()> {
         logon_retry: RetryState::new(5),
         enter_retry: RetryState::new(5),
         core_state: ClientState::Connected,
-        use_emojis: !args.no_emojis,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
     };

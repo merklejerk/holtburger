@@ -26,8 +26,8 @@ pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
 }
 
 impl TabController for NearbyTab {
-    fn render(&self, f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
-        render_nearby_tab(f, game, use_emojis, area);
+    fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect) {
+        render_nearby_tab(f, game, area);
     }
 
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {

@@ -40,7 +40,7 @@ pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
     }
 }
 
-pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
+pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     let (focused_pane, dashboard_tab) = (game.view.focused_pane, game.view.dashboard_tab);
 
     let dashboard_style = if focused_pane == FocusedPane::Dashboard {
@@ -117,7 +117,7 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, use_emojis: bo
     f.render_widget(&dashboard_block, area);
 
     // Tab-specific rendering
-    get_tab_controller(dashboard_tab).render(f, game, use_emojis, dashboard_inner_chunks[0]);
+    get_tab_controller(dashboard_tab).render(f, game, dashboard_inner_chunks[0]);
 
     if let Some(action_bar) = crate::ui::utils::render_action_bar(game) {
         f.render_widget(action_bar, dashboard_inner_chunks[1]);

@@ -6,7 +6,7 @@ use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, Scrollba
 
 use crate::ui::state::GameState;
 
-pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, _use_emojis: bool, area: Rect) {
+pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)

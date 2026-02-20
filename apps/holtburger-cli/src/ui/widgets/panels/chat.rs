@@ -172,6 +172,7 @@ pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _chat: &mut Chat
         ContextView::Custom => "Debug Information",
         ContextView::Assess(_) => "Object Appraisal",
         ContextView::Spell(_) => "Spell Details",
+        ContextView::Enchantment(_) => "Enchantment Details",
     };
 
     let ctx_title = if game.view.focused_pane == FocusedPane::Context {

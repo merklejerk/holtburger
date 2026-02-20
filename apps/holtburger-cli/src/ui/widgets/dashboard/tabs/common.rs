@@ -3,12 +3,14 @@ use super::super::debug;
 use super::classification::{self, EntityClass};
 use crate::ui::state::GameState;
 use crate::ui::types::{ActiveInteraction, CommandTarget, ContextView, InteractionMode};
-use crate::ui::update::effect::UIEffect;
+use crate::ui::UIEffect;
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use ratatui::text::Line;
 use std::borrow::Cow;
+
+pub type VerbSet = Vec<Verb>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -58,6 +60,7 @@ pub fn handle_base_action(
         }
         (Action::Debug, target) => match target {
             CommandTarget::Spell(sid) => Some(UIEffect::ActivateDebugSpell(*sid)),
+            CommandTarget::Enchantment(e) => Some(UIEffect::ActivateDebugEnchantment(*e)),
             CommandTarget::Entity(e, _) => Some(UIEffect::ActivateDebugEntity(e.guid)),
             _ => None,
         },
@@ -263,17 +266,13 @@ pub fn get_context_content_for_view(game: &GameState) -> Vec<Line<'static>> {
                 return debug::get_debug_info(
                     &target,
                     |id| {
-                        game.data
-                            .entities
-                            .get(&id)
-                            .map(|e| e.name.clone())
-                            .or_else(|| {
-                                if Some(id) == player_guid {
-                                    Some("You".to_string())
-                                } else {
-                                    None
-                                }
-                            })
+                        game.data.entities.get(&id).map(|e| e.name.clone()).or_else(|| {
+                            if Some(id) == player_guid {
+                                Some("You".to_string())
+                            } else {
+                                None
+                            }
+                        })
                     },
                     Some(&game.data.spell_info),
                     player_info,
@@ -283,6 +282,10 @@ pub fn get_context_content_for_view(game: &GameState) -> Vec<Line<'static>> {
         }
         ContextView::Spell(spell_id) => {
             let target = CommandTarget::Spell(spell_id);
+            debug::get_debug_info(&target, |_| None, Some(&game.data.spell_info), None)
+        }
+        ContextView::Enchantment(enchant) => {
+            let target = CommandTarget::Enchantment(enchant);
             debug::get_debug_info(&target, |_| None, Some(&game.data.spell_info), None)
         }
         _ => vec![],

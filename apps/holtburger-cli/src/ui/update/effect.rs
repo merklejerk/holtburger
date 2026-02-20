@@ -2,6 +2,7 @@ use crate::ui::state::{AppState, ChatMessageKind};
 use crate::ui::{ActiveInteraction, ContextView, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
+use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug)]
 pub enum UIEffect {
@@ -9,6 +10,7 @@ pub enum UIEffect {
     Commands(Vec<ClientCommand>),
     Assess(Guid),
     ActivateDebugSpell(u32),
+    ActivateDebugEnchantment(Enchantment),
     ActivateDebugEntity(Guid),
     Move(Guid),
     Give(Guid),
@@ -82,6 +84,13 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         UIEffect::ActivateDebugSpell(spell_id) => {
             if let Some(game) = state.game_option_mut() {
                 game.view.context_view = ContextView::Spell(spell_id);
+                game.view.context_scroll_offset = 0;
+            }
+            vec![]
+        }
+        UIEffect::ActivateDebugEnchantment(enchant) => {
+            if let Some(game) = state.game_option_mut() {
+                game.view.context_view = ContextView::Enchantment(enchant);
                 game.view.context_scroll_offset = 0;
             }
             vec![]

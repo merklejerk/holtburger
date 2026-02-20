@@ -1,6 +1,26 @@
-use super::super::types::{CHAT_HISTORY_WINDOW_SIZE, ChatMessageKind, ContextView, FocusedPane};
+pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
+
+#[derive(Debug, Clone)]
+pub enum ChatMessageKind {
+    Info,
+    System,
+    Chat,
+    Tell,
+    Emote,
+    Error,
+    Warning,
+    Debug,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub kind: ChatMessageKind,
+    pub text: String,
+}
+
+use super::super::types::{ContextView, FocusedPane};
 use super::super::utils::wrap_text;
-use crate::ui::model::{AppState, GameState};
+use crate::ui::state::{AppState, GameState, Page, SelectionState};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
@@ -58,14 +78,14 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
         .iter()
         .map(|v| v.len())
         .sum();
-    game.maintain_scroll(false, total_lines, height);
+    game.view.maintain_scroll(false, total_lines, height);
 
     let all_lines: Vec<&(String, Color)> = app.wrapped_chat_cache[window_start..]
         .iter()
         .flat_map(|v| v.iter())
         .collect();
 
-    let effective_scroll = game.scroll_offset;
+    let effective_scroll = game.view.scroll_offset;
     let end = total_lines.saturating_sub(effective_scroll);
     let start = end.saturating_sub(height);
 
@@ -87,13 +107,13 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
         messages = padding;
     }
 
-    let chat_style = if game.focused_pane == FocusedPane::Chat {
+    let chat_style = if game.view.focused_pane == FocusedPane::Chat {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default()
     };
 
-    let chat_title = if game.focused_pane == FocusedPane::Chat {
+    let chat_title = if game.view.focused_pane == FocusedPane::Chat {
         ">> World Chat <<"
     } else {
         " World Chat "
@@ -104,7 +124,7 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
             .borders(Borders::ALL)
             .title(chat_title)
             .border_style(chat_style)
-            .title_style(if game.focused_pane == FocusedPane::Chat {
+            .title_style(if game.view.focused_pane == FocusedPane::Chat {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
@@ -139,15 +159,15 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
 
 pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _app: &mut AppState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
-    let total_ctx = game.context_buffer.len();
+    let total_ctx = game.view.context_buffer.len();
 
-    game.maintain_scroll(true, total_ctx, height);
+    game.view.maintain_scroll(true, total_ctx, height);
 
-    let effective_ctx_scroll = game.context_scroll_offset;
+    let effective_ctx_scroll = game.view.context_scroll_offset;
     let ctx_end = total_ctx.saturating_sub(effective_ctx_scroll);
     let ctx_start = ctx_end.saturating_sub(height);
 
-    let mut ctx_items: Vec<ListItem<'static>> = game.context_buffer[ctx_start..ctx_end]
+    let mut ctx_items: Vec<ListItem<'static>> = game.view.context_buffer[ctx_start..ctx_end]
         .iter()
         .map(|s| ListItem::new(s.clone()))
         .collect();
@@ -159,20 +179,20 @@ pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _app: &mut AppSt
         ctx_items = padding;
     }
 
-    let ctx_style = if game.focused_pane == FocusedPane::Context {
+    let ctx_style = if game.view.focused_pane == FocusedPane::Context {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default()
     };
 
-    let base_title = match game.context_view {
+    let base_title = match game.view.context_view {
         ContextView::Default => "Context Information",
         ContextView::Custom => "Debug Information",
         ContextView::Assess(_) => "Object Appraisal",
         ContextView::Spell(_) => "Spell Details",
     };
 
-    let ctx_title = if game.focused_pane == FocusedPane::Context {
+    let ctx_title = if game.view.focused_pane == FocusedPane::Context {
         format!(">> {} <<", base_title)
     } else {
         format!(" {} ", base_title)
@@ -183,7 +203,7 @@ pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _app: &mut AppSt
             .borders(Borders::ALL)
             .title(ctx_title)
             .border_style(ctx_style)
-            .title_style(if game.focused_pane == FocusedPane::Context {
+            .title_style(if game.view.focused_pane == FocusedPane::Context {
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)

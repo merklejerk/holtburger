@@ -1,4 +1,4 @@
-use crate::ui::model::{AppState, GameState};
+use crate::ui::state::{AppState, GameState};
 use holtburger_core::world::stats::VitalType;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -8,14 +8,17 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 pub fn render_vitals(f: &mut Frame, game: &GameState, _app: &AppState, area: Rect) {
     let health = game
+        .data
         .vitals
         .values()
         .find(|v| v.vital_type == VitalType::Health);
     let stamina = game
+        .data
         .vitals
         .values()
         .find(|v| v.vital_type == VitalType::Stamina);
     let mana = game
+        .data
         .vitals
         .values()
         .find(|v| v.vital_type == VitalType::Mana);
@@ -57,7 +60,7 @@ pub fn render_vitals(f: &mut Frame, game: &GameState, _app: &AppState, area: Rec
     ]);
     f.render_widget(Paragraph::new(bars_line), vitals_layout[0]);
 
-    if let Some(info) = game.level_info.as_ref() {
+    if let Some(info) = game.data.level_info.as_ref() {
         let mut spans = vec![Span::styled(
             format!("Lv {}", info.level),
             Style::default().fg(Color::Cyan),

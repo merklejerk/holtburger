@@ -1,5 +1,6 @@
-use crate::ui::model::{AppState, GameState};
-use crate::ui::types::{CommandTarget, UIEffect, UpdateResult};
+use crate::ui::CommandTarget;
+use crate::ui::state::{AppState, GameState};
+use crate::ui::update::{UIEffect, UpdateResult};
 use crate::ui::widgets::dashboard::{Action, Verb, input::handle_common_dashboard_input};
 use crossterm::event::KeyEvent;
 use ratatui::Frame;

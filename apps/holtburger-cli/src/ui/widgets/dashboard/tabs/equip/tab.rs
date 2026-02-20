@@ -4,9 +4,10 @@ use ratatui::layout::Rect;
 use super::super::common::{Action, Verb};
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use super::verbs;
-use crate::ui::model::{AppState, GameState};
+use crate::ui::CommandTarget;
+use crate::ui::UIEffect;
+use crate::ui::state::{AppState, GameState};
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, UIEffect};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct EquipTab;
@@ -23,8 +24,8 @@ impl TabController for EquipTab {
             _ => CommandTarget::None,
         };
 
-        let player_guid = game.player_guid;
-        let active_interaction = game.active_interaction;
+        let player_guid = game.data.player_guid;
+        let active_interaction = game.view.active_interaction;
 
         if let Some(interaction_verbs) =
             super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
@@ -45,8 +46,8 @@ impl TabController for EquipTab {
         game: &mut GameState,
         app: &mut AppState,
     ) -> Option<UIEffect> {
-        let player_guid = game.player_guid;
-        let active_interaction = game.active_interaction;
+        let player_guid = game.data.player_guid;
+        let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, app, index);
 
@@ -54,7 +55,7 @@ impl TabController for EquipTab {
             (Action::Equip(slot), CommandTarget::Entity(e, _)) => {
                 Some(UIEffect::Command(ClientCommand::GetAndWield {
                     item: e.guid,
-                    slot: Some(*slot),
+                    slot: Some(slot.clone()),
                 }))
             }
             (Action::Unequip, CommandTarget::Entity(e, _)) => player_guid.map(|pguid| {

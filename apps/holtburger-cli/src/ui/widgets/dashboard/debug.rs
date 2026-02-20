@@ -1,5 +1,5 @@
 use super::tabs::classification;
-use crate::ui::types::CommandTarget;
+use crate::ui::CommandTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,

@@ -9,32 +9,32 @@ use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::world::entity::Entity;
 
-use crate::ui::model::AppState;
+use crate::ui::state::GameState;
 
 pub enum EquipTabLine<'a> {
     Header(String, bool),
     Item(&'a Entity, bool, bool, Option<TargetSlot>),
 }
 
-pub fn render_equip_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let items = get_list_items(state);
+pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
+    let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    state
+    game.view
         .dashboard_list_state
-        .select(Some(state.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut state.dashboard_list_state);
+        .select(Some(game.view.selected_dashboard_index));
+    f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
 
     // Render Scrollbar
     let height = area.height as usize;
-    state.last_dashboard_height = height;
+    game.view.last_dashboard_height = height;
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            state
+            game.view
                 .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
@@ -54,8 +54,8 @@ pub fn render_equip_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
-fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let lines = get_lines(state);
+fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
+    let lines = get_lines(game);
     let mut list_items = Vec::new();
 
     for line in lines {
@@ -97,7 +97,7 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     list_items
 }
 
-pub fn get_lines<'a>(state: &'a AppState) -> Vec<EquipTabLine<'a>> {
+pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
     let mut lines = Vec::new();
 
     let categories = [
@@ -143,10 +143,11 @@ pub fn get_lines<'a>(state: &'a AppState) -> Vec<EquipTabLine<'a>> {
         (EquipMask::SIGIL_THREE, "Sigil 3", None),
     ];
 
-    let mut equippable_items: Vec<&Entity> = state
+    let mut equippable_items: Vec<&Entity> = game
+        .data
         .inventory
         .iter()
-        .filter_map(|guid| state.entities.get(guid))
+        .filter_map(|guid| game.data.entities.get(guid))
         .filter(|e| e.valid_locations.is_some_and(|v| !v.is_empty()))
         .collect();
 
@@ -170,7 +171,8 @@ pub fn get_lines<'a>(state: &'a AppState) -> Vec<EquipTabLine<'a>> {
             let valid = item.valid_locations.unwrap_or(EquipMask::NONE);
 
             if valid.intersects(mask) {
-                let current_mask = state
+                let current_mask = game
+                    .data
                     .equipment
                     .get(&item.guid)
                     .cloned()

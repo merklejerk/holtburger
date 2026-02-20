@@ -1,5 +1,5 @@
 use super::super::types::{DashboardTab, FocusedPane};
-use crate::ui::model::AppState;
+use crate::ui::model::{AppState, GameState};
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
 use ratatui::Frame;
@@ -18,16 +18,22 @@ pub mod assess;
 pub mod debug;
 pub mod filter;
 
-pub fn get_verbs_for_tab(state: &AppState, tab: DashboardTab, index: usize) -> Vec<Verb> {
-    get_tab_controller(tab).get_verbs(state, index)
+pub fn get_verbs_for_tab(
+    game: &GameState,
+    app: &AppState,
+    tab: DashboardTab,
+    index: usize,
+) -> Vec<Verb> {
+    get_tab_controller(tab).get_verbs(game, app, index)
 }
 
 pub fn get_target_at_index<'a>(
-    state: &'a AppState,
+    game: &'a GameState,
+    app: &'a AppState,
     tab: DashboardTab,
     index: usize,
 ) -> CommandTarget<'a> {
-    get_tab_controller(tab).get_target_at_index(state, index)
+    get_tab_controller(tab).get_target_at_index(game, app, index)
 }
 
 pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
@@ -40,8 +46,10 @@ pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
     }
 }
 
-pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let dashboard_style = if state.focused_pane == FocusedPane::Dashboard {
+pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+    let (focused_pane, dashboard_tab) = (game.focused_pane, game.dashboard_tab);
+
+    let dashboard_style = if focused_pane == FocusedPane::Dashboard {
         Style::default().fg(Color::Yellow)
     } else {
         Style::default()
@@ -56,10 +64,12 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let bottom_tabs = [(DashboardTab::Equip, "5", "Equip")];
 
-    let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], state: &AppState| {
+    let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], game: &GameState| {
         let mut spans = Vec::new();
 
-        if state.focused_pane == FocusedPane::Dashboard {
+        let (focused, active_tab) = (game.focused_pane, game.dashboard_tab);
+
+        if focused == FocusedPane::Dashboard {
             spans.push(Span::styled(
                 ">> ",
                 Style::default()
@@ -72,7 +82,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
                 spans.push(Span::raw("|"));
             }
 
-            let is_active = state.dashboard_tab == *tab;
+            let is_active = active_tab == *tab;
             if is_active {
                 spans.push(Span::styled(
                     format!(" [{}] {} ", key, label),
@@ -83,7 +93,7 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
             }
         }
 
-        if state.focused_pane == FocusedPane::Dashboard {
+        if focused == FocusedPane::Dashboard {
             spans.push(Span::styled(
                 " <<",
                 Style::default()
@@ -96,8 +106,8 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
 
     let dashboard_block = Block::default()
         .borders(Borders::ALL)
-        .title(create_tab_line(&top_tabs, state))
-        .title_bottom(create_tab_line(&bottom_tabs, state))
+        .title(create_tab_line(&top_tabs, game))
+        .title_bottom(create_tab_line(&bottom_tabs, game))
         .border_style(dashboard_style);
 
     let inner_area = dashboard_block.inner(area);
@@ -113,15 +123,15 @@ pub fn render_dashboard_pane(f: &mut Frame, state: &mut AppState, area: Rect) {
     f.render_widget(&dashboard_block, area);
 
     // Tab-specific rendering
-    match state.dashboard_tab {
-        DashboardTab::Equip => EquipTab.render(f, state, dashboard_inner_chunks[0]),
-        DashboardTab::Nearby => NearbyTab.render(f, state, dashboard_inner_chunks[0]),
-        DashboardTab::Inventory => InventoryTab.render(f, state, dashboard_inner_chunks[0]),
-        DashboardTab::Character => CharacterTab.render(f, state, dashboard_inner_chunks[0]),
-        DashboardTab::Spells => SpellsTab.render(f, state, dashboard_inner_chunks[0]),
+    match dashboard_tab {
+        DashboardTab::Equip => EquipTab.render(f, game, app, dashboard_inner_chunks[0]),
+        DashboardTab::Nearby => NearbyTab.render(f, game, app, dashboard_inner_chunks[0]),
+        DashboardTab::Inventory => InventoryTab.render(f, game, app, dashboard_inner_chunks[0]),
+        DashboardTab::Character => CharacterTab.render(f, game, app, dashboard_inner_chunks[0]),
+        DashboardTab::Spells => SpellsTab.render(f, game, app, dashboard_inner_chunks[0]),
     }
 
-    if let Some(action_bar) = crate::ui::utils::render_action_bar(state) {
+    if let Some(action_bar) = crate::ui::utils::render_action_bar(game, app) {
         f.render_widget(action_bar, dashboard_inner_chunks[1]);
     }
 }

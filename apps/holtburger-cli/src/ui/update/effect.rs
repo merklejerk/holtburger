@@ -8,83 +8,102 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         UIEffect::Command(cmd) => vec![cmd],
         UIEffect::Commands(cmds) => cmds,
         UIEffect::Assess(guid) => {
-            state.context_view = ContextView::Assess(guid);
-            state.context_scroll_offset = 0;
+            if let Some(game) = state.game_option_mut() {
+                game.context_view = ContextView::Assess(guid);
+                game.context_scroll_offset = 0;
+            }
             vec![ClientCommand::Identify(guid)]
         }
         UIEffect::ActivateDebugSpell(spell_id) => {
-            state.context_view = ContextView::Spell(spell_id);
-            state.context_scroll_offset = 0;
+            if let Some(game) = state.game_option_mut() {
+                game.context_view = ContextView::Spell(spell_id);
+                game.context_scroll_offset = 0;
+            }
             vec![]
         }
         UIEffect::ActivateDebugEntity(guid) => {
-            state.current_debug_guid = Some(guid);
-            state.context_view = ContextView::Custom;
-            state.context_scroll_offset = 0;
+            if let Some(game) = state.game_option_mut() {
+                game.current_debug_guid = Some(guid);
+                game.context_view = ContextView::Custom;
+                game.context_scroll_offset = 0;
+            }
             vec![]
         }
         UIEffect::Heal(guid) => {
-            state.active_interaction = Some(ActiveInteraction {
-                guid,
-                mode: InteractionMode::Healing,
-            });
+            if let Some(game) = state.game_option_mut() {
+                game.active_interaction = Some(ActiveInteraction {
+                    guid,
+                    mode: InteractionMode::Healing,
+                });
+            }
             vec![]
         }
         UIEffect::Move(guid) => {
-            state.active_interaction = Some(ActiveInteraction {
-                guid,
-                mode: InteractionMode::Moving,
-            });
+            if let Some(game) = state.game_option_mut() {
+                game.active_interaction = Some(ActiveInteraction {
+                    guid,
+                    mode: InteractionMode::Moving,
+                });
+            }
             vec![]
         }
         UIEffect::Target(guid) => {
-            state.active_interaction = Some(ActiveInteraction {
-                guid,
-                mode: InteractionMode::Target,
-            });
+            if let Some(game) = state.game_option_mut() {
+                game.active_interaction = Some(ActiveInteraction {
+                    guid,
+                    mode: InteractionMode::Target,
+                });
+            }
             vec![]
         }
         UIEffect::Give(target_guid) => {
-            if let Some(ActiveInteraction {
-                guid: item_guid,
-                mode: InteractionMode::Moving,
-            }) = state.active_interaction
+            if let Some(game) = state.game_option_mut()
+                && let Some(ActiveInteraction {
+                    guid: item_guid,
+                    mode: InteractionMode::Moving,
+                }) = game.active_interaction
             {
                 let cmd = ClientCommand::GiveObjectRequest {
                     target: target_guid,
                     item: item_guid,
                     amount: 1, // Assume 1 for now.
                 };
-                state.active_interaction = None;
+                game.active_interaction = None;
                 return vec![cmd];
             }
             vec![]
         }
         UIEffect::ApplyHealing(guid) => {
-            if let Some(interaction) = state.active_interaction {
+            if let Some(game) = state.game_option_mut()
+                && let Some(interaction) = game.active_interaction
+            {
                 let cmd = ClientCommand::UseWithTarget {
                     item: interaction.guid,
                     target: guid,
                 };
-                state.active_interaction = None;
+                game.active_interaction = None;
                 return vec![cmd];
             }
             vec![]
         }
         UIEffect::ApplyMoving(container_guid) => {
-            if let Some(interaction) = state.active_interaction {
+            if let Some(game) = state.game_option_mut()
+                && let Some(interaction) = game.active_interaction
+            {
                 let cmd = ClientCommand::MoveItem {
                     item: interaction.guid,
                     container: container_guid,
                     placement: 0,
                 };
-                state.active_interaction = None;
+                game.active_interaction = None;
                 return vec![cmd];
             }
             vec![]
         }
         UIEffect::CancelInteraction => {
-            state.active_interaction = None;
+            if let Some(game) = state.game_option_mut() {
+                game.active_interaction = None;
+            }
             vec![]
         }
     }

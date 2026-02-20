@@ -92,12 +92,6 @@ pub struct ChatMessage {
     pub text: String,
 }
 
-#[derive(PartialEq, Debug)]
-pub enum UIState {
-    Chat,
-    CharacterSelection,
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Modal {
     Retry { message: String, end_time: Instant },
@@ -132,6 +126,7 @@ pub enum ContextView {
 #[derive(Debug, Default)]
 pub struct UpdateResult {
     pub commands: Vec<ClientCommand>,
+    pub effect: Option<UIEffect>,
     pub needs_redraw: bool,
 }
 
@@ -145,9 +140,15 @@ impl UpdateResult {
         self
     }
 
+    pub fn with_effect(mut self, effect: UIEffect) -> Self {
+        self.effect = Some(effect);
+        self
+    }
+
     pub fn redraw() -> Self {
         Self {
             commands: Vec::new(),
+            effect: None,
             needs_redraw: true,
         }
     }
@@ -155,12 +156,16 @@ impl UpdateResult {
     pub fn commands(commands: Vec<ClientCommand>) -> Self {
         Self {
             commands,
+            effect: None,
             needs_redraw: false,
         }
     }
 
     pub fn merge(&mut self, other: UpdateResult) {
         self.commands.extend(other.commands);
+        if other.effect.is_some() {
+            self.effect = other.effect;
+        }
         self.needs_redraw |= other.needs_redraw;
     }
 }

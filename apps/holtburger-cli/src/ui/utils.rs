@@ -1,4 +1,4 @@
-use crate::ui::AppState;
+use crate::ui::model::{AppState, GameState};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -90,12 +90,10 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     result
 }
 
-pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
-    let verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(
-        state,
-        state.dashboard_tab,
-        state.selected_dashboard_index,
-    );
+pub fn render_action_bar(game: &GameState, app: &AppState) -> Option<Paragraph<'static>> {
+    let (tab, index) = (game.dashboard_tab, game.selected_dashboard_index);
+
+    let verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(game, app, tab, index);
     if verbs.is_empty() {
         return None;
     }
@@ -105,7 +103,7 @@ pub fn render_action_bar(state: &AppState) -> Option<Paragraph<'_>> {
         if i > 0 {
             spans.push(Span::raw(" "));
         }
-        spans.push(Span::raw(verb.display_label()));
+        spans.push(Span::raw(verb.display_label().to_string()));
     }
 
     Some(Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::TOP)))

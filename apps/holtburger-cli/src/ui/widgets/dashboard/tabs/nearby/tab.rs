@@ -5,7 +5,7 @@ use super::super::classification::{self, EntityClass};
 use super::super::common::{Action, VerbSet};
 use super::render::render_nearby_tab;
 use super::verbs;
-use crate::ui::model::AppState;
+use crate::ui::model::{AppState, GameState};
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, UIEffect};
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
@@ -14,47 +14,68 @@ use holtburger_core::world::entity::Entity;
 
 pub struct NearbyTab;
 
-pub fn get_entities(state: &AppState) -> Vec<(&Entity, f32, usize)> {
+pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
     filter_entities(
-        &state.entities,
-        &state.inventory,
-        &state.equipment,
-        state.player_pos.as_ref(),
+        &game.entities,
+        &game.inventory,
+        &game.equipment,
+        game.player_pos.as_ref(),
         EntityFilter::World,
     )
 }
 
 impl TabController for NearbyTab {
-    fn render(&self, f: &mut Frame, state: &mut AppState, area: Rect) {
-        render_nearby_tab(f, state, area);
+    fn render(&self, f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+        render_nearby_tab(f, game, app, area);
     }
 
-    fn get_verbs(&self, state: &AppState, index: usize) -> VerbSet {
-        let target = self.get_target_at_index(state, index);
-        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
-            &target,
-            state.player_guid,
-            state.active_interaction,
-        ) {
+    fn get_verbs(&self, game: &GameState, app: &AppState, index: usize) -> VerbSet {
+        let target = self.get_target_at_index(game, app, index);
+        let player_guid = game.player_guid;
+        let active_interaction = game.active_interaction;
+
+        if let Some(interaction_verbs) =
+            super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
+        {
             return interaction_verbs;
         }
 
         if let CommandTarget::Entity(e, _) = target {
-            return verbs::get_verbs(e, state);
+            return verbs::get_verbs(e, game);
         }
 
         vec![]
+    }
+
+    fn get_target_at_index<'a>(
+        &self,
+        game: &'a GameState,
+        _app: &'a AppState,
+        index: usize,
+    ) -> CommandTarget<'a> {
+        let entities = get_entities(game);
+        if let Some((e, _, _)) = entities.get(index) {
+            CommandTarget::Entity(e, None)
+        } else {
+            CommandTarget::None
+        }
+    }
+
+    fn get_item_count(&self, game: &GameState, _app: &AppState) -> usize {
+        get_entities(game).len()
     }
 
     fn handle_action(
         &self,
         action: &Action,
         index: usize,
-        state: &mut AppState,
+        game: &mut GameState,
+        app: &mut AppState,
     ) -> Option<UIEffect> {
-        let target = self.get_target_at_index(state, index);
-        let player_guid = state.player_guid;
-        let active_interaction = state.active_interaction;
+        let player_guid = game.player_guid;
+        let active_interaction = game.active_interaction;
+
+        let target = self.get_target_at_index(game, app, index);
 
         match (action, &target) {
             (Action::PickUp, CommandTarget::Entity(e, _)) => {
@@ -88,17 +109,5 @@ impl TabController for NearbyTab {
                 active_interaction,
             ),
         }
-    }
-
-    fn get_target_at_index<'a>(&self, state: &'a AppState, index: usize) -> CommandTarget<'a> {
-        let entities = get_entities(state);
-        entities
-            .get(index)
-            .map(|(e, _, _)| CommandTarget::Entity(e, None))
-            .unwrap_or(CommandTarget::None)
-    }
-
-    fn get_item_count(&self, state: &AppState) -> usize {
-        get_entities(state).len()
     }
 }

@@ -16,13 +16,11 @@ impl AppState {
                 result = self.update_tick(elapsed);
             }
             AppAction::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
-                result.commands =
-                    self.handle_key_press(key, width, height, main_chunks, dynamic_chunk);
+                result = self.handle_key_press(key, width, height, main_chunks, dynamic_chunk);
                 result.needs_redraw = true; // Input always redraws
             }
             AppAction::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
-                result.commands =
-                    self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
+                result = self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
                 result.needs_redraw = true;
             }
             AppAction::ReceivedEvent(event) => {
@@ -144,33 +142,36 @@ impl AppState {
             }
         }
 
-        // Enforce dashboard index bounds
+        // GameState logic
         let dashboard_count = self.dashboard_item_count();
-        if self.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
-            self.selected_dashboard_index = dashboard_count - 1;
-            result.needs_redraw = true;
-        } else if dashboard_count == 0 && self.selected_dashboard_index != 0 {
-            self.selected_dashboard_index = 0;
-            result.needs_redraw = true;
-        }
-
-        // Proactive enchantment purge
-        let old_count = self.player_enchantments.len();
-        self.player_enchantments.retain(|e| {
-            if e.duration < 0.0 {
-                return true;
+        if let Some(game) = self.game_option_mut() {
+            // Enforce dashboard index bounds
+            if game.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
+                game.selected_dashboard_index = dashboard_count - 1;
+                result.needs_redraw = true;
+            } else if dashboard_count == 0 && game.selected_dashboard_index != 0 {
+                game.selected_dashboard_index = 0;
+                result.needs_redraw = true;
             }
-            let expires_at = e.start_time + e.duration;
-            expires_at > 0.0
-        });
-        if self.player_enchantments.len() != old_count {
-            result.needs_redraw = true;
-        }
 
-        // Update enchantment timers locally
-        for enchant in &mut self.player_enchantments {
-            if enchant.duration >= 0.0 {
-                enchant.start_time -= elapsed;
+            // Proactive enchantment purge
+            let old_count = game.player_enchantments.len();
+            game.player_enchantments.retain(|e| {
+                if e.duration < 0.0 {
+                    return true;
+                }
+                let expires_at = e.start_time + e.duration;
+                expires_at > 0.0
+            });
+            if game.player_enchantments.len() != old_count {
+                result.needs_redraw = true;
+            }
+
+            // Update enchantment timers locally
+            for enchant in &mut game.player_enchantments {
+                if enchant.duration >= 0.0 {
+                    enchant.start_time -= elapsed;
+                }
             }
         }
 

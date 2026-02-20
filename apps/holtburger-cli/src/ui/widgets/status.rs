@@ -1,4 +1,4 @@
-use crate::ui::AppState;
+use crate::ui::model::{AppState, GameState};
 use crate::ui::widgets::vitals::render_vitals;
 use holtburger_common::time::*;
 use ratatui::Frame;
@@ -17,17 +17,17 @@ const DEGREES_IN_CIRCLE: f32 = 360.0;
 const DEGREES_PER_POINT: f32 = DEGREES_IN_CIRCLE / COMPASS_POINTS as f32; // 22.5° per segment
 const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the label
 
-pub fn render_status_bar(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn render_status_bar(f: &mut Frame, game: &GameState, app: &AppState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    render_vitals(f, state, chunks[0]);
-    render_status_panel(f, state, chunks[1]);
+    render_vitals(f, game, app, chunks[0]);
+    render_status_panel(f, game, app, chunks[1]);
 }
 
-fn render_status_panel(f: &mut Frame, state: &AppState, area: Rect) {
+fn render_status_panel(f: &mut Frame, game: &GameState, app: &AppState, area: Rect) {
     let status_block = Block::default().borders(Borders::ALL).title("Status");
     let inner_status_area = status_block.inner(area);
     f.render_widget(status_block, area);
@@ -41,13 +41,13 @@ fn render_status_panel(f: &mut Frame, state: &AppState, area: Rect) {
         .split(inner_status_area);
 
     // 1. Coords + Compass
-    let retry_info = get_retry_info(state);
-    let pos_info = state
+    let retry_info = get_retry_info(app);
+    let pos_info = game
         .player_pos
         .as_ref()
         .map(|pos| pos.to_world_coords().to_string_with_precision(2))
         .unwrap_or_else(|| "0.00N, 0.00E".to_string());
-    let compass_str = get_compass_str(state);
+    let compass_str = get_compass_str(game);
     let pos_compass_str = format!("{} 🧭 {} > {}", retry_info, pos_info, compass_str);
     f.render_widget(
         Paragraph::new(pos_compass_str).alignment(ratatui::layout::Alignment::Left),
@@ -55,46 +55,46 @@ fn render_status_panel(f: &mut Frame, state: &AppState, area: Rect) {
     );
 
     // 2. Chronometer
-    let time_str = get_time_str(state);
+    let time_str = get_time_str(game, app);
     f.render_widget(
         Paragraph::new(time_str).alignment(ratatui::layout::Alignment::Right),
         status_layout[1],
     );
 }
 
-fn get_retry_info(state: &AppState) -> String {
+fn get_retry_info(app: &AppState) -> String {
     let mut retry_info = String::new();
     let now = std::time::Instant::now();
 
-    if state.logon_retry.active {
-        let secs = state
+    if app.logon_retry.active {
+        let secs = app
             .logon_retry
             .next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
         retry_info.push_str(&format!(
             "[Logon:{}/{} {}s] ",
-            state.logon_retry.attempts, state.logon_retry.max_attempts, secs
+            app.logon_retry.attempts, app.logon_retry.max_attempts, secs
         ));
     }
 
-    if state.enter_retry.active {
-        let secs = state
+    if app.enter_retry.active {
+        let secs = app
             .enter_retry
             .next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
         retry_info.push_str(&format!(
             "[Enter:{}/{} {}s] ",
-            state.enter_retry.attempts, state.enter_retry.max_attempts, secs
+            app.enter_retry.attempts, app.enter_retry.max_attempts, secs
         ));
     }
 
     retry_info
 }
 
-fn get_compass_str(state: &AppState) -> String {
-    let heading_rad = state
+fn get_compass_str(game: &GameState) -> String {
+    let heading_rad = game
         .player_pos
         .as_ref()
         .map(|p| p.rotation.to_heading())
@@ -106,8 +106,8 @@ fn get_compass_str(state: &AppState) -> String {
     format!("{:03.0}°{}", heading_deg, COMPASS_DIRECTIONS[dir_idx])
 }
 
-fn get_time_str(state: &AppState) -> String {
-    if let Some((st, inst)) = state.server_time {
+fn get_time_str(game: &GameState, _app: &AppState) -> String {
+    if let Some((st, inst)) = game.server_time {
         let current_server_time = st + inst.elapsed().as_secs_f64();
         let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);
         let ticks_per_hour_24 = DERETH_DAY_LENGTH / 24.0;

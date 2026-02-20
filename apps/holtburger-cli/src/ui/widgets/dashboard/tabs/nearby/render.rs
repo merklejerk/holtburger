@@ -5,29 +5,27 @@ use ratatui::text::Line;
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use super::super::classification::{EntityClass, classify_entity, get_entity_color};
-use crate::ui::model::AppState;
+use crate::ui::model::{AppState, GameState};
 use holtburger_core::world::entity::Entity;
 
-pub fn render_nearby_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let items = get_list_items(state);
+pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+    let items = get_list_items(game, app);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    state
-        .dashboard_list_state
-        .select(Some(state.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut state.dashboard_list_state);
+    game.dashboard_list_state
+        .select(Some(game.selected_dashboard_index));
+    f.render_stateful_widget(dashboard_list, area, &mut game.dashboard_list_state);
 
     // Render Scrollbar
     let height = area.height as usize;
-    state.last_dashboard_height = height;
+    game.last_dashboard_height = height;
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            state
-                .selected_dashboard_index
+            game.selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -46,9 +44,9 @@ pub fn render_nearby_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
-fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let entities = super::tab::get_entities(state);
-    let container_counts = state.get_container_counts();
+fn get_list_items(game: &GameState, app: &AppState) -> Vec<ListItem<'static>> {
+    let entities = super::tab::get_entities(game);
+    let container_counts = app.get_container_counts();
     let mut list_items = Vec::new();
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {
@@ -61,8 +59,8 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             e,
             display_dist,
             *depth,
-            i == state.selected_dashboard_index,
-            state.use_emojis,
+            i == game.selected_dashboard_index,
+            app.use_emojis,
             container_count,
         ));
     }

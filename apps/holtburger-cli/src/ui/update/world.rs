@@ -1,5 +1,5 @@
-use crate::ui::model::AppState;
-use crate::ui::types::{ChatMessageKind, ContextView, UIState};
+use crate::ui::model::{AppState, GameState, Page, SelectionState};
+use crate::ui::types::{ChatMessageKind, ContextView};
 use holtburger_common::properties::PropertyInt;
 use holtburger_core::{StateEvent, WireEvent};
 use holtburger_protocol::messages::EquipMask;
@@ -9,9 +9,10 @@ impl AppState {
         match event {
             WireEvent::CharacterList(mut chars) => {
                 chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-                self.characters = chars;
-                self.state = UIState::CharacterSelection;
-                self.selected_character_index = 0;
+                self.page = Page::Selection(SelectionState {
+                    characters: chars,
+                    selected_character_index: 0,
+                });
                 self.logon_retry.reset();
             }
             WireEvent::LogMessage(msg) => {
@@ -29,8 +30,12 @@ impl AppState {
                 self.log_chat(kind, msg);
             }
             WireEvent::PlayerEntered { guid, name } => {
-                self.player_guid = Some(guid);
-                self.character_name = Some(name);
+                if let Page::Game(game) = &mut self.page {
+                    game.player_guid = Some(guid);
+                    game.character_name = Some(name);
+                } else {
+                    self.page = Page::Game(Box::new(GameState::new(guid, name)));
+                }
             }
             WireEvent::ServerMessage(message) => {
                 self.log_chat(ChatMessageKind::System, message);
@@ -52,15 +57,28 @@ impl AppState {
     }
 
     pub(super) fn handle_received_state_event(&mut self, event: StateEvent) {
-        if let StateEvent::EntityIdentified(entity) = event {
+        if let StateEvent::EntityIdentified(entity) = event
+            && let Some(game) = self.game_option_mut()
+        {
             let guid = entity.guid;
-            self.entities.insert(guid, *entity);
-            self.context_view = ContextView::Assess(guid);
+            game.entities.insert(guid, *entity);
+            game.context_view = ContextView::Assess(guid);
         }
     }
 
     pub(super) fn handle_client_view_event(&mut self, event: holtburger_core::ClientViewEvent) {
         use holtburger_core::ClientViewEvent;
+
+        // Skip events if not in-game, unless it's a StatusUpdate or ErrorRaised
+        // that handles transitions.
+        if !matches!(
+            event,
+            ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. }
+        ) && self.game_option().is_none()
+        {
+            return;
+        }
+
         match event {
             ClientViewEvent::StatusUpdate { state } => {
                 self.core_state = state;
@@ -117,9 +135,11 @@ impl AppState {
                 enchantments,
                 resolved_names,
             } => {
-                self.player_enchantments = enchantments;
-                for (id, name) in resolved_names {
-                    self.spell_names.insert(id, name);
+                if let Some(game) = self.game_option_mut() {
+                    game.player_enchantments = enchantments;
+                    for (id, name) in resolved_names {
+                        game.spell_names.insert(id, name);
+                    }
                 }
             }
             ClientViewEvent::PlayerStatsSkillsUpdated {
@@ -130,97 +150,115 @@ impl AppState {
                 vitae,
                 level_info,
             } => {
-                self.attributes = attributes;
-                self.skills = skills;
-                self.resistances = resistances;
-                self.armor = armor;
-                self.vitae = vitae;
-                self.level_info = Some(level_info);
+                if let Some(game) = self.game_option_mut() {
+                    game.attributes = attributes;
+                    game.skills = skills;
+                    game.resistances = resistances;
+                    game.armor = armor;
+                    game.vitae = vitae;
+                    game.level_info = Some(level_info);
+                }
             }
             ClientViewEvent::PlayerVitalsUpdated { vitals } => {
-                for (vt, v) in vitals {
-                    self.vitals.insert(vt, v);
+                if let Some(game) = self.game_option_mut() {
+                    for (vt, v) in vitals {
+                        game.vitals.insert(vt, v);
+                    }
                 }
             }
             ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells } => {
-                self.player_spells = spell_ids;
-                for (id, info) in spells {
-                    self.spell_names.insert(id, info.name.clone());
-                    self.spell_info.insert(id, Box::new(info));
+                if let Some(game) = self.game_option_mut() {
+                    game.player_spells = spell_ids;
+                    for (id, info) in spells {
+                        game.spell_names.insert(id, info.name.clone());
+                        game.spell_info.insert(id, Box::new(info));
+                    }
                 }
             }
             ClientViewEvent::EntityUpserted { entity } => {
-                let guid = entity.guid;
-                if Some(guid) == self.player_guid {
-                    self.player_pos = Some(entity.position);
-                }
-
-                // Update inventory tracking
-                if let Some(pguid) = self.player_guid {
-                    if let Some(cid) = entity.container_id
-                        && (cid == pguid || self.inventory.contains(&cid))
-                    {
-                        self.inventory.insert(guid);
-                    } else if let Some(wid) = entity.wielder_id
-                        && wid == pguid
-                    {
-                        self.inventory.insert(guid);
-                    } else {
-                        // If it's no longer in our inventory/wielded, remove it
-                        self.inventory.remove(&guid);
+                if let Some(game) = self.game_option_mut() {
+                    let guid = entity.guid;
+                    if Some(guid) == game.player_guid {
+                        game.player_pos = Some(entity.position);
                     }
-                }
 
-                // Update equipment tracking
-                if let Some(pguid) = self.player_guid
-                    && entity.wielder_id == Some(pguid)
-                {
-                    if let Some(mask) = entity.currently_wielded_location {
-                        if mask.is_empty() {
-                            self.equipment.remove(&guid);
+                    // Update inventory tracking
+                    if let Some(pguid) = game.player_guid {
+                        if let Some(cid) = entity.container_id
+                            && (cid == pguid || game.inventory.contains(&cid))
+                        {
+                            game.inventory.insert(guid);
+                        } else if let Some(wid) = entity.wielder_id
+                            && wid == pguid
+                        {
+                            game.inventory.insert(guid);
                         } else {
-                            self.equipment.insert(guid, mask);
+                            // If it's no longer in our inventory/wielded, remove it
+                            game.inventory.remove(&guid);
                         }
-                    } else if let Some(&loc) = entity
-                        .int_properties
-                        .get(&(PropertyInt::CurrentWieldedLocation as u32))
+                    }
+
+                    // Update equipment tracking
+                    if let Some(pguid) = game.player_guid
+                        && entity.wielder_id == Some(pguid)
                     {
-                        let mask = EquipMask::from_bits_truncate(loc as u32);
-                        if mask.is_empty() {
-                            self.equipment.remove(&guid);
+                        if let Some(mask) = entity.currently_wielded_location {
+                            if mask.is_empty() {
+                                game.equipment.remove(&guid);
+                            } else {
+                                game.equipment.insert(guid, mask);
+                            }
+                        } else if let Some(&loc) = entity
+                            .int_properties
+                            .get(&(PropertyInt::CurrentWieldedLocation as u32))
+                        {
+                            let mask = EquipMask::from_bits_truncate(loc as u32);
+                            if mask.is_empty() {
+                                game.equipment.remove(&guid);
+                            } else {
+                                game.equipment.insert(guid, mask);
+                            }
                         } else {
-                            self.equipment.insert(guid, mask);
+                            game.equipment.remove(&guid);
                         }
                     } else {
-                        self.equipment.remove(&guid);
+                        game.equipment.remove(&guid);
                     }
-                } else {
-                    self.equipment.remove(&guid);
-                }
 
-                self.entities.insert(entity.guid, *entity);
+                    game.entities.insert(entity.guid, *entity);
+                }
             }
             ClientViewEvent::EntityRemoved { guid } => {
-                self.update_inventory_recursive(guid, false);
-                self.entities.remove(&guid);
-                self.equipment.remove(&guid);
-                if self.current_debug_guid == Some(guid) {
-                    self.current_debug_guid = None;
+                if let Page::Game(_) = self.page {
+                    self.update_inventory_recursive(guid, false);
+                    if let Some(game) = self.game_option_mut() {
+                        game.entities.remove(&guid);
+                        game.equipment.remove(&guid);
+                        if game.current_debug_guid == Some(guid) {
+                            game.current_debug_guid = None;
+                        }
+                    }
                 }
             }
             ClientViewEvent::ServerTimeUpdated { time } => {
-                self.server_time = Some((time, std::time::Instant::now()));
+                if let Some(game) = self.game_option_mut() {
+                    game.server_time = Some((time, std::time::Instant::now()));
+                }
             }
             ClientViewEvent::CombatModeUpdated { mode } => {
-                self.combat_mode = mode;
+                if let Some(game) = self.game_option_mut() {
+                    game.combat_mode = mode;
+                }
             }
             ClientViewEvent::NoClipUpdated { enabled } => {
-                self.noclip = enabled;
-                let status = if enabled { "ENABLED" } else { "DISABLED" };
-                self.log_chat(
-                    ChatMessageKind::System,
-                    format!(">> NoClip is now {}", status),
-                );
+                if let Some(game) = self.game_option_mut() {
+                    game.noclip = enabled;
+                    let status = if enabled { "ENABLED" } else { "DISABLED" };
+                    self.log_chat(
+                        ChatMessageKind::System,
+                        format!(">> NoClip is now {}", status),
+                    );
+                }
             }
         }
     }

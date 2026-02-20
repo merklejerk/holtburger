@@ -4,28 +4,26 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use crate::ui::model::AppState;
+use crate::ui::model::{AppState, GameState};
 
-pub fn render_spells_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let items = get_list_items(state);
+pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+    let items = get_list_items(game, app);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    state
-        .dashboard_list_state
-        .select(Some(state.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut state.dashboard_list_state);
+    game.dashboard_list_state
+        .select(Some(game.selected_dashboard_index));
+    f.render_stateful_widget(dashboard_list, area, &mut game.dashboard_list_state);
 
     // Render Scrollbar
     let height = area.height as usize;
-    state.last_dashboard_height = height;
+    game.last_dashboard_height = height;
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            state
-                .selected_dashboard_index
+            game.selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -44,11 +42,10 @@ pub fn render_spells_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
-fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let mut spells = state.player_spells.clone();
+fn get_list_items(game: &GameState, _app: &AppState) -> Vec<ListItem<'static>> {
+    let mut spells = game.player_spells.clone();
     spells.sort_by_key(|&sid| {
-        state
-            .spell_names
+        game.spell_names
             .get(&sid)
             .cloned()
             .unwrap_or_else(|| "".to_string())
@@ -58,13 +55,13 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .iter()
         .enumerate()
         .map(|(i, &spell_id)| {
-            let name = state
+            let name = game
                 .spell_names
                 .get(&spell_id)
                 .cloned()
                 .unwrap_or_else(|| format!("Unknown Spell {}", spell_id));
 
-            let is_selected = i == state.selected_dashboard_index;
+            let is_selected = i == game.selected_dashboard_index;
 
             let name_style = if is_selected {
                 Style::default().bg(Color::DarkGray)
@@ -82,7 +79,7 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 Span::styled(format!("{:<30}", name), name_style),
                 Span::raw(" "),
                 Span::styled(
-                    if let Some(info) = state.spell_info.get(&spell_id) {
+                    if let Some(info) = game.spell_info.get(&spell_id) {
                         format!("Power: {}", info.power)
                     } else {
                         "".to_string()

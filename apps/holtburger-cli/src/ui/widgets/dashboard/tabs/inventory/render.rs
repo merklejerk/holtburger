@@ -13,7 +13,7 @@ use holtburger_common::properties::EquipMask;
 use holtburger_core::world::entity::Entity;
 use std::collections::HashMap;
 
-pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
+pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let mut bottom_area = area;
 
     let counts = game.data.get_container_counts();
@@ -41,7 +41,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, use_emojis: boo
         f.render_widget(summary, top_area);
     }
 
-    let items = get_list_items(game, use_emojis, &counts);
+    let items = get_list_items(game, &counts);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -84,7 +84,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, use_emojis: boo
 
 fn get_list_items(
     game: &GameState,
-    use_emojis: bool,
+
     container_counts: &HashMap<Guid, usize>,
 ) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(game);
@@ -101,7 +101,6 @@ fn get_list_items(
             e,
             *depth,
             i == game.view.selected_dashboard_index,
-            use_emojis,
             is_equipped,
             container_count,
         ));
@@ -115,7 +114,7 @@ fn render_inventory_item(
     e: &Entity,
     depth: usize,
     highlight: bool,
-    use_emojis: bool,
+
     is_equipped: bool,
     container_count: Option<usize>,
 ) -> ListItem<'static> {
@@ -132,11 +131,7 @@ fn render_inventory_item(
         text_style = text_style.add_modifier(Modifier::BOLD);
     }
 
-    let type_marker = if use_emojis {
-        class.emoji()
-    } else {
-        class.label()
-    };
+    let type_marker = class.emoji();
 
     let mut display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)

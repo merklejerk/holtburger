@@ -32,7 +32,7 @@ pub enum CharTabLine {
     Spacer,
 }
 
-pub fn render_character_tab(f: &mut Frame, game: &mut GameState, _use_emojis: bool, area: Rect) {
+pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let mut bottom_area = area;
 
     if let Some(info) = &game.data.level_info {

@@ -16,8 +16,8 @@ pub enum EquipTabLine<'a> {
     Item(&'a Entity, bool, bool, Option<TargetSlot>),
 }
 
-pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
-    let items = get_list_items(game, use_emojis);
+pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
+    let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
@@ -54,7 +54,7 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, a
     }
 }
 
-fn get_list_items(game: &GameState, _use_emojis: bool) -> Vec<ListItem<'static>> {
+fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     let lines = get_lines(game);
     let mut list_items = Vec::new();
 

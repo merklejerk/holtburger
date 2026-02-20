@@ -25,8 +25,8 @@ pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
 }
 
 impl TabController for InventoryTab {
-    fn render(&self, f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
-        render_inventory_tab(f, game, use_emojis, area);
+    fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect) {
+        render_inventory_tab(f, game, area);
     }
 
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {

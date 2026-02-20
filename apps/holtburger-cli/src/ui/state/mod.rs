@@ -47,7 +47,6 @@ pub struct AppState {
     pub enter_retry: RetryState,
     pub core_state: ClientState,
     pub net_stats: NetStats,
-    pub use_emojis: bool,
     pub verbosity: u8,
 }
 

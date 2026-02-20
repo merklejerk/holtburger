@@ -9,7 +9,7 @@ use ratatui::text::Line;
 
 pub trait TabController {
     /// Renders the tab's content into the given area.
-    fn render(&self, f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect);
+    fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect);
 
     /// Returns the list of available verbs for the item at the specified index.
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb>;

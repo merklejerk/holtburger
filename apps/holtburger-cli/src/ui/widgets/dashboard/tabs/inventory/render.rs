@@ -7,17 +7,20 @@ use ratatui::widgets::{
 };
 
 use super::super::classification::{EntityClass, classify_entity, get_entity_color};
-use crate::ui::model::AppState;
+use crate::ui::state::GameState;
+use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
 use holtburger_core::world::entity::Entity;
+use std::collections::HashMap;
 
-pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
+pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let mut bottom_area = area;
-    let counts = state.get_container_counts();
+
+    let counts = game.data.get_container_counts();
 
     // Sticky summary line for the player's main inventory container
-    if let Some(player_guid) = state.player_guid
-        && let Some(player_entity) = state.entities.get(&player_guid)
+    if let Some(player_guid) = game.data.player_guid
+        && let Some(player_entity) = game.data.entities.get(&player_guid)
         && let Some(capacity) = player_entity.items_capacity
     {
         let count = counts.get(&player_guid).cloned().unwrap_or(0);
@@ -38,24 +41,28 @@ pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
         f.render_widget(summary, top_area);
     }
 
-    let items = get_list_items(state, &counts);
+    let items = get_list_items(game, &counts);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    state
+    game.view
         .dashboard_list_state
-        .select(Some(state.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, bottom_area, &mut state.dashboard_list_state);
+        .select(Some(game.view.selected_dashboard_index));
+    f.render_stateful_widget(
+        dashboard_list,
+        bottom_area,
+        &mut game.view.dashboard_list_state,
+    );
 
     // Render Scrollbar
     let height = bottom_area.height as usize;
-    state.last_dashboard_height = height;
+    game.view.last_dashboard_height = height;
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            state
+            game.view
                 .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
@@ -76,23 +83,24 @@ pub fn render_inventory_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
 }
 
 fn get_list_items(
-    state: &AppState,
-    container_counts: &std::collections::HashMap<holtburger_common::Guid, usize>,
+    game: &GameState,
+
+    container_counts: &HashMap<Guid, usize>,
 ) -> Vec<ListItem<'static>> {
-    let entities = super::tab::get_entities(state);
+    let entities = super::tab::get_entities(game);
     let mut list_items = Vec::new();
 
+    let equipment = &game.data.equipment;
+
     for (i, (e, _, depth)) in entities.iter().enumerate() {
-        let is_equipped =
-            state.equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
+        let is_equipped = equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
 
         let container_count = container_counts.get(&e.guid).cloned();
 
         list_items.push(render_inventory_item(
             e,
             *depth,
-            i == state.selected_dashboard_index,
-            state.use_emojis,
+            i == game.view.selected_dashboard_index,
             is_equipped,
             container_count,
         ));
@@ -106,7 +114,7 @@ fn render_inventory_item(
     e: &Entity,
     depth: usize,
     highlight: bool,
-    use_emojis: bool,
+
     is_equipped: bool,
     container_count: Option<usize>,
 ) -> ListItem<'static> {
@@ -123,11 +131,7 @@ fn render_inventory_item(
         text_style = text_style.add_modifier(Modifier::BOLD);
     }
 
-    let type_marker = if use_emojis {
-        class.emoji()
-    } else {
-        class.label()
-    };
+    let type_marker = class.emoji();
 
     let mut display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)

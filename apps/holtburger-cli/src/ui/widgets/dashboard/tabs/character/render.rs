@@ -13,7 +13,7 @@ use holtburger_core::world::magic::get_enchantment_name;
 use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
 
-use crate::ui::model::AppState;
+use crate::ui::state::GameState;
 use crate::ui::types::StatType;
 use crate::ui::utils::format_cost;
 
@@ -32,10 +32,10 @@ pub enum CharTabLine {
     Spacer,
 }
 
-pub fn render_character_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
+pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let mut bottom_area = area;
 
-    if let Some(info) = &state.level_info {
+    if let Some(info) = &game.data.level_info {
         let summary_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -68,24 +68,28 @@ pub fn render_character_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
         f.render_widget(summary, top_area);
     }
 
-    let items = get_stats_list_items(state);
+    let items = get_stats_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    state
+    game.view
         .dashboard_list_state
-        .select(Some(state.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, bottom_area, &mut state.dashboard_list_state);
+        .select(Some(game.view.selected_dashboard_index));
+    f.render_stateful_widget(
+        dashboard_list,
+        bottom_area,
+        &mut game.view.dashboard_list_state,
+    );
 
     // Render Scrollbar
     let height = bottom_area.height as usize;
-    state.last_dashboard_height = height;
+    game.view.last_dashboard_height = height;
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            state
+            game.view
                 .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
@@ -105,8 +109,8 @@ pub fn render_character_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
     }
 }
 
-fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let items = get_char_tab_lines(state);
+fn get_stats_list_items(game: &GameState) -> Vec<ListItem<'static>> {
+    let items = get_char_tab_lines(game);
     let mut list_items = Vec::new();
 
     let header_style = Style::default()
@@ -115,7 +119,7 @@ fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
         .add_modifier(Modifier::BOLD);
 
     for (i, line) in items.iter().enumerate() {
-        let highlight = i == state.selected_dashboard_index
+        let highlight = i == game.view.selected_dashboard_index
             && matches!(
                 line,
                 CharTabLine::Enchantment(_)
@@ -204,7 +208,8 @@ fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 let val_color = if highlight { Color::Cyan } else { color };
                 let time_str = format_duration(enchant.start_time, enchant.duration);
 
-                let spell_name = state
+                let spell_name = game
+                    .data
                     .spell_names
                     .get(&(enchant.spell_id as u32))
                     .cloned()
@@ -237,7 +242,7 @@ fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
                 } else {
                     Color::DarkGray
                 };
-                let name = get_enchantment_name(enchant, &state.spell_names);
+                let name = get_enchantment_name(enchant, &game.data.spell_names);
                 let time_str = format_duration(enchant.start_time, enchant.duration);
                 list_items.push(
                     ListItem::new(Line::from(vec![
@@ -264,7 +269,7 @@ fn get_stats_list_items(state: &AppState) -> Vec<ListItem<'static>> {
     list_items
 }
 
-pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
+pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
     let mut lines = Vec::new();
 
     let resists_props = [
@@ -289,7 +294,7 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     let mut vitae_enchants: Vec<Enchantment> = Vec::new();
     let mut misc_enchants: Vec<Enchantment> = Vec::new();
 
-    for enchant in &state.player_enchantments {
+    for enchant in &game.data.player_enchantments {
         let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
         let mut categorized = true;
 
@@ -366,8 +371,8 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     // Misc are sorted by name then ID
     let sort_by_name = |list: &mut Vec<Enchantment>| {
         list.sort_by(|a, b| {
-            let na = get_enchantment_name(a, &state.spell_names);
-            let nb = get_enchantment_name(b, &state.spell_names);
+            let na = get_enchantment_name(a, &game.data.spell_names);
+            let nb = get_enchantment_name(b, &game.data.spell_names);
             na.cmp(&nb).then(a.spell_id.cmp(&b.spell_id))
         });
     };
@@ -376,8 +381,8 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
     // 1. Vitals
     lines.push(CharTabLine::Header("VITALS"));
 
-    if state.vitae < 0.999 || !vitae_enchants.is_empty() {
-        let penalty_pct = (1.0 - state.vitae) * 100.0;
+    if game.data.vitae < 0.999 || !vitae_enchants.is_empty() {
+        let penalty_pct = (1.0 - game.data.vitae) * 100.0;
         lines.push(CharTabLine::Stat {
             label: "Vitae Penalty".to_string(),
             value: format!("{:.0}%", penalty_pct),
@@ -391,7 +396,7 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         }
     }
 
-    let mut vitals: Vec<_> = state.vitals.values().collect();
+    let mut vitals: Vec<_> = game.data.vitals.values().collect();
     vitals.sort_by(|a, b| a.vital_type.to_string().cmp(&b.vital_type.to_string()));
     for v in vitals {
         let val = format!("{} / {}", v.current, v.buffed_max);
@@ -417,7 +422,7 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // 2. Attributes
     lines.push(CharTabLine::Header("ATTRIBUTES"));
-    let mut attrs: Vec<_> = state.attributes.values().collect();
+    let mut attrs: Vec<_> = game.data.attributes.values().collect();
     attrs.sort_by(|a, b| a.attr_type.to_string().cmp(&b.attr_type.to_string()));
     for a in attrs {
         let val = if a.current != a.base {
@@ -447,7 +452,8 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // 3. Skills
     lines.push(CharTabLine::Header("SKILLS"));
-    let mut skills: Vec<_> = state
+    let mut skills: Vec<_> = game
+        .data
         .skills
         .values()
         .filter(|s| s.skill_type.is_eor())
@@ -485,7 +491,8 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
                 .map(|next| next.saturating_sub(s.spent_xp) as u64);
         } else if s.training == TrainingLevel::Untrained {
             // Check if we can train it
-            sp_cost = state
+            sp_cost = game
+                .data
                 .skill_table
                 .as_ref()
                 .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
@@ -513,11 +520,11 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
 
     // 4. Resistances
     lines.push(CharTabLine::Header("RESISTANCES"));
-    if state.player_guid.is_some() {
+    if game.data.player_guid.is_some() {
         // Armor always first in Resistances
         lines.push(CharTabLine::Stat {
             label: "Armor".to_string(),
-            value: state.armor.to_string(),
+            value: game.data.armor.to_string(),
             xp_cost: None,
             sp_cost: None,
             stat_type: None,
@@ -528,20 +535,26 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
         }
 
         let mut resists = vec![
-            (PropertyFloat::ResistSlash, state.resistances.slash),
-            (PropertyFloat::ResistPierce, state.resistances.pierce),
-            (PropertyFloat::ResistBludgeon, state.resistances.bludgeon),
-            (PropertyFloat::ResistFire, state.resistances.fire),
-            (PropertyFloat::ResistCold, state.resistances.cold),
-            (PropertyFloat::ResistAcid, state.resistances.acid),
-            (PropertyFloat::ResistElectric, state.resistances.electric),
-            (PropertyFloat::ResistNether, state.resistances.nether),
+            (PropertyFloat::ResistSlash, game.data.resistances.slash),
+            (PropertyFloat::ResistPierce, game.data.resistances.pierce),
+            (
+                PropertyFloat::ResistBludgeon,
+                game.data.resistances.bludgeon,
+            ),
+            (PropertyFloat::ResistFire, game.data.resistances.fire),
+            (PropertyFloat::ResistCold, game.data.resistances.cold),
+            (PropertyFloat::ResistAcid, game.data.resistances.acid),
+            (
+                PropertyFloat::ResistElectric,
+                game.data.resistances.electric,
+            ),
+            (PropertyFloat::ResistNether, game.data.resistances.nether),
         ];
         resists.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));
 
         for (prop, val) in resists {
             lines.push(CharTabLine::Stat {
-                label: prop.to_string(),
+                label: format!("{:?}", prop),
                 value: format!("{:.2}", val),
                 xp_cost: None,
                 sp_cost: None,
@@ -555,6 +568,7 @@ pub fn get_char_tab_lines(state: &AppState) -> Vec<CharTabLine> {
             }
         }
     }
+
     lines.push(CharTabLine::Spacer);
 
     // 5. Misc

@@ -1,32 +1,31 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use super::super::classification::{EntityClass, classify_entity, get_entity_color};
-use crate::ui::model::AppState;
+use crate::ui::state::GameState;
 use holtburger_core::world::entity::Entity;
 
-pub fn render_nearby_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
-    let items = get_list_items(state);
+pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
+    let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    state
+    game.view
         .dashboard_list_state
-        .select(Some(state.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut state.dashboard_list_state);
+        .select(Some(game.view.selected_dashboard_index));
+    f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
 
     // Render Scrollbar
     let height = area.height as usize;
-    state.last_dashboard_height = height;
+    game.view.last_dashboard_height = height;
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            state
+            game.view
                 .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
@@ -37,18 +36,16 @@ pub fn render_nearby_tab(f: &mut Frame, state: &mut AppState, area: Rect) {
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+                .style(Style::default().fg(Color::Gray).bg(Color::Black)),
             area,
             &mut scrollbar_state,
         );
     }
 }
 
-fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
-    let entities = super::tab::get_entities(state);
-    let container_counts = state.get_container_counts();
+fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
+    let entities = super::tab::get_entities(game);
+    let container_counts = game.data.get_container_counts();
     let mut list_items = Vec::new();
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {
@@ -61,8 +58,7 @@ fn get_list_items(state: &AppState) -> Vec<ListItem<'static>> {
             e,
             display_dist,
             *depth,
-            i == state.selected_dashboard_index,
-            state.use_emojis,
+            i == game.view.selected_dashboard_index,
             container_count,
         ));
     }
@@ -76,7 +72,7 @@ fn render_nearby_item(
     dist: Option<f32>,
     depth: usize,
     highlight: bool,
-    use_emojis: bool,
+
     container_count: Option<usize>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
@@ -89,11 +85,7 @@ fn render_nearby_item(
 
     let text_style = Style::default().fg(color);
 
-    let type_marker = if use_emojis {
-        class.emoji()
-    } else {
-        class.label()
-    };
+    let type_marker = class.emoji();
 
     let mut display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
@@ -119,8 +111,8 @@ fn render_nearby_item(
             indent, type_marker, display_name, d
         )
     } else {
-        format!("{}[{}] {:<15}", indent, type_marker, display_name)
+        format!("{}[{}] {}", indent, type_marker, display_name)
     };
 
-    ListItem::new(Line::styled(text, text_style)).style(item_style)
+    ListItem::new(text).style(item_style.patch(text_style))
 }

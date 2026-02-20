@@ -18,11 +18,7 @@ pub mod assess;
 pub mod debug;
 pub mod filter;
 
-pub fn get_verbs_for_tab(
-    game: &GameState,
-    tab: DashboardTab,
-    index: usize,
-) -> Vec<Verb> {
+pub fn get_verbs_for_tab(game: &GameState, tab: DashboardTab, index: usize) -> Vec<Verb> {
     get_tab_controller(tab).get_verbs(game, index)
 }
 

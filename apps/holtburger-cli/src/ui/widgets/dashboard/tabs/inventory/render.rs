@@ -6,7 +6,7 @@ use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::super::classification::{classify_entity, get_entity_color, EntityClass};
+use super::super::classification::{EntityClass, classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
@@ -47,9 +47,14 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, use_emojis: boo
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.view.dashboard_list_state
+    game.view
+        .dashboard_list_state
         .select(Some(game.view.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, bottom_area, &mut game.view.dashboard_list_state);
+    f.render_stateful_widget(
+        dashboard_list,
+        bottom_area,
+        &mut game.view.dashboard_list_state,
+    );
 
     // Render Scrollbar
     let height = bottom_area.height as usize;
@@ -57,7 +62,8 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, use_emojis: boo
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            game.view.selected_dashboard_index
+            game.view
+                .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -87,9 +93,7 @@ fn get_list_items(
     let equipment = &game.data.equipment;
 
     for (i, (e, _, depth)) in entities.iter().enumerate() {
-        let is_equipped = equipment
-            .get(&e.guid)
-            .unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
+        let is_equipped = equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
 
         let container_count = container_counts.get(&e.guid).cloned();
 

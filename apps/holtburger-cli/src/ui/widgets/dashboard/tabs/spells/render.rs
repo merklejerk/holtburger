@@ -13,7 +13,8 @@ pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, _use_emojis: bool,
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.view.dashboard_list_state
+    game.view
+        .dashboard_list_state
         .select(Some(game.view.selected_dashboard_index));
     f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
 
@@ -23,7 +24,8 @@ pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, _use_emojis: bool,
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            game.view.selected_dashboard_index
+            game.view
+                .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -45,7 +47,8 @@ pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, _use_emojis: bool,
 fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     let mut spells = game.data.player_spells.clone();
     spells.sort_by_key(|&sid| {
-        game.data.spell_names
+        game.data
+            .spell_names
             .get(&sid)
             .cloned()
             .unwrap_or_else(|| "".to_string())
@@ -56,7 +59,8 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
         .enumerate()
         .map(|(i, &spell_id)| {
             let name = game
-                .data.spell_names
+                .data
+                .spell_names
                 .get(&spell_id)
                 .cloned()
                 .unwrap_or_else(|| format!("Unknown Spell {}", spell_id));

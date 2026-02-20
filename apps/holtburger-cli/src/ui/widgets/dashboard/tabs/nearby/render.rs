@@ -14,7 +14,8 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, 
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.view.dashboard_list_state
+    game.view
+        .dashboard_list_state
         .select(Some(game.view.selected_dashboard_index));
     f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
 

@@ -4,10 +4,10 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
+use super::super::classification::{classify_entity, get_entity_color};
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::world::entity::Entity;
-use super::super::classification::{get_entity_color, classify_entity};
 
 use crate::ui::state::GameState;
 
@@ -23,7 +23,8 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, a
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.view.dashboard_list_state
+    game.view
+        .dashboard_list_state
         .select(Some(game.view.selected_dashboard_index));
     f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
 
@@ -33,7 +34,8 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, a
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            game.view.selected_dashboard_index
+            game.view
+                .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -142,7 +144,8 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
     ];
 
     let mut equippable_items: Vec<&Entity> = game
-        .data.inventory
+        .data
+        .inventory
         .iter()
         .filter_map(|guid| game.data.entities.get(guid))
         .filter(|e| e.valid_locations.is_some_and(|v| !v.is_empty()))
@@ -169,7 +172,8 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
 
             if valid.intersects(mask) {
                 let current_mask = game
-                    .data.equipment
+                    .data
+                    .equipment
                     .get(&item.guid)
                     .cloned()
                     .unwrap_or(EquipMask::NONE);

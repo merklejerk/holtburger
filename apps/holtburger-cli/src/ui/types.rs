@@ -63,6 +63,7 @@ pub enum ContextView {
     Custom,
     Assess(Guid),
     Spell(u32),
+    Enchantment(Enchantment),
 }
 
 pub const SCROLL_STEP: usize = 3;

@@ -1,4 +1,4 @@
-use crate::ui::AppState;
+use crate::ui::NetStats;
 use holtburger_core::ClientState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -9,7 +9,12 @@ use unicode_width::UnicodeWidthStr;
 
 const SPARK_CHARS: &[&str] = &[" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-pub fn render_pulse_panel(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn render_pulse_panel(
+    f: &mut Frame,
+    core_state: &ClientState,
+    net_stats: &NetStats,
+    area: Rect,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default());
@@ -17,7 +22,7 @@ pub fn render_pulse_panel(f: &mut Frame, state: &AppState, area: Rect) {
     f.render_widget(block, area);
 
     // 1. Status Emoji
-    let status_emoji = match state.core_state {
+    let status_emoji = match core_state {
         ClientState::Connected => "🔌",
         ClientState::CharacterSelection(_) => "👥",
         ClientState::EnteringWorld => "🚪",
@@ -33,8 +38,8 @@ pub fn render_pulse_panel(f: &mut Frame, state: &AppState, area: Rect) {
     let mut net_spans = vec![Span::raw(prefix)];
 
     // 2. Net Stats (Sparklines)
-    let history_in = &state.net_stats.history_in;
-    let history_out = &state.net_stats.history_out;
+    let history_in = net_stats.history_in.clone();
+    let history_out = net_stats.history_out.clone();
 
     // Take at most spark_width elements
     let take_in = history_in.len().min(spark_width);

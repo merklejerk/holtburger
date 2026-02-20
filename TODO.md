@@ -44,7 +44,7 @@
 - [x] Show self in nearby tab.
 - [x] Show capacity (`(x/X)`) indicators on containers.
 - [x] Popup for "retrying..." mode.
-- [~] TUI client needs major refactors.
+- [x] TUI client needs major refactors. (Done: Page-based architecture with isolated GameState)
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).

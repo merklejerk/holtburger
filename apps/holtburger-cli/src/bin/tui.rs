@@ -7,14 +7,10 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::ui::{
-    self, AppState, ChatMessageKind, ContextView, DashboardTab, FocusedPane, NetStats, UIState,
+    self, AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState,
 };
-use holtburger_core::world::stats::Resistances;
 use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
-use holtburger_protocol::messages::combat::CombatMode;
-use ratatui::widgets::ListState;
 use ratatui::{Terminal, backend::CrosstermBackend};
-use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Mutex;
@@ -96,8 +92,6 @@ struct Args {
     debug_log: Option<String>,
     #[arg(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
-    #[arg(long)]
-    no_emojis: bool,
     #[arg(short, long)]
     dats: Option<String>,
 }
@@ -204,68 +198,25 @@ async fn main() -> Result<()> {
 
     let mut app_state = AppState {
         account_name: args.account.clone(),
-        character_name: None,
-        player_guid: None,
-        level_info: None,
-        attributes: HashMap::new(),
-        vitals: HashMap::new(),
-        skills: HashMap::new(),
-        resistances: Resistances::default(),
-        armor: 0,
-        vitae: 1.0,
-        messages: Vec::new(),
+        account_password: args.password.clone(),
+        page: Page::Selection(SelectionState::default()),
+        modal: None,
+        chat: ChatState::new(chat_log),
         input: String::new(),
         input_history: Vec::new(),
         history_index: None,
-        characters: Vec::new(),
-        state: UIState::Chat,
-        modal: None,
-        focused_pane: FocusedPane::Dashboard,
-        previous_focused_pane: FocusedPane::Dashboard,
-        selected_character_index: 0,
-        selected_dashboard_index: 0,
-        dashboard_list_state: ListState::default().with_selected(Some(0)),
-        last_dashboard_height: 0,
-        scroll_offset: 0,
-        chat_total_lines: 0,
-        chat_last_total_lines: 0,
-        context_total_lines: 0,
-        context_last_total_lines: 0,
-        dashboard_tab: DashboardTab::Nearby,
-        context_buffer: Vec::new(),
-        context_scroll_offset: 0,
-        context_view: ContextView::Default,
-        current_debug_guid: None,
-        active_interaction: None,
-        account_password: args.password.clone(),
         logon_retry: RetryState::new(5),
         enter_retry: RetryState::new(5),
         core_state: ClientState::Connected,
-        player_pos: None,
-        player_enchantments: Vec::new(),
-        player_spells: Vec::new(),
-        spell_names: HashMap::new(),
-        spell_info: HashMap::new(),
-        skill_table: None,
-        entities: HashMap::new(),
-        server_time: None,
-        chat_log,
-        use_emojis: !args.no_emojis,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),
-        combat_mode: CombatMode::NonCombat,
-        noclip: false,
-        inventory: HashSet::new(),
-        equipment: HashMap::new(),
-        wrapped_chat_cache: Vec::new(),
-        last_chat_width: 0,
     };
 
     app_state.refresh_context_buffer();
 
     if args.verbose > 0 {
-        app_state.log_chat(
+        app_state.chat.log(
             ChatMessageKind::System,
             format!("Verbosity level {} enabled.", args.verbose),
         );
@@ -286,12 +237,6 @@ async fn main() -> Result<()> {
     loop {
         // 1. Process Network Events (Drain batch)
         while let Ok(event) = wire_view_rx.try_recv() {
-            if let WireEvent::GameMessage(msg) = &event {
-                use holtburger_protocol::messages::GameMessage;
-                if let GameMessage::ServerName(data) = msg.as_ref() {
-                    app_state.world_name = data.name.clone();
-                }
-            }
             let res = app_state.handle_action(ui::AppAction::ReceivedEvent(event));
             needs_redraw |= res.needs_redraw;
             for cmd in res.commands {

@@ -402,7 +402,7 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         let val = format!("{} / {}", v.current, v.buffed_max);
         let xp_cost = v
             .next_rank_xp
-            .map(|next: u32| next.saturating_sub(v.spent_xp) as u64);
+            .map(|next| next.saturating_sub(v.spent_xp) as u64);
 
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
@@ -432,7 +432,7 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         };
         let xp_cost = a
             .next_rank_xp
-            .map(|next: u32| next.saturating_sub(a.spent_xp) as u64);
+            .map(|next| next.saturating_sub(a.spent_xp) as u64);
 
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
@@ -488,7 +488,7 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         if s.training as u32 >= TrainingLevel::Trained as u32 {
             xp_cost = s
                 .next_rank_xp
-                .map(|next: u32| next.saturating_sub(s.spent_xp) as u64);
+                .map(|next| next.saturating_sub(s.spent_xp) as u64);
         } else if s.training == TrainingLevel::Untrained {
             // Check if we can train it
             sp_cost = game
@@ -569,13 +569,6 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         }
     }
 
-    // Sort by name then ID for the final section
-    let mut final_misc_enchants = misc_enchants.clone();
-    final_misc_enchants.sort_by(|a, b| {
-        let na = get_enchantment_name(a, &game.data.spell_names);
-        let nb = get_enchantment_name(b, &game.data.spell_names);
-        na.cmp(&nb).then(a.spell_id.cmp(&b.spell_id))
-    });
     lines.push(CharTabLine::Spacer);
 
     // 5. Misc

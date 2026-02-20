@@ -39,9 +39,8 @@ impl AppState {
             return result;
         }
 
-        // Global shortcut: Esc on selection screen (placeholder logic)
+        // Global shortcut: Esc on selection screen
         if key.code == KeyCode::Esc && matches!(self.page, Page::Selection(_)) {
-            self.page = Page::Game(Box::default());
             return result;
         }
 
@@ -302,7 +301,7 @@ impl GameState {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if command == "/quit" || input == "/exit" {
+                    if command == "/quit" || command == "/exit" {
                         result.commands.push(ClientCommand::Quit);
                         return result;
                     }
@@ -386,11 +385,11 @@ impl GameState {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if command == "/noclip" || input.starts_with("/noclip ") {
+                    if command == "/noclip" || command.starts_with("/noclip ") {
                         let enabled = if command == "/noclip" {
                             !self.data.noclip
                         } else {
-                            match input.strip_prefix("/noclip ").unwrap_or("").trim() {
+                            match command.strip_prefix("/noclip ").unwrap_or("").trim() {
                                 "on" => true,
                                 "off" => false,
                                 _ => !self.data.noclip,
@@ -404,10 +403,8 @@ impl GameState {
                         return result.with_redraw(true);
                     }
                     if command == "/info" {
-                        // Special handling for client info display
-                        result.effect = Some(crate::ui::update::effect::UIEffect::Command(
-                            ClientCommand::Ping,
-                        )); // TEMP placeholder;
+                        result.effect =
+                            Some(crate::ui::update::effect::UIEffect::DisplayClientInfo);
                         input_history.push(command.clone());
                         *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;

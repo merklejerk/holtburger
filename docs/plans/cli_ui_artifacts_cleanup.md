@@ -61,22 +61,26 @@
 ## 6. The Living Worksheet
 
 ### Task Checklist
-- [ ] **Phase 1: State & Type Relocation**
-  - [ ] Move `wrapped_chat_cache` and `last_chat_width` to `ViewState` (or wait for Phase 2).
-  - [ ] Extract `NetStats` to `state/net.rs`.
-  - [ ] Extract `SelectionState` to `state/selection.rs`.
-  - [ ] Extract `Page` to `state/page.rs`.
-  - [ ] Fix imports and compile.
-- [ ] **Phase 2: The Chat Manager**
-  - [ ] Create `ChatState` in `state/chat.rs`.
-  - [ ] Move `log_chat` logic.
-  - [ ] Update callers.
-  - [ ] Fix imports and compile.
-- [ ] **Phase 3: Delegation & The Borrow Checker Dance**
-  - [ ] Remove reach-through methods on `AppState`.
-  - [ ] Refactor `std::mem::replace` in `ui/mod.rs`.
-  - [ ] Refactor `std::mem::replace` in `ui/update/input.rs`.
-  - [ ] Fix imports and compile.
+- [x] Phase 1: State & Type Relocation
+  - [x] Move `wrapped_chat_cache` and `last_chat_width` to `ViewState` (or wait for Phase 2).
+  - [x] Extract `NetStats` to `state/net.rs`.
+  - [x] Extract `SelectionState` to `state/selection.rs`.
+  - [x] Extract `Page` to `state/page.rs`.
+  - [x] Fix imports and compile.
+- [x] **Phase 2: The Chat Manager**
+  - [x] Create `ChatState` in `state/chat.rs`.
+  - [x] Move `log_chat` logic.
+  - [x] Update callers.
+  - [x] Fix imports and compile.
+- [x] **Phase 3: Delegation & The Borrow Checker Dance**
+  - [x] Remove reach-through methods on `AppState`.
+  - [x] Refactor `std::mem::replace` in `ui/mod.rs`.
+  - [x] Refactor `std::mem::replace` in `ui/update/input.rs`.
+  - [x] Fix imports and compile.
+- [ ] **Phase 4: Final Cleanup and Validation**
+  - [ ] Review any remaining TODOs in the codebase.
+  - [ ] Final check of unused imports/warnings.
+  - [ ] Commit all changes.
 
 ### Decisions Log
 - *None yet.*

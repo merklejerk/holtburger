@@ -1,4 +1,4 @@
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::GameState;
 use crate::ui::{FocusedPane, InteractionMode};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -6,7 +6,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, app: &AppState, area: Rect) {
+pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, area: Rect) {
     let (combat_color, combat_title) = match game.data.combat_mode {
         holtburger_protocol::messages::combat::CombatMode::Melee => {
             (Some(Color::LightRed), Some(" MELEE "))
@@ -86,7 +86,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, app: &AppState, area
         } else {
             &game.data.world_name
         };
-        let info = format!(" {}:{} on {} ", app.account_name, current_char, server);
+        let info = format!(" {}:{} on {} ", account_name, current_char, server);
         f.render_widget(Paragraph::new(info), chunks[0]);
     }
 }

@@ -1,16 +1,15 @@
 use super::super::assess;
 use super::super::debug;
 use super::classification::{self, EntityClass};
-use crate::ui::UIEffect;
-use crate::ui::state::{AppState, GameState};
-use crate::ui::{ActiveInteraction, CommandTarget, ContextView, InteractionMode};
+use crate::ui::state::GameState;
+use crate::ui::types::{ActiveInteraction, CommandTarget, ContextView, InteractionMode};
+use crate::ui::update::effect::UIEffect;
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
 use ratatui::text::Line;
 use std::borrow::Cow;
 
-pub type VerbSet = Vec<Verb>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -236,57 +235,53 @@ pub fn get_interaction_verbs(
 }
 
 /// Returns the context content based on the current context view state.
-pub fn get_context_content_for_view(game: &GameState, _app: &AppState) -> Vec<Line<'static>> {
+pub fn get_context_content_for_view(game: &GameState) -> Vec<Line<'static>> {
     match game.view.context_view {
-        ContextView::Assess(guid) => {
-            if let Some(e) = game.data.entities.get(&guid) {
-                return assess::get_assess_info(e);
+            ContextView::Assess(guid) => {
+                if let Some(e) = game.data.entities.get(&guid) {
+                    return assess::get_assess_info(e);
+                }
+                vec![]
             }
-            vec![]
-        }
-        ContextView::Custom => {
-            let player_guid = game.data.player_guid;
-            let target_guid = game.view.current_debug_guid.or(player_guid);
+            ContextView::Custom => {
+                let player_guid = game.data.player_guid;
+                let target_guid = game.view.current_debug_guid.or(player_guid);
 
-            if let Some(e) = target_guid.and_then(|guid| game.data.entities.get(&guid)) {
-                let guid = e.guid;
-                let target = CommandTarget::Entity(e, None);
-                let player_info = if Some(guid) == player_guid {
-                    Some(debug::PlayerDebugInfo {
-                        attributes: &game.data.attributes,
-                        vitals: &game.data.vitals,
-                        skills: &game.data.skills,
-                        enchantments: &game.data.player_enchantments,
-                    })
-                } else {
-                    None
-                };
+                if let Some(e) = target_guid.and_then(|guid| game.data.entities.get(&guid)) {
+                    let guid = e.guid;
+                    let target = CommandTarget::Entity(e, None);
+                    let player_info = if Some(guid) == player_guid {
+                        Some(debug::PlayerDebugInfo {
+                            attributes: &game.data.attributes,
+                            vitals: &game.data.vitals,
+                            skills: &game.data.skills,
+                            enchantments: &game.data.player_enchantments,
+                        })
+                    } else {
+                        None
+                    };
 
-                return debug::get_debug_info(
-                    &target,
-                    |id| {
-                        game.data
-                            .entities
-                            .get(&id)
-                            .map(|e| e.name.clone())
-                            .or_else(|| {
+                    return debug::get_debug_info(
+                        &target,
+                        |id| {
+                            game.data.entities.get(&id).map(|e| e.name.clone()).or_else(|| {
                                 if Some(id) == player_guid {
                                     Some("You".to_string())
                                 } else {
                                     None
                                 }
                             })
-                    },
-                    Some(&game.data.spell_info),
-                    player_info,
-                );
+                        },
+                        Some(&game.data.spell_info),
+                        player_info,
+                    );
+                }
+                vec![]
             }
-            vec![]
+            ContextView::Spell(spell_id) => {
+                let target = CommandTarget::Spell(spell_id);
+                debug::get_debug_info(&target, |_| None, Some(&game.data.spell_info), None)
+            }
+            _ => vec![],
         }
-        ContextView::Spell(spell_id) => {
-            let target = CommandTarget::Spell(spell_id);
-            debug::get_debug_info(&target, |_| None, Some(&game.data.spell_info), None)
-        }
-        _ => vec![],
-    }
 }

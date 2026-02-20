@@ -1,5 +1,6 @@
 use holtburger_common::Guid;
 use ratatui::text::Line;
+use crate::ui::types::{FocusedPane, DashboardTab, ActiveInteraction, ContextView};
 
 #[derive(Debug, Clone)]
 pub struct ViewState {
@@ -19,9 +20,9 @@ pub struct ViewState {
     pub chat_total_lines: usize,
     /// Used to detect chat resizing.
     pub chat_last_total_lines: usize,
-    /// Cached total line count for context/debug view.
-    pub context_total_lines: usize,
     /// Used to detect context resizing.
+    pub context_total_lines: usize,
+    /// Cached total line count for context/debug view.
     pub context_last_total_lines: usize,
     /// Current active tab in the dashboard.
     pub dashboard_tab: DashboardTab,
@@ -91,45 +92,4 @@ impl ViewState {
         *scroll_offset = (*scroll_offset).min(max_scroll);
         *old_total = current_total;
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InteractionMode {
-    Moving,
-    Healing,
-    Target,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ActiveInteraction {
-    pub guid: Guid,
-    pub mode: InteractionMode,
-}
-
-#[derive(PartialEq, Debug, Clone, Copy, Default)]
-pub enum DashboardTab {
-    #[default]
-    Nearby,
-    Inventory,
-    Character,
-    Spells,
-    Equip,
-}
-
-#[derive(PartialEq, Debug, Clone, Copy)]
-pub enum FocusedPane {
-    Chat,
-    Context,
-    Input,
-    Dashboard,
-    Dynamic,
-}
-
-#[derive(PartialEq, Debug, Clone, Copy, Default)]
-pub enum ContextView {
-    #[default]
-    Default,
-    Custom,
-    Assess(Guid),
-    Spell(u32),
 }

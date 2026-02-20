@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::ui::UpdateResult;
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::{ContextView, DashboardTab};
 
@@ -10,7 +10,6 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
     tab: &T,
     key: KeyEvent,
     game: &mut GameState,
-    app: &mut AppState,
 ) -> Option<UpdateResult> {
     match key.code {
         KeyCode::Char('1') => {
@@ -44,7 +43,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             Some(UpdateResult::new())
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            let total = tab.get_item_count(game, app);
+            let total = tab.get_item_count(game);
             if total > 0 {
                 game.view.selected_dashboard_index =
                     (game.view.selected_dashboard_index + 1) % total;
@@ -52,7 +51,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             Some(UpdateResult::new())
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let total = tab.get_item_count(game, app);
+            let total = tab.get_item_count(game);
             if total > 0 {
                 game.view.selected_dashboard_index =
                     (game.view.selected_dashboard_index + total - 1) % total;
@@ -64,7 +63,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             Some(UpdateResult::new())
         }
         KeyCode::End => {
-            let total = tab.get_item_count(game, app);
+            let total = tab.get_item_count(game);
             game.view.selected_dashboard_index = total.saturating_sub(1);
             Some(UpdateResult::new())
         }
@@ -76,7 +75,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             Some(UpdateResult::new())
         }
         KeyCode::PageDown => {
-            let total = tab.get_item_count(game, app);
+            let total = tab.get_item_count(game);
             let h = game.view.last_dashboard_height;
             let step = (h / 2) + 1;
             game.view.selected_dashboard_index =
@@ -85,7 +84,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
         }
         KeyCode::Enter | KeyCode::Char(_) => {
             let index = game.view.selected_dashboard_index;
-            let verbs = tab.get_verbs(game, app, index);
+            let verbs = tab.get_verbs(game, index);
 
             let shortcut = match key.code {
                 KeyCode::Enter => '\r',
@@ -94,7 +93,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             };
 
             let verb = verbs.iter().find(|v| v.shortcut == shortcut)?;
-            let effect = tab.handle_action(&verb.action, index, game, app)?;
+            let effect = tab.handle_action(&verb.action, index, game)?;
 
             Some(UpdateResult::new().with_effect(effect))
         }

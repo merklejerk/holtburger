@@ -7,7 +7,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::ui::{
-    self, AppState, NetStats, Page, SelectionState, widgets::panels::chat::ChatMessageKind,
+    self, AppState, NetStats, Page, SelectionState, ChatMessageKind, ChatState,
 };
 use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
 use holtburger_protocol::messages::GameMessage;
@@ -204,25 +204,22 @@ async fn main() -> Result<()> {
         account_password: args.password.clone(),
         page: Page::Selection(SelectionState::default()),
         modal: None,
-        messages: Vec::new(),
+        chat: ChatState::new(chat_log),
         input: String::new(),
         input_history: Vec::new(),
         history_index: None,
         logon_retry: RetryState::new(5),
         enter_retry: RetryState::new(5),
         core_state: ClientState::Connected,
-        chat_log,
         use_emojis: !args.no_emojis,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
-        wrapped_chat_cache: Vec::new(),
-        last_chat_width: 0,
     };
 
     app_state.refresh_context_buffer();
 
     if args.verbose > 0 {
-        app_state.log_chat(
+        app_state.chat.log(
             ChatMessageKind::System,
             format!("Verbosity level {} enabled.", args.verbose),
         );

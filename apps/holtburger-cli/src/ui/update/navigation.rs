@@ -1,5 +1,5 @@
 use crate::ui::state::AppState;
-use crate::ui::widgets::panels::chat::ChatMessageKind;
+use crate::ui::state::ChatMessageKind;
 use holtburger_core::ClientViewEvent;
 
 impl AppState {
@@ -9,7 +9,7 @@ impl AppState {
                 if let Some(game) = self.game_option_mut() {
                     game.data.noclip = enabled;
                     let status = if enabled { "ENABLED" } else { "DISABLED" };
-                    self.log_chat(
+                    self.chat.log(
                         ChatMessageKind::System,
                         format!(">> NoClip is now {}", status),
                     );

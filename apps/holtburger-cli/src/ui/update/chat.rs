@@ -1,5 +1,5 @@
 use crate::ui::state::AppState;
-use crate::ui::widgets::panels::chat::ChatMessageKind;
+use crate::ui::state::ChatMessageKind;
 use holtburger_core::WireEvent;
 
 impl AppState {
@@ -17,19 +17,19 @@ impl AppState {
                 } else {
                     ChatMessageKind::System
                 };
-                self.log_chat(kind, msg);
+                self.chat.log(kind, msg);
             }
             WireEvent::ServerMessage(message) => {
-                self.log_chat(ChatMessageKind::System, message);
+                self.chat.log(ChatMessageKind::System, message);
             }
             WireEvent::Chat { sender, message } => {
-                self.log_chat(ChatMessageKind::Chat, format!("{}: {}", sender, message));
+                self.chat.log(ChatMessageKind::Chat, format!("{}: {}", sender, message));
             }
             WireEvent::Emote { sender, text } => {
-                self.log_chat(ChatMessageKind::Emote, format!("{} {}", sender, text));
+                self.chat.log(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
             WireEvent::PingResponse => {
-                self.log_chat(ChatMessageKind::System, "Pong!".to_string());
+                self.chat.log(ChatMessageKind::System, "Pong!".to_string());
             }
             _ => {}
         }

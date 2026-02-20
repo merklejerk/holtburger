@@ -1,5 +1,5 @@
 use crate::ui::CommandTarget;
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::{DashboardTab, FocusedPane};
 use ratatui::Frame;
@@ -20,20 +20,18 @@ pub mod filter;
 
 pub fn get_verbs_for_tab(
     game: &GameState,
-    app: &AppState,
     tab: DashboardTab,
     index: usize,
 ) -> Vec<Verb> {
-    get_tab_controller(tab).get_verbs(game, app, index)
+    get_tab_controller(tab).get_verbs(game, index)
 }
 
 pub fn get_target_at_index<'a>(
     game: &'a GameState,
-    app: &'a AppState,
     tab: DashboardTab,
     index: usize,
 ) -> CommandTarget<'a> {
-    get_tab_controller(tab).get_target_at_index(game, app, index)
+    get_tab_controller(tab).get_target_at_index(game, index)
 }
 
 pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
@@ -46,7 +44,7 @@ pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
     }
 }
 
-pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
     let (focused_pane, dashboard_tab) = (game.view.focused_pane, game.view.dashboard_tab);
 
     let dashboard_style = if focused_pane == FocusedPane::Dashboard {
@@ -123,15 +121,9 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, app: &mut AppS
     f.render_widget(&dashboard_block, area);
 
     // Tab-specific rendering
-    match dashboard_tab {
-        DashboardTab::Equip => EquipTab.render(f, game, app, dashboard_inner_chunks[0]),
-        DashboardTab::Nearby => NearbyTab.render(f, game, app, dashboard_inner_chunks[0]),
-        DashboardTab::Inventory => InventoryTab.render(f, game, app, dashboard_inner_chunks[0]),
-        DashboardTab::Character => CharacterTab.render(f, game, app, dashboard_inner_chunks[0]),
-        DashboardTab::Spells => SpellsTab.render(f, game, app, dashboard_inner_chunks[0]),
-    }
+    get_tab_controller(dashboard_tab).render(f, game, use_emojis, dashboard_inner_chunks[0]);
 
-    if let Some(action_bar) = crate::ui::utils::render_action_bar(game, app) {
+    if let Some(action_bar) = crate::ui::utils::render_action_bar(game) {
         f.render_widget(action_bar, dashboard_inner_chunks[1]);
     }
 }

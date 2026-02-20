@@ -6,22 +6,17 @@ use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::super::classification::{EntityClass, classify_entity, get_entity_color};
-use crate::ui::state::{AppState, GameState};
+use super::super::classification::{classify_entity, get_entity_color, EntityClass};
+use crate::ui::state::GameState;
 use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
 use holtburger_core::world::entity::Entity;
 use std::collections::HashMap;
 
-pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
     let mut bottom_area = area;
 
-    let mut counts = HashMap::new();
-    for e in game.data.entities.values() {
-        if let Some(cid) = e.container_id {
-            *counts.entry(cid).or_default() += 1;
-        }
-    }
+    let counts = game.data.get_container_counts();
 
     // Sticky summary line for the player's main inventory container
     if let Some(player_guid) = game.data.player_guid
@@ -46,20 +41,15 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, app: &mut AppSt
         f.render_widget(summary, top_area);
     }
 
-    let items = get_list_items(game, app, &counts);
+    let items = get_list_items(game, use_emojis, &counts);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.view
-        .dashboard_list_state
+    game.view.dashboard_list_state
         .select(Some(game.view.selected_dashboard_index));
-    f.render_stateful_widget(
-        dashboard_list,
-        bottom_area,
-        &mut game.view.dashboard_list_state,
-    );
+    f.render_stateful_widget(dashboard_list, bottom_area, &mut game.view.dashboard_list_state);
 
     // Render Scrollbar
     let height = bottom_area.height as usize;
@@ -67,8 +57,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, app: &mut AppSt
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            game.view
-                .selected_dashboard_index
+            game.view.selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -89,7 +78,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, app: &mut AppSt
 
 fn get_list_items(
     game: &GameState,
-    app: &AppState,
+    use_emojis: bool,
     container_counts: &HashMap<Guid, usize>,
 ) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(game);
@@ -98,7 +87,9 @@ fn get_list_items(
     let equipment = &game.data.equipment;
 
     for (i, (e, _, depth)) in entities.iter().enumerate() {
-        let is_equipped = equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
+        let is_equipped = equipment
+            .get(&e.guid)
+            .unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
 
         let container_count = container_counts.get(&e.guid).cloned();
 
@@ -106,7 +97,7 @@ fn get_list_items(
             e,
             *depth,
             i == game.view.selected_dashboard_index,
-            app.use_emojis,
+            use_emojis,
             is_equipped,
             container_count,
         ));

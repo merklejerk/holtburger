@@ -1,31 +1,24 @@
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write;
-use std::sync::Mutex;
-use std::time::Instant;
 
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
-use holtburger_protocol::messages::CharacterEntry;
-use ratatui::style::Color;
 
-use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
-use crate::ui::widgets::panels::chat::{ChatMessage, ChatMessageKind};
+
 use crate::ui::widgets::panels::modal::Modal;
 
 pub mod game;
 pub mod view;
+mod net;
+mod selection;
+mod page;
+mod chat;
 
 pub use self::game::GameData;
 pub use self::view::ViewState;
-
-#[derive(Debug, Default)]
-pub struct SelectionState {
-    /// List of available characters for selection.
-    pub characters: Vec<CharacterEntry>,
-    /// Index of character currently selected in selection screen.
-    pub selected_character_index: usize,
-}
+pub use self::net::NetStats;
+pub use self::selection::SelectionState;
+pub use self::page::Page;
+pub use self::chat::{ChatState, ChatMessage, ChatMessageKind};
 
 #[derive(Debug, Clone)]
 pub struct GameState {
@@ -51,37 +44,12 @@ impl Default for GameState {
     }
 }
 
-pub enum Page {
-    Selection(SelectionState),
-    Game(Box<GameState>),
-}
-
-pub struct NetStats {
-    pub bytes_in: u64,
-    pub bytes_out: u64,
-    pub history_in: Vec<u64>,
-    pub history_out: Vec<u64>,
-    pub last_update: Option<Instant>,
-}
-
-impl Default for NetStats {
-    fn default() -> Self {
-        Self {
-            bytes_in: 0,
-            bytes_out: 0,
-            history_in: vec![0; NET_PULSE_HISTORY_SIZE],
-            history_out: vec![0; NET_PULSE_HISTORY_SIZE],
-            last_update: None,
-        }
-    }
-}
-
 pub struct AppState {
     pub account_name: String,
     pub account_password: String,
     pub page: Page,
     pub modal: Option<Modal>,
-    pub messages: Vec<ChatMessage>,
+    pub chat: ChatState,
     pub input: String,
     pub input_history: Vec<String>,
     pub history_index: Option<usize>,
@@ -89,27 +57,11 @@ pub struct AppState {
     pub enter_retry: RetryState,
     pub core_state: ClientState,
     pub net_stats: NetStats,
-    pub chat_log: Option<Mutex<File>>,
     pub use_emojis: bool,
     pub verbosity: u8,
-    pub wrapped_chat_cache: Vec<Vec<(String, Color)>>,
-    pub last_chat_width: usize,
 }
 
 impl AppState {
-    pub fn game_data(&self) -> &GameData {
-        match &self.page {
-            Page::Game(game) => &game.data,
-            _ => panic!("Accessing GameData from non-game page!"),
-        }
-    }
-
-    pub fn game_data_mut(&mut self) -> &mut GameData {
-        match &mut self.page {
-            Page::Game(game) => &mut game.data,
-            _ => panic!("Accessing GameData from non-game page!"),
-        }
-    }
 
     pub fn game_view(&self) -> &ViewState {
         match &self.page {
@@ -125,6 +77,18 @@ impl AppState {
         }
     }
 
+    pub fn get_container_counts(&self) -> HashMap<Guid, usize> {
+        let mut counts = HashMap::new();
+        if let Page::Game(game) = &self.page {
+            for e in game.data.entities.values() {
+                if let Some(cid) = e.container_id {
+                    *counts.entry(cid).or_default() += 1;
+                }
+            }
+        }
+        counts
+    }
+
     pub fn game_option(&self) -> Option<&GameState> {
         match &self.page {
             Page::Game(game) => Some(game),
@@ -136,27 +100,6 @@ impl AppState {
         match &mut self.page {
             Page::Game(game) => Some(game),
             _ => None,
-        }
-    }
-
-    pub fn log_chat(&mut self, kind: ChatMessageKind, text: String) {
-        if let Some(log_mutex) = &self.chat_log
-            && let Ok(mut file) = log_mutex.lock()
-        {
-            let _ = writeln!(file, "{}", text);
-            let _ = file.flush();
-        }
-        self.messages.push(ChatMessage { kind, text });
-
-        const MAX_CHAT: usize = 4000;
-        if self.messages.len() > MAX_CHAT {
-            let drop_count = self.messages.len() - MAX_CHAT;
-            self.messages.drain(0..drop_count);
-            if self.wrapped_chat_cache.len() > drop_count {
-                self.wrapped_chat_cache.drain(0..drop_count);
-            } else {
-                self.wrapped_chat_cache.clear();
-            }
         }
     }
 
@@ -185,7 +128,7 @@ impl AppState {
 
         let active_tab = crate::ui::widgets::dashboard::get_tab_controller(tab);
         if let Some(game) = self.game_option() {
-            let content = active_tab.get_context_panel_content(&game, self);
+            let content = active_tab.get_context_panel_content(&game);
             if let Some(game) = self.game_option_mut() {
                 game.view.context_buffer = content;
             }
@@ -196,7 +139,7 @@ impl AppState {
         if let Some(game) = self.game_option() {
             let active_tab =
                 crate::ui::widgets::dashboard::get_tab_controller(game.view.dashboard_tab);
-            active_tab.get_item_count(&game, self)
+            active_tab.get_item_count(&game)
         } else {
             0
         }
@@ -286,7 +229,7 @@ impl AppState {
             "══════════════════════════".to_string(),
         ));
         for (kind, msg) in logs {
-            self.log_chat(kind, msg);
+            self.chat.log(kind, msg);
         }
     }
 }
@@ -313,17 +256,5 @@ impl AppState {
                 stack.extend(children);
             }
         }
-    }
-
-    pub fn get_container_counts(&self) -> HashMap<Guid, usize> {
-        let mut counts = HashMap::new();
-        if let Some(game) = self.game_option() {
-            for e in game.data.entities.values() {
-                if let Some(cid) = e.container_id {
-                    *counts.entry(cid).or_default() += 1;
-                }
-            }
-        }
-        counts
     }
 }

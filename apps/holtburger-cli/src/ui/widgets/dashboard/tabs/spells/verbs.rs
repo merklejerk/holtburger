@@ -1,6 +1,6 @@
-use super::super::common::{Action, Verb, VerbSet};
+use super::super::common::{Action, Verb};
 
-pub fn get_verbs(is_targeted: bool) -> VerbSet {
+pub fn get_verbs(is_targeted: bool) -> Vec<Verb> {
     let label = if is_targeted {
         "Cast on target"
     } else {

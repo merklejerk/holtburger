@@ -2,8 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
-use crate::ui::state::{AppState, Page};
+use crate::ui::state::{AppState, Page, ChatState, GameState, SelectionState};
 use crate::ui::update::UpdateResult;
+use crate::ui::FocusedPane;
 
 impl AppState {
     pub(super) fn handle_key_press(
@@ -45,10 +46,15 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        // We use mem::replace to avoid borrow conflict between self.page and self.
-        let mut page = std::mem::replace(&mut self.page, Page::Selection(Default::default()));
-        result = page.handle_input(key, self, width, &main_chunks);
-        self.page = page;
+        result = self.page.handle_input(
+            key,
+            &mut self.input,
+            &mut self.input_history,
+            &mut self.history_index,
+            &mut self.chat,
+            width,
+            &main_chunks,
+        );
 
         // Apply UIEffect while we have ownership of self back
         if let Some(effect) = result.effect.take() {
@@ -91,9 +97,7 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        let mut page = std::mem::replace(&mut self.page, Page::Selection(Default::default()));
-        result = page.handle_mouse(mouse, self, &main_chunks);
-        self.page = page;
+        result = self.page.handle_mouse(mouse, &main_chunks);
 
         // Apply UIEffect while we have ownership of self back
         if let Some(effect) = result.effect.take() {
@@ -106,8 +110,6 @@ impl AppState {
     }
 }
 
-use crate::ui::FocusedPane;
-use crate::ui::state::{GameState, SelectionState};
 
 impl SelectionState {
     pub fn handle_input(&mut self, key: KeyEvent) -> UpdateResult {
@@ -167,7 +169,6 @@ impl GameState {
     pub fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
-        _app: &mut AppState,
         main_chunks: &[Rect],
     ) -> UpdateResult {
         let mut result = UpdateResult::new();
@@ -252,16 +253,18 @@ impl GameState {
     pub fn handle_input(
         &mut self,
         key: KeyEvent,
-        app: &mut AppState,
+        input: &mut String,
+        input_history: &mut Vec<String>,
+        history_index: &mut Option<usize>,
+        chat: &mut ChatState,
         width: u16,
         main_chunks: &[Rect],
     ) -> UpdateResult {
         let mut result = UpdateResult::new();
 
         if self.view.focused_pane == FocusedPane::Dashboard {
-            let active_tab =
-                crate::ui::widgets::dashboard::get_tab_controller(self.view.dashboard_tab);
-            if let Some(tab_result) = active_tab.handle_input(key, self, app) {
+            let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.view.dashboard_tab);
+            if let Some(tab_result) = active_tab.handle_input(key, self) {
                 result.merge(tab_result);
                 return result;
             }
@@ -296,82 +299,82 @@ impl GameState {
             }
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    let input = app.input.drain(..).collect::<String>();
-                    if input.is_empty() {
+                    let command = input.drain(..).collect::<String>();
+                    if command.is_empty() {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/quit" || input == "/exit" {
+                    if command == "/quit" || input == "/exit" {
                         result.commands.push(ClientCommand::Quit);
                         return result;
                     }
-                    if input == "/clear" {
-                        app.messages.clear();
-                        app.wrapped_chat_cache.clear();
-                        app.input.clear();
+                    if command == "/clear" {
+                        chat.messages.clear();
+                        chat.wrapped_chat_cache.clear();
+                        input.clear();
                         return result.with_redraw(true);
                     }
-                    if input == "/ping" {
+                    if command == "/ping" {
                         result.commands.push(ClientCommand::Ping);
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/jump" {
+                    if command == "/jump" {
                         result.commands.push(ClientCommand::Jump {
                             extent: 10.0,
                             velocity: holtburger_common::Vector3::default(),
                         });
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input.starts_with("/tell ") {
-                        let parts: Vec<&str> = input.splitn(3, ' ').collect();
+                    if command.starts_with("/tell ") {
+                        let parts: Vec<&str> = command.splitn(3, ' ').collect();
                         if parts.len() == 3 {
                             result.commands.push(ClientCommand::Tell {
                                 target: parts[1].to_string(),
                                 message: parts[2].to_string(),
                             });
                         }
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/sit" {
+                    if command == "/sit" {
                         result.commands.push(ClientCommand::SetState(0x13));
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/stand" {
+                    if command == "/stand" {
                         result.commands.push(ClientCommand::SetState(0x04));
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if let Some(args) = input.strip_prefix("/turn ") {
+                    if let Some(args) = command.strip_prefix("/turn ") {
                         if let Ok(heading) = args.parse::<f32>() {
                             result.commands.push(ClientCommand::TurnTo { heading });
                         }
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/sync" {
+                    if command == "/sync" {
                         result.commands.push(ClientCommand::SyncPosition);
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/combat" {
+                    if command == "/combat" {
                         use holtburger_protocol::messages::combat::CombatMode;
                         let mode = if self.data.combat_mode != CombatMode::NonCombat {
                             CombatMode::NonCombat
@@ -380,13 +383,13 @@ impl GameState {
                         };
 
                         result.commands.push(ClientCommand::SetCombatMode(mode));
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/noclip" || input.starts_with("/noclip ") {
-                        let enabled = if input == "/noclip" {
+                    if command == "/noclip" || input.starts_with("/noclip ") {
+                        let enabled = if command == "/noclip" {
                             !self.data.noclip
                         } else {
                             match input.strip_prefix("/noclip ").unwrap_or("").trim() {
@@ -397,36 +400,36 @@ impl GameState {
                         };
                         result.commands.push(ClientCommand::SetNoClip(enabled));
                         self.data.noclip = enabled;
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/info" {
+                    if command == "/info" {
                         // Special handling for client info display
-                        app.display_client_info();
-                        app.input_history.push(input.clone());
-                        app.history_index = None;
+                        result.effect = Some(crate::ui::update::effect::UIEffect::Command(ClientCommand::Ping)); // TEMP placeholder;
+                        input_history.push(command.clone());
+                        *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if input == "/help" {
-                        use crate::ui::widgets::panels::chat::ChatMessageKind;
-                        app.log_chat(
+                    if command == "/help" {
+                        use crate::ui::state::ChatMessageKind;
+                        chat.log(
                             ChatMessageKind::System,
                             "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>".to_string()
                         );
-                        app.log_chat(
+                        chat.log(
                             ChatMessageKind::System,
                             "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)"
                                 .to_string(),
                         );
-                        app.input.clear();
+                        input.clear();
                         return result.with_redraw(true);
                     }
-                    app.input_history.push(input.clone());
-                    app.history_index = None;
-                    result.commands.push(ClientCommand::Talk(input));
+                    input_history.push(command.clone());
+                    *history_index = None;
+                    result.commands.push(ClientCommand::Talk(command));
                     self.view.focused_pane = self.view.previous_focused_pane;
                     result.needs_redraw = true;
                 } else {
@@ -437,7 +440,7 @@ impl GameState {
             }
             KeyCode::Backspace => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    app.input.pop();
+                    input.pop();
                     result.needs_redraw = true;
                 }
             }
@@ -465,13 +468,12 @@ impl GameState {
             }
             KeyCode::Up => match self.view.focused_pane {
                 FocusedPane::Input => {
-                    if !app.input_history.is_empty() {
-                        let idx = app
-                            .history_index
+                    if !input_history.is_empty() {
+                        let idx = history_index
                             .map(|i| i.saturating_sub(1))
-                            .unwrap_or(app.input_history.len() - 1);
-                        app.history_index = Some(idx);
-                        app.input = app.input_history[idx].clone();
+                            .unwrap_or(input_history.len().saturating_sub(1));
+                        *history_index = Some(idx);
+                        *input = input_history[idx].clone();
                         result.needs_redraw = true;
                     }
                 }
@@ -498,14 +500,14 @@ impl GameState {
             },
             KeyCode::Down => match self.view.focused_pane {
                 FocusedPane::Input => {
-                    if let Some(idx) = app.history_index {
-                        if idx + 1 < app.input_history.len() {
-                            let next = idx + 1;
-                            app.history_index = Some(next);
-                            app.input = app.input_history[next].clone();
+                    if let Some(idx) = history_index {
+                        if *idx + 1 < input_history.len() {
+                            let next = *idx + 1;
+                            *history_index = Some(next);
+                            *input = input_history[next].clone();
                         } else {
-                            app.history_index = None;
-                            app.input.clear();
+                            *history_index = None;
+                            input.clear();
                         }
                         result.needs_redraw = true;
                     }
@@ -559,7 +561,7 @@ impl GameState {
             },
             KeyCode::Char(c) => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    app.input.push(c);
+                    input.push(c);
                     result.needs_redraw = true;
                 }
             }

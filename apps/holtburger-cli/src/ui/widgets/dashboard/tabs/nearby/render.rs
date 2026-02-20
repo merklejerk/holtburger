@@ -1,22 +1,20 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use super::super::classification::{EntityClass, classify_entity, get_entity_color};
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::GameState;
 use holtburger_core::world::entity::Entity;
 
-pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
-    let items = get_list_items(game, app);
+pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
+    let items = get_list_items(game, use_emojis);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.view
-        .dashboard_list_state
+    game.view.dashboard_list_state
         .select(Some(game.view.selected_dashboard_index));
     f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
 
@@ -37,18 +35,16 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+                .style(Style::default().fg(Color::Gray).bg(Color::Black)),
             area,
             &mut scrollbar_state,
         );
     }
 }
 
-fn get_list_items(game: &GameState, app: &AppState) -> Vec<ListItem<'static>> {
+fn get_list_items(game: &GameState, use_emojis: bool) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(game);
-    let container_counts = app.get_container_counts();
+    let container_counts = game.data.get_container_counts();
     let mut list_items = Vec::new();
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {
@@ -62,7 +58,7 @@ fn get_list_items(game: &GameState, app: &AppState) -> Vec<ListItem<'static>> {
             display_dist,
             *depth,
             i == game.view.selected_dashboard_index,
-            app.use_emojis,
+            use_emojis,
             container_count,
         ));
     }
@@ -119,8 +115,8 @@ fn render_nearby_item(
             indent, type_marker, display_name, d
         )
     } else {
-        format!("{}[{}] {:<15}", indent, type_marker, display_name)
+        format!("{}[{}] {}", indent, type_marker, display_name)
     };
 
-    ListItem::new(Line::styled(text, text_style)).style(item_style)
+    ListItem::new(text).style(item_style.patch(text_style))
 }

@@ -13,6 +13,5 @@ pub const LAYOUT_WIDE_CONTEXT_PCT: u16 = 25;
 pub const LAYOUT_NARROW_DASHBOARD_PCT: u16 = 50;
 pub const LAYOUT_NARROW_CONTEXT_PCT: u16 = 50;
 
-pub const SCROLL_STEP: usize = 3;
 
 pub const NET_PULSE_HISTORY_SIZE: usize = 32;

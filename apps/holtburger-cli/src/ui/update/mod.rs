@@ -10,7 +10,7 @@ pub mod world;
 use crate::ui::action::AppAction;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 use crate::ui::state::AppState;
-use crate::ui::widgets::panels::chat::ChatMessageKind;
+use crate::ui::state::ChatMessageKind;
 use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 
@@ -89,7 +89,7 @@ impl AppState {
         }
 
         if self.logon_retry.tick(now) {
-            self.log_chat(
+            self.chat.log(
                 ChatMessageKind::System,
                 format!(
                     "* Retrying login (attempt {}/{})...",
@@ -102,7 +102,7 @@ impl AppState {
             result.needs_redraw = true;
         }
         if self.enter_retry.tick(now) {
-            self.log_chat(
+            self.chat.log(
                 ChatMessageKind::System,
                 format!(
                     "* Retrying enter world (attempt {}/{})...",

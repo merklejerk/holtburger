@@ -1,10 +1,10 @@
 use super::super::classification::{self, EntityClass};
-use super::super::common::{Action, Verb, VerbSet};
+use super::super::common::{Action, Verb};
 use crate::ui::state::GameState;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::world::entity::Entity;
 
-pub fn get_verbs(e: &Entity, game: &GameState) -> VerbSet {
+pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
     let mut verbs = vec![
         Verb::new(Action::Assess, 'a', "Assess"),
         Verb::new(Action::Target, 't', "Target"),

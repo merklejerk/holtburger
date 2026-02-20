@@ -1,24 +1,6 @@
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 
-#[derive(Debug, Clone)]
-pub enum ChatMessageKind {
-    Info,
-    System,
-    Chat,
-    Tell,
-    Emote,
-    Error,
-    Warning,
-    Debug,
-}
-
-#[derive(Debug, Clone)]
-pub struct ChatMessage {
-    pub kind: ChatMessageKind,
-    pub text: String,
-}
-
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::{GameState, ChatMessageKind, ChatState};
 use crate::ui::utils::wrap_text;
 use crate::ui::{ContextView, FocusedPane};
 use ratatui::Frame;
@@ -29,28 +11,28 @@ use ratatui::widgets::{
     Block, Borders, List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatState, area: Rect) {
     let width = area.width.saturating_sub(2) as usize;
     let height = area.height.saturating_sub(2) as usize;
 
-    let m_len = app.messages.len();
+    let m_len = chat.messages.len();
     let window_size = CHAT_HISTORY_WINDOW_SIZE;
 
     // Guard: Ensure the cache is not longer than the current number of messages (stale cache fix)
-    if app.wrapped_chat_cache.len() > m_len {
-        app.wrapped_chat_cache.truncate(m_len);
+    if chat.wrapped_chat_cache.len() > m_len {
+        chat.wrapped_chat_cache.truncate(m_len);
     }
 
     // Check if we need to refresh the cache due to width change
-    if width != app.last_chat_width {
-        app.wrapped_chat_cache.clear();
-        app.last_chat_width = width;
+    if width != chat.last_chat_width {
+        chat.wrapped_chat_cache.clear();
+        chat.last_chat_width = width;
     }
 
     // Add new messages to the cache
-    if app.wrapped_chat_cache.len() < m_len {
-        let start_idx = app.wrapped_chat_cache.len();
-        for m in &app.messages[start_idx..] {
+    if chat.wrapped_chat_cache.len() < m_len {
+        let start_idx = chat.wrapped_chat_cache.len();
+        for m in &chat.messages[start_idx..] {
             let color = match m.kind {
                 ChatMessageKind::Chat => Color::White,
                 ChatMessageKind::Tell => Color::Magenta,
@@ -67,20 +49,20 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
             for line in wrapped {
                 msg_lines.push((line, color));
             }
-            app.wrapped_chat_cache.push(msg_lines);
+            chat.wrapped_chat_cache.push(msg_lines);
         }
     }
 
     // Now flatten the window into a temporary references vector
     let window_start = m_len.saturating_sub(window_size);
 
-    let total_lines: usize = app.wrapped_chat_cache[window_start..]
+    let total_lines: usize = chat.wrapped_chat_cache[window_start..]
         .iter()
         .map(|v| v.len())
         .sum();
     game.view.maintain_scroll(false, total_lines, height);
 
-    let all_lines: Vec<&(String, Color)> = app.wrapped_chat_cache[window_start..]
+    let all_lines: Vec<&(String, Color)> = chat.wrapped_chat_cache[window_start..]
         .iter()
         .flat_map(|v| v.iter())
         .collect();
@@ -157,7 +139,7 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
     }
 }
 
-pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _app: &mut AppState, area: Rect) {
+pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _chat: &mut ChatState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
     let total_ctx = game.view.context_buffer.len();
 

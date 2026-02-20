@@ -1,4 +1,4 @@
-use crate::ui::state::AppState;
+use crate::ui::state::{AppState, ChatMessageKind};
 use crate::ui::{ActiveInteraction, ContextView, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
@@ -17,6 +17,7 @@ pub enum UIEffect {
     ApplyMoving(Guid),
     Target(Guid),
     CancelInteraction,
+    Log(ChatMessageKind, String),
 }
 
 #[derive(Debug, Default)]
@@ -168,6 +169,10 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
             if let Some(game) = state.game_option_mut() {
                 game.view.active_interaction = None;
             }
+            vec![]
+        }
+        UIEffect::Log(kind, msg) => {
+            state.chat.log(kind, msg);
             vec![]
         }
     }

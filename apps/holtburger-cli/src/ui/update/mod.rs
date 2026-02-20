@@ -1,12 +1,20 @@
+pub mod chat;
+pub mod client;
+pub mod combat;
 pub mod effect;
 pub mod input;
+pub mod inventory;
+pub mod navigation;
 pub mod world;
 
-use crate::ui::NET_PULSE_HISTORY_SIZE;
 use crate::ui::action::AppAction;
-use crate::ui::model::AppState;
-use crate::ui::types::{ChatMessageKind, Modal, UpdateResult};
-use holtburger_core::ClientCommand;
+use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
+use crate::ui::state::AppState;
+use crate::ui::widgets::panels::chat::ChatMessageKind;
+use crate::ui::widgets::panels::modal::Modal;
+use holtburger_core::client::types::ClientCommand;
+
+pub use effect::{UIEffect, UpdateResult};
 
 impl AppState {
     pub fn handle_action(&mut self, action: AppAction) -> UpdateResult {
@@ -146,29 +154,29 @@ impl AppState {
         let dashboard_count = self.dashboard_item_count();
         if let Some(game) = self.game_option_mut() {
             // Enforce dashboard index bounds
-            if game.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
-                game.selected_dashboard_index = dashboard_count - 1;
+            if game.view.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
+                game.view.selected_dashboard_index = dashboard_count - 1;
                 result.needs_redraw = true;
-            } else if dashboard_count == 0 && game.selected_dashboard_index != 0 {
-                game.selected_dashboard_index = 0;
+            } else if dashboard_count == 0 && game.view.selected_dashboard_index != 0 {
+                game.view.selected_dashboard_index = 0;
                 result.needs_redraw = true;
             }
 
             // Proactive enchantment purge
-            let old_count = game.player_enchantments.len();
-            game.player_enchantments.retain(|e| {
+            let old_count = game.data.player_enchantments.len();
+            game.data.player_enchantments.retain(|e| {
                 if e.duration < 0.0 {
                     return true;
                 }
                 let expires_at = e.start_time + e.duration;
                 expires_at > 0.0
             });
-            if game.player_enchantments.len() != old_count {
+            if game.data.player_enchantments.len() != old_count {
                 result.needs_redraw = true;
             }
 
             // Update enchantment timers locally
-            for enchant in &mut game.player_enchantments {
+            for enchant in &mut game.data.player_enchantments {
                 if enchant.duration >= 0.0 {
                     enchant.start_time -= elapsed;
                 }

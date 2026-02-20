@@ -1,6 +1,6 @@
 use super::super::classification::{self, EntityClass};
 use super::super::common::{Action, Verb, VerbSet};
-use crate::ui::model::GameState;
+use crate::ui::state::GameState;
 use holtburger_core::world::entity::Entity;
 
 pub fn get_verbs(e: &Entity, game: &GameState) -> VerbSet {
@@ -35,7 +35,7 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> VerbSet {
 
     verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
 
-    let is_equipped = if let (Some(pguid), Some(wielder)) = (game.player_guid, e.wielder_id) {
+    let is_equipped = if let (Some(pguid), Some(wielder)) = (game.data.player_guid, e.wielder_id) {
         pguid == wielder
     } else {
         false

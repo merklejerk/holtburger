@@ -1,6 +1,6 @@
 use super::super::classification::{self, EntityClass};
 use super::super::common::{Action, Verb, VerbSet};
-use crate::ui::model::GameState;
+use crate::ui::state::GameState;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::world::entity::Entity;
 
@@ -13,7 +13,7 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> VerbSet {
         return verbs;
     }
 
-    let is_player = game.player_guid == Some(e.guid);
+    let is_player = game.data.player_guid == Some(e.guid);
     let class = classification::classify_entity(e);
 
     match class {

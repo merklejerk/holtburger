@@ -4,9 +4,10 @@ use ratatui::layout::Rect;
 use super::super::common::{Action, VerbSet};
 use super::render::render_spells_tab;
 use super::verbs;
-use crate::ui::model::{AppState, GameState};
+use crate::ui::CommandTarget;
+use crate::ui::UIEffect;
+use crate::ui::state::{AppState, GameState};
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, UIEffect};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct SpellsTab;
@@ -17,8 +18,8 @@ impl TabController for SpellsTab {
     }
 
     fn get_verbs(&self, game: &GameState, app: &AppState, index: usize) -> VerbSet {
-        let player_guid = game.player_guid;
-        let active_interaction = game.active_interaction;
+        let player_guid = game.data.player_guid;
+        let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, app, index);
         if let Some(interaction_verbs) =
@@ -40,10 +41,11 @@ impl TabController for SpellsTab {
         let target = self.get_target_at_index(game, app, index);
         match (action, &target) {
             (Action::Cast(_), CommandTarget::Spell(spell_id)) => {
-                use crate::ui::types::{ChatMessageKind, InteractionMode};
+                use crate::ui::InteractionMode;
+                use crate::ui::widgets::panels::chat::ChatMessageKind;
                 use holtburger_protocol::messages::combat::CombatMode;
 
-                if !game.is_wielding_caster() {
+                if !game.data.is_wielding_caster() {
                     app.log_chat(
                         ChatMessageKind::Error,
                         "You must be wielding a caster to cast spells!".to_string(),
@@ -52,36 +54,36 @@ impl TabController for SpellsTab {
                 }
 
                 let mut cmds = Vec::new();
-                let combat_mode = game.combat_mode;
+                let combat_mode = game.data.combat_mode;
                 if combat_mode != CombatMode::Magic {
                     cmds.push(ClientCommand::SetCombatMode(CombatMode::Magic));
                 }
 
-                let active_interaction = game.active_interaction;
+                let active_interaction = game.view.active_interaction;
                 if let Some(interaction) = active_interaction
                     && (interaction.mode == InteractionMode::Target
                         || interaction.mode == InteractionMode::Healing)
                 {
                     cmds.push(ClientCommand::CastTargetedSpell {
                         target: interaction.guid,
-                        spell_id: *spell_id,
+                        spell_id: spell_id.clone(),
                     });
-                } else if let Some(player_guid) = game.player_guid {
+                } else if let Some(player_guid) = game.data.player_guid {
                     cmds.push(ClientCommand::CastTargetedSpell {
                         target: player_guid,
-                        spell_id: *spell_id,
+                        spell_id: spell_id.clone(),
                     });
                 } else {
                     cmds.push(ClientCommand::CastUntargetedSpell {
-                        spell_id: *spell_id,
+                        spell_id: spell_id.clone(),
                     });
                 }
 
                 Some(UIEffect::Commands(cmds))
             }
             _ => {
-                let player_guid = game.player_guid;
-                let active_interaction = game.active_interaction;
+                let player_guid = game.data.player_guid;
+                let active_interaction = game.view.active_interaction;
                 super::super::common::handle_base_action(
                     action,
                     &target,
@@ -98,9 +100,10 @@ impl TabController for SpellsTab {
         _app: &'a AppState,
         index: usize,
     ) -> CommandTarget<'a> {
-        let mut spells = game.player_spells.clone();
+        let mut spells = game.data.player_spells.clone();
         spells.sort_by_key(|&sid| {
-            game.spell_names
+            game.data
+                .spell_names
                 .get(&sid)
                 .cloned()
                 .unwrap_or_else(|| "".to_string())
@@ -112,6 +115,6 @@ impl TabController for SpellsTab {
     }
 
     fn get_item_count(&self, game: &GameState, _app: &AppState) -> usize {
-        game.player_spells.len()
+        game.data.player_spells.len()
     }
 }

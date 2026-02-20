@@ -1,5 +1,5 @@
-use crate::ui::model::{AppState, GameState};
-use crate::ui::widgets::vitals::render_vitals;
+use crate::ui::state::{AppState, GameState};
+use crate::ui::widgets::hud::vitals::render_vitals;
 use holtburger_common::time::*;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -43,6 +43,7 @@ fn render_status_panel(f: &mut Frame, game: &GameState, app: &AppState, area: Re
     // 1. Coords + Compass
     let retry_info = get_retry_info(app);
     let pos_info = game
+        .data
         .player_pos
         .as_ref()
         .map(|pos| pos.to_world_coords().to_string_with_precision(2))
@@ -95,6 +96,7 @@ fn get_retry_info(app: &AppState) -> String {
 
 fn get_compass_str(game: &GameState) -> String {
     let heading_rad = game
+        .data
         .player_pos
         .as_ref()
         .map(|p| p.rotation.to_heading())
@@ -107,7 +109,7 @@ fn get_compass_str(game: &GameState) -> String {
 }
 
 fn get_time_str(game: &GameState, _app: &AppState) -> String {
-    if let Some((st, inst)) = game.server_time {
+    if let Some((st, inst)) = game.data.server_time {
         let current_server_time = st + inst.elapsed().as_secs_f64();
         let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);
         let ticks_per_hour_24 = DERETH_DAY_LENGTH / 24.0;

@@ -1,4 +1,4 @@
-use crate::ui::model::{AppState, GameState};
+use crate::ui::state::{AppState, GameState};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -91,7 +91,7 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 pub fn render_action_bar(game: &GameState, app: &AppState) -> Option<Paragraph<'static>> {
-    let (tab, index) = (game.dashboard_tab, game.selected_dashboard_index);
+    let (tab, index) = (game.view.dashboard_tab, game.view.selected_dashboard_index);
 
     let verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(game, app, tab, index);
     if verbs.is_empty() {
@@ -110,11 +110,11 @@ pub fn render_action_bar(game: &GameState, app: &AppState) -> Option<Paragraph<'
 }
 
 pub fn get_adjacent_pane(
-    current: super::types::FocusedPane,
+    current: crate::ui::FocusedPane,
     width: u16,
     active_interaction: bool,
     delta: i32,
-) -> super::types::FocusedPane {
+) -> crate::ui::FocusedPane {
     let order = get_pane_order(width);
     let n = order.len() as i32;
     let current_idx = order.iter().position(|&p| p == current).unwrap_or(0) as i32;
@@ -122,29 +122,29 @@ pub fn get_adjacent_pane(
     let mut next_idx = (current_idx + delta).rem_euclid(n);
 
     // Skip dynamic if not moving anything
-    if order[next_idx as usize] == super::types::FocusedPane::Dynamic && !active_interaction {
+    if order[next_idx as usize] == crate::ui::FocusedPane::Dynamic && !active_interaction {
         next_idx = (next_idx + delta).rem_euclid(n);
     }
 
     order[next_idx as usize]
 }
 
-fn get_pane_order(width: u16) -> [super::types::FocusedPane; 4] {
-    if width < super::types::WIDTH_BREAKPOINT {
+fn get_pane_order(width: u16) -> [crate::ui::FocusedPane; 4] {
+    if width < crate::ui::layout::WIDTH_BREAKPOINT {
         // Portrait: Dashboard -> Context -> Dynamic -> Chat
         [
-            super::types::FocusedPane::Dashboard,
-            super::types::FocusedPane::Context,
-            super::types::FocusedPane::Dynamic,
-            super::types::FocusedPane::Chat,
+            crate::ui::FocusedPane::Dashboard,
+            crate::ui::FocusedPane::Context,
+            crate::ui::FocusedPane::Dynamic,
+            crate::ui::FocusedPane::Chat,
         ]
     } else {
         // Landscape: Dashboard -> Chat -> Context -> Dynamic
         [
-            super::types::FocusedPane::Dashboard,
-            super::types::FocusedPane::Chat,
-            super::types::FocusedPane::Context,
-            super::types::FocusedPane::Dynamic,
+            crate::ui::FocusedPane::Dashboard,
+            crate::ui::FocusedPane::Chat,
+            crate::ui::FocusedPane::Context,
+            crate::ui::FocusedPane::Dynamic,
         ]
     }
 }

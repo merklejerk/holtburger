@@ -1,5 +1,4 @@
-use crate::ui::model::AppState;
-use crate::ui::types::Modal;
+use crate::ui::state::AppState;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -59,4 +58,11 @@ pub fn render_modal(f: &mut Frame, state: &AppState, area: Rect) {
             }
         }
     }
+}
+
+use std::time::Instant;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Modal {
+    Retry { message: String, end_time: Instant },
 }

@@ -18,9 +18,9 @@ pub struct ChatMessage {
     pub text: String,
 }
 
-use super::super::types::{ContextView, FocusedPane};
-use super::super::utils::wrap_text;
-use crate::ui::state::{AppState, GameState, Page, SelectionState};
+use crate::ui::state::{AppState, GameState};
+use crate::ui::utils::wrap_text;
+use crate::ui::{ContextView, FocusedPane};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};

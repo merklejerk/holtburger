@@ -4,9 +4,10 @@ use ratatui::layout::Rect;
 use super::super::common::{Action, Verb, VerbSet};
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use super::verbs;
-use crate::ui::model::{AppState, GameState};
+use crate::ui::UIEffect;
+use crate::ui::state::{AppState, GameState};
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, StatType, UIEffect};
+use crate::ui::{CommandTarget, StatType};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;
@@ -17,8 +18,8 @@ impl TabController for CharacterTab {
     }
 
     fn get_verbs(&self, game: &GameState, app: &AppState, index: usize) -> VerbSet {
-        let player_guid = game.player_guid;
-        let active_interaction = game.active_interaction;
+        let player_guid = game.data.player_guid;
+        let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, app, index);
         if let Some(interaction_verbs) =
@@ -42,8 +43,8 @@ impl TabController for CharacterTab {
         game: &mut GameState,
         app: &mut AppState,
     ) -> Option<UIEffect> {
-        let player_guid = game.player_guid;
-        let active_interaction = game.active_interaction;
+        let player_guid = game.data.player_guid;
+        let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, app, index);
 

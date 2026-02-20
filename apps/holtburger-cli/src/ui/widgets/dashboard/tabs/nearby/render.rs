@@ -5,7 +5,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use super::super::classification::{EntityClass, classify_entity, get_entity_color};
-use crate::ui::model::{AppState, GameState};
+use crate::ui::state::{AppState, GameState};
 use holtburger_core::world::entity::Entity;
 
 pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
@@ -15,17 +15,19 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.dashboard_list_state
-        .select(Some(game.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut game.dashboard_list_state);
+    game.view
+        .dashboard_list_state
+        .select(Some(game.view.selected_dashboard_index));
+    f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
 
     // Render Scrollbar
     let height = area.height as usize;
-    game.last_dashboard_height = height;
+    game.view.last_dashboard_height = height;
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            game.selected_dashboard_index
+            game.view
+                .selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -59,7 +61,7 @@ fn get_list_items(game: &GameState, app: &AppState) -> Vec<ListItem<'static>> {
             e,
             display_dist,
             *depth,
-            i == game.selected_dashboard_index,
+            i == game.view.selected_dashboard_index,
             app.use_emojis,
             container_count,
         ));

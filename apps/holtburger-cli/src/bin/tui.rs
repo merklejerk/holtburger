@@ -6,7 +6,9 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use directories::ProjectDirs;
-use holtburger_cli::ui::{self, AppState, ChatMessageKind, NetStats, Page, SelectionState};
+use holtburger_cli::ui::{
+    self, AppState, NetStats, Page, SelectionState, widgets::panels::chat::ChatMessageKind,
+};
 use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
 use holtburger_protocol::messages::GameMessage;
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -245,7 +247,7 @@ async fn main() -> Result<()> {
                 && let GameMessage::ServerName(data) = msg.as_ref()
                 && let Some(game) = app_state.game_option_mut()
             {
-                game.world_name = data.name.clone();
+                game.data.world_name = data.name.clone();
             }
             let res = app_state.handle_action(ui::AppAction::ReceivedEvent(event));
             needs_redraw |= res.needs_redraw;

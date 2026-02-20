@@ -1,7 +1,7 @@
-use super::super::types::{DashboardTab, FocusedPane};
-use crate::ui::model::{AppState, GameState};
+use crate::ui::CommandTarget;
+use crate::ui::state::{AppState, GameState};
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
+use crate::ui::{DashboardTab, FocusedPane};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -47,7 +47,7 @@ pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
 }
 
 pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
-    let (focused_pane, dashboard_tab) = (game.focused_pane, game.dashboard_tab);
+    let (focused_pane, dashboard_tab) = (game.view.focused_pane, game.view.dashboard_tab);
 
     let dashboard_style = if focused_pane == FocusedPane::Dashboard {
         Style::default().fg(Color::Yellow)
@@ -67,7 +67,7 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, app: &mut AppS
     let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], game: &GameState| {
         let mut spans = Vec::new();
 
-        let (focused, active_tab) = (game.focused_pane, game.dashboard_tab);
+        let (focused, active_tab) = (game.view.focused_pane, game.view.dashboard_tab);
 
         if focused == FocusedPane::Dashboard {
             spans.push(Span::styled(

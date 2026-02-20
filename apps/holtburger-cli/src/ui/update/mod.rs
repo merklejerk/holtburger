@@ -1,12 +1,20 @@
+pub mod chat;
+pub mod client;
+pub mod combat;
 pub mod effect;
 pub mod input;
+pub mod inventory;
+pub mod navigation;
 pub mod world;
 
-use crate::ui::NET_PULSE_HISTORY_SIZE;
 use crate::ui::action::AppAction;
-use crate::ui::model::AppState;
-use crate::ui::types::{ChatMessageKind, Modal, UpdateResult};
-use holtburger_core::ClientCommand;
+use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
+use crate::ui::state::AppState;
+use crate::ui::state::ChatMessageKind;
+use crate::ui::widgets::panels::modal::Modal;
+use holtburger_core::client::types::ClientCommand;
+
+pub use effect::{UIEffect, UpdateResult};
 
 impl AppState {
     pub fn handle_action(&mut self, action: AppAction) -> UpdateResult {
@@ -16,13 +24,11 @@ impl AppState {
                 result = self.update_tick(elapsed);
             }
             AppAction::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
-                result.commands =
-                    self.handle_key_press(key, width, height, main_chunks, dynamic_chunk);
+                result = self.handle_key_press(key, width, height, main_chunks, dynamic_chunk);
                 result.needs_redraw = true; // Input always redraws
             }
             AppAction::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
-                result.commands =
-                    self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
+                result = self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
                 result.needs_redraw = true;
             }
             AppAction::ReceivedEvent(event) => {
@@ -83,7 +89,7 @@ impl AppState {
         }
 
         if self.logon_retry.tick(now) {
-            self.log_chat(
+            self.chat.log(
                 ChatMessageKind::System,
                 format!(
                     "* Retrying login (attempt {}/{})...",
@@ -96,7 +102,7 @@ impl AppState {
             result.needs_redraw = true;
         }
         if self.enter_retry.tick(now) {
-            self.log_chat(
+            self.chat.log(
                 ChatMessageKind::System,
                 format!(
                     "* Retrying enter world (attempt {}/{})...",
@@ -144,33 +150,36 @@ impl AppState {
             }
         }
 
-        // Enforce dashboard index bounds
+        // GameState logic
         let dashboard_count = self.dashboard_item_count();
-        if self.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
-            self.selected_dashboard_index = dashboard_count - 1;
-            result.needs_redraw = true;
-        } else if dashboard_count == 0 && self.selected_dashboard_index != 0 {
-            self.selected_dashboard_index = 0;
-            result.needs_redraw = true;
-        }
-
-        // Proactive enchantment purge
-        let old_count = self.player_enchantments.len();
-        self.player_enchantments.retain(|e| {
-            if e.duration < 0.0 {
-                return true;
+        if let Some(game) = self.game_option_mut() {
+            // Enforce dashboard index bounds
+            if game.view.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
+                game.view.selected_dashboard_index = dashboard_count - 1;
+                result.needs_redraw = true;
+            } else if dashboard_count == 0 && game.view.selected_dashboard_index != 0 {
+                game.view.selected_dashboard_index = 0;
+                result.needs_redraw = true;
             }
-            let expires_at = e.start_time + e.duration;
-            expires_at > 0.0
-        });
-        if self.player_enchantments.len() != old_count {
-            result.needs_redraw = true;
-        }
 
-        // Update enchantment timers locally
-        for enchant in &mut self.player_enchantments {
-            if enchant.duration >= 0.0 {
-                enchant.start_time -= elapsed;
+            // Proactive enchantment purge
+            let old_count = game.data.player_enchantments.len();
+            game.data.player_enchantments.retain(|e| {
+                if e.duration < 0.0 {
+                    return true;
+                }
+                let expires_at = e.start_time + e.duration;
+                expires_at > 0.0
+            });
+            if game.data.player_enchantments.len() != old_count {
+                result.needs_redraw = true;
+            }
+
+            // Update enchantment timers locally
+            for enchant in &mut game.data.player_enchantments {
+                if enchant.duration >= 0.0 {
+                    enchant.start_time -= elapsed;
+                }
             }
         }
 

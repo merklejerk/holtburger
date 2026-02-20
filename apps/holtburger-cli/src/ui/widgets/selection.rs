@@ -1,10 +1,10 @@
-use crate::ui::AppState;
+use crate::ui::state::SelectionState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, List, ListItem};
 
-pub fn render_character_selection(f: &mut Frame, state: &AppState, area: Rect) {
+pub fn render_character_selection(f: &mut Frame, state: &SelectionState, area: Rect) {
     if state.characters.is_empty() {
         let block = Block::default()
             .borders(Borders::ALL)

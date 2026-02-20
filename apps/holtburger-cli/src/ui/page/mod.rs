@@ -207,6 +207,11 @@ impl GameState {
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
                     self.scroll_offset = self.scroll_offset.saturating_add(crate::ui::SCROLL_STEP);
+                    self.maintain_scroll(
+                        false,
+                        self.chat_total_lines,
+                        main_chunks[1].height.saturating_sub(2) as usize,
+                    );
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
                     && mouse.row < main_chunks[2].y + main_chunks[2].height
@@ -216,6 +221,11 @@ impl GameState {
                     self.context_scroll_offset = self
                         .context_scroll_offset
                         .saturating_add(crate::ui::SCROLL_STEP);
+                    self.maintain_scroll(
+                        true,
+                        self.context_buffer.len(),
+                        main_chunks[2].height.saturating_sub(2) as usize,
+                    );
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[0].y
                     && mouse.row < main_chunks[0].y + main_chunks[0].height
@@ -480,10 +490,20 @@ impl GameState {
                 }
                 FocusedPane::Chat => {
                     self.scroll_offset = self.scroll_offset.saturating_add(1);
+                    self.maintain_scroll(
+                        false,
+                        self.chat_total_lines,
+                        main_chunks[1].height.saturating_sub(2) as usize,
+                    );
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
                     self.context_scroll_offset = self.context_scroll_offset.saturating_add(1);
+                    self.maintain_scroll(
+                        true,
+                        self.context_buffer.len(),
+                        main_chunks[2].height.saturating_sub(2) as usize,
+                    );
                     result.needs_redraw = true;
                 }
                 _ => {}
@@ -517,12 +537,14 @@ impl GameState {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
                     self.scroll_offset = self.scroll_offset.saturating_add(step);
+                    self.maintain_scroll(false, self.chat_total_lines, h);
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
                     let h = main_chunks[2].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
                     self.context_scroll_offset = self.context_scroll_offset.saturating_add(step);
+                    self.maintain_scroll(true, self.context_buffer.len(), h);
                     result.needs_redraw = true;
                 }
                 _ => {}
@@ -550,13 +572,13 @@ impl GameState {
             }
             KeyCode::Home => match self.focused_pane {
                 FocusedPane::Chat => {
-                    let max_scroll = self.chat_total_lines.saturating_sub(1);
-                    self.scroll_offset = max_scroll;
+                    let h = main_chunks[1].height.saturating_sub(2) as usize;
+                    self.scroll_offset = self.chat_total_lines.saturating_sub(h);
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
-                    let max_scroll = self.context_buffer.len().saturating_sub(1);
-                    self.context_scroll_offset = max_scroll;
+                    let h = main_chunks[2].height.saturating_sub(2) as usize;
+                    self.context_scroll_offset = self.context_buffer.len().saturating_sub(h);
                     result.needs_redraw = true;
                 }
                 _ => {}

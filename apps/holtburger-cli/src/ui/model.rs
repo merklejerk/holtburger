@@ -217,6 +217,34 @@ impl Default for GameState {
 }
 
 impl GameState {
+    pub fn maintain_scroll(&mut self, is_context: bool, current_total: usize, height: usize) {
+        let (scroll_offset, old_total) = if is_context {
+            (
+                &mut self.context_scroll_offset,
+                &mut self.context_total_lines,
+            )
+        } else {
+            (&mut self.scroll_offset, &mut self.chat_total_lines)
+        };
+
+        if *old_total > 0 && current_total != *old_total {
+            if current_total > *old_total {
+                let diff = current_total - *old_total;
+                if *scroll_offset > 0 {
+                    *scroll_offset += diff;
+                }
+            } else {
+                // Buffer shrank (pruning)
+                let diff = *old_total - current_total;
+                *scroll_offset = scroll_offset.saturating_sub(diff);
+            }
+        }
+
+        let max_scroll = current_total.saturating_sub(height);
+        *scroll_offset = (*scroll_offset).min(max_scroll);
+        *old_total = current_total;
+    }
+
     pub fn is_wielding_caster(&self) -> bool {
         self.get_suggested_combat_mode() == CombatMode::Magic
     }
@@ -359,31 +387,7 @@ impl AppState {
 
     pub fn maintain_scroll(&mut self, is_context: bool, current_total: usize, height: usize) {
         if let Some(game) = self.game_option_mut() {
-            let (scroll_offset, old_total) = if is_context {
-                (
-                    &mut game.context_scroll_offset,
-                    &mut game.context_total_lines,
-                )
-            } else {
-                (&mut game.scroll_offset, &mut game.chat_total_lines)
-            };
-
-            if *old_total > 0 && current_total != *old_total {
-                if current_total > *old_total {
-                    let diff = current_total - *old_total;
-                    if *scroll_offset > 0 {
-                        *scroll_offset += diff;
-                    }
-                } else {
-                    // Buffer shrank (pruning)
-                    let diff = *old_total - current_total;
-                    *scroll_offset = scroll_offset.saturating_sub(diff);
-                }
-            }
-
-            let max_scroll = current_total.saturating_sub(height);
-            *scroll_offset = (*scroll_offset).min(max_scroll);
-            *old_total = current_total;
+            game.maintain_scroll(is_context, current_total, height);
         }
     }
 

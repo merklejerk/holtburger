@@ -58,7 +58,7 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
         .iter()
         .map(|v| v.len())
         .sum();
-    app.maintain_scroll(false, total_lines, height);
+    game.maintain_scroll(false, total_lines, height);
 
     let all_lines: Vec<&(String, Color)> = app.wrapped_chat_cache[window_start..]
         .iter()
@@ -137,11 +137,11 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState,
     }
 }
 
-pub fn render_context_pane(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _app: &mut AppState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
     let total_ctx = game.context_buffer.len();
 
-    app.maintain_scroll(true, total_ctx, height);
+    game.maintain_scroll(true, total_ctx, height);
 
     let effective_ctx_scroll = game.context_scroll_offset;
     let ctx_end = total_ctx.saturating_sub(effective_ctx_scroll);

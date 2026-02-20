@@ -11,6 +11,5 @@ pub fn get_verbs(xp_cost: bool, sp_cost: bool) -> Vec<Verb> {
         verbs.push(Verb::new(Action::Train, 'n', "Train"));
     }
 
-    verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
     verbs
 }

@@ -4,7 +4,9 @@ use holtburger_core::{ClientViewEvent, StateEvent, WireEvent};
 impl AppState {
     pub(super) fn handle_received_event(&mut self, event: WireEvent) {
         match event {
-            WireEvent::CharacterList(_) | WireEvent::PlayerEntered { .. } => {
+            WireEvent::CharacterList(_)
+            | WireEvent::PlayerEntered { .. }
+            | WireEvent::GameMessage(_) => {
                 self.handle_setup_event(event);
             }
             WireEvent::LogMessage(_)

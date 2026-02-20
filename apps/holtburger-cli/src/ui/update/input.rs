@@ -76,6 +76,7 @@ impl AppState {
                 self.page = Page::Game(Box::new(crate::ui::state::GameState::new(
                     char_info.guid,
                     char_info.name.clone(),
+                    self.world_name.clone(),
                 )));
             }
         }

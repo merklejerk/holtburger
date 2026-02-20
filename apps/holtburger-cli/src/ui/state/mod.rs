@@ -26,9 +26,9 @@ pub struct GameState {
 }
 
 impl GameState {
-    pub fn new(guid: Guid, name: String) -> Self {
+    pub fn new(guid: Guid, name: String, world_name: String) -> Self {
         Self {
-            data: GameData::new(guid, name),
+            data: GameData::new(guid, name, world_name),
             view: ViewState::default(),
         }
     }
@@ -47,6 +47,7 @@ pub struct AppState {
     pub enter_retry: RetryState,
     pub core_state: ClientState,
     pub net_stats: NetStats,
+    pub world_name: String,
     pub verbosity: u8,
 }
 

@@ -10,7 +10,6 @@ use holtburger_cli::ui::{
     self, AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState,
 };
 use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
-use holtburger_protocol::messages::GameMessage;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -211,6 +210,7 @@ async fn main() -> Result<()> {
         core_state: ClientState::Connected,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
+        world_name: String::new(),
     };
 
     app_state.refresh_context_buffer();
@@ -237,12 +237,6 @@ async fn main() -> Result<()> {
     loop {
         // 1. Process Network Events (Drain batch)
         while let Ok(event) = wire_view_rx.try_recv() {
-            if let WireEvent::GameMessage(msg) = &event
-                && let GameMessage::ServerName(data) = msg.as_ref()
-                && let Some(game) = app_state.game_option_mut()
-            {
-                game.data.world_name = data.name.clone();
-            }
             let res = app_state.handle_action(ui::AppAction::ReceivedEvent(event));
             needs_redraw |= res.needs_redraw;
             for cmd in res.commands {

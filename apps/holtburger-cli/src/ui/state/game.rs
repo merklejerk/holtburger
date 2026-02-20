@@ -91,10 +91,11 @@ impl Default for GameData {
 }
 
 impl GameData {
-    pub fn new(guid: Guid, name: String) -> Self {
+    pub fn new(guid: Guid, name: String, world_name: String) -> Self {
         Self {
             character_name: Some(name),
             player_guid: Some(guid),
+            world_name,
             ..Self::default()
         }
     }

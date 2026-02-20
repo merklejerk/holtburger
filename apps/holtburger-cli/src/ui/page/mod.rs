@@ -5,20 +5,21 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders};
 use unicode_width::UnicodeWidthStr;
 
-use crate::ui::{FocusedPane, NetStats};
 use crate::ui::get_layout;
 use crate::ui::layout::PULSE_PANEL_WIDTH;
 use crate::ui::state::{ChatState, GameState, Page, SelectionState};
 use crate::ui::update::UpdateResult;
-use holtburger_core::ClientState;
 use crate::ui::widgets::dashboard::render_dashboard_pane;
 use crate::ui::widgets::hud::pulse::render_pulse_panel;
 use crate::ui::widgets::hud::status::render_status_bar;
 use crate::ui::widgets::panels::chat::{render_chat_pane, render_context_pane};
 use crate::ui::widgets::panels::dynamic::render_dynamic_pane;
 use crate::ui::widgets::selection::render_character_selection;
+use crate::ui::{FocusedPane, NetStats};
+use holtburger_core::ClientState;
 
 impl Page {
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         f: &mut Frame,
@@ -51,6 +52,7 @@ impl Page {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_input(
         &mut self,
         key: KeyEvent,
@@ -95,6 +97,7 @@ impl SelectionState {
 }
 
 impl GameState {
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         f: &mut Frame,

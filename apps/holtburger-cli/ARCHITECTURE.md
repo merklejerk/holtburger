@@ -8,7 +8,7 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
     - `tui.rs`: The main TUI application loop, handling terminal initialization and event orchestration.
     - `cli.rs`: (Planned/Minimal) Non-interactive command-line interface.
 - **`src/ui/`**: Core UI logic and state.
-    - [model.rs](src/ui/model.rs): Defines `AppState` and `GameState`. This is the "God Object" that holds all information required for rendering.
+    - [state/](src/ui/state/): Defines `AppState` and its component parts. This is a collection of disjoint state containers (Net, Chat, Selection, Page, Game) to avoid borrow checker conflicts.
     - [update/](src/ui/update/): Transition logic that moves the `AppState` from one state to another based on internal or external actions.
     - [page/](src/ui/page/): High-level screen abstractions (Selection, Game).
     - [widgets/](src/ui/widgets/): Reusable, mostly stateless UI components (Chat, Vitals, Dashboard).
@@ -16,45 +16,37 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
 
 ## 🧠 State Management: The Model
 
-The application uses a centralized state container: `AppState`.
+The application state is decomposed into granular modules within `src/ui/state/` to facilitate **disjoint borrowing**. This allows multiple parts of the application (e.g., Chat and Game) to be borrowed mutably at the same time.
 
-### `AppState` ([src/ui/model.rs](src/ui/model.rs))
-Manages the global lifecycle of the application:
-- **`Page`**: An enum that strictly separates the "Character Selection" phase from the "In-Game" phase.
-- **`NetStats`**: Real-time tracking of bytes in/out, used for the "Pulse" diagnostic widget.
-- **Modals**: Global overlays for errors, confirmations, or interactions.
+### `AppState` ([src/ui/state/mod.rs](src/ui/state/mod.rs))
+The root container that aggregates all sub-states:
+- **`SelectionState`**: Tracks the currently selected entity and interaction targets.
+- **`NetStats`**: Real-time network telemetry.
+- **`ChatState`**: Manages the message log, line-wrapping cache, and scroll position.
+- **`Page`**: High-level routing (Selection vs. Game).
+- **`GameState`**: Contains the active world projection (see below).
 
-### `GameState` ([src/ui/model.rs](src/ui/model.rs))
-When the user is in-game, `AppState` contains a `GameState` which is a projection of the `holtburger-core` world state. It caches:
-- **World Entities**: Nearby monsters, NPCs, and items.
-- **Player Stats**: Vitals, Skills, Attributes, and Resistances.
-- **Inventory/Spellbook**: Local copies of the player's items and known magic.
+### `GameState` ([src/ui/state/game.rs](src/ui/state/game.rs) & [src/ui/state/view.rs](src/ui/state/view.rs))
+When in-game, state is further split to separate ground truth from UI transient state:
+- **`GameData`**: A projection of the `holtburger-core` state (Entities, Stats, Inventory, Spells).
+- **`ViewState`**: UI-only state (Scroll offsets, focused panes, dashboard tab state).
 
 ## 🔄 The Interaction Loop: Update & View
 
 The TUI operates on an asynchronous event loop located in [src/bin/tui.rs](src/bin/tui.rs).
 
 ### 1. Action Orchestration
-We use `tokio::select!` to multiplex four event streams into a single **`AppAction`**:
-- **Terminal Events**: Input (keys, mouse) and window resizing from `crossterm`.
-- **Core Events**: Broadcasts from `holtburger-core` (`WireEvent`, `StateEvent`, `ViewEvent`).
-- **Tick Timer**: A constant heartbeat for animations and network retries.
+We use `tokio::select!` to multiplex event streams into **`AppAction`**.
 
 ### 2. The `Update` Phase ([src/ui/update/mod.rs](src/ui/update/mod.rs))
-Every `AppAction` is passed to `AppState::handle_action`. This method decomposes the update logic into domain-specific modules:
-- **`input.rs`**: Maps crossterm `KeyEvent`s and `MouseEvent`s to state changes or intents.
-- **`world.rs`**: Processes `holtburger-core` events (`WireEvent`, `StateEvent`, `ViewEvent`) to update the local `GameState` projection.
-- **`effect.rs`**: Translates high-level UI intents (**`UIEffect`**) into concrete `ClientCommand`s to be sent to the server.
-
-The update phase produces an **`UpdateResult`**, which may contain:
-- `needs_redraw`: Boolean flag to trigger a terminal draw.
-- `commands`: A list of `ClientCommand`s to be sent back to the core engine (e.g., "Use Item").
-- `effect`: A `UIEffect` that requires further coordination (e.g., "Assess", "MoveTo", "Target").
+Events are processed by `handle_action`, which uses **disjoint borrows** to pass only required fields to handlers:
+- **`input.rs`**: Maps crossterm events to intents.
+- **`world.rs`**: Processes engine events to update `GameData`.
 
 ### 3. The `View` Phase ([src/ui/page/mod.rs](src/ui/page/mod.rs))
-If `needs_redraw` is true, the `Page::render` method is called.
-- It uses **`get_layout`** ([src/ui/mod.rs](src/ui/mod.rs)) to calculate the responsive UI zones.
-- It delegates rendering to specific **Widgets**, passing them sub-sections of the `AppState`.
+If a redraw is needed, the rendering loop passes granular slices of the state to widgets. 
+- Widgets never receive the full `AppState` or `GameState`.
+- Rendering is stateless where possible, relying on `ViewState` only for layout/scroll persistence.
 
 ## 📱 Responsive Layout Strategy
 
@@ -78,20 +70,22 @@ The Dashboard panel (bottom right) is extensible via the **`TabController`** tra
 sequenceDiagram
     participant C as Core Engine
     participant T as TUI Loop (tui.rs)
-    participant S as AppState (model.rs)
-    participant P as Page (page.rs)
+    participant S as AppState (state/mod.rs)
+    participant P as Page (page/mod.rs)
 
     C->>T: ClientViewEvent (Guid, VitalUpdate)
     T->>S: handle_action(ReceivedViewEvent)
-    S-->>S: Update vitals in GameState
+    S-->>S: Update vitals in GameData
     S->>T: UpdateResult { needs_redraw: true }
-    T->>P: render(Frame, AppState)
+    T->>P: render(Frame, AppStateFields...)
     P->>T: next_frame()
 ```
 
 ## 🛠️ Developer Navigation Guide
 
 - **Adding a new UI element?** Create a new file in `widgets/` and call it from `page/game.rs`.
-- **Handling a new server message?** Add it to the event handlers in `update/mod.rs` and update `GameState`.
+- **Handling a new server message?** Add it to the event handlers in `update/mod.rs` and update `GameData`.
 - **Changing hotkeys?** Look in `update/input.rs`.
-- **Adding a new tab to the bottom panel?** Implement `TabController` in `widgets/dashboard/tabs/`.
+- **Adding a new tab to the dashboard?** Implement `TabController` in `widgets/dashboard/tabs/`.
+- **Adding new UI persistent state?** Add fields to `ViewState`.
+

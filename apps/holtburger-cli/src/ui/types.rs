@@ -1,9 +1,9 @@
-use std::time::Instant;
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub enum StatType {
@@ -66,4 +66,3 @@ pub enum ContextView {
 }
 
 pub const SCROLL_STEP: usize = 3;
-pub const NET_PULSE_HISTORY_SIZE: usize = 32;

@@ -15,11 +15,7 @@ pub trait TabController {
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb>;
 
     /// Returns the command target (e.g. Entity, Spell) at the specified index.
-    fn get_target_at_index<'a>(
-        &self,
-        game: &'a GameState,
-        index: usize,
-    ) -> CommandTarget<'a>;
+    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a>;
 
     /// Returns the total number of items in the tab.
     fn get_item_count(&self, game: &GameState) -> usize;
@@ -33,11 +29,7 @@ pub trait TabController {
     ) -> Option<UIEffect>;
 
     /// Optional: Handles tab-specific input. Returns a list of commands to execute.
-    fn handle_input(
-        &self,
-        key: KeyEvent,
-        game: &mut GameState,
-    ) -> Option<UpdateResult> {
+    fn handle_input(&self, key: KeyEvent, game: &mut GameState) -> Option<UpdateResult> {
         handle_common_dashboard_input(self, key, game)
     }
 

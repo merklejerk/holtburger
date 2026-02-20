@@ -1,9 +1,9 @@
 use super::super::assess;
 use super::super::debug;
 use super::classification::{self, EntityClass};
+use crate::ui::UIEffect;
 use crate::ui::state::GameState;
 use crate::ui::types::{ActiveInteraction, CommandTarget, ContextView, InteractionMode};
-use crate::ui::UIEffect;
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
@@ -266,13 +266,17 @@ pub fn get_context_content_for_view(game: &GameState) -> Vec<Line<'static>> {
                 return debug::get_debug_info(
                     &target,
                     |id| {
-                        game.data.entities.get(&id).map(|e| e.name.clone()).or_else(|| {
-                            if Some(id) == player_guid {
-                                Some("You".to_string())
-                            } else {
-                                None
-                            }
-                        })
+                        game.data
+                            .entities
+                            .get(&id)
+                            .map(|e| e.name.clone())
+                            .or_else(|| {
+                                if Some(id) == player_guid {
+                                    Some("You".to_string())
+                                } else {
+                                    None
+                                }
+                            })
                     },
                     Some(&game.data.spell_info),
                     player_info,

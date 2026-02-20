@@ -1,5 +1,5 @@
-use std::time::Instant;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
+use std::time::Instant;
 
 pub struct NetStats {
     pub bytes_in: u64,

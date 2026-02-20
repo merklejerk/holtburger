@@ -1,6 +1,6 @@
+use crate::ui::types::{ActiveInteraction, ContextView, DashboardTab, FocusedPane};
 use holtburger_common::Guid;
 use ratatui::text::Line;
-use crate::ui::types::{FocusedPane, DashboardTab, ActiveInteraction, ContextView};
 
 #[derive(Debug, Clone)]
 pub struct ViewState {

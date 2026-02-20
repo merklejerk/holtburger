@@ -3,24 +3,23 @@ use std::collections::HashMap;
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
-
 use crate::ui::widgets::panels::modal::Modal;
 
-pub mod game;
-pub mod view;
-mod net;
-mod selection;
-mod page;
 mod chat;
+pub mod game;
+mod net;
+mod page;
+mod selection;
+pub mod view;
 
+pub use self::chat::{ChatMessage, ChatMessageKind, ChatState};
 pub use self::game::GameData;
-pub use self::view::ViewState;
 pub use self::net::NetStats;
-pub use self::selection::SelectionState;
 pub use self::page::Page;
-pub use self::chat::{ChatState, ChatMessage, ChatMessageKind};
+pub use self::selection::SelectionState;
+pub use self::view::ViewState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GameState {
     pub data: GameData,
     pub view: ViewState,
@@ -30,15 +29,6 @@ impl GameState {
     pub fn new(guid: Guid, name: String) -> Self {
         Self {
             data: GameData::new(guid, name),
-            view: ViewState::default(),
-        }
-    }
-}
-
-impl Default for GameState {
-    fn default() -> Self {
-        Self {
-            data: GameData::default(),
             view: ViewState::default(),
         }
     }
@@ -62,7 +52,6 @@ pub struct AppState {
 }
 
 impl AppState {
-
     pub fn game_view(&self) -> &ViewState {
         match &self.page {
             Page::Game(game) => &game.view,
@@ -128,7 +117,7 @@ impl AppState {
 
         let active_tab = crate::ui::widgets::dashboard::get_tab_controller(tab);
         if let Some(game) = self.game_option() {
-            let content = active_tab.get_context_panel_content(&game);
+            let content = active_tab.get_context_panel_content(game);
             if let Some(game) = self.game_option_mut() {
                 game.view.context_buffer = content;
             }
@@ -139,7 +128,7 @@ impl AppState {
         if let Some(game) = self.game_option() {
             let active_tab =
                 crate::ui::widgets::dashboard::get_tab_controller(game.view.dashboard_tab);
-            active_tab.get_item_count(&game)
+            active_tab.get_item_count(game)
         } else {
             0
         }

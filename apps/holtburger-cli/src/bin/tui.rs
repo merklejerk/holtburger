@@ -7,7 +7,7 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::ui::{
-    self, AppState, NetStats, Page, SelectionState, ChatMessageKind, ChatState,
+    self, AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState,
 };
 use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
 use holtburger_protocol::messages::GameMessage;

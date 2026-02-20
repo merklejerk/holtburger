@@ -11,4 +11,3 @@ pub enum AppAction {
     ReceivedStateEvent(StateEvent),
     ReceivedViewEvent(ClientViewEvent),
 }
-

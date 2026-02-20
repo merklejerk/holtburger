@@ -92,10 +92,11 @@ impl Default for GameData {
 
 impl GameData {
     pub fn new(guid: Guid, name: String) -> Self {
-        let mut data = Self::default();
-        data.character_name = Some(name);
-        data.player_guid = Some(guid);
-        data
+        Self {
+            character_name: Some(name),
+            player_guid: Some(guid),
+            ..Self::default()
+        }
     }
 
     pub fn is_wielding_caster(&self) -> bool {

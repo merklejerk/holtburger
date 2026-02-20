@@ -2,9 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_core::ClientCommand;
 use ratatui::layout::Rect;
 
-use crate::ui::state::{AppState, Page, ChatState, GameState, SelectionState};
-use crate::ui::update::UpdateResult;
 use crate::ui::FocusedPane;
+use crate::ui::state::{AppState, ChatState, GameState, Page, SelectionState};
+use crate::ui::update::UpdateResult;
 
 impl AppState {
     pub(super) fn handle_key_press(
@@ -110,7 +110,6 @@ impl AppState {
     }
 }
 
-
 impl SelectionState {
     pub fn handle_input(&mut self, key: KeyEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
@@ -166,11 +165,7 @@ impl SelectionState {
 }
 
 impl GameState {
-    pub fn handle_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        main_chunks: &[Rect],
-    ) -> UpdateResult {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, main_chunks: &[Rect]) -> UpdateResult {
         let mut result = UpdateResult::new();
         match mouse.kind {
             crossterm::event::MouseEventKind::ScrollUp => {
@@ -250,6 +245,7 @@ impl GameState {
         result
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn handle_input(
         &mut self,
         key: KeyEvent,
@@ -263,7 +259,8 @@ impl GameState {
         let mut result = UpdateResult::new();
 
         if self.view.focused_pane == FocusedPane::Dashboard {
-            let active_tab = crate::ui::widgets::dashboard::get_tab_controller(self.view.dashboard_tab);
+            let active_tab =
+                crate::ui::widgets::dashboard::get_tab_controller(self.view.dashboard_tab);
             if let Some(tab_result) = active_tab.handle_input(key, self) {
                 result.merge(tab_result);
                 return result;
@@ -299,7 +296,7 @@ impl GameState {
             }
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    let command = input.drain(..).collect::<String>();
+                    let command = std::mem::take(input);
                     if command.is_empty() {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
@@ -407,7 +404,9 @@ impl GameState {
                     }
                     if command == "/info" {
                         // Special handling for client info display
-                        result.effect = Some(crate::ui::update::effect::UIEffect::Command(ClientCommand::Ping)); // TEMP placeholder;
+                        result.effect = Some(crate::ui::update::effect::UIEffect::Command(
+                            ClientCommand::Ping,
+                        )); // TEMP placeholder;
                         input_history.push(command.clone());
                         *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;

@@ -1,7 +1,7 @@
+use ratatui::style::Color;
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
-use ratatui::style::Color;
 
 #[derive(Debug, Clone)]
 pub enum ChatMessageKind {

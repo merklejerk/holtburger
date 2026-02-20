@@ -23,10 +23,12 @@ impl AppState {
                 self.chat.log(ChatMessageKind::System, message);
             }
             WireEvent::Chat { sender, message } => {
-                self.chat.log(ChatMessageKind::Chat, format!("{}: {}", sender, message));
+                self.chat
+                    .log(ChatMessageKind::Chat, format!("{}: {}", sender, message));
             }
             WireEvent::Emote { sender, text } => {
-                self.chat.log(ChatMessageKind::Emote, format!("{} {}", sender, text));
+                self.chat
+                    .log(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
             WireEvent::PingResponse => {
                 self.chat.log(ChatMessageKind::System, "Pong!".to_string());

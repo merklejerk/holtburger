@@ -77,10 +77,10 @@
   - [x] Refactor `std::mem::replace` in `ui/mod.rs`.
   - [x] Refactor `std::mem::replace` in `ui/update/input.rs`.
   - [x] Fix imports and compile.
-- [ ] **Phase 4: Final Cleanup and Validation**
-  - [ ] Review any remaining TODOs in the codebase.
-  - [ ] Final check of unused imports/warnings.
-  - [ ] Commit all changes.
+- [x] **Phase 4: Final Cleanup and Validation**
+  - [x] Review any remaining TODOs in the codebase.
+  - [x] Final check of unused imports/warnings.
+  - [x] Commit all changes.
 
 ### Decisions Log
 - *None yet.*

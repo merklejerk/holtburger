@@ -1,27 +1,26 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use super::super::common::{Action, Verb, VerbSet};
-use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
+use super::super::common::{Action, Verb};
 use super::verbs;
-use crate::ui::UIEffect;
-use crate::ui::state::{AppState, GameState};
+use super::render::{render_character_tab, CharTabLine, get_char_tab_lines};
+use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::{CommandTarget, StatType};
+use crate::ui::types::{CommandTarget, StatType}; use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;
 
 impl TabController for CharacterTab {
-    fn render(&self, f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
-        render_character_tab(f, game, app, area);
+    fn render(&self, f: &mut Frame, game: &mut GameState, use_emojis: bool, area: Rect) {
+        render_character_tab(f, game, use_emojis, area);
     }
 
-    fn get_verbs(&self, game: &GameState, app: &AppState, index: usize) -> VerbSet {
+    fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
         let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
 
-        let target = self.get_target_at_index(game, app, index);
+        let target = self.get_target_at_index(game, index);
         if let Some(interaction_verbs) =
             super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
         {
@@ -41,12 +40,11 @@ impl TabController for CharacterTab {
         action: &Action,
         index: usize,
         game: &mut GameState,
-        app: &mut AppState,
     ) -> Option<UIEffect> {
         let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
 
-        let target = self.get_target_at_index(game, app, index);
+        let target = self.get_target_at_index(game, index);
 
         match (action, &target) {
             (Action::LevelUp, CommandTarget::Stat(st, Some(cost), _)) => {
@@ -90,13 +88,12 @@ impl TabController for CharacterTab {
     fn get_target_at_index<'a>(
         &self,
         game: &'a GameState,
-        _app: &'a AppState,
         index: usize,
     ) -> CommandTarget<'a> {
         get_command_target_at_index(game, index).unwrap_or(CommandTarget::None)
     }
 
-    fn get_item_count(&self, game: &GameState, _app: &AppState) -> usize {
+    fn get_item_count(&self, game: &GameState) -> usize {
         get_char_tab_lines(game).len()
     }
 }

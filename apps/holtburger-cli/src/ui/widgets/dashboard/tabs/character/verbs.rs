@@ -1,6 +1,6 @@
-use super::super::common::{Action, Verb, VerbSet};
+use super::super::common::{Action, Verb};
 
-pub fn get_verbs(xp_cost: bool, sp_cost: bool) -> VerbSet {
+pub fn get_verbs(xp_cost: bool, sp_cost: bool) -> Vec<Verb> {
     let mut verbs = Vec::new();
 
     if xp_cost {

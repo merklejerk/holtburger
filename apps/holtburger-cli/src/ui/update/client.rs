@@ -1,5 +1,5 @@
 use crate::ui::state::{AppState, GameState, Page, SelectionState};
-use crate::ui::widgets::panels::chat::ChatMessageKind;
+use crate::ui::state::ChatMessageKind;
 use holtburger_core::ErrorKind;
 use holtburger_core::{ClientState, ClientViewEvent, WireEvent};
 use holtburger_protocol::errors::CharacterError;
@@ -25,7 +25,7 @@ impl AppState {
                         CharacterError::from_repr(error_code).unwrap_or(CharacterError::None);
                     if error == CharacterError::Logon {
                         self.logon_retry.schedule();
-                        self.log_chat(
+                        self.chat.log(
                             ChatMessageKind::Warning,
                             format!(
                                 "Account already logged on. Retrying in {}s...",
@@ -35,7 +35,7 @@ impl AppState {
                         return;
                     } else if error == CharacterError::EnterGameCharacterInWorld {
                         self.enter_retry.schedule();
-                        self.log_chat(
+                        self.chat.log(
                             ChatMessageKind::Warning,
                             format!(
                                 "Character still in world. Retrying in {}s...",
@@ -52,7 +52,7 @@ impl AppState {
                     }
                     ErrorKind::Transport => ChatMessageKind::Warning,
                 };
-                self.log_chat(chat_kind, format!("[!] {}", message));
+                self.chat.log(chat_kind, format!("[!] {}", message));
             }
             _ => {}
         }

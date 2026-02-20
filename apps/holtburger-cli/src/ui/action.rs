@@ -12,23 +12,3 @@ pub enum AppAction {
     ReceivedViewEvent(ClientViewEvent),
 }
 
-use holtburger_core::client::types::TargetSlot;
-use holtburger_core::world::entity::Entity;
-use holtburger_core::world::stats::{AttributeType, SkillType, VitalType};
-use holtburger_protocol::messages::magic::Enchantment;
-
-#[derive(Debug, Clone)]
-pub enum StatType {
-    Attribute(AttributeType),
-    Vital(VitalType),
-    Skill(SkillType),
-}
-
-#[derive(Debug, Clone)]
-pub enum CommandTarget<'a> {
-    Entity(&'a Entity, Option<TargetSlot>),
-    Enchantment(Enchantment),
-    Stat(StatType, Option<u64>, Option<u32>),
-    Spell(u32),
-    None,
-}

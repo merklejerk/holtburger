@@ -1,6 +1,7 @@
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::GameState;
 use crate::ui::widgets::hud::vitals::render_vitals;
 use holtburger_common::time::*;
+use holtburger_core::RetryState;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -17,17 +18,17 @@ const DEGREES_IN_CIRCLE: f32 = 360.0;
 const DEGREES_PER_POINT: f32 = DEGREES_IN_CIRCLE / COMPASS_POINTS as f32; // 22.5° per segment
 const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the label
 
-pub fn render_status_bar(f: &mut Frame, game: &GameState, app: &AppState, area: Rect) {
+pub fn render_status_bar(f: &mut Frame, game: &GameState, logon_retry: &RetryState, enter_retry: &RetryState, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    render_vitals(f, game, app, chunks[0]);
-    render_status_panel(f, game, app, chunks[1]);
+    render_vitals(f, game, chunks[0]);
+    render_status_panel(f, game, logon_retry, enter_retry, chunks[1]);
 }
 
-fn render_status_panel(f: &mut Frame, game: &GameState, app: &AppState, area: Rect) {
+fn render_status_panel(f: &mut Frame, game: &GameState, logon_retry: &RetryState, enter_retry: &RetryState, area: Rect) {
     let status_block = Block::default().borders(Borders::ALL).title("Status");
     let inner_status_area = status_block.inner(area);
     f.render_widget(status_block, area);
@@ -41,7 +42,7 @@ fn render_status_panel(f: &mut Frame, game: &GameState, app: &AppState, area: Re
         .split(inner_status_area);
 
     // 1. Coords + Compass
-    let retry_info = get_retry_info(app);
+    let retry_info = get_retry_info(logon_retry, enter_retry);
     let pos_info = game
         .data
         .player_pos
@@ -56,38 +57,36 @@ fn render_status_panel(f: &mut Frame, game: &GameState, app: &AppState, area: Re
     );
 
     // 2. Chronometer
-    let time_str = get_time_str(game, app);
+    let time_str = get_time_str(game);
     f.render_widget(
         Paragraph::new(time_str).alignment(ratatui::layout::Alignment::Right),
         status_layout[1],
     );
 }
 
-fn get_retry_info(app: &AppState) -> String {
+fn get_retry_info(logon: &RetryState, enter: &RetryState) -> String {
     let mut retry_info = String::new();
     let now = std::time::Instant::now();
 
-    if app.logon_retry.active {
-        let secs = app
-            .logon_retry
+    if logon.active {
+        let secs = logon
             .next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
         retry_info.push_str(&format!(
             "[Logon:{}/{} {}s] ",
-            app.logon_retry.attempts, app.logon_retry.max_attempts, secs
+            logon.attempts, logon.max_attempts, secs
         ));
     }
 
-    if app.enter_retry.active {
-        let secs = app
-            .enter_retry
+    if enter.active {
+        let secs = enter
             .next_time
             .map(|t| t.saturating_duration_since(now).as_secs())
             .unwrap_or(0);
         retry_info.push_str(&format!(
             "[Enter:{}/{} {}s] ",
-            app.enter_retry.attempts, app.enter_retry.max_attempts, secs
+            enter.attempts, enter.max_attempts, secs
         ));
     }
 
@@ -108,7 +107,7 @@ fn get_compass_str(game: &GameState) -> String {
     format!("{:03.0}°{}", heading_deg, COMPASS_DIRECTIONS[dir_idx])
 }
 
-fn get_time_str(game: &GameState, _app: &AppState) -> String {
+fn get_time_str(game: &GameState) -> String {
     if let Some((st, inst)) = game.data.server_time {
         let current_server_time = st + inst.elapsed().as_secs_f64();
         let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);

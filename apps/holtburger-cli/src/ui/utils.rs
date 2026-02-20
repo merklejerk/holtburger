@@ -1,4 +1,4 @@
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::GameState;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -90,10 +90,10 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     result
 }
 
-pub fn render_action_bar(game: &GameState, app: &AppState) -> Option<Paragraph<'static>> {
+pub fn render_action_bar(game: &GameState) -> Option<Paragraph<'static>> {
     let (tab, index) = (game.view.dashboard_tab, game.view.selected_dashboard_index);
 
-    let verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(game, app, tab, index);
+    let verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(game, tab, index);
     if verbs.is_empty() {
         return None;
     }

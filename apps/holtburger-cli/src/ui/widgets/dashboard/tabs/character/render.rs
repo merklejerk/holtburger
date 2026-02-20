@@ -13,8 +13,8 @@ use holtburger_core::world::magic::get_enchantment_name;
 use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
 
-use crate::ui::StatType;
-use crate::ui::state::{AppState, GameState};
+use crate::ui::state::GameState;
+use crate::ui::types::StatType;
 use crate::ui::utils::format_cost;
 
 pub enum CharTabLine {
@@ -32,7 +32,7 @@ pub enum CharTabLine {
     Spacer,
 }
 
-pub fn render_character_tab(f: &mut Frame, game: &mut GameState, app: &mut AppState, area: Rect) {
+pub fn render_character_tab(f: &mut Frame, game: &mut GameState, _use_emojis: bool, area: Rect) {
     let mut bottom_area = area;
 
     if let Some(info) = &game.data.level_info {
@@ -68,20 +68,15 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, app: &mut AppSt
         f.render_widget(summary, top_area);
     }
 
-    let items = get_stats_list_items(game, app);
+    let items = get_stats_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
         .highlight_style(Style::default().add_modifier(Modifier::BOLD))
         .highlight_symbol("> ");
 
-    game.view
-        .dashboard_list_state
+    game.view.dashboard_list_state
         .select(Some(game.view.selected_dashboard_index));
-    f.render_stateful_widget(
-        dashboard_list,
-        bottom_area,
-        &mut game.view.dashboard_list_state,
-    );
+    f.render_stateful_widget(dashboard_list, bottom_area, &mut game.view.dashboard_list_state);
 
     // Render Scrollbar
     let height = bottom_area.height as usize;
@@ -89,8 +84,7 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, app: &mut AppSt
 
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            game.view
-                .selected_dashboard_index
+            game.view.selected_dashboard_index
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -109,7 +103,7 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, app: &mut AppSt
     }
 }
 
-fn get_stats_list_items(game: &GameState, _app: &AppState) -> Vec<ListItem<'static>> {
+fn get_stats_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     let items = get_char_tab_lines(game);
     let mut list_items = Vec::new();
 
@@ -208,9 +202,7 @@ fn get_stats_list_items(game: &GameState, _app: &AppState) -> Vec<ListItem<'stat
                 let val_color = if highlight { Color::Cyan } else { color };
                 let time_str = format_duration(enchant.start_time, enchant.duration);
 
-                let spell_name = game
-                    .data
-                    .spell_names
+                let spell_name = game.data.spell_names
                     .get(&(enchant.spell_id as u32))
                     .cloned()
                     .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
@@ -402,7 +394,7 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         let val = format!("{} / {}", v.current, v.buffed_max);
         let xp_cost = v
             .next_rank_xp
-            .map(|next| next.saturating_sub(v.spent_xp) as u64);
+            .map(|next: u32| next.saturating_sub(v.spent_xp as u32) as u64);
 
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
@@ -432,7 +424,7 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         };
         let xp_cost = a
             .next_rank_xp
-            .map(|next| next.saturating_sub(a.spent_xp) as u64);
+            .map(|next: u32| next.saturating_sub(a.spent_xp as u32) as u64);
 
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
@@ -452,9 +444,7 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
 
     // 3. Skills
     lines.push(CharTabLine::Header("SKILLS"));
-    let mut skills: Vec<_> = game
-        .data
-        .skills
+    let mut skills: Vec<_> = game.data.skills
         .values()
         .filter(|s| s.skill_type.is_eor())
         .collect();
@@ -488,12 +478,10 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         if s.training as u32 >= TrainingLevel::Trained as u32 {
             xp_cost = s
                 .next_rank_xp
-                .map(|next| next.saturating_sub(s.spent_xp) as u64);
+                .map(|next: u32| next.saturating_sub(s.spent_xp as u32) as u64);
         } else if s.training == TrainingLevel::Untrained {
             // Check if we can train it
-            sp_cost = game
-                .data
-                .skill_table
+            sp_cost = game.data.skill_table
                 .as_ref()
                 .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
                 .and_then(|base| {
@@ -537,24 +525,18 @@ pub fn get_char_tab_lines(game: &GameState) -> Vec<CharTabLine> {
         let mut resists = vec![
             (PropertyFloat::ResistSlash, game.data.resistances.slash),
             (PropertyFloat::ResistPierce, game.data.resistances.pierce),
-            (
-                PropertyFloat::ResistBludgeon,
-                game.data.resistances.bludgeon,
-            ),
+            (PropertyFloat::ResistBludgeon, game.data.resistances.bludgeon),
             (PropertyFloat::ResistFire, game.data.resistances.fire),
             (PropertyFloat::ResistCold, game.data.resistances.cold),
             (PropertyFloat::ResistAcid, game.data.resistances.acid),
-            (
-                PropertyFloat::ResistElectric,
-                game.data.resistances.electric,
-            ),
+            (PropertyFloat::ResistElectric, game.data.resistances.electric),
             (PropertyFloat::ResistNether, game.data.resistances.nether),
         ];
         resists.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));
 
         for (prop, val) in resists {
             lines.push(CharTabLine::Stat {
-                label: prop.to_string(),
+                label: format!("{:?}", prop),
                 value: format!("{:.2}", val),
                 xp_cost: None,
                 sp_cost: None,

@@ -6,6 +6,7 @@ pub mod layout;
 pub mod page;
 pub mod state;
 pub mod traits;
+pub mod types;
 pub mod update;
 pub mod utils;
 pub mod widgets;
@@ -15,6 +16,7 @@ pub use self::layout::*;
 pub use self::state::view::*;
 pub use self::state::*;
 pub use self::traits::*;
+pub use self::types::*;
 pub use self::update::*;
 pub use self::widgets::panels::modal::Modal;
 use self::widgets::panels::modal::render_modal;
@@ -82,11 +84,20 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
 }
 
 pub fn ui(f: &mut Frame, state: &mut AppState) {
-    // We swap out the page to break the borrow cycle during rendering.
-    // The provided AppState is used for shared global components.
-    let mut page = std::mem::replace(&mut state.page, Page::Selection(Default::default()));
-    page.render(f, f.size(), state);
-    state.page = page;
+    // We break the borrow cycle by borrowing disjoint fields from state.
+    state.page.render(
+        f,
+        f.size(),
+        &mut state.chat,
+        state.use_emojis,
+        &state.account_name,
+        &state.input,
+        &state.core_state,
+        &state.net_stats,
+        state.modal.is_some(),
+        &state.logon_retry,
+        &state.enter_retry,
+    );
 
     // 2. Modals are still top-level overlays that sit on top of any page.
     if let Some(_modal) = &state.modal {

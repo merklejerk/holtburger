@@ -20,6 +20,7 @@ pub enum UIEffect {
     Target(Guid),
     CancelInteraction,
     Log(ChatMessageKind, String),
+    DisplayClientInfo,
 }
 
 #[derive(Debug, Default)]
@@ -182,6 +183,10 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         }
         UIEffect::Log(kind, msg) => {
             state.chat.log(kind, msg);
+            vec![]
+        }
+        UIEffect::DisplayClientInfo => {
+            state.display_client_info();
             vec![]
         }
     }

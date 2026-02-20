@@ -6,7 +6,8 @@ use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use super::verbs;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget; use crate::ui::update::effect::UIEffect;
+use crate::ui::types::CommandTarget;
+use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 
 pub struct EquipTab;
@@ -26,11 +27,9 @@ impl TabController for EquipTab {
         let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
 
-        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
-            &target,
-            player_guid,
-            active_interaction,
-        ) {
+        if let Some(interaction_verbs) =
+            super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
+        {
             return interaction_verbs;
         }
 
@@ -74,11 +73,7 @@ impl TabController for EquipTab {
         }
     }
 
-    fn get_target_at_index<'a>(
-        &self,
-        game: &'a GameState,
-        index: usize,
-    ) -> CommandTarget<'a> {
+    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
         let lines = get_lines(game);
         match lines.get(index) {
             Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::Entity(e, *slot),

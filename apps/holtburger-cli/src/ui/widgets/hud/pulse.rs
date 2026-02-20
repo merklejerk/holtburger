@@ -9,7 +9,12 @@ use unicode_width::UnicodeWidthStr;
 
 const SPARK_CHARS: &[&str] = &[" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
-pub fn render_pulse_panel(f: &mut Frame, core_state: &ClientState, net_stats: &NetStats, area: Rect) {
+pub fn render_pulse_panel(
+    f: &mut Frame,
+    core_state: &ClientState,
+    net_stats: &NetStats,
+    area: Rect,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default());

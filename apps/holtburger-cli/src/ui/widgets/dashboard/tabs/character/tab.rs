@@ -2,11 +2,12 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::common::{Action, Verb};
+use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use super::verbs;
-use super::render::{render_character_tab, CharTabLine, get_char_tab_lines};
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, StatType}; use crate::ui::update::effect::UIEffect;
+use crate::ui::types::{CommandTarget, StatType};
+use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;
@@ -85,11 +86,7 @@ impl TabController for CharacterTab {
         }
     }
 
-    fn get_target_at_index<'a>(
-        &self,
-        game: &'a GameState,
-        index: usize,
-    ) -> CommandTarget<'a> {
+    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
         get_command_target_at_index(game, index).unwrap_or(CommandTarget::None)
     }
 

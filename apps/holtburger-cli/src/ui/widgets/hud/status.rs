@@ -18,7 +18,13 @@ const DEGREES_IN_CIRCLE: f32 = 360.0;
 const DEGREES_PER_POINT: f32 = DEGREES_IN_CIRCLE / COMPASS_POINTS as f32; // 22.5° per segment
 const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the label
 
-pub fn render_status_bar(f: &mut Frame, game: &GameState, logon_retry: &RetryState, enter_retry: &RetryState, area: Rect) {
+pub fn render_status_bar(
+    f: &mut Frame,
+    game: &GameState,
+    logon_retry: &RetryState,
+    enter_retry: &RetryState,
+    area: Rect,
+) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -28,7 +34,13 @@ pub fn render_status_bar(f: &mut Frame, game: &GameState, logon_retry: &RetrySta
     render_status_panel(f, game, logon_retry, enter_retry, chunks[1]);
 }
 
-fn render_status_panel(f: &mut Frame, game: &GameState, logon_retry: &RetryState, enter_retry: &RetryState, area: Rect) {
+fn render_status_panel(
+    f: &mut Frame,
+    game: &GameState,
+    logon_retry: &RetryState,
+    enter_retry: &RetryState,
+    area: Rect,
+) {
     let status_block = Block::default().borders(Borders::ALL).title("Status");
     let inner_status_area = status_block.inner(area);
     f.render_widget(status_block, area);

@@ -1,6 +1,6 @@
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 
-use crate::ui::state::{GameState, ChatMessageKind, ChatState};
+use crate::ui::state::{ChatMessageKind, ChatState, GameState};
 use crate::ui::utils::wrap_text;
 use crate::ui::{ContextView, FocusedPane};
 use ratatui::Frame;

@@ -22,11 +22,9 @@ impl TabController for SpellsTab {
         let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, index);
-        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
-            &target,
-            player_guid,
-            active_interaction,
-        ) {
+        if let Some(interaction_verbs) =
+            super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
+        {
             return interaction_verbs;
         }
 
@@ -42,8 +40,8 @@ impl TabController for SpellsTab {
         let target = self.get_target_at_index(game, index);
         match (action, &target) {
             (Action::Cast(_), CommandTarget::Spell(spell_id)) => {
-                use crate::ui::types::InteractionMode;
                 use crate::ui::state::ChatMessageKind;
+                use crate::ui::types::InteractionMode;
                 use holtburger_protocol::messages::combat::CombatMode;
 
                 if !game.data.is_wielding_caster() {
@@ -94,14 +92,11 @@ impl TabController for SpellsTab {
         }
     }
 
-    fn get_target_at_index<'a>(
-        &self,
-        game: &'a GameState,
-        index: usize,
-    ) -> CommandTarget<'a> {
+    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
         let mut spells = game.data.player_spells.clone();
         spells.sort_by_key(|&sid| {
-            game.data.spell_names
+            game.data
+                .spell_names
                 .get(&sid)
                 .cloned()
                 .unwrap_or_else(|| "".to_string())

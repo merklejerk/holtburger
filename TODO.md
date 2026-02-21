@@ -88,13 +88,16 @@
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
     - [ ] Auto-attack on target.
-- [ ] Trade tab.
+- [x] Trade tab.
 - [ ] Manage in-world containers.
 - [ ] Stacking/Splitting.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
+- [ ] Show count for stacked items.
+- [ ] Stack not updating when consumed (try Bunch of Nanners).
+- [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 
 ### Critical
 

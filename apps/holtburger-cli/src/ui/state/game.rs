@@ -57,6 +57,10 @@ pub struct GameData {
     pub inventory: HashSet<Guid>,
     /// Map of GUIDs currently equipped on the character.
     pub equipment: HashMap<Guid, EquipMask>,
+    /// Current vendor state (inventory and multipliers).
+    pub vendor: Option<holtburger_core::world::state::VendorState>,
+    /// Current active trade with another player.
+    pub trade: Option<holtburger_core::world::state::TradeState>,
 }
 
 use holtburger_protocol::messages::EquipMask;
@@ -86,6 +90,8 @@ impl Default for GameData {
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
+            vendor: None,
+            trade: None,
         }
     }
 }

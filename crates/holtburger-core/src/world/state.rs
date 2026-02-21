@@ -20,6 +20,30 @@ pub struct ServerTimeSync {
     pub local_time: std::time::Instant,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VendorState {
+    pub vendor_guid: Guid,
+    pub items: Vec<holtburger_protocol::messages::trade::events::VendorItem>,
+    pub buy_multiplier: f32,
+    pub sell_multiplier: f32,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct TradeSide {
+    pub guid: Guid,
+    pub accepted: bool,
+    pub items: Vec<Guid>, // Guids of items in the trade window
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TradeState {
+    pub partner_guid: Guid,
+    pub initiator_guid: Guid,
+    pub trade_stamp: f64,
+    pub self_side: TradeSide,
+    pub partner_side: TradeSide,
+}
+
 /// The authoritative state of the game world.
 ///
 /// NOTE: The player's state is partially mirrored between `self.player` (session sequence data)
@@ -39,6 +63,8 @@ pub struct WorldState {
     pub skill_table: Option<Arc<SkillTable>>,
     pub spell_table: Option<Arc<SpellTable>>,
     pub scene: SpatialScene,
+    pub vendor: Option<VendorState>,
+    pub trade: Option<TradeState>,
 }
 
 impl WorldState {
@@ -196,6 +222,8 @@ impl WorldState {
             skill_table,
             spell_table,
             scene: SpatialScene::new(),
+            vendor: None,
+            trade: None,
         }
     }
 
@@ -255,18 +283,28 @@ impl WorldState {
 
         match msg {
             GameMessage::ObjectCreate(data) => {
-                let entity_name = data.name.clone().unwrap_or_else(|| "Unknown".to_string());
+                let entity_name = data
+                    .public_weenie_desc
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Unknown".to_string());
 
-                let mut entity = Entity::new(data.guid, entity_name, data.pos.unwrap_or_default());
-                entity.wcid = Some(data.wcid);
-                entity.flags = data.obj_desc_flags;
-                entity.weenie_flags = data.weenie_flags;
-                entity.weenie_flags2 = data.weenie_flags2;
-                entity.item_type = Some(ItemType::from_bits_truncate(data.item_type));
+                let mut entity = Entity::new(
+                    data.public_weenie_desc.guid,
+                    entity_name,
+                    data.pos.unwrap_or_default(),
+                );
+                entity.wcid = Some(data.public_weenie_desc.wcid);
+                entity.flags = data.public_weenie_desc.obj_desc_flags;
+                entity.weenie_flags = data.public_weenie_desc.weenie_flags;
+                entity.weenie_flags2 = data.public_weenie_desc.weenie_flags2;
+                entity.item_type = Some(ItemType::from_bits_truncate(
+                    data.public_weenie_desc.item_type,
+                ));
                 entity.physics_state = data.physics_state;
                 entity.physics_parent_id = data.parent_id;
-                entity.container_id = data.container_id;
-                entity.wielder_id = data.wielder_id;
+                entity.container_id = data.public_weenie_desc.container_id;
+                entity.wielder_id = data.public_weenie_desc.wielder_id;
 
                 if let Some(v) = data.velocity {
                     entity.velocity = v;
@@ -278,40 +316,59 @@ impl WorldState {
                     entity.omega = o;
                 }
                 entity.gfx_id = data.mtable_id;
-                entity.icon_id = Some(data.icon_id);
+                entity.icon_id = Some(data.public_weenie_desc.icon_id);
 
                 entity.obj_scale = data.obj_scale;
                 entity.friction = data.friction;
                 entity.elasticity = data.elasticity;
                 entity.translucency = data.translucency;
 
-                entity.plural_name = data.plural_name.clone();
-                entity.items_capacity = data.items_capacity;
-                entity.containers_capacity = data.containers_capacity;
-                entity.ammo_type = data.ammo_type;
-                entity.value = data.value;
-                entity.usable = data.usable.map(Usable::from_bits_truncate);
-                entity.use_radius = data.use_radius;
-                entity.target_type = data.target_type.map(ItemType::from_bits_truncate);
-                entity.ui_effects = data.ui_effects;
-                entity.combat_use = data.combat_use.and_then(CombatUse::from_repr);
-                entity.structure = data.structure;
-                entity.max_structure = data.max_structure;
-                entity.stack_size = data.stack_size;
-                entity.max_stack_size = data.max_stack_size;
-                entity.valid_locations = data.valid_locations.map(EquipMask::from_bits_truncate);
+                entity.plural_name = data.public_weenie_desc.plural_name.clone();
+                entity.items_capacity = data.public_weenie_desc.items_capacity;
+                entity.containers_capacity = data.public_weenie_desc.containers_capacity;
+                entity.ammo_type = data.public_weenie_desc.ammo_type;
+                entity.value = data.public_weenie_desc.value;
+                entity.usable = data
+                    .public_weenie_desc
+                    .usable
+                    .map(Usable::from_bits_truncate);
+                entity.use_radius = data.public_weenie_desc.use_radius;
+                entity.target_type = data
+                    .public_weenie_desc
+                    .target_type
+                    .map(ItemType::from_bits_truncate);
+                entity.ui_effects = data.public_weenie_desc.ui_effects;
+                entity.combat_use = data
+                    .public_weenie_desc
+                    .combat_use
+                    .and_then(CombatUse::from_repr);
+                entity.structure = data.public_weenie_desc.structure;
+                entity.max_structure = data.public_weenie_desc.max_structure;
+                entity.stack_size = data.public_weenie_desc.stack_size;
+                entity.max_stack_size = data.public_weenie_desc.max_stack_size;
+                entity.valid_locations = data
+                    .public_weenie_desc
+                    .valid_locations
+                    .map(EquipMask::from_bits_truncate);
                 entity.currently_wielded_location = data
+                    .public_weenie_desc
                     .currently_wielded_location
                     .map(EquipMask::from_bits_truncate);
-                entity.priority = data.priority;
-                entity.radar_blip_color = data.radar_blip_color.and_then(RadarColor::from_repr);
-                entity.radar_enum = data.radar_enum.and_then(RadarBehavior::from_repr);
-                entity.pscript = data.pscript;
-                entity.workmanship = data.workmanship;
-                entity.burden = data.burden;
-                entity.spell = data.spell;
-                entity.cooldown_id = data.cooldown_id;
-                entity.cooldown_duration = data.cooldown_duration;
+                entity.priority = data.public_weenie_desc.priority;
+                entity.radar_blip_color = data
+                    .public_weenie_desc
+                    .radar_blip_color
+                    .and_then(RadarColor::from_repr);
+                entity.radar_enum = data
+                    .public_weenie_desc
+                    .radar_enum
+                    .and_then(RadarBehavior::from_repr);
+                entity.pscript = data.public_weenie_desc.pscript;
+                entity.workmanship = data.public_weenie_desc.workmanship;
+                entity.burden = data.public_weenie_desc.burden;
+                entity.spell = data.public_weenie_desc.spell;
+                entity.cooldown_id = data.public_weenie_desc.cooldown_id;
+                entity.cooldown_duration = data.public_weenie_desc.cooldown_duration;
 
                 entity.mtable_id = data.mtable_id;
                 entity.stable_id = data.stable_id;
@@ -322,26 +379,29 @@ impl WorldState {
                 entity.default_script_intensity = data.default_script_intensity;
                 entity.autonomous_movement = data.autonomous_movement;
                 entity.animation_frame = data.animation_frame;
-                entity.house_owner = data.house_owner;
-                entity.hook_item_types = data.hook_item_types.map(ItemType::from_bits_truncate);
-                entity.monarch_id = data.monarch_id;
-                entity.hook_type = data.hook_type;
-                entity.icon_overlay_id = data.icon_overlay_id;
-                entity.icon_underlay_id = data.icon_underlay_id;
-                entity.material_type = data.material_type;
-                entity.pet_owner = data.pet_owner;
+                entity.house_owner = data.public_weenie_desc.house_owner;
+                entity.hook_item_types = data
+                    .public_weenie_desc
+                    .hook_item_types
+                    .map(ItemType::from_bits_truncate);
+                entity.monarch_id = data.public_weenie_desc.monarch_id;
+                entity.hook_type = data.public_weenie_desc.hook_type;
+                entity.icon_overlay_id = data.public_weenie_desc.icon_overlay_id;
+                entity.icon_underlay_id = data.public_weenie_desc.icon_underlay_id;
+                entity.material_type = data.public_weenie_desc.material_type;
+                entity.pet_owner = data.public_weenie_desc.pet_owner;
                 entity.sequences = data.sequences;
 
                 // Update inventory tracking for new objects appearing in containers
-                if let Some(cid) = data.container_id
+                if let Some(cid) = data.public_weenie_desc.container_id
                     && (cid == self.player.guid || self.player.inventory.contains(&cid))
                 {
-                    self.player.add_to_inventory(data.guid);
+                    self.player.add_to_inventory(data.public_weenie_desc.guid);
                 }
-                if let Some(wid) = data.wielder_id
+                if let Some(wid) = data.public_weenie_desc.wielder_id
                     && wid == self.player.guid
                 {
-                    self.player.add_to_inventory(data.guid);
+                    self.player.add_to_inventory(data.public_weenie_desc.guid);
                 }
 
                 self.add_entity(entity.clone());
@@ -636,6 +696,73 @@ impl WorldState {
                         events.push(StateEvent::UseDone {
                             error_id: data.error_id,
                         });
+                    }
+                    GameEvent::ApproachVendor(data) => {
+                        let vendor_state = VendorState {
+                            vendor_guid: data.vendor_guid,
+                            items: data.items.clone(),
+                            buy_multiplier: data.buy_multiplier,
+                            sell_multiplier: data.sell_multiplier,
+                        };
+                        self.vendor = Some(vendor_state.clone());
+                        events.push(StateEvent::VendorStateUpdated(Some(vendor_state)));
+                    }
+                    GameEvent::RegisterTrade(data) => {
+                        let partner_guid = if data.initiator == self.player.guid {
+                            data.partner
+                        } else {
+                            data.initiator
+                        };
+                        let trade_state = TradeState {
+                            partner_guid,
+                            initiator_guid: data.initiator,
+                            trade_stamp: 0.0,
+                            self_side: TradeSide {
+                                guid: self.player.guid,
+                                accepted: false,
+                                items: Vec::new(),
+                            },
+                            partner_side: TradeSide {
+                                guid: partner_guid,
+                                accepted: false,
+                                items: Vec::new(),
+                            },
+                        };
+                        self.trade = Some(trade_state.clone());
+                        events.push(StateEvent::TradeStateUpdated(Some(trade_state)));
+                    }
+                    GameEvent::AddToTrade(data) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            if data.trade_side == 0x01 {
+                                trade.self_side.items.push(data.object_guid);
+                            } else {
+                                trade.partner_side.items.push(data.object_guid);
+                            }
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::AcceptTrade(data) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            if data.who_accepted == self.player.guid {
+                                trade.self_side.accepted = true;
+                            } else {
+                                trade.partner_side.accepted = true;
+                            }
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::ResetTrade(_) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::CloseTrade(_) => {
+                        self.trade = None;
+                        events.push(StateEvent::TradeStateUpdated(None));
                     }
                     GameEvent::IdentifyObjectResponse(data) => {
                         let guid = data.object_guid;

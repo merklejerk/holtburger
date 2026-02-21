@@ -96,6 +96,8 @@ pub enum StateEvent {
     UseDone {
         error_id: u32,
     },
+    VendorStateUpdated(Option<state::VendorState>),
+    TradeStateUpdated(Option<state::TradeState>),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]

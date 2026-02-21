@@ -55,6 +55,16 @@ impl AppState {
             ClientViewEvent::EntityRemoved { guid } => {
                 self.handle_entity_removed(guid);
             }
+            ClientViewEvent::VendorStateUpdated { vendor } => {
+                if let Some(game) = self.game_option_mut() {
+                    game.data.vendor = vendor;
+                }
+            }
+            ClientViewEvent::TradeStateUpdated { trade } => {
+                if let Some(game) = self.game_option_mut() {
+                    game.data.trade = trade;
+                }
+            }
             ClientViewEvent::ServerTimeUpdated { .. } | ClientViewEvent::NoClipUpdated { .. } => {
                 self.handle_navigation_event(event);
             }

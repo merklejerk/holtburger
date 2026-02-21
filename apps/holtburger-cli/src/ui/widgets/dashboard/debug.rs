@@ -29,6 +29,18 @@ pub fn get_debug_info(
     let mut lines = Vec::new();
 
     match target {
+        CommandTarget::VendorItem(v) => {
+            lines.push(Line::from(format!(
+                "DEBUG VENDOR ITEM: {}",
+                v.description.name.as_deref().unwrap_or("Unknown")
+            )));
+            lines.push(Line::from(format!("GUID:   {:08X}", v.description.guid)));
+            lines.push(Line::from(format!(
+                "Value:  {}",
+                v.description.value.unwrap_or(0)
+            )));
+            lines.push(Line::from(format!("WCID:   {}", v.description.wcid)));
+        }
         CommandTarget::Entity(e, _) => {
             lines.push(Line::from(format!("DEBUG INFO: {}", e.name)));
             lines.push(Line::from(format!("GUID:   {:08X}", e.guid)));

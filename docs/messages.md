@@ -458,3 +458,76 @@ Structure:
    - `0x0100` Spells.
    - `0x0200` Enchantments: Starts with an `EnchantmentMask` (u32).
 
+---
+
+## 6. Trade and Vendors
+
+Trading and interacting with vendors involves a specialized set of opcodes for opening sessions, updating the trade window, and finalizing transactions.
+
+### `0x01A7` VendorOpen (S2C)
+Sent by the server when a vendor interaction begins.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `VendorID` | GUID of the vendor. |
+| `float32` | `BuyMultiplier` | Price multiplier when buying from the vendor. |
+| `float32` | `SellMultiplier` | Price multiplier when selling to the vendor. |
+| `uint32` | `ItemCount` | Number of items in the vendor's inventory. |
+| `VendorItem[]` | `Items` | List of items available for purchase. |
+
+**VendorItem Structure**:
+1. `uint32`: `PackedStackSize`.
+2. `PublicWeenieDescription`: (Standard weenie structure).
+
+### `0x005F` TradeRegister (S2C)
+Sent when a player-to-player trade negotiation starts.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `InitiatorID` | GUID of the player who started the trade. |
+| `uint32` | `PartnerID` | GUID of the trade partner. |
+
+### `0x0060` TradeUpdate (S2C)
+Updates the contents or status of a trade window.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `Side` | 1 = Self, 2 = Partner. |
+| `uint32` | `ItemCount` | Number of items currently in this side of the window. |
+| `uint32[]` | `Items` | List of item GUIDs. |
+| `bool` | `Accepted` | Whether this side has clicked "Accept". |
+
+### `0x0061` TradeEnd (S2C)
+Sent when a trade session is closed or completed.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `Reason` | 1 = Success, 2 = Canceled, 3 = Error. |
+
+### `0x0062` TradeReset (S2C)
+Clears both sides of the trade window.
+
+### `0x005D` TradeAccept (C2S)
+Sent by the client to accept the current trade offer.
+
+### `0x005E` TradeDecline (C2S)
+Sent by the client to decline/cancel the trade.
+
+### `0x01A2` Buy (C2S)
+Sent to purchase items from a vendor.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `VendorID` | GUID of the vendor. |
+| `uint32` | `ItemCount` | Number of items to buy. |
+| `ItemProfile[]` | `Items` | List of `(GUID, Amount)` pairs. |
+
+### `0x01A3` Sell (C2S)
+Sent to sell items to a vendor.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `VendorID` | GUID of the vendor. |
+| `uint32` | `ItemCount` | Number of items to sell. |
+| `ItemProfile[]` | `Items` | List of `(GUID, Amount)` pairs. |
+

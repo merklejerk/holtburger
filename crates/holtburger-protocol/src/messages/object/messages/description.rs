@@ -22,7 +22,7 @@ pub struct PhysicsChildData {
 /// If the high word is not zero, it indicates a versioned message.
 const VERSION_HI_WORD_MASK: u32 = 0xFFFF0000;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct HouseRestrictionsData {
     pub version: u32,
     pub bitmask: Option<u32>,
@@ -179,33 +179,9 @@ impl ProtocolPack for HouseRestrictionsData {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ObjectDescriptionData {
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct PublicWeenieDescription {
     pub guid: Guid,
-    pub model_data: ModelData,
-    pub physics_flags: PhysicsDescriptionFlag,
-    pub physics_state: PhysicsState,
-    pub movement_data: Option<Vec<u8>>,
-    pub autonomous_movement: Option<bool>,
-    pub animation_frame: Option<u32>,
-    pub pos: Option<WorldPosition>,
-    pub mtable_id: Option<u32>,
-    pub stable_id: Option<u32>,
-    pub petable_id: Option<u32>,
-    pub csetup_id: Option<u32>,
-    pub parent_id: Option<Guid>,
-    pub parent_loc: Option<u32>,
-    pub children: Option<Vec<PhysicsChildData>>,
-    pub obj_scale: Option<f32>,
-    pub friction: Option<f32>,
-    pub elasticity: Option<f32>,
-    pub translucency: Option<f32>,
-    pub velocity: Option<Vector3>,
-    pub acceleration: Option<Vector3>,
-    pub omega: Option<Vector3>,
-    pub default_script_id: Option<u32>,
-    pub default_script_intensity: Option<f32>,
-    pub sequences: [u16; 9],
     pub weenie_flags: WeenieHeaderFlag,
     pub name: Option<String>,
     pub wcid: u32,
@@ -251,305 +227,22 @@ pub struct ObjectDescriptionData {
     pub pet_owner: Option<Guid>,
 }
 
-impl Default for ObjectDescriptionData {
-    fn default() -> Self {
-        Self {
-            guid: Guid::NULL,
-            model_data: ModelData::default(),
-            physics_flags: PhysicsDescriptionFlag::empty(),
-            physics_state: PhysicsState::empty(),
-            movement_data: None,
-            autonomous_movement: None,
-            animation_frame: None,
-            pos: None,
-            mtable_id: None,
-            stable_id: None,
-            petable_id: None,
-            csetup_id: None,
-            parent_id: None,
-            parent_loc: None,
-            children: None,
-            obj_scale: None,
-            friction: None,
-            elasticity: None,
-            translucency: None,
-            velocity: None,
-            acceleration: None,
-            omega: None,
-            default_script_id: None,
-            default_script_intensity: None,
-            sequences: [0; 9],
-            weenie_flags: WeenieHeaderFlag::empty(),
-            name: None,
-            wcid: 0,
-            icon_id: 0,
-            item_type: 0,
-            obj_desc_flags: ObjectDescriptionFlag::empty(),
-            weenie_flags2: WeenieHeaderFlag2::empty(),
-            plural_name: None,
-            items_capacity: None,
-            containers_capacity: None,
-            ammo_type: None,
-            value: None,
-            usable: None,
-            use_radius: None,
-            target_type: None,
-            ui_effects: None,
-            combat_use: None,
-            structure: None,
-            max_structure: None,
-            stack_size: None,
-            max_stack_size: None,
-            container_id: None,
-            wielder_id: None,
-            valid_locations: None,
-            currently_wielded_location: None,
-            priority: None,
-            radar_blip_color: None,
-            radar_enum: None,
-            pscript: None,
-            workmanship: None,
-            burden: None,
-            spell: None,
-            house_owner: None,
-            house_restrictions: None,
-            hook_item_types: None,
-            monarch_id: None,
-            hook_type: None,
-            icon_overlay_id: None,
-            icon_underlay_id: None,
-            material_type: None,
-            cooldown_id: None,
-            cooldown_duration: None,
-            pet_owner: None,
-        }
+impl ProtocolUnpack for PublicWeenieDescription {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        Self::unpack_fields(data, offset, guid)
     }
 }
 
-impl ProtocolUnpack for ObjectDescriptionData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let guid = Guid::unpack(data, offset)?;
-        let model_data = ModelData::unpack(data, offset)?;
+impl ProtocolPack for PublicWeenieDescription {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.guid.pack(buf);
+        self.pack_fields(buf);
+    }
+}
 
-        if *offset + 8 > data.len() {
-            return None;
-        }
-        let phys_flags_bits = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let physics_flags = PhysicsDescriptionFlag::from_bits_retain(phys_flags_bits);
-        *offset += 4;
-        let physics_state =
-            PhysicsState::from_bits_retain(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-        *offset += 4;
-
-        let mut movement_data = None;
-        let mut autonomous_movement = None;
-        let mut animation_frame = None;
-
-        if physics_flags.contains(PhysicsDescriptionFlag::MOVEMENT) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let len = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
-            *offset += 4;
-            if *offset + len > data.len() {
-                return None;
-            }
-            movement_data = Some(data[*offset..*offset + len].to_vec());
-            *offset += len;
-            if len > 0 {
-                if *offset + 4 > data.len() {
-                    return None;
-                }
-                autonomous_movement =
-                    Some(LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0);
-                *offset += 4;
-            }
-        } else if physics_flags.contains(PhysicsDescriptionFlag::ANIMATION_FRAME) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            animation_frame = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut pos = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::POSITION) {
-            pos = WorldPosition::unpack(data, offset);
-        }
-
-        let mut mtable_id = None;
-        let mut stable_id = None;
-        let mut petable_id = None;
-        let mut csetup_id = None;
-
-        if physics_flags.contains(PhysicsDescriptionFlag::MTABLE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            mtable_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-        if physics_flags.contains(PhysicsDescriptionFlag::STABLE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            stable_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-        if physics_flags.contains(PhysicsDescriptionFlag::PETABLE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            petable_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-        if physics_flags.contains(PhysicsDescriptionFlag::CSETUP) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            csetup_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut parent_id = None;
-        let mut parent_loc = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
-            parent_id = Some(Guid::unpack(data, offset)?);
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            parent_loc = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut children = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::CHILDREN) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
-            *offset += 4;
-            if *offset + (count * 8) > data.len() {
-                return None;
-            }
-
-            let mut parsed_children = Vec::with_capacity(count);
-            for _ in 0..count {
-                let child_guid = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-                *offset += 4;
-                let location_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                *offset += 4;
-                parsed_children.push(PhysicsChildData {
-                    guid: child_guid,
-                    location_id,
-                });
-            }
-            children = Some(parsed_children);
-        }
-
-        let mut obj_scale = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::OBJSCALE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            obj_scale = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut friction = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::FRICTION) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            friction = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut elasticity = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::ELASTICITY) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            elasticity = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut translucency = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::TRANSLUCENCY) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            translucency = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut velocity = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::VELOCITY) {
-            if *offset + 12 > data.len() {
-                return None;
-            }
-            velocity = Some(Vector3 {
-                x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
-                y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
-                z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
-            });
-            *offset += 12;
-        }
-
-        let mut acceleration = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::ACCELERATION) {
-            if *offset + 12 > data.len() {
-                return None;
-            }
-            acceleration = Some(Vector3 {
-                x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
-                y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
-                z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
-            });
-            *offset += 12;
-        }
-
-        let mut omega = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::OMEGA) {
-            if *offset + 12 > data.len() {
-                return None;
-            }
-            omega = Some(Vector3 {
-                x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
-                y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
-                z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
-            });
-            *offset += 12;
-        }
-
-        let mut default_script_id = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            default_script_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut default_script_intensity = None;
-        if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT_INTENSITY) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            default_script_intensity = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        if *offset + 18 > data.len() {
-            return None;
-        }
-        let mut sequences = [0u16; 9];
-        for seq in &mut sequences {
-            *seq = LittleEndian::read_u16(&data[*offset..*offset + 2]);
-            *offset += 2;
-        }
-        *offset = align_to_4(*offset);
-
+impl PublicWeenieDescription {
+    pub fn unpack_fields(data: &[u8], offset: &mut usize, guid: Guid) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
         }
@@ -878,32 +571,8 @@ impl ProtocolUnpack for ObjectDescriptionData {
 
         *offset = align_to_4(*offset);
 
-        Some(ObjectDescriptionData {
+        Some(PublicWeenieDescription {
             guid,
-            model_data,
-            physics_flags,
-            physics_state,
-            movement_data,
-            autonomous_movement,
-            animation_frame,
-            pos,
-            mtable_id,
-            stable_id,
-            petable_id,
-            csetup_id,
-            parent_id,
-            parent_loc,
-            children,
-            obj_scale,
-            friction,
-            elasticity,
-            translucency,
-            velocity,
-            acceleration,
-            omega,
-            default_script_id,
-            default_script_intensity,
-            sequences,
             weenie_flags,
             name,
             wcid,
@@ -949,11 +618,518 @@ impl ProtocolUnpack for ObjectDescriptionData {
             pet_owner,
         })
     }
+
+    pub fn pack_fields(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.weenie_flags.bits())
+            .unwrap();
+        write_string16(buf, self.name.as_deref().unwrap_or(""));
+        write_packed_wclass_id(buf, self.wcid);
+        write_packed_data_id(buf, self.icon_id, 0x06000000);
+        buf.write_u32::<LittleEndian>(self.item_type).unwrap();
+        buf.write_u32::<LittleEndian>(self.obj_desc_flags.bits())
+            .unwrap();
+        pad_to_4(buf);
+
+        if self
+            .obj_desc_flags
+            .contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER)
+        {
+            buf.write_u32::<LittleEndian>(self.weenie_flags2.bits())
+                .unwrap();
+        }
+
+        if self.weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME) {
+            write_string16(buf, self.plural_name.as_deref().unwrap_or(""));
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) {
+            buf.write_i8(self.items_capacity.unwrap_or(0)).unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::CONTAINERS_CAPACITY)
+        {
+            buf.write_i8(self.containers_capacity.unwrap_or(0)).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) {
+            buf.write_u16::<LittleEndian>(self.ammo_type.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::VALUE) {
+            buf.write_u32::<LittleEndian>(self.value.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::USABLE) {
+            buf.write_u32::<LittleEndian>(self.usable.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) {
+            buf.write_f32::<LittleEndian>(self.use_radius.unwrap_or(0.0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) {
+            buf.write_u32::<LittleEndian>(self.target_type.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) {
+            buf.write_u32::<LittleEndian>(self.ui_effects.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) {
+            buf.write_u8(self.combat_use.unwrap_or(0)).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) {
+            buf.write_u16::<LittleEndian>(self.structure.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) {
+            buf.write_u16::<LittleEndian>(self.max_structure.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) {
+            buf.write_u16::<LittleEndian>(self.stack_size.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) {
+            buf.write_u16::<LittleEndian>(self.max_stack_size.unwrap_or(0))
+                .unwrap();
+        }
+
+        if self.weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
+            self.container_id.unwrap().pack(buf);
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
+            self.wielder_id.unwrap().pack(buf);
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::VALID_LOCATIONS)
+        {
+            buf.write_u32::<LittleEndian>(self.valid_locations.unwrap_or(0))
+                .unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION)
+        {
+            buf.write_u32::<LittleEndian>(self.currently_wielded_location.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
+            buf.write_u32::<LittleEndian>(self.priority.unwrap_or(0))
+                .unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::RADAR_BLIP_COLOR)
+        {
+            buf.write_u8(self.radar_blip_color.unwrap_or(0)).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::RADAR_BEHAVIOR) {
+            buf.write_u8(self.radar_enum.unwrap_or(0)).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::PSCRIPT) {
+            buf.write_u16::<LittleEndian>(self.pscript.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::WORKMANSHIP) {
+            buf.write_f32::<LittleEndian>(self.workmanship.unwrap_or(0.0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
+            buf.write_u16::<LittleEndian>(self.burden.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::SPELL) {
+            buf.write_u16::<LittleEndian>(self.spell.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::HOUSE_OWNER) {
+            self.house_owner.unwrap_or(Guid::NULL).pack(buf);
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::HOUSE_RESTRICTIONS)
+        {
+            if let Some(restrictions) = &self.house_restrictions {
+                restrictions.pack(buf);
+            } else {
+                buf.write_u32::<LittleEndian>(0).unwrap();
+                buf.write_u32::<LittleEndian>(0).unwrap();
+            }
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::HOOK_ITEM_TYPES)
+        {
+            buf.write_u32::<LittleEndian>(self.hook_item_types.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MONARCH) {
+            self.monarch_id.unwrap_or(Guid::NULL).pack(buf);
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::HOOK_TYPE) {
+            buf.write_u16::<LittleEndian>(self.hook_type.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::ICON_OVERLAY) {
+            write_packed_data_id(buf, self.icon_overlay_id.unwrap_or(0), 0x06000000);
+        }
+        if self
+            .weenie_flags2
+            .contains(WeenieHeaderFlag2::ICON_UNDERLAY)
+        {
+            write_packed_data_id(buf, self.icon_underlay_id.unwrap_or(0), 0x06000000);
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MATERIAL_TYPE) {
+            buf.write_u32::<LittleEndian>(self.material_type.unwrap_or(0))
+                .unwrap();
+        }
+        if self.weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN) {
+            buf.write_u32::<LittleEndian>(self.cooldown_id.unwrap_or(0))
+                .unwrap();
+        }
+        if self
+            .weenie_flags2
+            .contains(WeenieHeaderFlag2::COOLDOWN_DURATION)
+        {
+            buf.write_f64::<LittleEndian>(self.cooldown_duration.unwrap_or(0.0))
+                .unwrap();
+        }
+        if self.weenie_flags2.contains(WeenieHeaderFlag2::PET_OWNER) {
+            self.pet_owner.unwrap_or(Guid::NULL).pack(buf);
+        }
+        pad_to_4(buf);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectDescriptionData {
+    pub model_data: ModelData,
+    pub physics_flags: PhysicsDescriptionFlag,
+    pub physics_state: PhysicsState,
+    pub movement_data: Option<Vec<u8>>,
+    pub autonomous_movement: Option<bool>,
+    pub animation_frame: Option<u32>,
+    pub pos: Option<WorldPosition>,
+    pub mtable_id: Option<u32>,
+    pub stable_id: Option<u32>,
+    pub petable_id: Option<u32>,
+    pub csetup_id: Option<u32>,
+    pub parent_id: Option<Guid>,
+    pub parent_loc: Option<u32>,
+    pub children: Option<Vec<PhysicsChildData>>,
+    pub obj_scale: Option<f32>,
+    pub friction: Option<f32>,
+    pub elasticity: Option<f32>,
+    pub translucency: Option<f32>,
+    pub velocity: Option<Vector3>,
+    pub acceleration: Option<Vector3>,
+    pub omega: Option<Vector3>,
+    pub default_script_id: Option<u32>,
+    pub default_script_intensity: Option<f32>,
+    pub sequences: [u16; 9],
+    pub public_weenie_desc: PublicWeenieDescription,
+}
+
+impl Default for ObjectDescriptionData {
+    fn default() -> Self {
+        Self {
+            model_data: ModelData::default(),
+            physics_flags: PhysicsDescriptionFlag::empty(),
+            physics_state: PhysicsState::empty(),
+            movement_data: None,
+            autonomous_movement: None,
+            animation_frame: None,
+            pos: None,
+            mtable_id: None,
+            stable_id: None,
+            petable_id: None,
+            csetup_id: None,
+            parent_id: None,
+            parent_loc: None,
+            children: None,
+            obj_scale: None,
+            friction: None,
+            elasticity: None,
+            translucency: None,
+            velocity: None,
+            acceleration: None,
+            omega: None,
+            default_script_id: None,
+            default_script_intensity: None,
+            sequences: [0; 9],
+            public_weenie_desc: PublicWeenieDescription::default(),
+        }
+    }
+}
+
+impl ObjectDescriptionData {
+    pub fn with_guid(guid: Guid) -> Self {
+        let mut obj = Self::default();
+        obj.public_weenie_desc.guid = guid;
+        obj
+    }
+}
+
+impl ProtocolUnpack for ObjectDescriptionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        let model_data = ModelData::unpack(data, offset)?;
+
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let phys_flags_bits = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let physics_flags = PhysicsDescriptionFlag::from_bits_retain(phys_flags_bits);
+        *offset += 4;
+        let physics_state =
+            PhysicsState::from_bits_retain(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+        *offset += 4;
+
+        let mut movement_data = None;
+        let mut autonomous_movement = None;
+        let mut animation_frame = None;
+
+        if physics_flags.contains(PhysicsDescriptionFlag::MOVEMENT) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let len = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+            *offset += 4;
+            if *offset + len > data.len() {
+                return None;
+            }
+            movement_data = Some(data[*offset..*offset + len].to_vec());
+            *offset += len;
+            if len > 0 {
+                if *offset + 4 > data.len() {
+                    return None;
+                }
+                autonomous_movement =
+                    Some(LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0);
+                *offset += 4;
+            }
+        } else if physics_flags.contains(PhysicsDescriptionFlag::ANIMATION_FRAME) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            animation_frame = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut pos = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::POSITION) {
+            pos = WorldPosition::unpack(data, offset);
+        }
+
+        let mut mtable_id = None;
+        let mut stable_id = None;
+        let mut petable_id = None;
+        let mut csetup_id = None;
+
+        if physics_flags.contains(PhysicsDescriptionFlag::MTABLE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            mtable_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if physics_flags.contains(PhysicsDescriptionFlag::STABLE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            stable_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if physics_flags.contains(PhysicsDescriptionFlag::PETABLE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            petable_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+        if physics_flags.contains(PhysicsDescriptionFlag::CSETUP) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            csetup_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut parent_id = None;
+        let mut parent_loc = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::PARENT) {
+            parent_id = Some(Guid::unpack(data, offset)?);
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            parent_loc = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut children = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::CHILDREN) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+            *offset += 4;
+            if *offset + (count * 8) > data.len() {
+                return None;
+            }
+
+            let mut parsed_children = Vec::with_capacity(count);
+            for _ in 0..count {
+                let child_guid = Guid(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+                *offset += 4;
+                let location_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+                *offset += 4;
+                parsed_children.push(PhysicsChildData {
+                    guid: child_guid,
+                    location_id,
+                });
+            }
+            children = Some(parsed_children);
+        }
+
+        let mut obj_scale = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::OBJSCALE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            obj_scale = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut friction = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::FRICTION) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            friction = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut elasticity = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::ELASTICITY) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            elasticity = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut translucency = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::TRANSLUCENCY) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            translucency = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut velocity = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::VELOCITY) {
+            if *offset + 12 > data.len() {
+                return None;
+            }
+            velocity = Some(Vector3 {
+                x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
+                y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
+                z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
+            });
+            *offset += 12;
+        }
+
+        let mut acceleration = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::ACCELERATION) {
+            if *offset + 12 > data.len() {
+                return None;
+            }
+            acceleration = Some(Vector3 {
+                x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
+                y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
+                z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
+            });
+            *offset += 12;
+        }
+
+        let mut omega = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::OMEGA) {
+            if *offset + 12 > data.len() {
+                return None;
+            }
+            omega = Some(Vector3 {
+                x: LittleEndian::read_f32(&data[*offset..*offset + 4]),
+                y: LittleEndian::read_f32(&data[*offset + 4..*offset + 8]),
+                z: LittleEndian::read_f32(&data[*offset + 8..*offset + 12]),
+            });
+            *offset += 12;
+        }
+
+        let mut default_script_id = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            default_script_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        let mut default_script_intensity = None;
+        if physics_flags.contains(PhysicsDescriptionFlag::DEFAULT_SCRIPT_INTENSITY) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            default_script_intensity = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
+            *offset += 4;
+        }
+
+        if *offset + 18 > data.len() {
+            return None;
+        }
+        let mut sequences = [0u16; 9];
+        for seq in &mut sequences {
+            *seq = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+            *offset += 2;
+        }
+        *offset = align_to_4(*offset);
+
+        let public_weenie_desc = PublicWeenieDescription::unpack_fields(data, offset, guid)?;
+
+        Some(ObjectDescriptionData {
+            model_data,
+            physics_flags,
+            physics_state,
+            movement_data,
+            autonomous_movement,
+            animation_frame,
+            pos,
+            mtable_id,
+            stable_id,
+            petable_id,
+            csetup_id,
+            parent_id,
+            parent_loc,
+            children,
+            obj_scale,
+            friction,
+            elasticity,
+            translucency,
+            velocity,
+            acceleration,
+            omega,
+            default_script_id,
+            default_script_intensity,
+            sequences,
+            public_weenie_desc,
+        })
+    }
 }
 
 impl ProtocolPack for ObjectDescriptionData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        self.guid.pack(buf);
+        self.public_weenie_desc.guid.pack(buf);
         self.model_data.pack(buf);
         buf.write_u32::<LittleEndian>(self.physics_flags.bits())
             .unwrap();
@@ -1091,188 +1267,7 @@ impl ProtocolPack for ObjectDescriptionData {
         }
         pad_to_4(buf);
 
-        buf.write_u32::<LittleEndian>(self.weenie_flags.bits())
-            .unwrap();
-        write_string16(buf, self.name.as_deref().unwrap_or(""));
-        write_packed_wclass_id(buf, self.wcid);
-        write_packed_data_id(buf, self.icon_id, 0x06000000);
-        buf.write_u32::<LittleEndian>(self.item_type).unwrap();
-        buf.write_u32::<LittleEndian>(self.obj_desc_flags.bits())
-            .unwrap();
-        pad_to_4(buf);
-
-        if self
-            .obj_desc_flags
-            .contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER)
-        {
-            buf.write_u32::<LittleEndian>(self.weenie_flags2.bits())
-                .unwrap();
-        }
-
-        if self.weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME) {
-            write_string16(buf, self.plural_name.as_deref().unwrap_or(""));
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) {
-            buf.write_i8(self.items_capacity.unwrap_or(0)).unwrap();
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::CONTAINERS_CAPACITY)
-        {
-            buf.write_i8(self.containers_capacity.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) {
-            buf.write_u16::<LittleEndian>(self.ammo_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::VALUE) {
-            buf.write_u32::<LittleEndian>(self.value.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::USABLE) {
-            buf.write_u32::<LittleEndian>(self.usable.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) {
-            buf.write_f32::<LittleEndian>(self.use_radius.unwrap_or(0.0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) {
-            buf.write_u32::<LittleEndian>(self.target_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) {
-            buf.write_u32::<LittleEndian>(self.ui_effects.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) {
-            buf.write_u8(self.combat_use.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) {
-            buf.write_u16::<LittleEndian>(self.structure.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) {
-            buf.write_u16::<LittleEndian>(self.max_structure.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) {
-            buf.write_u16::<LittleEndian>(self.stack_size.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) {
-            buf.write_u16::<LittleEndian>(self.max_stack_size.unwrap_or(0))
-                .unwrap();
-        }
-
-        if self.weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
-            self.container_id.unwrap().pack(buf);
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
-            self.wielder_id.unwrap().pack(buf);
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::VALID_LOCATIONS)
-        {
-            buf.write_u32::<LittleEndian>(self.valid_locations.unwrap_or(0))
-                .unwrap();
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION)
-        {
-            buf.write_u32::<LittleEndian>(self.currently_wielded_location.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
-            buf.write_u32::<LittleEndian>(self.priority.unwrap_or(0))
-                .unwrap();
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::RADAR_BLIP_COLOR)
-        {
-            buf.write_u8(self.radar_blip_color.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::RADAR_BEHAVIOR) {
-            buf.write_u8(self.radar_enum.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::PSCRIPT) {
-            buf.write_u16::<LittleEndian>(self.pscript.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::WORKMANSHIP) {
-            buf.write_f32::<LittleEndian>(self.workmanship.unwrap_or(0.0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
-            buf.write_u16::<LittleEndian>(self.burden.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::SPELL) {
-            buf.write_u16::<LittleEndian>(self.spell.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::HOUSE_OWNER) {
-            self.house_owner.unwrap_or(Guid::NULL).pack(buf);
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::HOUSE_RESTRICTIONS)
-        {
-            if let Some(restrictions) = &self.house_restrictions {
-                restrictions.pack(buf);
-            } else {
-                // When house restrictions are absent, the wire format still expects
-                // two u32 fields for the restrictions structure; write them as zeros
-                // to represent "no house restrictions" according to the protocol.
-                buf.write_u32::<LittleEndian>(0).unwrap();
-                buf.write_u32::<LittleEndian>(0).unwrap();
-            }
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::HOOK_ITEM_TYPES)
-        {
-            buf.write_u32::<LittleEndian>(self.hook_item_types.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MONARCH) {
-            self.monarch_id.unwrap_or(Guid::NULL).pack(buf);
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::HOOK_TYPE) {
-            buf.write_u16::<LittleEndian>(self.hook_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::ICON_OVERLAY) {
-            write_packed_data_id(buf, self.icon_overlay_id.unwrap_or(0), 0x06000000);
-        }
-        if self
-            .weenie_flags2
-            .contains(WeenieHeaderFlag2::ICON_UNDERLAY)
-        {
-            write_packed_data_id(buf, self.icon_underlay_id.unwrap_or(0), 0x06000000);
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MATERIAL_TYPE) {
-            buf.write_u32::<LittleEndian>(self.material_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN) {
-            buf.write_u32::<LittleEndian>(self.cooldown_id.unwrap_or(0))
-                .unwrap();
-        }
-        if self
-            .weenie_flags2
-            .contains(WeenieHeaderFlag2::COOLDOWN_DURATION)
-        {
-            buf.write_f64::<LittleEndian>(self.cooldown_duration.unwrap_or(0.0))
-                .unwrap();
-        }
-        if self.weenie_flags2.contains(WeenieHeaderFlag2::PET_OWNER) {
-            self.pet_owner.unwrap_or(Guid::NULL).pack(buf);
-        }
-        pad_to_4(buf);
+        self.public_weenie_desc.pack_fields(buf);
     }
 }
 
@@ -1284,7 +1279,6 @@ mod tests {
     #[test]
     fn retains_extended_physics_and_weenie_fields_roundtrip() {
         let original = ObjectDescriptionData {
-            guid: Guid(0x50000042),
             model_data: ModelData {
                 header: 0x11,
                 ..Default::default()
@@ -1328,37 +1322,41 @@ mod tests {
             default_script_id: Some(0x33000001),
             default_script_intensity: Some(0.75),
             sequences: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-            weenie_flags: WeenieHeaderFlag::PLURAL_NAME
-                | WeenieHeaderFlag::ITEMS_CAPACITY
-                | WeenieHeaderFlag::VALUE
-                | WeenieHeaderFlag::COMBAT_USE
-                | WeenieHeaderFlag::SPELL
-                | WeenieHeaderFlag::HOUSE_RESTRICTIONS
-                | WeenieHeaderFlag::ICON_OVERLAY
-                | WeenieHeaderFlag::MATERIAL_TYPE,
-            name: Some("Roundtrip Object".to_string()),
-            wcid: 1234,
-            icon_id: 0x06000010,
-            item_type: 1,
-            obj_desc_flags: ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
-            weenie_flags2: WeenieHeaderFlag2::ICON_UNDERLAY | WeenieHeaderFlag2::COOLDOWN,
-            plural_name: Some("Roundtrip Objects".to_string()),
-            items_capacity: Some(12),
-            value: Some(42),
-            combat_use: Some(1),
-            spell: Some(0x9001),
-            house_restrictions: Some(HouseRestrictionsData {
-                version: 0x10000002,
-                bitmask: Some(1),
-                monarch_id: Some(Guid(0x50000077)),
-                open_house: None,
-                bucket_count: 0,
-                entries: vec![(0x50000088, 1)],
-            }),
-            icon_overlay_id: Some(0x06000022),
-            icon_underlay_id: Some(0x06000023),
-            material_type: Some(5),
-            cooldown_id: Some(100),
+            public_weenie_desc: PublicWeenieDescription {
+                guid: Guid(0x50000042),
+                weenie_flags: WeenieHeaderFlag::PLURAL_NAME
+                    | WeenieHeaderFlag::ITEMS_CAPACITY
+                    | WeenieHeaderFlag::VALUE
+                    | WeenieHeaderFlag::COMBAT_USE
+                    | WeenieHeaderFlag::SPELL
+                    | WeenieHeaderFlag::HOUSE_RESTRICTIONS
+                    | WeenieHeaderFlag::ICON_OVERLAY
+                    | WeenieHeaderFlag::MATERIAL_TYPE,
+                name: Some("Roundtrip Object".to_string()),
+                wcid: 1234,
+                icon_id: 0x06000010,
+                item_type: 1,
+                obj_desc_flags: ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
+                weenie_flags2: WeenieHeaderFlag2::ICON_UNDERLAY | WeenieHeaderFlag2::COOLDOWN,
+                plural_name: Some("Roundtrip Objects".to_string()),
+                items_capacity: Some(12),
+                value: Some(42),
+                combat_use: Some(1),
+                spell: Some(0x9001),
+                house_restrictions: Some(HouseRestrictionsData {
+                    version: 0x10000002,
+                    bitmask: Some(1),
+                    monarch_id: Some(Guid(0x50000077)),
+                    open_house: None,
+                    bucket_count: 0,
+                    entries: vec![(0x50000088, 1)],
+                }),
+                icon_overlay_id: Some(0x06000022),
+                icon_underlay_id: Some(0x06000023),
+                material_type: Some(5),
+                cooldown_id: Some(100),
+                ..Default::default()
+            },
             ..Default::default()
         };
 

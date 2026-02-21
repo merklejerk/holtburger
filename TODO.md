@@ -59,6 +59,7 @@
 - [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
+- [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 
 ### High
 - [x] Fail when spell/attack distance is too far.

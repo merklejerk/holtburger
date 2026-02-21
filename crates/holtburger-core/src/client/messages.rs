@@ -192,6 +192,24 @@ impl Client {
                     });
                     Ok(())
                 }
+                GameEvent::RegisterTrade(data) => {
+                    let partner_guid = if data.initiator == self.world.player.guid {
+                        data.partner
+                    } else {
+                        data.initiator
+                    };
+                    let partner_name = self
+                        .world
+                        .entities
+                        .get(partner_guid)
+                        .map(|e| e.name.clone())
+                        .unwrap_or_else(|| format!("0x{:08X}", partner_guid.0));
+                    self.emit_wire_event(WireEvent::ServerMessage(format!(
+                        "Trade started with {}.",
+                        partner_name
+                    )));
+                    Ok(())
+                }
                 _ => Ok(()),
             },
             GameMessage::PlayerCreate(data) => {

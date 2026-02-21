@@ -138,6 +138,12 @@ pub enum ClientViewEvent {
     NoClipUpdated {
         enabled: bool,
     },
+    VendorStateUpdated {
+        vendor: Option<crate::world::state::VendorState>,
+    },
+    TradeStateUpdated {
+        trade: Option<crate::world::state::TradeState>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -201,6 +207,23 @@ pub enum ClientCommand {
         target: Guid,
         item: Guid,
         amount: i32,
+    },
+    ApproachVendor(Guid),
+    Buy {
+        vendor: Guid,
+        items: Vec<holtburger_protocol::messages::trade::actions::ItemProfile>,
+    },
+    Sell {
+        vendor: Guid,
+        items: Vec<holtburger_protocol::messages::trade::actions::ItemProfile>,
+    },
+    OpenTrade(Guid),
+    CloseTrade,
+    AcceptTrade,
+    DeclineTrade,
+    ResetTrade,
+    AddToTrade {
+        item: Guid,
     },
     UseWithTarget {
         item: Guid,

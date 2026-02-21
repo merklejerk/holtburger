@@ -22,9 +22,12 @@ impl TabController for CharacterTab {
         let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, index);
-        if let Some(interaction_verbs) =
-            super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
-        {
+        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
+            &target,
+            player_guid,
+            active_interaction,
+            game.view.dashboard_tab,
+        ) {
             return interaction_verbs;
         }
 
@@ -42,9 +45,6 @@ impl TabController for CharacterTab {
         index: usize,
         game: &mut GameState,
     ) -> Option<UIEffect> {
-        let player_guid = game.data.player_guid;
-        let active_interaction = game.view.active_interaction;
-
         let target = self.get_target_at_index(game, index);
 
         match (action, &target) {
@@ -77,12 +77,7 @@ impl TabController for CharacterTab {
                     None
                 }
             }
-            _ => super::super::common::handle_base_action(
-                action,
-                &target,
-                player_guid,
-                active_interaction,
-            ),
+            _ => super::super::common::handle_base_action(action, &target, game),
         }
     }
 

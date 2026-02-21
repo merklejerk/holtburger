@@ -283,10 +283,12 @@ pub enum GameActionOpcode {
     GetAndWieldItem = 0x001A,
     /// C2S: Drop an item on the ground.
     DropItem = 0x001B,
-    // /// C2S: Purchase item(s) from a vendor.
-    // Buy = 0x005F,
-    // /// C2S: Sell item(s) to a vendor.
-    // Sell = 0x0060,
+    /// C2S: Purchase item(s) from a vendor.
+    Buy = 0x005F,
+    /// C2S: Sell item(s) to a vendor.
+    Sell = 0x0060,
+    /// C2S: Approach a vendor to open its buy/sell interface.
+    ApproachVendor = 0x0062,
     // /// C2S: Merge two stacks of items.
     // StackableMerge = 0x0054,
     // /// C2S: Split an item stack into a container.
@@ -303,6 +305,20 @@ pub enum GameActionOpcode {
     // QueryItemMana = 0x0263,
     /// C2S: Attempt to give an item to another player.
     GiveObjectRequest = 0x00CD,
+
+    // --- Trades ---
+    /// C2S: Open trade negotiations with another player.
+    OpenTradeNegotiations = 0x01F6,
+    /// C2S: Close current trade negotiations.
+    CloseTradeNegotiations = 0x01F7,
+    /// C2S: Add an item to the trade window.
+    AddToTrade = 0x01F8,
+    /// C2S: Reset the trade offer (clears accept status).
+    ResetTrade = 0x0204,
+    /// C2S: Accept the current trade offer.
+    AcceptTrade = 0x01FA,
+    /// C2S: Decline the current trade offer.
+    DeclineTrade = 0x01FB,
 
     // --- Books & Inscriptions ---
     // /// C2S: Request book metadata (title, author, etc).
@@ -621,8 +637,28 @@ pub enum GameEventOpcode {
     // FellowshipUpdateFellow = 0x02C0,
 
     // --- Vendor & Trade ---
-    // /// S2C: Vendor information event / Approach vendor. (Note: ACE uses 0x0062 for both)
-    // VendorInfoEvent = 0x0062,
+    /// S2C: Vendor information event / Approach vendor.
+    ApproachVendor = 0x0062,
+    /// S2C: Start a trade session.
+    RegisterTrade = 0x01FD,
+    /// S2C: Open a trade session.
+    OpenTrade = 0x01FE,
+    /// S2C: End a trade session.
+    CloseTrade = 0x01FF,
+    /// S2C: Add an item or stack to the trade session.
+    AddToTrade = 0x0200,
+    /// S2C: Remove an item or stack from the trade session.
+    RemoveFromTrade = 0x0201,
+    /// S2C: Accept the current trade agreement.
+    AcceptTrade = 0x0202,
+    /// S2C: Decline the current trade agreement.
+    DeclineTrade = 0x0203,
+    /// S2C: Reset the trade session.
+    ResetTrade = 0x0205,
+    /// S2C: Notifies the client of a trade-related error.
+    TradeFailure = 0x0207,
+    /// S2C: Inform the client to clear the "accepted" flag for a trade partner.
+    ClearTradeAcceptance = 0x0208,
 
     // --- Interaction & Login (Extra) ---
     // /// S2C: Response to an age query.
@@ -729,30 +765,6 @@ pub enum GameEventOpcode {
     // MiscPortalStorm = 0x02CB,
     // /// S2C: Notification that the portal storm has ended.
     // MiscPortalstormSubsided = 0x02CC,
-
-    // --- Trade ---
-    // /// S2C: Registers a new trade session between two players.
-    // RegisterTrade = 0x01FD,
-    // /// S2C: Opens the trade window on the client.
-    // OpenTrade = 0x01FE,
-    // /// S2C: Closes the trade window.
-    // CloseTrade = 0x01FF,
-    // /// S2C: Detailed status update for an ongoing trade session.
-    // TradeUpdate = 0x01FA,
-    // /// S2C: Notifies that an item was added to the trade offer.
-    // AddToTrade = 0x0200,
-    // /// S2C: Notifies that an item was removed from the trade offer.
-    // RemoveFromTrade = 0x0201,
-    // /// S2C: Notifies that the other player has accepted the current trade.
-    // AcceptTrade = 0x0202,
-    // /// S2C: Notifies that the other player has declined the trade.
-    // DeclineTrade = 0x0203,
-    // /// S2C: Resets the trade agreement state.
-    // ResetTrade = 0x0205,
-    // /// S2C: Notification that the trade operation failed.
-    // TradeFailure = 0x0207,
-    // /// S2C: Clears the trade acceptance flag.
-    // ClearTradeAcceptance = 0x0208,
 
     // --- Housing ---
     // /// S2C: Returns detailed profile and description of a house.

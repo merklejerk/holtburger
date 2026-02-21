@@ -250,6 +250,20 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::NoClipUpdated { enabled: *enabled });
             }
+            StateEvent::VendorStateUpdated(vendor) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::VendorStateUpdated {
+                        vendor: vendor.clone(),
+                    });
+            }
+            StateEvent::TradeStateUpdated(trade) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::TradeStateUpdated {
+                        trade: trade.clone(),
+                    });
+            }
             _ => {}
         }
     }

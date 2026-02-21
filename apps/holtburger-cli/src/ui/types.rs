@@ -15,6 +15,7 @@ pub enum StatType {
 #[derive(Debug, Clone)]
 pub enum CommandTarget<'a> {
     Entity(&'a Entity, Option<TargetSlot>),
+    VendorItem(&'a holtburger_protocol::messages::trade::events::VendorItem),
     Enchantment(Enchantment),
     Stat(StatType, Option<u64>, Option<u32>),
     Spell(u32),
@@ -46,6 +47,7 @@ pub enum DashboardTab {
     Character,
     Spells,
     Equip,
+    Trade,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

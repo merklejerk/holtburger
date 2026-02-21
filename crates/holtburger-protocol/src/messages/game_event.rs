@@ -5,6 +5,7 @@ pub use crate::messages::misc::events::*;
 pub use crate::messages::network::events::*;
 pub use crate::messages::object::events::*;
 pub use crate::messages::player::events::*;
+pub use crate::messages::trade::events::*;
 
 use crate::opcodes::GameEventOpcode;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -45,6 +46,17 @@ pub enum GameEvent {
     IdentifyObjectResponse(Box<IdentifyObjectResponseData>),
     InventoryServerSaveFailed(Box<InventoryServerSaveFailedData>),
     UpdateHealth(Box<UpdateHealthData>),
+    RegisterTrade(Box<RegisterTradeData>),
+    OpenTrade(Box<OpenTradeData>),
+    CloseTrade(Box<CloseTradeData>),
+    AddToTrade(Box<AddToTradeEventData>),
+    RemoveFromTrade(Box<RemoveFromTradeData>),
+    AcceptTrade(Box<AcceptTradeEventData>),
+    DeclineTrade(Box<DeclineTradeEventData>),
+    ResetTrade(Box<ResetTradeEventData>),
+    TradeFailure(Box<TradeFailureData>),
+    ClearTradeAcceptance,
+    ApproachVendor(Box<ApproachVendorData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -158,6 +170,37 @@ impl ProtocolUnpack for GameEventMessage {
                 ),
                 GameEventOpcode::UpdateHealth => {
                     GameEvent::UpdateHealth(Box::new(UpdateHealthData::unpack(data, offset)?))
+                }
+                GameEventOpcode::RegisterTrade => {
+                    GameEvent::RegisterTrade(Box::new(RegisterTradeData::unpack(data, offset)?))
+                }
+                GameEventOpcode::OpenTrade => {
+                    GameEvent::OpenTrade(Box::new(OpenTradeData::unpack(data, offset)?))
+                }
+                GameEventOpcode::CloseTrade => {
+                    GameEvent::CloseTrade(Box::new(CloseTradeData::unpack(data, offset)?))
+                }
+                GameEventOpcode::AddToTrade => {
+                    GameEvent::AddToTrade(Box::new(AddToTradeEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::RemoveFromTrade => {
+                    GameEvent::RemoveFromTrade(Box::new(RemoveFromTradeData::unpack(data, offset)?))
+                }
+                GameEventOpcode::AcceptTrade => {
+                    GameEvent::AcceptTrade(Box::new(AcceptTradeEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::DeclineTrade => {
+                    GameEvent::DeclineTrade(Box::new(DeclineTradeEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::ResetTrade => {
+                    GameEvent::ResetTrade(Box::new(ResetTradeEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::TradeFailure => {
+                    GameEvent::TradeFailure(Box::new(TradeFailureData::unpack(data, offset)?))
+                }
+                GameEventOpcode::ClearTradeAcceptance => GameEvent::ClearTradeAcceptance,
+                GameEventOpcode::ApproachVendor => {
+                    GameEvent::ApproachVendor(Box::new(ApproachVendorData::unpack(data, offset)?))
                 }
             },
             None => {
@@ -314,6 +357,60 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::UpdateHealth(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::UpdateHealth as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::RegisterTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::RegisterTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::OpenTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::OpenTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::CloseTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CloseTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::AddToTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::AddToTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::RemoveFromTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::RemoveFromTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::AcceptTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::AcceptTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::DeclineTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::DeclineTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::ResetTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::ResetTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::TradeFailure(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::TradeFailure as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::ClearTradeAcceptance => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::ClearTradeAcceptance as u32)
+                    .unwrap();
+            }
+            GameEvent::ApproachVendor(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::ApproachVendor as u32)
                     .unwrap();
                 data.pack(buf);
             }

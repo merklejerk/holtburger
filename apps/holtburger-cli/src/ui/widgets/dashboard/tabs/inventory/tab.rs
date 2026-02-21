@@ -30,21 +30,35 @@ impl TabController for InventoryTab {
     }
 
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
+        let mut verbs = Vec::new();
         let target = self.get_target_at_index(game, index);
         let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
 
-        if let Some(interaction_verbs) =
-            super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
-        {
-            return interaction_verbs;
+        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
+            &target,
+            player_guid,
+            active_interaction,
+            game.view.dashboard_tab,
+        ) {
+            verbs.extend(interaction_verbs);
         }
 
         if let CommandTarget::Entity(e, _) = target {
-            return verbs::get_verbs(e, game);
+            verbs.extend(verbs::get_verbs(e, game));
+
+            // If a vendor session is active, allow selling this item
+            if game.data.vendor.is_some() {
+                verbs.push(Verb::new(Action::Sell, 's', "Sell"));
+            }
+
+            // If a trade is active, allow adding to trade
+            if game.data.trade.is_some() {
+                verbs.push(Verb::new(Action::AddToTrade, 't', "Trade"));
+            }
         }
 
-        vec![]
+        verbs
     }
 
     fn handle_action(
@@ -54,7 +68,6 @@ impl TabController for InventoryTab {
         game: &mut GameState,
     ) -> Option<UIEffect> {
         let player_guid = game.data.player_guid;
-        let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, index);
 
@@ -72,12 +85,7 @@ impl TabController for InventoryTab {
                     placement: 0,
                 })
             }),
-            _ => super::super::common::handle_base_action(
-                action,
-                &target,
-                player_guid,
-                active_interaction,
-            ),
+            _ => super::super::common::handle_base_action(action, &target, game),
         }
     }
 

@@ -1002,7 +1002,7 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct ObjectDescriptionFlag: u32 {
         const NONE = 0x00000000;
         const OPENABLE = 0x00000001;
@@ -1098,7 +1098,7 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct WeenieHeaderFlag: u32 {
         const NONE = 0x00000000;
         const PLURAL_NAME = 0x00000001;
@@ -1137,7 +1137,7 @@ bitflags! {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct WeenieHeaderFlag2: u32 {
         const NONE = 0x00;
         const ICON_UNDERLAY = 0x01;

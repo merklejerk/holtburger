@@ -19,7 +19,7 @@ impl PlayerState {
     ) -> bool {
         match msg {
             GameMessage::ObjectCreate(data) => {
-                if data.guid == self.guid && self.guid != Guid::NULL {
+                if data.public_weenie_desc.guid == self.guid && self.guid != Guid::NULL {
                     if let Some(pos) = data.pos {
                         self.position = pos;
                     }

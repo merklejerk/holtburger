@@ -37,6 +37,11 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
+        KeyCode::Char('6') => {
+            game.view.dashboard_tab = DashboardTab::Trade;
+            game.view.selected_dashboard_index = 0;
+            Some(UpdateResult::new())
+        }
         KeyCode::Char('x') | KeyCode::Char('X') => {
             game.view.context_view = ContextView::Default;
             game.view.current_debug_guid = None;

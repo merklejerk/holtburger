@@ -64,7 +64,7 @@ pub enum WireEvent {
     ClientError(String),
     WeenieError {
         error_id: u32,
-        message: Option<String>,
+        parameter: Option<String>,
     },
     InventoryServerSaveFailed {
         item_guid: Guid,

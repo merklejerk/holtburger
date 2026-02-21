@@ -98,6 +98,7 @@
 - [ ] Show count for stacked items.
 - [ ] Stack not updating when consumed (try Bunch of Nanners).
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
+- [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
 
 ### Critical
 

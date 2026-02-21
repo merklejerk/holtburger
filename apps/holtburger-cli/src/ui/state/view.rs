@@ -1,4 +1,4 @@
-use crate::ui::types::{ActiveInteraction, ContextView, DashboardTab, FocusedPane};
+use crate::ui::types::{ActiveInteraction, ContextView, DashboardTab, FocusedPane, TradeFocus};
 use holtburger_common::Guid;
 use ratatui::text::Line;
 
@@ -36,6 +36,8 @@ pub struct ViewState {
     pub current_debug_guid: Option<Guid>,
     /// State of current interaction like vendor transactions.
     pub active_interaction: Option<ActiveInteraction>,
+    /// Current focused side of the trade window.
+    pub trade_focus: TradeFocus,
 }
 
 impl Default for ViewState {
@@ -57,6 +59,7 @@ impl Default for ViewState {
             context_view: ContextView::Default,
             current_debug_guid: None,
             active_interaction: None,
+            trade_focus: TradeFocus::default(),
         }
     }
 }

@@ -79,16 +79,19 @@ impl Client {
                         is_transient: true,
                     });
             }
-            WireEvent::WeenieError { error_id, message } => {
+            WireEvent::WeenieError {
+                error_id,
+                parameter,
+            } => {
+                let message =
+                    crate::errors::format_weenie_error_id(*error_id, parameter.as_deref());
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
                         kind: ErrorKind::Weenie,
                         code: Some(*error_id),
-                        message: message
-                            .clone()
-                            .unwrap_or_else(|| format!("Weenie error {}", error_id)),
+                        message,
                         is_transient: true,
                     });
             }
@@ -115,13 +118,14 @@ impl Client {
                     });
             }
             WireEvent::UseDone { error_id } if *error_id != 0 => {
+                let message = crate::errors::format_weenie_error_id(*error_id, None);
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
                         kind: ErrorKind::Weenie,
                         code: Some(*error_id),
-                        message: format!("Use failed: {}", error_id),
+                        message,
                         is_transient: true,
                     });
             }

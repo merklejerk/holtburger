@@ -40,6 +40,13 @@ pub enum Modal {
     Retry { message: String, end_time: Instant },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TradeFocus {
+    #[default]
+    Local,
+    Partner,
+}
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum DashboardTab {
     Nearby,

@@ -34,7 +34,7 @@ impl ProtocolPack for WeenieErrorData {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WeenieErrorWithStringData {
     pub error_id: u32,
-    pub message: String,
+    pub parameter: String,
 }
 
 impl WeenieErrorWithStringData {
@@ -50,15 +50,18 @@ impl ProtocolUnpack for WeenieErrorWithStringData {
         }
         let error_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let message = read_string16(data, offset)?;
-        Some(WeenieErrorWithStringData { error_id, message })
+        let parameter = read_string16(data, offset)?;
+        Some(WeenieErrorWithStringData {
+            error_id,
+            parameter,
+        })
     }
 }
 
 impl ProtocolPack for WeenieErrorWithStringData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.error_id.to_le_bytes());
-        write_string16(buf, &self.message);
+        write_string16(buf, &self.parameter);
     }
 }
 
@@ -116,7 +119,7 @@ mod tests {
             sequence: 0x0E,
             event: GameEvent::WeenieErrorWithString(Box::new(WeenieErrorWithStringData {
                 error_id: 0x1234,
-                message: "Test error".to_string(),
+                parameter: "Test error".to_string(),
             })),
         }));
         assert_pack_unpack_parity(test_fixtures::WEENIE_ERROR_WITH_STRING, &expected);

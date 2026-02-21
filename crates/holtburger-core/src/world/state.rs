@@ -689,7 +689,7 @@ impl WorldState {
                     GameEvent::WeenieErrorWithString(data) => {
                         events.push(StateEvent::WeenieErrorWithString {
                             error_id: data.error_id,
-                            message: data.message.clone(),
+                            parameter: data.parameter.clone(),
                         });
                     }
                     GameEvent::UseDone(data) => {

@@ -168,14 +168,14 @@ impl Client {
                 GameEvent::WeenieError(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
                         error_id: data.error_id,
-                        message: None,
+                        parameter: None,
                     });
                     Ok(())
                 }
                 GameEvent::WeenieErrorWithString(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
                         error_id: data.error_id,
-                        message: Some(data.message.clone()),
+                        parameter: Some(data.parameter.clone()),
                     });
                     Ok(())
                 }

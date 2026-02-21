@@ -5,7 +5,7 @@ use super::super::common::{Action, Verb};
 use super::render::render_trade_tab;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
+use crate::ui::types::{CommandTarget, TradeFocus};
 use crate::ui::update::effect::UIEffect;
 
 pub struct TradeTab;
@@ -35,6 +35,9 @@ impl TabController for TradeTab {
         }
 
         if let CommandTarget::Entity(e, _) = target {
+            verbs.push(Verb::new(Action::Assess, 'a', "Assess"));
+            verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
+
             verbs.extend(super::verbs::get_verbs(e, game));
             // Add Sell verb if we are talking to a vendor
             if game.data.vendor.is_some() {
@@ -43,7 +46,7 @@ impl TabController for TradeTab {
         }
 
         if game.data.trade.is_some() {
-            verbs.push(Verb::new(Action::AcceptTrade, 'a', "Accept"));
+            verbs.push(Verb::new(Action::AcceptTrade, 'c', "Accept"));
             verbs.push(Verb::new(Action::DeclineTrade, 'd', "Decline"));
             verbs.push(Verb::new(Action::ResetTrade, 'r', "Reset"));
         }
@@ -52,13 +55,20 @@ impl TabController for TradeTab {
     }
 
     fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
-        if let Some(m) = game
-            .data
-            .vendor
-            .as_ref()
-            .and_then(|vendor| vendor.items.get(index))
-        {
-            return CommandTarget::VendorItem(m);
+        if let Some(vendor) = &game.data.vendor {
+            if let Some(m) = vendor.items.get(index) {
+                return CommandTarget::VendorItem(m);
+            }
+        } else if let Some(trade) = &game.data.trade {
+            let guid = match game.view.trade_focus {
+                TradeFocus::Local => trade.self_side.items.get(index),
+                TradeFocus::Partner => trade.partner_side.items.get(index),
+            };
+            if let Some(guid) = guid
+                && let Some(entity) = game.data.entities.get(guid)
+            {
+                return CommandTarget::Entity(entity, None);
+            }
         }
         CommandTarget::None
     }
@@ -67,11 +77,10 @@ impl TabController for TradeTab {
         if let Some(vendor) = &game.data.vendor {
             vendor.items.len()
         } else if let Some(trade) = &game.data.trade {
-            trade
-                .self_side
-                .items
-                .len()
-                .max(trade.partner_side.items.len())
+            match game.view.trade_focus {
+                TradeFocus::Local => trade.self_side.items.len(),
+                TradeFocus::Partner => trade.partner_side.items.len(),
+            }
         } else {
             0
         }

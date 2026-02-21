@@ -81,14 +81,17 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
             }
 
             let is_active = active_tab == *tab;
+            let is_trade_active = *tab == DashboardTab::Trade && game.data.trade.is_some();
+
+            let mut style = Style::default();
             if is_active {
-                spans.push(Span::styled(
-                    format!(" [{}] {} ", key, label),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                spans.push(Span::raw(format!(" [{}] {} ", key, label)));
+                style = style.add_modifier(Modifier::BOLD);
             }
+            if is_trade_active {
+                style = style.fg(Color::Green);
+            }
+
+            spans.push(Span::styled(format!(" [{}] {} ", key, label), style));
         }
 
         if focused == FocusedPane::Dashboard {

@@ -91,7 +91,7 @@ pub enum StateEvent {
     },
     WeenieErrorWithString {
         error_id: u32,
-        message: String,
+        parameter: String,
     },
     UseDone {
         error_id: u32,

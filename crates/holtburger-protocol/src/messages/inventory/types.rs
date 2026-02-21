@@ -1,4 +1,3 @@
-use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 pub use holtburger_common::properties::EquipMask;
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
@@ -6,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetStackSizeData {
-    pub sequence: u32,
+    pub sequence: u8,
     pub object_guid: Guid,
     pub stack_size: u32,
     pub value: u32,
@@ -14,18 +13,10 @@ pub struct SetStackSizeData {
 
 impl ProtocolUnpack for SetStackSizeData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let sequence = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
+        let sequence = u8::unpack(data, offset)?;
         let object_guid = Guid::unpack(data, offset)?;
-        if *offset + 8 > data.len() {
-            return None;
-        }
-        let stack_size = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let value = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        *offset += 8;
+        let stack_size = u32::unpack(data, offset)?;
+        let value = u32::unpack(data, offset)?;
         Some(SetStackSizeData {
             sequence,
             object_guid,
@@ -37,10 +28,10 @@ impl ProtocolUnpack for SetStackSizeData {
 
 impl ProtocolPack for SetStackSizeData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.write_u32::<LittleEndian>(self.sequence).unwrap();
+        self.sequence.pack(buf);
         self.object_guid.pack(buf);
-        buf.write_u32::<LittleEndian>(self.stack_size).unwrap();
-        buf.write_u32::<LittleEndian>(self.value).unwrap();
+        self.stack_size.pack(buf);
+        self.value.pack(buf);
     }
 }
 
@@ -87,21 +78,31 @@ mod tests {
 
     #[test]
     fn test_set_stack_size_fixture() {
-        // Opcode (0x0197), Seq (0x20), Obj (0x80000001), Size (50), Value (1000)
-        let hex = "97010000200000000100008032000000E8030000";
+        // [Opcode, Sequence (1 byte), Guid, StackSize (u32), Value (u32)] (17 bytes)
+        // 97010000 20 01000080 32000000 E8030000
+        let hex = "97010000200100008032000000E8030000";
         let fixture = hex::decode(hex).unwrap();
-        let mut offset = 0;
-        let msg = GameMessage::unpack(&fixture, &mut offset).expect("failed to unpack GameMessage");
+        let expected = GameMessage::SetStackSize(Box::new(SetStackSizeData {
+            sequence: 0x20,
+            object_guid: Guid(0x80000001),
+            stack_size: 50,
+            value: 1000,
+        }));
+        assert_pack_unpack_parity(&fixture, &expected);
+    }
 
-        if let GameMessage::SetStackSize(data) = &msg {
-            assert_eq!(data.sequence, 0x20);
-            assert_eq!(data.object_guid, Guid(0x80000001));
-            assert_eq!(data.stack_size, 50);
-            assert_eq!(data.value, 1000);
-        } else {
-            panic!("expected GameMessage::SetStackSize, got {:?}", msg);
-        }
-
-        assert_pack_unpack_parity(&fixture, &msg);
+    #[test]
+    fn test_set_stack_size_user_payload_fixture() {
+        // Opcode 0x0197, Seq 0x00, Obj 0x800000BE, Stack 7933, Value 7933
+        // [97, 01, 00, 00, 00, BE, 00, 00, 80, FD, 1E, 00, 00, FD, 1E, 00, 00]
+        let hex = "9701000000BE000080FD1E0000FD1E0000";
+        let fixture = hex::decode(hex).unwrap();
+        let expected = GameMessage::SetStackSize(Box::new(SetStackSizeData {
+            sequence: 0,
+            object_guid: Guid(0x800000BE),
+            stack_size: 7933,
+            value: 7933,
+        }));
+        assert_pack_unpack_parity(&fixture, &expected);
     }
 }

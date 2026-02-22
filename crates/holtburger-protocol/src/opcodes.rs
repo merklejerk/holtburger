@@ -311,6 +311,8 @@ pub enum GameActionOpcode {
     CloseTradeNegotiations = 0x01F7,
     /// C2S: Add an item to the trade window.
     AddToTrade = 0x01F8,
+    /// C2S: Remove an item from the trade window.
+    RemoveFromTrade = 0x01F9,
     /// C2S: Reset the trade offer (clears accept status).
     ResetTrade = 0x0204,
     /// C2S: Accept the current trade offer.
@@ -475,20 +477,6 @@ pub enum GameActionOpcode {
     // FellowshipAssignNewLeader = 0x0290,
     // /// C2S: Toggle the fellowship's open/closed enrollment status.
     // FellowshipChangeOpenness = 0x0291,
-
-    // --- Trade ---
-    // /// C2S: Initiate trade negotiation with another player.
-    // OpenTradeNegotiations = 0x01F6,
-    // /// C2S: Terminate the current trade negotiation.
-    // CloseTradeNegotiations = 0x01F7,
-    // /// C2S: Add an item or stack to the trade window.
-    // AddToTrade = 0x01F8,
-    // /// C2S: Commit to the current trade agreement.
-    // AcceptTrade = 0x01FA,
-    // /// C2S: Reject the current trade agreement.
-    // DeclineTrade = 0x01FB,
-    // /// C2S: Clear all items and status from the trade window.
-    // ResetTrade = 0x0204,
 
     // --- Housing ---
     // /// C2S: Purchase a selected house.

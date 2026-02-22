@@ -38,6 +38,8 @@ pub struct ViewState {
     pub active_interaction: Option<ActiveInteraction>,
     /// Current focused side of the trade window.
     pub trade_focus: TradeFocus,
+    /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.
+    pub last_trade_initiation: Option<(std::time::Instant, Guid)>,
 }
 
 impl Default for ViewState {
@@ -60,6 +62,7 @@ impl Default for ViewState {
             current_debug_guid: None,
             active_interaction: None,
             trade_focus: TradeFocus::default(),
+            last_trade_initiation: None,
         }
     }
 }

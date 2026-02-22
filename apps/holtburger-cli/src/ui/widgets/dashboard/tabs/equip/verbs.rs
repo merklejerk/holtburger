@@ -12,6 +12,7 @@ pub fn get_verbs(e: &Entity, is_here: bool, slot: Option<TargetSlot>) -> Vec<Ver
     let class = classification::classify_entity(e);
     match class {
         EntityClass::Npc
+        | EntityClass::Vendor
         | EntityClass::Portal
         | EntityClass::Door
         | EntityClass::LifeStone

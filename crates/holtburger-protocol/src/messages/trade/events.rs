@@ -1,3 +1,4 @@
+use crate::messages::object::messages::PublicWeenieDescription;
 use crate::messages::utils::{read_string16, write_string16};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
@@ -249,7 +250,7 @@ impl ProtocolPack for OpenTradeData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct VendorItem {
     pub packed_stack_size: u32,
-    pub description: crate::messages::object::messages::PublicWeenieDescription,
+    pub description: PublicWeenieDescription,
 }
 
 impl ProtocolUnpack for VendorItem {
@@ -259,8 +260,7 @@ impl ProtocolUnpack for VendorItem {
         }
         let packed_stack_size = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        let description =
-            crate::messages::object::messages::PublicWeenieDescription::unpack(data, offset)?;
+        let description = PublicWeenieDescription::unpack(data, offset)?;
         Some(Self {
             packed_stack_size,
             description,

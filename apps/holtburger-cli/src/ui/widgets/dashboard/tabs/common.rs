@@ -36,6 +36,7 @@ pub enum Action {
     AcceptTrade,
     DeclineTrade,
     ResetTrade,
+    Exit,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,6 +97,15 @@ pub fn handle_base_action(
         (Action::AcceptTrade, _) => Some(UIEffect::Command(ClientCommand::AcceptTrade)),
         (Action::DeclineTrade, _) => Some(UIEffect::Command(ClientCommand::DeclineTrade)),
         (Action::ResetTrade, _) => Some(UIEffect::Command(ClientCommand::ResetTrade)),
+        (Action::Exit, _) => {
+            if game.data.trade.is_some() {
+                Some(UIEffect::Command(ClientCommand::CloseTrade))
+            } else if game.data.vendor.is_some() {
+                Some(UIEffect::ClearVendor)
+            } else {
+                None
+            }
+        }
         (Action::Debug, target) => match target {
             CommandTarget::Spell(sid) => Some(UIEffect::ActivateDebugSpell(*sid)),
             CommandTarget::Enchantment(e) => Some(UIEffect::ActivateDebugEnchantment(*e)),

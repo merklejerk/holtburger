@@ -19,6 +19,7 @@ pub enum UIEffect {
     ApplyMoving(Guid),
     Target(Guid),
     CancelInteraction,
+    ClearVendor,
     Log(ChatMessageKind, String),
     DisplayClientInfo,
 }
@@ -178,6 +179,12 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         UIEffect::CancelInteraction => {
             if let Some(game) = state.game_option_mut() {
                 game.view.active_interaction = None;
+            }
+            vec![]
+        }
+        UIEffect::ClearVendor => {
+            if let Some(game) = state.game_option_mut() {
+                game.data.vendor = None;
             }
             vec![]
         }

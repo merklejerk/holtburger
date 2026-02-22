@@ -301,7 +301,7 @@ pub fn get_interaction_verbs(
             };
             Some(vec![
                 Verb::new(Action::Cast(is_targeted), 'c', label),
-                Verb::new(Action::Debug, 'b', "Debug"),
+                Verb::new(Action::Debug, 'g', "Debug"),
             ])
         }
         _ => {

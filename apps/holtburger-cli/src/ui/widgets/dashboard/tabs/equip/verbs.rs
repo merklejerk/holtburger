@@ -40,6 +40,6 @@ pub fn get_verbs(e: &Entity, is_here: bool, slot: Option<TargetSlot>) -> Vec<Ver
     }
 
     verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
-    verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
+    verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
     verbs
 }

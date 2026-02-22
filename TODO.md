@@ -64,6 +64,9 @@
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
+- [ ] `/set [CHARACTER_OPTION] ...` command.
+- [ ] Just get rid of verbs.rs and move the fn into the tab controller.
+- [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

@@ -12,49 +12,7 @@ use crate::ui::theme;
 use crate::ui::types::TradeFocus;
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
-    if let Some(vendor) = &game.data.vendor {
-        let items: Vec<ListItem> = vendor
-            .items
-            .iter()
-            .enumerate()
-            .map(|(i, m)| {
-                let name = m.description.name.as_deref().unwrap_or("Unknown Item");
-
-                // Calculate sell price using vendor multipliers (simplification)
-                let price =
-                    (m.description.value.unwrap_or(0) as f32 * vendor.buy_multiplier) as u32;
-
-                let is_selected = i == game.view.selected_dashboard_index;
-
-                ListItem::new(Line::from(vec![
-                    Span::raw(format!("{:<30}", name)),
-                    Span::styled(
-                        format!("{:>10}p", price),
-                        Style::default().fg(theme::MONEY_FG),
-                    ),
-                ]))
-                .style(theme::list_item_style(is_selected))
-            })
-            .collect();
-
-        let total = items.len();
-        let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                "Vendor: Sell x{:.2}, Buy x{:.2}",
-                vendor.sell_multiplier, vendor.buy_multiplier
-            )))
-            .highlight_style(theme::selection_style())
-            .highlight_symbol(theme::SELECTION_SYMBOL);
-
-        game.view
-            .dashboard_list_state
-            .select(Some(game.view.selected_dashboard_index));
-        game.view.last_dashboard_height = area.height as usize;
-
-        f.render_stateful_widget(list, area, &mut game.view.dashboard_list_state);
-
-        render_scrollbar(f, area, total, game.view.selected_dashboard_index);
-    } else if let Some(trade) = &game.data.trade {
+    if let Some(trade) = &game.data.trade {
         let trade_focus = game.view.trade_focus;
         let partner_name = game
             .data
@@ -229,6 +187,48 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 0
             },
         );
+    } else if let Some(vendor) = &game.data.vendor {
+        let items: Vec<ListItem> = vendor
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                let name = m.description.name.as_deref().unwrap_or("Unknown Item");
+
+                // Calculate sell price using vendor multipliers (simplification)
+                let price =
+                    (m.description.value.unwrap_or(0) as f32 * vendor.buy_multiplier) as u32;
+
+                let is_selected = i == game.view.selected_dashboard_index;
+
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{:<30}", name)),
+                    Span::styled(
+                        format!("{:>10}p", price),
+                        Style::default().fg(theme::MONEY_FG),
+                    ),
+                ]))
+                .style(theme::list_item_style(is_selected))
+            })
+            .collect();
+
+        let total = items.len();
+        let list = List::new(items)
+            .block(Block::default().borders(Borders::ALL).title(format!(
+                "Vendor: Sell x{:.2}, Buy x{:.2}",
+                vendor.sell_multiplier, vendor.buy_multiplier
+            )))
+            .highlight_style(theme::selection_style())
+            .highlight_symbol(theme::SELECTION_SYMBOL);
+
+        game.view
+            .dashboard_list_state
+            .select(Some(game.view.selected_dashboard_index));
+        game.view.last_dashboard_height = area.height as usize;
+
+        f.render_stateful_widget(list, area, &mut game.view.dashboard_list_state);
+
+        render_scrollbar(f, area, total, game.view.selected_dashboard_index);
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let block = Block::default().borders(Borders::ALL).title("Trade");

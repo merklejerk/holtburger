@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::ui::UpdateResult;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::{ContextView, DashboardTab, TradeFocus};
+use crate::ui::{DashboardTab, TradeFocus};
 
 /// Standard dashboard input handling (navigation, verbs).
 pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
@@ -53,12 +53,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
-        KeyCode::Char('x') | KeyCode::Char('X') => {
-            game.view.context_view = ContextView::Default;
-            game.view.current_debug_guid = None;
-            Some(UpdateResult::new())
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
+        KeyCode::Down => {
             let total = tab.get_item_count(game);
             if total > 0 {
                 game.view.selected_dashboard_index =
@@ -66,7 +61,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             }
             Some(UpdateResult::new())
         }
-        KeyCode::Char('k') | KeyCode::Up => {
+        KeyCode::Up => {
             let total = tab.get_item_count(game);
             if total > 0 {
                 game.view.selected_dashboard_index =

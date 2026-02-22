@@ -39,8 +39,8 @@ impl TabController for TradeTab {
             verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
 
             verbs.extend(super::verbs::get_verbs(e, game));
-            // Add Sell verb if we are talking to a vendor
-            if game.data.vendor.is_some() {
+            // Add Sell verb if we are talking to a vendor and not in a p2p trade
+            if game.data.vendor.is_some() && game.data.trade.is_none() {
                 verbs.push(Verb::new(Action::Sell, 's', "Sell"));
             }
         }
@@ -51,15 +51,15 @@ impl TabController for TradeTab {
             verbs.push(Verb::new(Action::ResetTrade, 'r', "Reset"));
         }
 
+        if game.data.trade.is_some() || game.data.vendor.is_some() {
+            verbs.push(Verb::new(Action::Exit, 'x', "Exit"));
+        }
+
         verbs
     }
 
     fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
-        if let Some(vendor) = &game.data.vendor {
-            if let Some(m) = vendor.items.get(index) {
-                return CommandTarget::VendorItem(m);
-            }
-        } else if let Some(trade) = &game.data.trade {
+        if let Some(trade) = &game.data.trade {
             let guid = match game.view.trade_focus {
                 TradeFocus::Local => trade.self_side.items.get(index),
                 TradeFocus::Partner => trade.partner_side.items.get(index),
@@ -69,18 +69,22 @@ impl TabController for TradeTab {
             {
                 return CommandTarget::Entity(entity, None);
             }
+        } else if let Some(vendor) = &game.data.vendor
+            && let Some(m) = vendor.items.get(index)
+        {
+            return CommandTarget::VendorItem(m);
         }
         CommandTarget::None
     }
 
     fn get_item_count(&self, game: &GameState) -> usize {
-        if let Some(vendor) = &game.data.vendor {
-            vendor.items.len()
-        } else if let Some(trade) = &game.data.trade {
+        if let Some(trade) = &game.data.trade {
             match game.view.trade_focus {
                 TradeFocus::Local => trade.self_side.items.len(),
                 TradeFocus::Partner => trade.partner_side.items.len(),
             }
+        } else if let Some(vendor) = &game.data.vendor {
+            vendor.items.len()
         } else {
             0
         }

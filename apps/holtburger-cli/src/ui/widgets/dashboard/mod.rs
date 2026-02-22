@@ -81,7 +81,8 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
             }
 
             let is_active = active_tab == *tab;
-            let is_trade_active = *tab == DashboardTab::Trade && game.data.trade.is_some();
+            let is_trade_active = *tab == DashboardTab::Trade
+                && (game.data.trade.is_some() || game.data.vendor.is_some());
 
             let mut style = Style::default();
             if is_active {

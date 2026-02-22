@@ -1,18 +1,19 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use super::super::classification::{EntityClass, classify_entity, get_entity_color};
 use crate::ui::state::GameState;
+use crate::ui::theme;
 use holtburger_core::world::entity::Entity;
 
 pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ");
+        .highlight_style(theme::selection_style())
+        .highlight_symbol(theme::SELECTION_SYMBOL);
 
     game.view
         .dashboard_list_state
@@ -36,7 +37,9 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black)),
+                .style(theme::scrollbar_style())
+                .track_style(theme::scrollbar_track_style())
+                .thumb_style(theme::scrollbar_thumb_style()),
             area,
             &mut scrollbar_state,
         );
@@ -77,11 +80,7 @@ fn render_nearby_item(
 ) -> ListItem<'static> {
     let class = classify_entity(e);
     let color = get_entity_color(class);
-    let item_style = if highlight {
-        Style::default().bg(Color::DarkGray)
-    } else {
-        Style::default()
-    };
+    let item_style = theme::list_item_style(highlight);
 
     let text_style = Style::default().fg(color);
 

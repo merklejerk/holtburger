@@ -5,6 +5,7 @@ pub mod action;
 pub mod layout;
 pub mod page;
 pub mod state;
+pub mod theme;
 pub mod traits;
 pub mod types;
 pub mod update;

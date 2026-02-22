@@ -14,6 +14,7 @@ use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, Vit
 use holtburger_protocol::messages::magic::Enchantment;
 
 use crate::ui::state::GameState;
+use crate::ui::theme;
 use crate::ui::types::StatType;
 use crate::ui::utils::format_cost;
 
@@ -63,7 +64,7 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         let summary = Paragraph::new(Line::from(vec![Span::styled(
             text,
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::SUMMARY_FG),
         )]));
         f.render_widget(summary, top_area);
     }
@@ -71,8 +72,8 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_stats_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ");
+        .highlight_style(theme::selection_style())
+        .highlight_symbol(theme::SELECTION_SYMBOL);
 
     game.view
         .dashboard_list_state
@@ -100,9 +101,9 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+                .style(theme::scrollbar_style())
+                .track_style(theme::scrollbar_track_style())
+                .thumb_style(theme::scrollbar_thumb_style()),
             bottom_area,
             &mut scrollbar_state,
         );
@@ -130,11 +131,7 @@ fn get_stats_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     }
             );
 
-        let style = if highlight {
-            Style::default().bg(Color::DarkGray)
-        } else {
-            Style::default()
-        };
+        let style = theme::list_item_style(highlight);
 
         match line {
             CharTabLine::Header(title) => {
@@ -169,7 +166,7 @@ fn get_stats_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     Span::styled(
                         value.clone(),
                         if highlight {
-                            Style::default().fg(Color::Cyan)
+                            Style::default().fg(theme::SUMMARY_FG)
                         } else if is_untrained {
                             Style::default().fg(Color::DarkGray)
                         } else {
@@ -182,7 +179,7 @@ fn get_stats_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
                         format_cost(*c),
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(theme::MONEY_FG),
                     ));
                     spans.push(Span::raw(" XP)"));
                 } else if let Some(c) = sp_cost {

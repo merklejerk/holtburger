@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
@@ -8,6 +8,7 @@ use ratatui::widgets::{
 };
 
 use crate::ui::state::GameState;
+use crate::ui::theme;
 use crate::ui::types::TradeFocus;
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
@@ -15,20 +16,24 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         let items: Vec<ListItem> = vendor
             .items
             .iter()
-            .map(|m| {
+            .enumerate()
+            .map(|(i, m)| {
                 let name = m.description.name.as_deref().unwrap_or("Unknown Item");
 
                 // Calculate sell price using vendor multipliers (simplification)
                 let price =
                     (m.description.value.unwrap_or(0) as f32 * vendor.buy_multiplier) as u32;
 
+                let is_selected = i == game.view.selected_dashboard_index;
+
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{:<30}", name)),
                     Span::styled(
                         format!("{:>10}p", price),
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(theme::MONEY_FG),
                     ),
                 ]))
+                .style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -38,12 +43,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 "Vendor: Sell x{:.2}, Buy x{:.2}",
                 vendor.sell_multiplier, vendor.buy_multiplier
             )))
-            .highlight_style(
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(Color::Cyan),
-            )
-            .highlight_symbol(">> ");
+            .highlight_style(theme::selection_style())
+            .highlight_symbol(theme::SELECTION_SYMBOL);
 
         game.view
             .dashboard_list_state
@@ -76,14 +77,17 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .self_side
             .items
             .iter()
-            .map(|guid| {
+            .enumerate()
+            .map(|(i, guid)| {
                 let name = game
                     .data
                     .entities
                     .get(guid)
                     .map(|e| e.name.as_str())
                     .unwrap_or("Unknown Item");
-                ListItem::new(name.to_string())
+                let is_selected =
+                    trade_focus == TradeFocus::Local && i == game.view.selected_dashboard_index;
+                ListItem::new(name.to_string()).style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -132,12 +136,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         if trade_focus == TradeFocus::Local {
             self_list = self_list
-                .highlight_style(
-                    Style::default()
-                        .add_modifier(Modifier::BOLD)
-                        .fg(Color::Cyan),
-                )
-                .highlight_symbol(">> ");
+                .highlight_style(theme::selection_style())
+                .highlight_symbol(theme::SELECTION_SYMBOL);
         }
 
         f.render_stateful_widget(self_list, self_area, self_state);
@@ -159,14 +159,17 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .partner_side
             .items
             .iter()
-            .map(|guid| {
+            .enumerate()
+            .map(|(i, guid)| {
                 let name = game
                     .data
                     .entities
                     .get(guid)
                     .map(|e| e.name.as_str())
                     .unwrap_or("Unknown Item");
-                ListItem::new(name.to_string())
+                let is_selected =
+                    trade_focus == TradeFocus::Partner && i == game.view.selected_dashboard_index;
+                ListItem::new(name.to_string()).style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -210,12 +213,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         if trade_focus == TradeFocus::Partner {
             partner_list = partner_list
-                .highlight_style(
-                    Style::default()
-                        .add_modifier(Modifier::BOLD)
-                        .fg(Color::Cyan),
-                )
-                .highlight_symbol(">> ");
+                .highlight_style(theme::selection_style())
+                .highlight_symbol(theme::SELECTION_SYMBOL);
         }
 
         f.render_stateful_widget(partner_list, partner_area, partner_state);
@@ -251,9 +250,9 @@ fn render_scrollbar(f: &mut Frame, area: Rect, item_count: usize, selected_index
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+                .style(theme::scrollbar_style())
+                .track_style(theme::scrollbar_track_style())
+                .thumb_style(theme::scrollbar_thumb_style()),
             area,
             &mut scrollbar_state,
         );

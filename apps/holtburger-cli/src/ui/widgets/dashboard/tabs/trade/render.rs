@@ -10,6 +10,8 @@ use ratatui::widgets::{
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use crate::ui::types::TradeFocus;
+use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
+use holtburger_common::properties::ItemType;
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if let Some(trade) = &game.data.trade {
@@ -109,6 +111,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             } else {
                 0
             },
+            self_area.height.saturating_sub(2) as usize,
         );
 
         // Partner side
@@ -186,8 +189,48 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             } else {
                 0
             },
+            partner_area.height.saturating_sub(2) as usize,
         );
     } else if let Some(vendor) = &game.data.vendor {
+        let vendor_name = game
+            .data
+            .entities
+            .get(&vendor.vendor_guid)
+            .map(|e| e.name.as_str())
+            .unwrap_or("Vendor");
+
+        let block = Block::default().borders(Borders::ALL).title(vendor_name);
+        let inner_area = block.inner(area);
+        f.render_widget(block, area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(1), Constraint::Min(0)])
+            .split(inner_area);
+
+        let summary_area = chunks[0];
+        let list_area = chunks[1];
+
+        // Summary Line
+        let balance = if vendor.alternate_currency_wcid == 0 {
+            format!("{}p", game.data.get_pyreal_balance())
+        } else {
+            format!(
+                "{} {}",
+                vendor.alternate_currency_amount, vendor.alternate_currency_name
+            )
+        };
+
+        let summary = Paragraph::new(Line::from(vec![
+            Span::styled("Buy: ", Style::default().fg(theme::SUMMARY_FG)),
+            Span::raw(format!("{:.2}  ", vendor.sell_multiplier)),
+            Span::styled("Sell: ", Style::default().fg(theme::SUMMARY_FG)),
+            Span::raw(format!("{:.2}  ", vendor.buy_multiplier)),
+            Span::styled("Bal: ", Style::default().fg(theme::SUMMARY_FG)),
+            Span::styled(balance, Style::default().fg(theme::MONEY_FG)),
+        ]));
+        f.render_widget(summary, summary_area);
+
         let items: Vec<ListItem> = vendor
             .items
             .iter()
@@ -195,16 +238,31 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .map(|(i, m)| {
                 let name = m.description.name.as_deref().unwrap_or("Unknown Item");
 
-                // Calculate sell price using vendor multipliers (simplification)
-                let price =
-                    (m.description.value.unwrap_or(0) as f32 * vendor.buy_multiplier) as u32;
+                // Calculate vendor's sell price (player pays this)
+                // Ground truth: Math.Max(1, (uint)Math.Ceiling(((float)sellRate * (value ?? 0)) - 0.1))
+                // Promissory notes have a special rate.
+                let mut sell_rate = vendor.sell_multiplier;
+                if m.description.item_type & ItemType::PROMISSORY_NOTE.bits() != 0 {
+                    sell_rate = PROMISSORY_NOTE_SELL_RATE;
+                }
+
+                let base_value = m.description.value.unwrap_or(0) as f32;
+                let price = ((sell_rate * base_value) - VENDOR_CEIL_OFFSET)
+                    .ceil()
+                    .max(DEFAULT_PRICE as f32) as u32;
 
                 let is_selected = i == game.view.selected_dashboard_index;
+
+                let currency_suffix = if vendor.alternate_currency_wcid == 0 {
+                    "p".to_string()
+                } else {
+                    format!(" {}", vendor.alternate_currency_name)
+                };
 
                 ListItem::new(Line::from(vec![
                     Span::raw(format!("{:<30}", name)),
                     Span::styled(
-                        format!("{:>10}p", price),
+                        format!("{:>10}{}", price, currency_suffix),
                         Style::default().fg(theme::MONEY_FG),
                     ),
                 ]))
@@ -214,21 +272,23 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         let total = items.len();
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                "Vendor: Sell x{:.2}, Buy x{:.2}",
-                vendor.sell_multiplier, vendor.buy_multiplier
-            )))
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
 
         game.view
             .dashboard_list_state
             .select(Some(game.view.selected_dashboard_index));
-        game.view.last_dashboard_height = area.height as usize;
+        game.view.last_dashboard_height = list_area.height as usize;
 
-        f.render_stateful_widget(list, area, &mut game.view.dashboard_list_state);
+        f.render_stateful_widget(list, list_area, &mut game.view.dashboard_list_state);
 
-        render_scrollbar(f, area, total, game.view.selected_dashboard_index);
+        render_scrollbar(
+            f,
+            area,
+            total,
+            game.view.selected_dashboard_index,
+            list_area.height as usize,
+        );
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let block = Block::default().borders(Borders::ALL).title("Trade");
@@ -238,11 +298,16 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     }
 }
 
-fn render_scrollbar(f: &mut Frame, area: Rect, item_count: usize, selected_index: usize) {
-    let inner_height = area.height.saturating_sub(2) as usize;
-    if item_count > inner_height {
-        let mut scrollbar_state = ScrollbarState::new(item_count.saturating_sub(inner_height))
-            .position(selected_index.min(item_count.saturating_sub(inner_height)));
+fn render_scrollbar(
+    f: &mut Frame,
+    area: Rect,
+    item_count: usize,
+    selected_index: usize,
+    view_height: usize,
+) {
+    if item_count > view_height {
+        let mut scrollbar_state = ScrollbarState::new(item_count.saturating_sub(view_height))
+            .position(selected_index.min(item_count.saturating_sub(view_height)));
         f.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)

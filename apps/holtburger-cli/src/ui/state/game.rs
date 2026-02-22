@@ -169,4 +169,18 @@ impl GameData {
         }
         counts
     }
+
+    pub fn get_pyreal_balance(&self) -> u32 {
+        let mut total = 0;
+        for guid in &self.inventory {
+            if let Some(entity) = self.entities.get(guid)
+                && entity
+                    .item_type
+                    .is_some_and(|it| it.intersects(ItemType::MONEY))
+            {
+                total += entity.stack_size.unwrap_or(1) as u32;
+            }
+        }
+        total
+    }
 }

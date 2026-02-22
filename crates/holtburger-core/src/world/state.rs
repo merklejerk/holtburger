@@ -26,6 +26,9 @@ pub struct VendorState {
     pub items: Vec<holtburger_protocol::messages::trade::events::VendorItemEventData>,
     pub buy_multiplier: f32,
     pub sell_multiplier: f32,
+    pub alternate_currency_wcid: u32,
+    pub alternate_currency_amount: u32,
+    pub alternate_currency_name: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -699,6 +702,9 @@ impl WorldState {
                             items: data.items.clone(),
                             buy_multiplier: data.buy_multiplier,
                             sell_multiplier: data.sell_multiplier,
+                            alternate_currency_wcid: data.alternate_currency_wcid,
+                            alternate_currency_amount: data.alternate_currency_amount,
+                            alternate_currency_name: data.alternate_currency_name.clone(),
                         };
                         self.vendor = Some(vendor_state.clone());
                         events.push(StateEvent::VendorStateUpdated(Some(vendor_state)));

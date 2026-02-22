@@ -48,6 +48,6 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
         }
     }
 
-    verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
+    verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
     verbs
 }

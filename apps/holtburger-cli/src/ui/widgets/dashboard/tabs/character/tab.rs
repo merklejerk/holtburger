@@ -35,7 +35,7 @@ impl TabController for CharacterTab {
             CommandTarget::Stat(_, xp_cost, sp_cost) => {
                 verbs::get_verbs(xp_cost.is_some(), sp_cost.is_some())
             }
-            _ => vec![Verb::new(Action::Debug, 'b', "Debug")],
+            _ => vec![Verb::new(Action::Debug, 'g', "Debug")],
         }
     }
 

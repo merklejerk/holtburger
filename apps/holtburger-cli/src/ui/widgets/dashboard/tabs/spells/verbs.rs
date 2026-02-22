@@ -8,6 +8,6 @@ pub fn get_verbs(is_targeted: bool) -> Vec<Verb> {
     };
     vec![
         Verb::new(Action::Cast(is_targeted), 'c', label),
-        Verb::new(Action::Debug, 'b', "Debug"),
+        Verb::new(Action::Debug, 'g', "Debug"),
     ]
 }

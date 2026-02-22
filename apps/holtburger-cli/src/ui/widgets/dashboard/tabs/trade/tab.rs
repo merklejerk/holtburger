@@ -36,7 +36,7 @@ impl TabController for TradeTab {
 
         if let CommandTarget::Entity(e, _) = target {
             verbs.push(Verb::new(Action::Assess, 'a', "Assess"));
-            verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
+            verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
 
             verbs.extend(super::verbs::get_verbs(e, game));
             // Add Sell verb if we are talking to a vendor and not in a p2p trade

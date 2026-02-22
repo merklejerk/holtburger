@@ -71,10 +71,12 @@ pub fn handle_base_action(
             game.data.vendor.as_ref().map(|vendor| {
                 UIEffect::Command(ClientCommand::Buy {
                     vendor: vendor.vendor_guid,
-                    items: vec![holtburger_protocol::messages::trade::actions::ItemProfile {
-                        object_guid: v.description.guid,
-                        amount: 1, // Default to 1 for now
-                    }],
+                    items: vec![
+                        holtburger_protocol::messages::trade::actions::ItemProfileActionData {
+                            object_guid: v.description.guid,
+                            amount: 1, // Default to 1 for now
+                        },
+                    ],
                 })
             })
         }
@@ -82,10 +84,12 @@ pub fn handle_base_action(
             game.data.vendor.as_ref().map(|vendor| {
                 UIEffect::Command(ClientCommand::Sell {
                     vendor: vendor.vendor_guid,
-                    items: vec![holtburger_protocol::messages::trade::actions::ItemProfile {
-                        object_guid: e.guid,
-                        amount: 1, // Default to 1 for now
-                    }],
+                    items: vec![
+                        holtburger_protocol::messages::trade::actions::ItemProfileActionData {
+                            object_guid: e.guid,
+                            amount: 1, // Default to 1 for now
+                        },
+                    ],
                 })
             })
         }

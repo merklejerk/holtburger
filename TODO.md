@@ -67,6 +67,7 @@
 - [ ] `/set [CHARACTER_OPTION] ...` command.
 - [ ] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
+- [ ] Auto-switch to trade tab when INITIATING a trade/vendor.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

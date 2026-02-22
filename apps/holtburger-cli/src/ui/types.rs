@@ -15,7 +15,7 @@ pub enum StatType {
 #[derive(Debug, Clone)]
 pub enum CommandTarget<'a> {
     Entity(&'a Entity, Option<TargetSlot>),
-    VendorItem(&'a holtburger_protocol::messages::trade::events::VendorItem),
+    VendorItem(&'a holtburger_protocol::messages::trade::events::VendorItemEventData),
     Enchantment(Enchantment),
     Stat(StatType, Option<u64>, Option<u32>),
     Spell(u32),

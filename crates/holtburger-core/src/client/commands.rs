@@ -27,7 +27,6 @@ impl Client {
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::CastTargetedSpell { .. }
             | ClientCommand::CastUntargetedSpell { .. }
-            | ClientCommand::ApproachVendor(_)
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
             | ClientCommand::OpenTrade(_)
@@ -215,21 +214,15 @@ impl Client {
                 )))
                 .await
             }
-            ClientCommand::ApproachVendor(vendor_guid) => {
-                self.send_game_action(GameAction::ApproachVendor(Box::new(
-                    ApproachVendorActionData { vendor_guid },
-                )))
-                .await
-            }
             ClientCommand::Buy { vendor, items } => {
-                self.send_game_action(GameAction::Buy(Box::new(BuyData {
+                self.send_game_action(GameAction::Buy(Box::new(BuyActionData {
                     vendor_guid: vendor,
                     items,
                 })))
                 .await
             }
             ClientCommand::Sell { vendor, items } => {
-                self.send_game_action(GameAction::Sell(Box::new(SellData {
+                self.send_game_action(GameAction::Sell(Box::new(SellActionData {
                     vendor_guid: vendor,
                     items,
                 })))
@@ -237,7 +230,7 @@ impl Client {
             }
             ClientCommand::OpenTrade(target) => {
                 self.send_game_action(GameAction::OpenTradeNegotiations(Box::new(
-                    OpenTradeNegotiationsData {
+                    OpenTradeNegotiationsActionData {
                         trade_partner_guid: target,
                     },
                 )))
@@ -245,13 +238,13 @@ impl Client {
             }
             ClientCommand::CloseTrade => {
                 self.send_game_action(GameAction::CloseTradeNegotiations(Box::new(
-                    CloseTradeNegotiationsData {},
+                    CloseTradeNegotiationsActionData {},
                 )))
                 .await
             }
             ClientCommand::AcceptTrade => {
                 let data = if let Some(trade) = self.world.trade.as_ref() {
-                    AcceptTradeData {
+                    AcceptTradeActionData {
                         partner_guid: trade.partner_guid,
                         trade_stamp: trade.trade_stamp,
                         trade_status: 1,
@@ -260,21 +253,23 @@ impl Client {
                         partner_accepts: if trade.partner_side.accepted { 1 } else { 0 },
                     }
                 } else {
-                    AcceptTradeData::default()
+                    AcceptTradeActionData::default()
                 };
                 self.send_game_action(GameAction::AcceptTrade(Box::new(data)))
                     .await
             }
             ClientCommand::DeclineTrade => {
-                self.send_game_action(GameAction::DeclineTrade(Box::new(DeclineTradeData {})))
-                    .await
+                self.send_game_action(GameAction::DeclineTrade(Box::new(
+                    DeclineTradeActionData {},
+                )))
+                .await
             }
             ClientCommand::ResetTrade => {
-                self.send_game_action(GameAction::ResetTrade(Box::new(ResetTradeData {})))
+                self.send_game_action(GameAction::ResetTrade(Box::new(ResetTradeActionData {})))
                     .await
             }
             ClientCommand::AddToTrade { item } => {
-                self.send_game_action(GameAction::AddToTrade(Box::new(AddToTradeData {
+                self.send_game_action(GameAction::AddToTrade(Box::new(AddToTradeActionData {
                     item_guid: item,
                     trade_slot: 0,
                 })))

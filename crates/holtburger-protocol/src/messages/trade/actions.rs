@@ -4,12 +4,12 @@ use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ItemProfile {
+pub struct ItemProfileActionData {
     pub amount: i32,
     pub object_guid: Guid,
 }
 
-impl ProtocolUnpack for ItemProfile {
+impl ProtocolUnpack for ItemProfileActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
             return None;
@@ -24,7 +24,7 @@ impl ProtocolUnpack for ItemProfile {
     }
 }
 
-impl ProtocolPack for ItemProfile {
+impl ProtocolPack for ItemProfileActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_i32::<LittleEndian>(self.amount).unwrap();
         self.object_guid.pack(buf);
@@ -32,12 +32,12 @@ impl ProtocolPack for ItemProfile {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct BuyData {
+pub struct BuyActionData {
     pub vendor_guid: Guid,
-    pub items: Vec<ItemProfile>,
+    pub items: Vec<ItemProfileActionData>,
 }
 
-impl ProtocolUnpack for BuyData {
+impl ProtocolUnpack for BuyActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let vendor_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -47,13 +47,13 @@ impl ProtocolUnpack for BuyData {
         *offset += 4;
         let mut items = Vec::with_capacity(num_items);
         for _ in 0..num_items {
-            items.push(ItemProfile::unpack(data, offset)?);
+            items.push(ItemProfileActionData::unpack(data, offset)?);
         }
         Some(Self { vendor_guid, items })
     }
 }
 
-impl ProtocolPack for BuyData {
+impl ProtocolPack for BuyActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.vendor_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.items.len() as u32)
@@ -65,12 +65,12 @@ impl ProtocolPack for BuyData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct SellData {
+pub struct SellActionData {
     pub vendor_guid: Guid,
-    pub items: Vec<ItemProfile>,
+    pub items: Vec<ItemProfileActionData>,
 }
 
-impl ProtocolUnpack for SellData {
+impl ProtocolUnpack for SellActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let vendor_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -80,13 +80,13 @@ impl ProtocolUnpack for SellData {
         *offset += 4;
         let mut items = Vec::with_capacity(num_items);
         for _ in 0..num_items {
-            items.push(ItemProfile::unpack(data, offset)?);
+            items.push(ItemProfileActionData::unpack(data, offset)?);
         }
         Some(Self { vendor_guid, items })
     }
 }
 
-impl ProtocolPack for SellData {
+impl ProtocolPack for SellActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.vendor_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.items.len() as u32)
@@ -98,43 +98,43 @@ impl ProtocolPack for SellData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct OpenTradeNegotiationsData {
+pub struct OpenTradeNegotiationsActionData {
     pub trade_partner_guid: Guid,
 }
 
-impl ProtocolUnpack for OpenTradeNegotiationsData {
+impl ProtocolUnpack for OpenTradeNegotiationsActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let trade_partner_guid = Guid::unpack(data, offset)?;
         Some(Self { trade_partner_guid })
     }
 }
 
-impl ProtocolPack for OpenTradeNegotiationsData {
+impl ProtocolPack for OpenTradeNegotiationsActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.trade_partner_guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct CloseTradeNegotiationsData {}
+pub struct CloseTradeNegotiationsActionData {}
 
-impl ProtocolUnpack for CloseTradeNegotiationsData {
+impl ProtocolUnpack for CloseTradeNegotiationsActionData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(Self {})
     }
 }
 
-impl ProtocolPack for CloseTradeNegotiationsData {
+impl ProtocolPack for CloseTradeNegotiationsActionData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct AddToTradeData {
+pub struct AddToTradeActionData {
     pub item_guid: Guid,
     pub trade_slot: u32,
 }
 
-impl ProtocolUnpack for AddToTradeData {
+impl ProtocolUnpack for AddToTradeActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -149,7 +149,7 @@ impl ProtocolUnpack for AddToTradeData {
     }
 }
 
-impl ProtocolPack for AddToTradeData {
+impl ProtocolPack for AddToTradeActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.item_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.trade_slot).unwrap();
@@ -157,7 +157,7 @@ impl ProtocolPack for AddToTradeData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct AcceptTradeData {
+pub struct AcceptTradeActionData {
     pub partner_guid: Guid,
     pub trade_stamp: f64,
     pub trade_status: u32,
@@ -166,7 +166,7 @@ pub struct AcceptTradeData {
     pub partner_accepts: u32,
 }
 
-impl ProtocolUnpack for AcceptTradeData {
+impl ProtocolUnpack for AcceptTradeActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let partner_guid = Guid::unpack(data, offset)?;
         if *offset + 24 > data.len() {
@@ -192,7 +192,7 @@ impl ProtocolUnpack for AcceptTradeData {
     }
 }
 
-impl ProtocolPack for AcceptTradeData {
+impl ProtocolPack for AcceptTradeActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.partner_guid.pack(buf);
         buf.write_f64::<LittleEndian>(self.trade_stamp).unwrap();
@@ -205,47 +205,29 @@ impl ProtocolPack for AcceptTradeData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct DeclineTradeData {}
+pub struct DeclineTradeActionData {}
 
-impl ProtocolUnpack for DeclineTradeData {
+impl ProtocolUnpack for DeclineTradeActionData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(Self {})
     }
 }
 
-impl ProtocolPack for DeclineTradeData {
+impl ProtocolPack for DeclineTradeActionData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ResetTradeData {}
+pub struct ResetTradeActionData {}
 
-impl ProtocolUnpack for ResetTradeData {
+impl ProtocolUnpack for ResetTradeActionData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(Self {})
     }
 }
 
-impl ProtocolPack for ResetTradeData {
+impl ProtocolPack for ResetTradeActionData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ApproachVendorActionData {
-    pub vendor_guid: Guid,
-}
-
-impl ProtocolUnpack for ApproachVendorActionData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let vendor_guid = Guid::unpack(data, offset)?;
-        Some(Self { vendor_guid })
-    }
-}
-
-impl ProtocolPack for ApproachVendorActionData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        self.vendor_guid.pack(buf);
-    }
 }
 
 #[cfg(test)]
@@ -256,7 +238,7 @@ mod tests {
     #[test]
     fn test_add_to_trade_action_roundtrip() {
         let fixture = [0x10, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00];
-        let data = AddToTradeData {
+        let data = AddToTradeActionData {
             item_guid: Guid::from(0x50000010),
             trade_slot: 0,
         };
@@ -266,7 +248,7 @@ mod tests {
     #[test]
     fn test_open_trade_negotiations_roundtrip() {
         let fixture = [0x01, 0x00, 0x00, 0x50];
-        let data = OpenTradeNegotiationsData {
+        let data = OpenTradeNegotiationsActionData {
             trade_partner_guid: Guid::from(0x50000001),
         };
         assert_pack_unpack_parity(&fixture, &data);
@@ -275,7 +257,7 @@ mod tests {
     #[test]
     fn test_close_trade_negotiations_roundtrip() {
         let fixture = [];
-        let data = CloseTradeNegotiationsData {};
+        let data = CloseTradeNegotiationsActionData {};
         assert_pack_unpack_parity(&fixture, &data);
     }
 
@@ -286,7 +268,7 @@ mod tests {
             0x02, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0xC0, 0x29, 0x8C, 0x67, 0x41, 0x01, 0x00,
             0x00, 0x00, 0x01, 0x00, 0x00, 0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        let data = AcceptTradeData {
+        let data = AcceptTradeActionData {
             partner_guid: Guid::from(0x50000002),
             trade_stamp: 12345678.0,
             trade_status: 1,
@@ -300,23 +282,14 @@ mod tests {
     #[test]
     fn test_decline_trade_action_roundtrip() {
         let fixture = [];
-        let data = DeclineTradeData {};
+        let data = DeclineTradeActionData {};
         assert_pack_unpack_parity(&fixture, &data);
     }
 
     #[test]
     fn test_reset_trade_action_roundtrip() {
         let fixture = [];
-        let data = ResetTradeData {};
-        assert_pack_unpack_parity(&fixture, &data);
-    }
-
-    #[test]
-    fn test_approach_vendor_action_roundtrip() {
-        let fixture = [0x01, 0x00, 0x00, 0x50];
-        let data = ApproachVendorActionData {
-            vendor_guid: Guid::from(0x50000001),
-        };
+        let data = ResetTradeActionData {};
         assert_pack_unpack_parity(&fixture, &data);
     }
 
@@ -326,9 +299,9 @@ mod tests {
             0x01, 0x00, 0x00, 0x50, 0x01, 0x00, 0x00, 0x00, 0x64, 0x00, 0x00, 0x00, 0x10, 0x00,
             0x00, 0x50,
         ];
-        let data = BuyData {
+        let data = BuyActionData {
             vendor_guid: Guid::from(0x50000001),
-            items: vec![ItemProfile {
+            items: vec![ItemProfileActionData {
                 amount: 100,
                 object_guid: Guid::from(0x50000010),
             }],
@@ -339,7 +312,7 @@ mod tests {
     #[test]
     fn test_item_profile_roundtrip() {
         let fixture = [0x64, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x50];
-        let data = ItemProfile {
+        let data = ItemProfileActionData {
             amount: 100,
             object_guid: Guid::from(0x50000010),
         };

@@ -46,17 +46,17 @@ pub enum GameEvent {
     IdentifyObjectResponse(Box<IdentifyObjectResponseData>),
     InventoryServerSaveFailed(Box<InventoryServerSaveFailedData>),
     UpdateHealth(Box<UpdateHealthData>),
-    RegisterTrade(Box<RegisterTradeData>),
-    OpenTrade(Box<OpenTradeData>),
-    CloseTrade(Box<CloseTradeData>),
+    RegisterTrade(Box<RegisterTradeEventData>),
+    OpenTrade(Box<OpenTradeEventData>),
+    CloseTrade(Box<CloseTradeEventData>),
     AddToTrade(Box<AddToTradeEventData>),
-    RemoveFromTrade(Box<RemoveFromTradeData>),
+    RemoveFromTrade(Box<RemoveFromTradeEventData>),
     AcceptTrade(Box<AcceptTradeEventData>),
     DeclineTrade(Box<DeclineTradeEventData>),
     ResetTrade(Box<ResetTradeEventData>),
-    TradeFailure(Box<TradeFailureData>),
+    TradeFailure(Box<TradeFailureEventData>),
     ClearTradeAcceptance,
-    ApproachVendor(Box<ApproachVendorData>),
+    ApproachVendor(Box<ApproachVendorEventData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -171,21 +171,21 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::UpdateHealth => {
                     GameEvent::UpdateHealth(Box::new(UpdateHealthData::unpack(data, offset)?))
                 }
-                GameEventOpcode::RegisterTrade => {
-                    GameEvent::RegisterTrade(Box::new(RegisterTradeData::unpack(data, offset)?))
-                }
+                GameEventOpcode::RegisterTrade => GameEvent::RegisterTrade(Box::new(
+                    RegisterTradeEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::OpenTrade => {
-                    GameEvent::OpenTrade(Box::new(OpenTradeData::unpack(data, offset)?))
+                    GameEvent::OpenTrade(Box::new(OpenTradeEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::CloseTrade => {
-                    GameEvent::CloseTrade(Box::new(CloseTradeData::unpack(data, offset)?))
+                    GameEvent::CloseTrade(Box::new(CloseTradeEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::AddToTrade => {
                     GameEvent::AddToTrade(Box::new(AddToTradeEventData::unpack(data, offset)?))
                 }
-                GameEventOpcode::RemoveFromTrade => {
-                    GameEvent::RemoveFromTrade(Box::new(RemoveFromTradeData::unpack(data, offset)?))
-                }
+                GameEventOpcode::RemoveFromTrade => GameEvent::RemoveFromTrade(Box::new(
+                    RemoveFromTradeEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::AcceptTrade => {
                     GameEvent::AcceptTrade(Box::new(AcceptTradeEventData::unpack(data, offset)?))
                 }
@@ -196,12 +196,12 @@ impl ProtocolUnpack for GameEventMessage {
                     GameEvent::ResetTrade(Box::new(ResetTradeEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::TradeFailure => {
-                    GameEvent::TradeFailure(Box::new(TradeFailureData::unpack(data, offset)?))
+                    GameEvent::TradeFailure(Box::new(TradeFailureEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::ClearTradeAcceptance => GameEvent::ClearTradeAcceptance,
-                GameEventOpcode::ApproachVendor => {
-                    GameEvent::ApproachVendor(Box::new(ApproachVendorData::unpack(data, offset)?))
-                }
+                GameEventOpcode::ApproachVendor => GameEvent::ApproachVendor(Box::new(
+                    ApproachVendorEventData::unpack(data, offset)?,
+                )),
             },
             None => {
                 log::warn!(

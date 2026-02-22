@@ -23,13 +23,13 @@ pub enum EndTradeReason {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct RegisterTradeData {
+pub struct RegisterTradeEventData {
     pub initiator: Guid,
     pub partner: Guid,
     pub unknown: u64, // Always 0 in ACE
 }
 
-impl ProtocolUnpack for RegisterTradeData {
+impl ProtocolUnpack for RegisterTradeEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let initiator = Guid::unpack(data, offset)?;
         let partner = Guid::unpack(data, offset)?;
@@ -46,7 +46,7 @@ impl ProtocolUnpack for RegisterTradeData {
     }
 }
 
-impl ProtocolPack for RegisterTradeData {
+impl ProtocolPack for RegisterTradeEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.initiator.pack(buf);
         self.partner.pack(buf);
@@ -55,11 +55,11 @@ impl ProtocolPack for RegisterTradeData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct CloseTradeData {
+pub struct CloseTradeEventData {
     pub reason: u32, // EndTradeReason
 }
 
-impl ProtocolUnpack for CloseTradeData {
+impl ProtocolUnpack for CloseTradeEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -70,7 +70,7 @@ impl ProtocolUnpack for CloseTradeData {
     }
 }
 
-impl ProtocolPack for CloseTradeData {
+impl ProtocolPack for CloseTradeEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.reason).unwrap();
     }
@@ -127,12 +127,12 @@ impl ProtocolPack for AcceptTradeEventData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct TradeFailureData {
+pub struct TradeFailureEventData {
     pub object_guid: Guid,
     pub reason: WeenieError,
 }
 
-impl ProtocolUnpack for TradeFailureData {
+impl ProtocolUnpack for TradeFailureEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let object_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -148,7 +148,7 @@ impl ProtocolUnpack for TradeFailureData {
     }
 }
 
-impl ProtocolPack for TradeFailureData {
+impl ProtocolPack for TradeFailureEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.reason as u32).unwrap();
@@ -156,29 +156,21 @@ impl ProtocolPack for TradeFailureData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ClearTradeAcceptanceData {}
-
-impl ProtocolUnpack for ClearTradeAcceptanceData {
-    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(Self {})
-    }
+pub struct ResetTradeEventData {
+    pub who_reset: Guid,
 }
-
-impl ProtocolPack for ClearTradeAcceptanceData {
-    fn pack(&self, _buf: &mut Vec<u8>) {}
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ResetTradeEventData {}
 
 impl ProtocolUnpack for ResetTradeEventData {
-    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(Self {})
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let who_reset = Guid::unpack(data, offset)?;
+        Some(Self { who_reset })
     }
 }
 
 impl ProtocolPack for ResetTradeEventData {
-    fn pack(&self, _buf: &mut Vec<u8>) {}
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.who_reset.pack(buf);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -200,13 +192,13 @@ impl ProtocolPack for DeclineTradeEventData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct RemoveFromTradeData {
+pub struct RemoveFromTradeEventData {
     pub object_guid: Guid,
     pub trade_side: u32, // TradeSide
     pub slot: u32,       // Always 0 in ACE
 }
 
-impl ProtocolUnpack for RemoveFromTradeData {
+impl ProtocolUnpack for RemoveFromTradeEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let object_guid = Guid::unpack(data, offset)?;
         if *offset + 8 > data.len() {
@@ -223,7 +215,7 @@ impl ProtocolUnpack for RemoveFromTradeData {
     }
 }
 
-impl ProtocolPack for RemoveFromTradeData {
+impl ProtocolPack for RemoveFromTradeEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.trade_side).unwrap();
@@ -232,30 +224,30 @@ impl ProtocolPack for RemoveFromTradeData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct OpenTradeData {
+pub struct OpenTradeEventData {
     pub partner_guid: Guid,
 }
 
-impl ProtocolUnpack for OpenTradeData {
+impl ProtocolUnpack for OpenTradeEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let partner_guid = Guid::unpack(data, offset)?;
         Some(Self { partner_guid })
     }
 }
 
-impl ProtocolPack for OpenTradeData {
+impl ProtocolPack for OpenTradeEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.partner_guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct VendorItem {
+pub struct VendorItemEventData {
     pub packed_stack_size: u32,
     pub description: PublicWeenieDescription,
 }
 
-impl ProtocolUnpack for VendorItem {
+impl ProtocolUnpack for VendorItemEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -270,7 +262,7 @@ impl ProtocolUnpack for VendorItem {
     }
 }
 
-impl ProtocolPack for VendorItem {
+impl ProtocolPack for VendorItemEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.packed_stack_size)
             .unwrap();
@@ -279,7 +271,7 @@ impl ProtocolPack for VendorItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct ApproachVendorData {
+pub struct ApproachVendorEventData {
     pub vendor_guid: Guid,
     pub merchandise_item_types: u32,
     pub merchandise_min_value: u32,
@@ -290,10 +282,10 @@ pub struct ApproachVendorData {
     pub alternate_currency_wcid: u32,
     pub alternate_currency_amount: u32,
     pub alternate_currency_name: String,
-    pub items: Vec<VendorItem>,
+    pub items: Vec<VendorItemEventData>,
 }
 
-impl ProtocolUnpack for ApproachVendorData {
+impl ProtocolUnpack for ApproachVendorEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let vendor_guid = Guid::unpack(data, offset)?;
         if *offset + 20 > data.len() {
@@ -324,7 +316,7 @@ impl ProtocolUnpack for ApproachVendorData {
 
         let mut items = Vec::with_capacity(num_items);
         for _ in 0..num_items {
-            items.push(VendorItem::unpack(data, offset)?);
+            items.push(VendorItemEventData::unpack(data, offset)?);
         }
 
         Some(Self {
@@ -343,7 +335,7 @@ impl ProtocolUnpack for ApproachVendorData {
     }
 }
 
-impl ProtocolPack for ApproachVendorData {
+impl ProtocolPack for ApproachVendorEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.vendor_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.merchandise_item_types)
@@ -381,7 +373,7 @@ mod tests {
             0x01, 0x00, 0x00, 0x50, 0x02, 0x00, 0x00, 0x50, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00,
         ];
-        let data = RegisterTradeData {
+        let data = RegisterTradeEventData {
             initiator: Guid::from(0x50000001),
             partner: Guid::from(0x50000002),
             unknown: 0,
@@ -410,7 +402,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00,
         ];
-        let data = ApproachVendorData {
+        let data = ApproachVendorEventData {
             vendor_guid: Guid::from(0x50000001),
             merchandise_item_types: 0xFFFFFFFF,
             merchandise_min_value: 0,
@@ -429,7 +421,7 @@ mod tests {
     #[test]
     fn test_close_trade_roundtrip() {
         let fixture = [0x01, 0x00, 0x00, 0x00];
-        let data = CloseTradeData { reason: 1 };
+        let data = CloseTradeEventData { reason: 1 };
         assert_pack_unpack_parity(&fixture, &data);
     }
 
@@ -445,7 +437,7 @@ mod tests {
     #[test]
     fn test_trade_failure_roundtrip() {
         let fixture = [0x10, 0x00, 0x00, 0x50, 0x50, 0x04, 0x00, 0x00];
-        let data = TradeFailureData {
+        let data = TradeFailureEventData {
             object_guid: Guid::from(0x50000010),
             reason: WeenieError::TradeBusy,
         };
@@ -466,7 +458,7 @@ mod tests {
         let fixture = [
             0x10, 0x00, 0x00, 0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
-        let data = RemoveFromTradeData {
+        let data = RemoveFromTradeEventData {
             object_guid: Guid::from(0x50000010),
             trade_side: 1,
             slot: 0,
@@ -477,7 +469,7 @@ mod tests {
     #[test]
     fn test_open_trade_roundtrip() {
         let fixture = [0x02, 0x00, 0x00, 0x50];
-        let data = OpenTradeData {
+        let data = OpenTradeEventData {
             partner_guid: Guid::from(0x50000002),
         };
         assert_pack_unpack_parity(&fixture, &data);

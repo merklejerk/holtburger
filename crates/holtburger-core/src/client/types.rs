@@ -9,7 +9,7 @@ use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_protocol::messages::trade::actions::ItemProfile;
+use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -212,14 +212,13 @@ pub enum ClientCommand {
         item: Guid,
         amount: i32,
     },
-    ApproachVendor(Guid),
     Buy {
         vendor: Guid,
-        items: Vec<ItemProfile>,
+        items: Vec<ItemProfileActionData>,
     },
     Sell {
         vendor: Guid,
-        items: Vec<ItemProfile>,
+        items: Vec<ItemProfileActionData>,
     },
     OpenTrade(Guid),
     CloseTrade,

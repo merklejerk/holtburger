@@ -23,7 +23,7 @@ pub struct ServerTimeSync {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct VendorState {
     pub vendor_guid: Guid,
-    pub items: Vec<holtburger_protocol::messages::trade::events::VendorItem>,
+    pub items: Vec<holtburger_protocol::messages::trade::events::VendorItemEventData>,
     pub buy_multiplier: f32,
     pub sell_multiplier: f32,
 }

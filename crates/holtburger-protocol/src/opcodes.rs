@@ -287,8 +287,6 @@ pub enum GameActionOpcode {
     Buy = 0x005F,
     /// C2S: Sell item(s) to a vendor.
     Sell = 0x0060,
-    /// C2S: Approach a vendor to open its buy/sell interface.
-    ApproachVendor = 0x0062,
     // /// C2S: Merge two stacks of items.
     // StackableMerge = 0x0054,
     // /// C2S: Split an item stack into a container.

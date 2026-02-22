@@ -43,15 +43,14 @@ pub enum GameAction {
     CastUntargetedSpell(Box<CastUntargetedSpellData>),
     ChangeCombatMode(Box<ChangeCombatModeData>),
     CancelAttack(Box<CancelAttackData>),
-    Buy(Box<BuyData>),
-    Sell(Box<SellData>),
-    OpenTradeNegotiations(Box<OpenTradeNegotiationsData>),
-    CloseTradeNegotiations(Box<CloseTradeNegotiationsData>),
-    AddToTrade(Box<AddToTradeData>),
-    AcceptTrade(Box<AcceptTradeData>),
-    DeclineTrade(Box<DeclineTradeData>),
-    ResetTrade(Box<ResetTradeData>),
-    ApproachVendor(Box<ApproachVendorActionData>),
+    Buy(Box<BuyActionData>),
+    Sell(Box<SellActionData>),
+    OpenTradeNegotiations(Box<OpenTradeNegotiationsActionData>),
+    CloseTradeNegotiations(Box<CloseTradeNegotiationsActionData>),
+    AddToTrade(Box<AddToTradeActionData>),
+    AcceptTrade(Box<AcceptTradeActionData>),
+    DeclineTrade(Box<DeclineTradeActionData>),
+    ResetTrade(Box<ResetTradeActionData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -135,31 +134,30 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::CancelAttack => {
                     GameAction::CancelAttack(Box::new(CancelAttackData::unpack(data, offset)?))
                 }
-                GameActionOpcode::Buy => GameAction::Buy(Box::new(BuyData::unpack(data, offset)?)),
+                GameActionOpcode::Buy => {
+                    GameAction::Buy(Box::new(BuyActionData::unpack(data, offset)?))
+                }
                 GameActionOpcode::Sell => {
-                    GameAction::Sell(Box::new(SellData::unpack(data, offset)?))
+                    GameAction::Sell(Box::new(SellActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::OpenTradeNegotiations => GameAction::OpenTradeNegotiations(
-                    Box::new(OpenTradeNegotiationsData::unpack(data, offset)?),
+                    Box::new(OpenTradeNegotiationsActionData::unpack(data, offset)?),
                 ),
                 GameActionOpcode::CloseTradeNegotiations => GameAction::CloseTradeNegotiations(
-                    Box::new(CloseTradeNegotiationsData::unpack(data, offset)?),
+                    Box::new(CloseTradeNegotiationsActionData::unpack(data, offset)?),
                 ),
                 GameActionOpcode::AddToTrade => {
-                    GameAction::AddToTrade(Box::new(AddToTradeData::unpack(data, offset)?))
+                    GameAction::AddToTrade(Box::new(AddToTradeActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::AcceptTrade => {
-                    GameAction::AcceptTrade(Box::new(AcceptTradeData::unpack(data, offset)?))
+                    GameAction::AcceptTrade(Box::new(AcceptTradeActionData::unpack(data, offset)?))
                 }
-                GameActionOpcode::DeclineTrade => {
-                    GameAction::DeclineTrade(Box::new(DeclineTradeData::unpack(data, offset)?))
-                }
-                GameActionOpcode::ResetTrade => {
-                    GameAction::ResetTrade(Box::new(ResetTradeData::unpack(data, offset)?))
-                }
-                GameActionOpcode::ApproachVendor => GameAction::ApproachVendor(Box::new(
-                    ApproachVendorActionData::unpack(data, offset)?,
+                GameActionOpcode::DeclineTrade => GameAction::DeclineTrade(Box::new(
+                    DeclineTradeActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::ResetTrade => {
+                    GameAction::ResetTrade(Box::new(ResetTradeActionData::unpack(data, offset)?))
+                }
             },
             None => {
                 let remaining = data[*offset..].to_vec();
@@ -332,11 +330,6 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::ResetTrade(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::ResetTrade as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameAction::ApproachVendor(data) => {
-                buf.write_u32::<LittleEndian>(GameActionOpcode::ApproachVendor as u32)
                     .unwrap();
                 data.pack(buf);
             }

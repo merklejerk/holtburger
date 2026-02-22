@@ -38,14 +38,6 @@ impl TabController for TradeTab {
             verbs.push(Verb::new(Action::Assess, 'a', "Assess"));
             verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
 
-            // If we're in a trade and focusing on our own offer side, allow unoffering
-            if let Some(trade) = &game.data.trade
-                && game.view.trade_focus == TradeFocus::Local
-                && trade.self_side.items.contains(&e.guid)
-            {
-                verbs.push(Verb::new(Action::RemoveFromTrade, 'o', "Unoffer"));
-            }
-
             verbs.extend(super::verbs::get_verbs(e, game));
             // Add Sell verb if we are talking to a vendor and not in a p2p trade
             if game.data.vendor.is_some() && game.data.trade.is_none() {

@@ -36,7 +36,6 @@ pub enum Action {
     AcceptTrade,
     DeclineTrade,
     ResetTrade,
-    RemoveFromTrade,
     Exit,
     OpenTrade,
 }
@@ -103,11 +102,6 @@ pub fn handle_base_action(
         (Action::AcceptTrade, _) => Some(UIEffect::Command(ClientCommand::AcceptTrade)),
         (Action::DeclineTrade, _) => Some(UIEffect::Command(ClientCommand::DeclineTrade)),
         (Action::ResetTrade, _) => Some(UIEffect::Command(ClientCommand::ResetTrade)),
-        (Action::RemoveFromTrade, CommandTarget::Entity(e, _)) => {
-            Some(UIEffect::Command(ClientCommand::RemoveFromTrade {
-                item: e.guid,
-            }))
-        }
         (Action::Exit, _) => {
             if game.data.trade.is_some() {
                 Some(UIEffect::Command(ClientCommand::CloseTrade))

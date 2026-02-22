@@ -157,24 +157,6 @@ impl ProtocolPack for AddToTradeActionData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct RemoveFromTradeActionData {
-    pub item_guid: Guid,
-}
-
-impl ProtocolUnpack for RemoveFromTradeActionData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let item_guid = Guid::unpack(data, offset)?;
-        Some(Self { item_guid })
-    }
-}
-
-impl ProtocolPack for RemoveFromTradeActionData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        self.item_guid.pack(buf);
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct AcceptTradeActionData {
     pub partner_guid: Guid,
     pub trade_stamp: f64,

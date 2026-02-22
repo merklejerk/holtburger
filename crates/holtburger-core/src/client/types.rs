@@ -228,9 +228,6 @@ pub enum ClientCommand {
     AddToTrade {
         item: Guid,
     },
-    RemoveFromTrade {
-        item: Guid,
-    },
     UseWithTarget {
         item: Guid,
         target: Guid,

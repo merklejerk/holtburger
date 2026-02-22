@@ -35,7 +35,6 @@ impl Client {
             | ClientCommand::DeclineTrade
             | ClientCommand::ResetTrade
             | ClientCommand::AddToTrade { .. }
-            | ClientCommand::RemoveFromTrade { .. }
             | ClientCommand::GiveObjectRequest { .. } => self.handle_interaction_command(cmd).await,
 
             ClientCommand::Drop(_)
@@ -274,12 +273,6 @@ impl Client {
                     item_guid: item,
                     trade_slot: 0,
                 })))
-                .await
-            }
-            ClientCommand::RemoveFromTrade { item } => {
-                self.send_game_action(GameAction::RemoveFromTrade(Box::new(
-                    RemoveFromTradeActionData { item_guid: item },
-                )))
                 .await
             }
             _ => unreachable!(),

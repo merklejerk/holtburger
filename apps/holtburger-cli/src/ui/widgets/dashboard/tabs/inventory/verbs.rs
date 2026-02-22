@@ -12,6 +12,7 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
 
     match class {
         EntityClass::Npc
+        | EntityClass::Vendor
         | EntityClass::Portal
         | EntityClass::Door
         | EntityClass::LifeStone
@@ -51,6 +52,16 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
         .intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
     {
         verbs.push(Verb::new(Action::Move, 'm', "Move"));
+    }
+
+    if let Some(trade) = &game.data.trade
+        && !is_equipped
+        && !trade.self_side.items.contains(&e.guid)
+    {
+        verbs.push(Verb::new(Action::AddToTrade, 'o', "Offer"));
+    // If a vendor session is active, allow selling this item
+    } else if game.data.vendor.is_some() {
+        verbs.push(Verb::new(Action::Sell, 's', "Sell"));
     }
 
     verbs.push(Verb::new(Action::Debug, 'g', "Debug"));

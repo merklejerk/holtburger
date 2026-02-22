@@ -51,11 +51,6 @@ impl TabController for InventoryTab {
             if game.data.vendor.is_some() {
                 verbs.push(Verb::new(Action::Sell, 's', "Sell"));
             }
-
-            // If a trade is active, allow adding to trade
-            if game.data.trade.is_some() {
-                verbs.push(Verb::new(Action::AddToTrade, 't', "Trade"));
-            }
         }
 
         verbs

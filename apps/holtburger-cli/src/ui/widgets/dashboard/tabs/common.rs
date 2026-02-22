@@ -36,7 +36,9 @@ pub enum Action {
     AcceptTrade,
     DeclineTrade,
     ResetTrade,
+    RemoveFromTrade,
     Exit,
+    OpenTrade,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +103,11 @@ pub fn handle_base_action(
         (Action::AcceptTrade, _) => Some(UIEffect::Command(ClientCommand::AcceptTrade)),
         (Action::DeclineTrade, _) => Some(UIEffect::Command(ClientCommand::DeclineTrade)),
         (Action::ResetTrade, _) => Some(UIEffect::Command(ClientCommand::ResetTrade)),
+        (Action::RemoveFromTrade, CommandTarget::Entity(e, _)) => {
+            Some(UIEffect::Command(ClientCommand::RemoveFromTrade {
+                item: e.guid,
+            }))
+        }
         (Action::Exit, _) => {
             if game.data.trade.is_some() {
                 Some(UIEffect::Command(ClientCommand::CloseTrade))
@@ -109,6 +116,9 @@ pub fn handle_base_action(
             } else {
                 None
             }
+        }
+        (Action::OpenTrade, CommandTarget::Entity(e, _)) => {
+            Some(UIEffect::Command(ClientCommand::OpenTrade(e.guid)))
         }
         (Action::Debug, target) => match target {
             CommandTarget::Spell(sid) => Some(UIEffect::ActivateDebugSpell(*sid)),
@@ -218,7 +228,7 @@ pub fn get_interaction_verbs(
     target: &CommandTarget,
     player_guid: Option<Guid>,
     active_interaction: Option<ActiveInteraction>,
-    dashboard_tab: crate::ui::DashboardTab,
+    _dashboard_tab: crate::ui::DashboardTab,
 ) -> Option<Vec<Verb>> {
     let interaction = active_interaction?;
 
@@ -234,7 +244,10 @@ pub fn get_interaction_verbs(
                     let class = classification::classify_entity(e);
                     let is_creature = matches!(
                         class,
-                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                        EntityClass::Player
+                            | EntityClass::Monster
+                            | EntityClass::Npc
+                            | EntityClass::Vendor
                     );
                     let is_self = Some(e.guid) == player_guid;
                     if !is_self {
@@ -248,12 +261,6 @@ pub fn get_interaction_verbs(
                                 Action::Confirm("Move to main pack".to_string()),
                                 '\r',
                                 "Move to main pack",
-                            ));
-                        } else if dashboard_tab == crate::ui::DashboardTab::Trade {
-                            verbs.push(Verb::new(
-                                Action::Confirm("Add to trade".to_string()),
-                                '\r',
-                                "Add to trade",
                             ));
                         } else if is_container {
                             verbs.push(Verb::new(
@@ -274,7 +281,10 @@ pub fn get_interaction_verbs(
                     let class = classification::classify_entity(e);
                     let is_creature = matches!(
                         class,
-                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                        EntityClass::Player
+                            | EntityClass::Monster
+                            | EntityClass::Npc
+                            | EntityClass::Vendor
                     );
 
                     if is_creature || e.guid == interaction.guid {

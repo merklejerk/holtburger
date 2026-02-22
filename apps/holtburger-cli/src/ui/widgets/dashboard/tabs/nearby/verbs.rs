@@ -18,6 +18,7 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
 
     match class {
         EntityClass::Npc
+        | EntityClass::Vendor
         | EntityClass::Portal
         | EntityClass::Door
         | EntityClass::LifeStone
@@ -42,6 +43,10 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
     if !is_player {
         // Nearby entities allow Approach
         verbs.push(Verb::new(Action::Approach, 'r', "Approach"));
+
+        if class == EntityClass::Player {
+            verbs.push(Verb::new(Action::OpenTrade, 'd', "Trade"));
+        }
 
         if !e.flags.intersects(ObjectDescriptionFlag::STUCK) {
             verbs.push(Verb::new(Action::PickUp, 'p', "Pick up"));

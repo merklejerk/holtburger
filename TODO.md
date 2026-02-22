@@ -114,6 +114,7 @@
 - [ ] Restrict sell verb to vendor item mask.
 - [ ] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
 - [ ] Swap `De[b]ug` with `Debu[g]`.
+- [ ] Still showing conflicting verbs during move interaction.
 
 ### Critical
 

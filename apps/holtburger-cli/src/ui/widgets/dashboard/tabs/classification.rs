@@ -6,6 +6,7 @@ use ratatui::style::Color;
 pub enum EntityClass {
     Player,
     Npc,
+    Vendor,
     Monster,
     Weapon,     // Includes shields
     Apparel,    // Clothing, Jewelry, Chest, etc.
@@ -30,6 +31,7 @@ impl EntityClass {
         match self {
             EntityClass::Player => "🧙",
             EntityClass::Npc => "🙋",
+            EntityClass::Vendor => "💰",
             EntityClass::Monster => "😈",
             EntityClass::Weapon => "🔪",
             EntityClass::Wand => "🪄",
@@ -54,6 +56,7 @@ impl EntityClass {
         match self {
             EntityClass::Player => "Player",
             EntityClass::Npc => "NPC",
+            EntityClass::Vendor => "Vendor",
             EntityClass::Monster => "Mob",
             EntityClass::Weapon => "Weapon",
             EntityClass::Wand => "Wand",
@@ -79,6 +82,7 @@ pub fn get_entity_color(class: EntityClass) -> Color {
     match class {
         EntityClass::Player => Color::White,
         EntityClass::Npc => Color::LightGreen,
+        EntityClass::Vendor => Color::LightGreen,
         EntityClass::Monster => Color::Red,
         EntityClass::Container | EntityClass::Chest => Color::Yellow,
         EntityClass::LifeStone => Color::Blue,
@@ -124,6 +128,9 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
     if is_creature {
         if is_attackable {
             return EntityClass::Monster;
+        }
+        if entity.flags.intersects(ObjectDescriptionFlag::VENDOR) {
+            return EntityClass::Vendor;
         }
         return EntityClass::Npc;
     }
@@ -172,7 +179,7 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
             w if w == WeenieType::LifeStone as u32 => return EntityClass::LifeStone,
             w if w == WeenieType::Door as u32 => return EntityClass::Door,
             w if w == WeenieType::Portal as u32 => return EntityClass::Portal,
-            w if w == WeenieType::Vendor as u32 => return EntityClass::Npc,
+            w if w == WeenieType::Vendor as u32 => return EntityClass::Vendor,
             w if w == WeenieType::Chest as u32 => return EntityClass::Chest,
             _ => {}
         }
@@ -186,7 +193,7 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
         return EntityClass::Door;
     }
     if entity.flags.intersects(ObjectDescriptionFlag::VENDOR) {
-        return EntityClass::Npc;
+        return EntityClass::Vendor;
     }
     if entity.flags.intersects(ObjectDescriptionFlag::PLAYER) {
         return EntityClass::Player;
@@ -220,6 +227,7 @@ pub fn is_targetable(entity: &Entity) -> bool {
     match classify_entity(entity) {
         EntityClass::Player => true,
         EntityClass::Npc
+        | EntityClass::Vendor
         | EntityClass::Monster
         | EntityClass::Weapon
         | EntityClass::Apparel

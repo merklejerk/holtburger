@@ -95,6 +95,12 @@ fn get_list_items(
 
     for (i, (e, _, depth)) in entities.iter().enumerate() {
         let is_equipped = equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
+        let is_offered = game
+            .data
+            .trade
+            .as_ref()
+            .map(|t| t.self_side.items.contains(&e.guid))
+            .unwrap_or(false);
 
         let container_count = container_counts.get(&e.guid).cloned();
 
@@ -103,6 +109,7 @@ fn get_list_items(
             *depth,
             i == game.view.selected_dashboard_index,
             is_equipped,
+            is_offered,
             container_count,
         ));
     }
@@ -115,8 +122,8 @@ fn render_inventory_item(
     e: &Entity,
     depth: usize,
     highlight: bool,
-
     is_equipped: bool,
+    is_offered: bool,
     container_count: Option<usize>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
@@ -124,7 +131,7 @@ fn render_inventory_item(
     let item_style = theme::list_item_style(highlight);
 
     let mut text_style = Style::default().fg(color);
-    if is_equipped {
+    if is_equipped || is_offered {
         text_style = text_style.add_modifier(Modifier::BOLD);
     }
 
@@ -134,6 +141,8 @@ fn render_inventory_item(
         format!("<{:08X}>", e.guid)
     } else if is_equipped {
         format!("{} (EQUIPPED)", e.name)
+    } else if is_offered {
+        format!("{} (OFFERED)", e.name)
     } else {
         e.name.clone()
     };

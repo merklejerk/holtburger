@@ -311,8 +311,6 @@ pub enum GameActionOpcode {
     CloseTradeNegotiations = 0x01F7,
     /// C2S: Add an item to the trade window.
     AddToTrade = 0x01F8,
-    /// C2S: Remove an item from the trade window.
-    RemoveFromTrade = 0x01F9,
     /// C2S: Reset the trade offer (clears accept status).
     ResetTrade = 0x0204,
     /// C2S: Accept the current trade offer.
@@ -633,8 +631,6 @@ pub enum GameEventOpcode {
     CloseTrade = 0x01FF,
     /// S2C: Add an item or stack to the trade session.
     AddToTrade = 0x0200,
-    /// S2C: Remove an item or stack from the trade session.
-    RemoveFromTrade = 0x0201,
     /// S2C: Accept the current trade agreement.
     AcceptTrade = 0x0202,
     /// S2C: Decline the current trade agreement.

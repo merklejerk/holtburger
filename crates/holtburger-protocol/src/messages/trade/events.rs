@@ -192,38 +192,6 @@ impl ProtocolPack for DeclineTradeEventData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct RemoveFromTradeEventData {
-    pub object_guid: Guid,
-    pub trade_side: u32, // TradeSide
-    pub slot: u32,       // Always 0 in ACE
-}
-
-impl ProtocolUnpack for RemoveFromTradeEventData {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        let object_guid = Guid::unpack(data, offset)?;
-        if *offset + 8 > data.len() {
-            return None;
-        }
-        let trade_side = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let slot = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        *offset += 8;
-        Some(Self {
-            object_guid,
-            trade_side,
-            slot,
-        })
-    }
-}
-
-impl ProtocolPack for RemoveFromTradeEventData {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        self.object_guid.pack(buf);
-        buf.write_u32::<LittleEndian>(self.trade_side).unwrap();
-        buf.write_u32::<LittleEndian>(self.slot).unwrap();
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct OpenTradeEventData {
     pub partner_guid: Guid,
 }
@@ -449,19 +417,6 @@ mod tests {
         let fixture = [0x01, 0x00, 0x00, 0x50];
         let data = DeclineTradeEventData {
             who_declined: Guid::from(0x50000001),
-        };
-        assert_pack_unpack_parity(&fixture, &data);
-    }
-
-    #[test]
-    fn test_remove_from_trade_roundtrip() {
-        let fixture = [
-            0x10, 0x00, 0x00, 0x50, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
-        let data = RemoveFromTradeEventData {
-            object_guid: Guid::from(0x50000010),
-            trade_side: 1,
-            slot: 0,
         };
         assert_pack_unpack_parity(&fixture, &data);
     }

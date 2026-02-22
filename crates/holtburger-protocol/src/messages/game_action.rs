@@ -48,7 +48,6 @@ pub enum GameAction {
     OpenTradeNegotiations(Box<OpenTradeNegotiationsActionData>),
     CloseTradeNegotiations(Box<CloseTradeNegotiationsActionData>),
     AddToTrade(Box<AddToTradeActionData>),
-    RemoveFromTrade(Box<RemoveFromTradeActionData>),
     AcceptTrade(Box<AcceptTradeActionData>),
     DeclineTrade(Box<DeclineTradeActionData>),
     ResetTrade(Box<ResetTradeActionData>),
@@ -150,9 +149,6 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::AddToTrade => {
                     GameAction::AddToTrade(Box::new(AddToTradeActionData::unpack(data, offset)?))
                 }
-                GameActionOpcode::RemoveFromTrade => GameAction::RemoveFromTrade(Box::new(
-                    RemoveFromTradeActionData::unpack(data, offset)?,
-                )),
                 GameActionOpcode::AcceptTrade => {
                     GameAction::AcceptTrade(Box::new(AcceptTradeActionData::unpack(data, offset)?))
                 }
@@ -319,11 +315,6 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::AddToTrade(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::AddToTrade as u32)
-                    .unwrap();
-                data.pack(buf);
-            }
-            GameAction::RemoveFromTrade(data) => {
-                buf.write_u32::<LittleEndian>(GameActionOpcode::RemoveFromTrade as u32)
                     .unwrap();
                 data.pack(buf);
             }

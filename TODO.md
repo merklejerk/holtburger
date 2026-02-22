@@ -109,6 +109,11 @@
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
 - [ ] Alt currencies display as pyreals in vendor tab.
+- [ ] Currency tracking in trade tab.
+- [ ] Log in chat when items are bought and sold.
+- [ ] Restrict sell verb to vendor item mask.
+- [ ] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
+- [ ] Swap `De[b]ug` with `Debu[g]`.
 
 ### Critical
 

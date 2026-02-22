@@ -81,7 +81,6 @@ mod tests {
     use crate::messages::game_event::{GameEvent, GameEventMessage};
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
-    use crate::test_helpers::assert_pack_unpack_parity;
     use holtburger_common::Guid;
 
     #[test]

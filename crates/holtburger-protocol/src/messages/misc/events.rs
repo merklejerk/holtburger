@@ -90,15 +90,18 @@ mod tests {
             target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEvent::WeenieError(Box::new(WeenieErrorData {
-                error: WeenieError::None,
+                error: WeenieError::BadParam,
             })),
         }));
-        // Note: Fixture uses 0x1234 which is not a valid WeenieError, so it maps to None.
-        // We bypass parity check because packing None results in 0x0, which doesn't match the fixture's 0x1234.
         let data = test_fixtures::WEENIE_ERROR;
         let mut offset = 0;
         let unpacked = GameMessage::unpack(data, &mut offset).unwrap();
         assert_eq!(unpacked, expected);
+
+        // Verify parity now that we use a valid error ID
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(packed, data);
     }
 
     #[test]
@@ -107,7 +110,7 @@ mod tests {
             target: Guid(0x50000001),
             sequence: 0x0E,
             event: GameEvent::WeenieErrorWithString(Box::new(WeenieErrorWithStringData {
-                error: WeenieError::None,
+                error: WeenieError::BadParam,
                 parameter: "Test error".to_string(),
             })),
         }));
@@ -115,5 +118,10 @@ mod tests {
         let mut offset = 0;
         let unpacked = GameMessage::unpack(data, &mut offset).unwrap();
         assert_eq!(unpacked, expected);
+
+        // Verify parity
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(packed, data);
     }
 }

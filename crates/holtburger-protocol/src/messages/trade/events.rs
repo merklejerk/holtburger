@@ -444,10 +444,10 @@ mod tests {
 
     #[test]
     fn test_trade_failure_roundtrip() {
-        let fixture = [0x10, 0x00, 0x00, 0x50, 0x8A, 0x02, 0x00, 0x00];
+        let fixture = [0x10, 0x00, 0x00, 0x50, 0x50, 0x04, 0x00, 0x00];
         let data = TradeFailureData {
             object_guid: Guid::from(0x50000010),
-            reason: 0x28A,
+            reason: WeenieError::TradeBusy,
         };
         assert_pack_unpack_parity(&fixture, &data);
     }

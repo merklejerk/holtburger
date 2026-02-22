@@ -682,20 +682,16 @@ impl WorldState {
                         }
                     }
                     GameEvent::WeenieError(data) => {
-                        events.push(StateEvent::WeenieError {
-                            error_id: data.error_id,
-                        });
+                        events.push(StateEvent::WeenieError { error: data.error });
                     }
                     GameEvent::WeenieErrorWithString(data) => {
                         events.push(StateEvent::WeenieErrorWithString {
-                            error_id: data.error_id,
+                            error: data.error,
                             parameter: data.parameter.clone(),
                         });
                     }
                     GameEvent::UseDone(data) => {
-                        events.push(StateEvent::UseDone {
-                            error_id: data.error_id,
-                        });
+                        events.push(StateEvent::UseDone { error: data.error });
                     }
                     GameEvent::ApproachVendor(data) => {
                         let vendor_state = VendorState {

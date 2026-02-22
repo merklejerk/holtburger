@@ -167,14 +167,14 @@ impl Client {
                 }
                 GameEvent::WeenieError(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
-                        error_id: data.error_id,
+                        error: data.error,
                         parameter: None,
                     });
                     Ok(())
                 }
                 GameEvent::WeenieErrorWithString(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
-                        error_id: data.error_id,
+                        error: data.error,
                         parameter: Some(data.parameter.clone()),
                     });
                     Ok(())
@@ -187,9 +187,7 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
-                    self.emit_wire_event(WireEvent::UseDone {
-                        error_id: data.error_id,
-                    });
+                    self.emit_wire_event(WireEvent::UseDone { error: data.error });
                     Ok(())
                 }
                 GameEvent::RegisterTrade(data) => {

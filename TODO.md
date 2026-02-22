@@ -20,6 +20,9 @@
 - [ ] Chat tabs (Chat vs combat vs all).
 - [ ] Shift+backspace to clear chat input buffer.
 - [ ] Show enchantment source (caster) in enchantment debug.
+- [ ] NPCs with VENDOR flag should display [S]hop instead of [U]se.
+- [ ] NPCs without VENDOR flag should display [T]alk.
+    - Vendor entity class? 
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -60,6 +63,7 @@
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
+- [ ] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -100,6 +104,7 @@
 - [ ] Stack not updating when consumed (try Bunch of Nanners).
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
+- [ ] Alt currencies display as pyreals in vendor tab.
 
 ### Critical
 

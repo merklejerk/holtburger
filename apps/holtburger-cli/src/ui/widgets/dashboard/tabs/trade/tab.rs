@@ -45,9 +45,12 @@ impl TabController for TradeTab {
             }
         }
 
-        if game.data.trade.is_some() {
-            verbs.push(Verb::new(Action::AcceptTrade, 'c', "Accept"));
-            verbs.push(Verb::new(Action::DeclineTrade, 'd', "Decline"));
+        if let Some(trade) = &game.data.trade {
+            if trade.self_side.accepted {
+                verbs.push(Verb::new(Action::DeclineTrade, 'c', "Decline"));
+            } else {
+                verbs.push(Verb::new(Action::AcceptTrade, 'c', "Accept"));
+            }
             verbs.push(Verb::new(Action::ResetTrade, 'r', "Reset"));
         }
 

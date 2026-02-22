@@ -13,6 +13,7 @@ use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::*;
 
 pub struct ServerTimeSync {
@@ -686,6 +687,16 @@ impl WorldState {
                     }
                     GameEvent::WeenieError(data) => {
                         events.push(StateEvent::WeenieError { error: data.error });
+
+                        if data.error == WeenieError::TradeComplete
+                            && let Some(trade) = self.trade.as_mut()
+                        {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            trade.self_side.items.clear();
+                            trade.partner_side.items.clear();
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
                     }
                     GameEvent::WeenieErrorWithString(data) => {
                         events.push(StateEvent::WeenieErrorWithString {
@@ -756,6 +767,29 @@ impl WorldState {
                         }
                     }
                     GameEvent::ResetTrade(_) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            trade.self_side.items.clear();
+                            trade.partner_side.items.clear();
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::DeclineTrade(_) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::ClearTradeAcceptance => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::TradeFailure(_) => {
                         if let Some(trade) = self.trade.as_mut() {
                             trade.self_side.accepted = false;
                             trade.partner_side.accepted = false;

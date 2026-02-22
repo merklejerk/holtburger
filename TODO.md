@@ -22,7 +22,7 @@
 - [ ] Show enchantment source (caster) in enchantment debug.
 - [ ] NPCs with VENDOR flag should display [S]hop instead of [U]se.
 - [ ] NPCs without VENDOR flag should display [T]alk.
-    - Vendor entity class? 
+- [x] Vendor entity class?
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -63,11 +63,12 @@
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
-- [ ] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
+- [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
 - [ ] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
-- [ ] Auto-switch to trade tab when INITIATING a trade/vendor.
+- [x] Auto-switch to trade tab when INITIATING a trade/vendor.
+- [ ] Should still show coords when indoors.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -105,15 +106,15 @@
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Show count for stacked items.
-- [ ] Stack not updating when consumed (try Bunch of Nanners).
+- [ ] Stack not updating when consumed/spent (try Bunch of Nanners, pyreals).
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
-- [ ] Alt currencies display as pyreals in vendor tab.
-- [ ] Currency tracking in trade tab.
+- [x] Alt currencies display as pyreals in vendor tab.
+- [x] Currency tracking in trade tab.
 - [ ] Log in chat when items are bought and sold.
 - [ ] Restrict sell verb to vendor item mask.
-- [ ] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
-- [ ] Swap `De[b]ug` with `Debu[g]`.
+- [x] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
+- [x] Swap `De[b]ug` with `Debu[g]`.
 - [ ] Still showing conflicting verbs during move interaction.
 
 ### Critical

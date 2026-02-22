@@ -1,9 +1,15 @@
 use crate::world::entity::Entity;
-use crate::world::stats::Resistances;
+use crate::world::state::{TradeState, VendorState};
+use crate::world::stats::{
+    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
+};
 use holtburger_common::{Guid, Vector3};
-use holtburger_protocol::errors::CharacterError;
+use holtburger_dat::file_type::spell_table::SpellBase;
+use holtburger_protocol::errors::{CharacterError, WeenieError};
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::trade::actions::ItemProfile;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -32,12 +38,12 @@ pub enum ErrorSource {
     Client,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy, Eq)]
-pub enum ErrorKind {
-    Weenie,
-    Character,
-    Client,
-    Transport,
+#[derive(Debug, PartialEq, Clone, Eq)]
+pub enum ErrorReason {
+    Weenie(WeenieError, Option<String>),
+    Character(CharacterError),
+    General(String),
+    Transport(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -63,12 +69,12 @@ pub enum WireEvent {
     CharacterError(CharacterError),
     ClientError(String),
     WeenieError {
-        error_id: u32,
+        error: WeenieError,
         parameter: Option<String>,
     },
     InventoryServerSaveFailed {
         item_guid: Guid,
-        error: holtburger_protocol::errors::WeenieError,
+        error: WeenieError,
     },
     BootAccount(String),
     GameMessage(Box<GameMessage>),
@@ -88,7 +94,7 @@ pub enum WireEvent {
     RawMessage(Vec<u8>),
     LogMessage(String),
     UseDone {
-        error_id: u32,
+        error: WeenieError,
     },
 }
 
@@ -98,19 +104,19 @@ pub enum ClientViewEvent {
         state: ClientState,
     },
     PlayerStatsSkillsUpdated {
-        attributes: HashMap<crate::world::stats::AttributeType, crate::world::stats::Attribute>,
-        skills: HashMap<crate::world::stats::SkillType, crate::world::stats::Skill>,
+        attributes: HashMap<AttributeType, Attribute>,
+        skills: HashMap<SkillType, Skill>,
         resistances: Resistances,
         armor: i32,
         vitae: f32,
-        level_info: crate::world::stats::CharacterLevelInfo,
+        level_info: CharacterLevelInfo,
     },
     PlayerVitalsUpdated {
-        vitals: HashMap<crate::world::stats::VitalType, crate::world::stats::Vital>,
+        vitals: HashMap<VitalType, Vital>,
     },
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
-        spells: HashMap<u32, holtburger_dat::file_type::spell_table::SpellBase>,
+        spells: HashMap<u32, SpellBase>,
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
@@ -118,10 +124,8 @@ pub enum ClientViewEvent {
     },
     ErrorRaised {
         source: ErrorSource,
-        kind: ErrorKind,
-        code: Option<u32>,
+        reason: ErrorReason,
         message: String,
-        is_transient: bool,
     },
     EntityUpserted {
         entity: Box<Entity>,
@@ -133,16 +137,16 @@ pub enum ClientViewEvent {
         time: f64,
     },
     CombatModeUpdated {
-        mode: holtburger_protocol::messages::combat::CombatMode,
+        mode: CombatMode,
     },
     NoClipUpdated {
         enabled: bool,
     },
     VendorStateUpdated {
-        vendor: Option<crate::world::state::VendorState>,
+        vendor: Option<VendorState>,
     },
     TradeStateUpdated {
-        trade: Option<crate::world::state::TradeState>,
+        trade: Option<TradeState>,
     },
 }
 
@@ -188,19 +192,19 @@ pub enum ClientCommand {
         target: Guid,
     },
     RaiseAttribute {
-        attribute: crate::world::stats::AttributeType,
+        attribute: AttributeType,
         xp_spent: u32,
     },
     RaiseVital {
-        vital: crate::world::stats::VitalType,
+        vital: VitalType,
         xp_spent: u32,
     },
     RaiseSkill {
-        skill: crate::world::stats::SkillType,
+        skill: SkillType,
         xp_spent: u32,
     },
     TrainSkill {
-        skill: crate::world::stats::SkillType,
+        skill: SkillType,
         credits: u32,
     },
     GiveObjectRequest {
@@ -211,11 +215,11 @@ pub enum ClientCommand {
     ApproachVendor(Guid),
     Buy {
         vendor: Guid,
-        items: Vec<holtburger_protocol::messages::trade::actions::ItemProfile>,
+        items: Vec<ItemProfile>,
     },
     Sell {
         vendor: Guid,
-        items: Vec<holtburger_protocol::messages::trade::actions::ItemProfile>,
+        items: Vec<ItemProfile>,
     },
     OpenTrade(Guid),
     CloseTrade,
@@ -236,7 +240,7 @@ pub enum ClientCommand {
     CastUntargetedSpell {
         spell_id: u32,
     },
-    SetCombatMode(holtburger_protocol::messages::combat::CombatMode),
+    SetCombatMode(CombatMode),
     SetNoClip(bool),
     CancelAttack,
     SyncPosition,

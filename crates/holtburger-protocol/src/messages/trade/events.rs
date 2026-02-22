@@ -1,3 +1,4 @@
+use crate::errors::WeenieError;
 use crate::messages::object::messages::PublicWeenieDescription;
 use crate::messages::utils::{read_string16, write_string16};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -128,7 +129,7 @@ impl ProtocolPack for AcceptTradeEventData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TradeFailureData {
     pub object_guid: Guid,
-    pub reason: u32, // WeenieError
+    pub reason: WeenieError,
 }
 
 impl ProtocolUnpack for TradeFailureData {
@@ -137,8 +138,9 @@ impl ProtocolUnpack for TradeFailureData {
         if *offset + 4 > data.len() {
             return None;
         }
-        let reason = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let reason_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
+        let reason = WeenieError::from_repr(reason_raw).unwrap_or(WeenieError::None);
         Some(Self {
             object_guid,
             reason,
@@ -149,7 +151,7 @@ impl ProtocolUnpack for TradeFailureData {
 impl ProtocolPack for TradeFailureData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.object_guid.pack(buf);
-        buf.write_u32::<LittleEndian>(self.reason).unwrap();
+        buf.write_u32::<LittleEndian>(self.reason as u32).unwrap();
     }
 }
 

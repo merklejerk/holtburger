@@ -149,6 +149,14 @@ pub enum PropertyBool {
     FreeMasteryResetRenewed = 9010,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum AttunedStatus {
+    Normal = 0,
+    Attuned = 1,
+    Sticky = 2,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
 #[repr(u32)]
 pub enum PropertyInt {

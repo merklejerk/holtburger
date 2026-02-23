@@ -40,6 +40,8 @@ pub struct ViewState {
     pub trade_focus: TradeFocus,
     /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.
     pub last_trade_initiation: Option<(std::time::Instant, Guid)>,
+    /// Cached wrapped message for empty trade tab: (width, wrapped_lines).
+    pub trade_no_session_msg_cache: Option<(u16, Vec<String>)>,
 }
 
 impl Default for ViewState {
@@ -63,6 +65,7 @@ impl Default for ViewState {
             active_interaction: None,
             trade_focus: TradeFocus::default(),
             last_trade_initiation: None,
+            trade_no_session_msg_cache: None,
         }
     }
 }

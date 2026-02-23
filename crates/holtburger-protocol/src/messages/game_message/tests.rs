@@ -67,9 +67,8 @@ fn test_dispatch_hear_speech() {
 
 #[test]
 fn test_dispatch_character_error() {
-    // WeenieError is wrapped in GameEvent, not top-level CharacterError
-    assert_dispatch_match(test_fixtures::WEENIE_ERROR, |msg| {
-        matches!(msg, GameMessage::GameEvent(_))
+    assert_dispatch_match(test_fixtures::CHARACTER_ERROR, |msg| {
+        matches!(msg, GameMessage::CharacterError(_))
     });
 }
 

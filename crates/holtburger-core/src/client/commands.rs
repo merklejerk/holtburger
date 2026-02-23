@@ -26,9 +26,16 @@ impl Client {
             | ClientCommand::Use(_)
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::CastTargetedSpell { .. }
-            | ClientCommand::CastUntargetedSpell { .. } => {
-                self.handle_interaction_command(cmd).await
-            }
+            | ClientCommand::CastUntargetedSpell { .. }
+            | ClientCommand::Buy { .. }
+            | ClientCommand::Sell { .. }
+            | ClientCommand::OpenTrade(_)
+            | ClientCommand::CloseTrade
+            | ClientCommand::AcceptTrade
+            | ClientCommand::DeclineTrade
+            | ClientCommand::ResetTrade
+            | ClientCommand::AddToTrade { .. }
+            | ClientCommand::GiveObjectRequest { .. } => self.handle_interaction_command(cmd).await,
 
             ClientCommand::Drop(_)
             | ClientCommand::Get(_)
@@ -47,11 +54,10 @@ impl Client {
             | ClientCommand::RaiseSkill { .. }
             | ClientCommand::TrainSkill { .. } => self.handle_progression_command(cmd).await,
 
-            ClientCommand::Ping
-            | ClientCommand::SetCombatMode(_)
-            | ClientCommand::SetNoClip(_)
+            ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
-            | ClientCommand::GiveObjectRequest { .. }
+            | ClientCommand::Ping
+            | ClientCommand::SetNoClip(_)
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
     }
@@ -186,6 +192,87 @@ impl Client {
                 self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
                     CastUntargetedSpellData { spell_id },
                 )))
+                .await
+            }
+            ClientCommand::GiveObjectRequest {
+                target,
+                item,
+                amount,
+            } => {
+                log::info!(
+                    ">>> Giving item 0x{:08X} to target 0x{:08X} (amount {})",
+                    item,
+                    target,
+                    amount
+                );
+                self.send_game_action(GameAction::GiveObjectRequest(Box::new(
+                    GiveObjectRequestData {
+                        target_guid: target,
+                        item_guid: item,
+                        amount,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::Buy { vendor, items } => {
+                self.send_game_action(GameAction::Buy(Box::new(BuyActionData {
+                    vendor_guid: vendor,
+                    items,
+                })))
+                .await
+            }
+            ClientCommand::Sell { vendor, items } => {
+                self.send_game_action(GameAction::Sell(Box::new(SellActionData {
+                    vendor_guid: vendor,
+                    items,
+                })))
+                .await
+            }
+            ClientCommand::OpenTrade(target) => {
+                self.send_game_action(GameAction::OpenTradeNegotiations(Box::new(
+                    OpenTradeNegotiationsActionData {
+                        trade_partner_guid: target,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::CloseTrade => {
+                self.send_game_action(GameAction::CloseTradeNegotiations(Box::new(
+                    CloseTradeNegotiationsActionData {},
+                )))
+                .await
+            }
+            ClientCommand::AcceptTrade => {
+                let data = if let Some(trade) = self.world.trade.as_ref() {
+                    AcceptTradeActionData {
+                        partner_guid: trade.partner_guid,
+                        trade_stamp: trade.trade_stamp,
+                        trade_status: 1,
+                        initiator_guid: trade.initiator_guid,
+                        initiator_accepts: 1,
+                        partner_accepts: if trade.partner_side.accepted { 1 } else { 0 },
+                    }
+                } else {
+                    AcceptTradeActionData::default()
+                };
+                self.send_game_action(GameAction::AcceptTrade(Box::new(data)))
+                    .await
+            }
+            ClientCommand::DeclineTrade => {
+                self.send_game_action(GameAction::DeclineTrade(Box::new(
+                    DeclineTradeActionData {},
+                )))
+                .await
+            }
+            ClientCommand::ResetTrade => {
+                self.send_game_action(GameAction::ResetTrade(Box::new(ResetTradeActionData {})))
+                    .await
+            }
+            ClientCommand::AddToTrade { item } => {
+                self.send_game_action(GameAction::AddToTrade(Box::new(AddToTradeActionData {
+                    item_guid: item,
+                    trade_slot: 0,
+                })))
                 .await
             }
             _ => unreachable!(),
@@ -435,26 +522,6 @@ impl Client {
                 self.send_game_action(GameAction::CancelAttack(Box::new(CancelAttackData {})))
                     .await
             }
-            ClientCommand::GiveObjectRequest {
-                target,
-                item,
-                amount,
-            } => {
-                log::info!(
-                    ">>> Giving item 0x{:08X} to target 0x{:08X} (amount {})",
-                    item,
-                    target,
-                    amount
-                );
-                self.send_game_action(GameAction::GiveObjectRequest(Box::new(
-                    GiveObjectRequestData {
-                        target_guid: target,
-                        item_guid: item,
-                        amount,
-                    },
-                )))
-                .await
-            }
             ClientCommand::Quit => {
                 log::info!("Disconnecting...");
                 // First attempt a graceful logout from the world
@@ -494,7 +561,7 @@ impl Client {
             .world
             .entities
             .get(item)
-            .and_then(|e| e.valid_locations)
+            .map(|e| e.valid_locations())
             .unwrap_or(EquipMask::NONE);
 
         let resolved_slot = slot.unwrap_or(TargetSlot::EquipMask(item_mask));

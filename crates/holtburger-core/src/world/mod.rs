@@ -10,6 +10,7 @@ use crate::world::entity::Entity;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyValue;
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
@@ -87,15 +88,17 @@ pub enum StateEvent {
         sequence: u16,
     },
     WeenieError {
-        error_id: u32,
+        error: WeenieError,
     },
     WeenieErrorWithString {
-        error_id: u32,
-        message: String,
+        error: WeenieError,
+        parameter: String,
     },
     UseDone {
-        error_id: u32,
+        error: WeenieError,
     },
+    VendorStateUpdated(Option<state::VendorState>),
+    TradeStateUpdated(Option<state::TradeState>),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]

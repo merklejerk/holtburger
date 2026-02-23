@@ -1,17 +1,18 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use crate::ui::state::GameState;
+use crate::ui::theme;
 
 pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ");
+        .highlight_style(theme::selection_style())
+        .highlight_symbol(theme::SELECTION_SYMBOL);
 
     game.view
         .dashboard_list_state
@@ -35,9 +36,9 @@ pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+                .style(theme::scrollbar_style())
+                .track_style(theme::scrollbar_track_style())
+                .thumb_style(theme::scrollbar_thumb_style()),
             area,
             &mut scrollbar_state,
         );
@@ -67,14 +68,10 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
 
             let is_selected = i == game.view.selected_dashboard_index;
 
-            let name_style = if is_selected {
-                Style::default().bg(Color::DarkGray)
-            } else {
-                Style::default()
-            };
+            let name_style = theme::list_item_style(is_selected);
 
             let power_style = if is_selected {
-                Style::default().bg(Color::DarkGray).fg(Color::Gray)
+                theme::list_item_style(true).fg(Color::Gray)
             } else {
                 Style::default().fg(Color::DarkGray)
             };

@@ -6,11 +6,12 @@ use crate::messages::utils::{
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
-    WeenieHeaderFlag2,
+    ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, PropertyDataId, PropertyFloat,
+    PropertyInstanceId, PropertyInt, PropertyString, WeenieHeaderFlag, WeenieHeaderFlag2,
 };
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::{Guid, Vector3};
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicsChildData {
@@ -22,7 +23,7 @@ pub struct PhysicsChildData {
 /// If the high word is not zero, it indicates a versioned message.
 const VERSION_HI_WORD_MASK: u32 = 0xFFFF0000;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct HouseRestrictionsData {
     pub version: u32,
     pub bitmask: Option<u32>,
@@ -179,9 +180,798 @@ impl ProtocolPack for HouseRestrictionsData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct PublicWeenieDescription {
+    pub guid: Guid,
+    pub weenie_flags: WeenieHeaderFlag,
+    pub name: Option<String>,
+    pub wcid: u32,
+    pub icon_id: u32,
+    pub item_type: u32,
+    pub obj_desc_flags: ObjectDescriptionFlag,
+    pub weenie_flags2: WeenieHeaderFlag2,
+    pub house_restrictions: Option<HouseRestrictionsData>,
+
+    pub int_properties: BTreeMap<u32, i32>,
+    pub int64_properties: BTreeMap<u32, i64>,
+    pub bool_properties: BTreeMap<u32, bool>,
+    pub float_properties: BTreeMap<u32, f64>,
+    pub string_properties: BTreeMap<u32, String>,
+    pub did_properties: BTreeMap<u32, Guid>,
+    pub iid_properties: BTreeMap<u32, Guid>,
+}
+
+impl ProtocolUnpack for PublicWeenieDescription {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let guid = Guid::unpack(data, offset)?;
+        Self::unpack_fields(data, offset, guid)
+    }
+}
+
+impl ProtocolPack for PublicWeenieDescription {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.guid.pack(buf);
+        self.pack_fields(buf);
+    }
+}
+
+impl PublicWeenieDescription {
+    pub fn value(&self) -> u32 {
+        self.int_properties
+            .get(&(PropertyInt::Value as u32))
+            .unwrap_or(&0)
+            .to_owned() as u32
+    }
+
+    pub fn items_capacity(&self) -> Option<u32> {
+        self.int_properties
+            .get(&(PropertyInt::ItemsCapacity as u32))
+            .map(|v| *v as u32)
+    }
+
+    pub fn plural_name(&self) -> Option<&str> {
+        self.string_properties
+            .get(&(PropertyString::PluralName as u32))
+            .map(|s| s.as_str())
+    }
+
+    pub fn unpack_fields(data: &[u8], offset: &mut usize, guid: Guid) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let weenie_flags_bits = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let weenie_flags = WeenieHeaderFlag::from_bits_retain(weenie_flags_bits);
+        *offset += 4;
+
+        let name = read_string16(data, offset);
+        let wcid = read_packed_wclass_id(data, offset);
+        let icon_id = read_packed_data_id(data, offset, 0x06000000);
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let item_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let obj_desc_flags_bits = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let obj_desc_flags = ObjectDescriptionFlag::from_bits_retain(obj_desc_flags_bits);
+        *offset += 8;
+        *offset = align_to_4(*offset);
+
+        let mut weenie_flags2 = WeenieHeaderFlag2::empty();
+        if obj_desc_flags.contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            weenie_flags2 = WeenieHeaderFlag2::from_bits_retain(LittleEndian::read_u32(
+                &data[*offset..*offset + 4],
+            ));
+            *offset += 4;
+        }
+
+        let mut int_properties = BTreeMap::new();
+        let int64_properties = BTreeMap::new();
+        let bool_properties = BTreeMap::new();
+        let mut float_properties = BTreeMap::new();
+        let mut string_properties = BTreeMap::new();
+        let mut did_properties = BTreeMap::new();
+        let mut iid_properties = BTreeMap::new();
+
+        if weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME)
+            && let Some(val) = read_string16(data, offset)
+        {
+            string_properties.insert(PropertyString::PluralName as u32, val);
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) {
+            if *offset >= data.len() {
+                return None;
+            }
+            int_properties.insert(PropertyInt::ItemsCapacity as u32, data[*offset] as i32);
+            *offset += 1;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) {
+            if *offset >= data.len() {
+                return None;
+            }
+            int_properties.insert(PropertyInt::ContainersCapacity as u32, data[*offset] as i32);
+            *offset += 1;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::AmmoType as u32,
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as i32,
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::VALUE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::Value as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::USABLE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::ItemUseable as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            float_properties.insert(
+                PropertyFloat::UseRadius as u32,
+                LittleEndian::read_f32(&data[*offset..*offset + 4]) as f64,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::TargetType as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::UiEffects as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) {
+            if *offset >= data.len() {
+                return None;
+            }
+            int_properties.insert(PropertyInt::CombatUse as u32, data[*offset] as i32);
+            *offset += 1;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::Structure as u32,
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as i32,
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::MaxStructure as u32,
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as i32,
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::StackSize as u32,
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as i32,
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::MaxStackSize as u32,
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as i32,
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
+            iid_properties.insert(
+                PropertyInstanceId::Container as u32,
+                Guid::unpack(data, offset)?,
+            );
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
+            iid_properties.insert(
+                PropertyInstanceId::Wielder as u32,
+                Guid::unpack(data, offset)?,
+            );
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::VALID_LOCATIONS) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::ValidLocations as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::CurrentWieldedLocation as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+        if weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::ClothingPriority as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::RADAR_BLIP_COLOR) {
+            if *offset >= data.len() {
+                return None;
+            }
+            int_properties.insert(PropertyInt::RadarBlipColor as u32, data[*offset] as i32);
+            *offset += 1;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::RADAR_BEHAVIOR) {
+            if *offset >= data.len() {
+                return None;
+            }
+            int_properties.insert(PropertyInt::ShowableOnRadar as u32, data[*offset] as i32);
+            *offset += 1;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::PSCRIPT) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            did_properties.insert(
+                PropertyDataId::PhysicsScript as u32,
+                Guid(LittleEndian::read_u16(&data[*offset..*offset + 2]) as u32),
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::WORKMANSHIP) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            let val = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+            int_properties.insert(PropertyInt::ItemWorkmanship as u32, val.round() as i32);
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::EncumbranceVal as u32,
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as i32,
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::SPELL) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            did_properties.insert(
+                PropertyDataId::Spell as u32,
+                Guid(LittleEndian::read_u16(&data[*offset..*offset + 2]) as u32),
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::HOUSE_OWNER) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            iid_properties.insert(
+                PropertyInstanceId::HouseOwner as u32,
+                Guid(LittleEndian::read_u32(&data[*offset..*offset + 4])),
+            );
+            *offset += 4;
+        }
+
+        let mut house_restrictions = None;
+        if weenie_flags.contains(WeenieHeaderFlag::HOUSE_RESTRICTIONS) {
+            house_restrictions = Some(HouseRestrictionsData::unpack(data, offset)?);
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::HOOK_ITEM_TYPES) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::HookItemType as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::MONARCH) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            iid_properties.insert(
+                PropertyInstanceId::Monarch as u32,
+                Guid(LittleEndian::read_u32(&data[*offset..*offset + 4])),
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::HOOK_TYPE) {
+            if *offset + 2 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::HookType as u32,
+                LittleEndian::read_u16(&data[*offset..*offset + 2]) as i32,
+            );
+            *offset += 2;
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::ICON_OVERLAY) {
+            did_properties.insert(
+                PropertyDataId::IconOverlay as u32,
+                Guid(read_packed_data_id(data, offset, 0x06000000)),
+            );
+        }
+
+        if weenie_flags2.contains(WeenieHeaderFlag2::ICON_UNDERLAY) {
+            did_properties.insert(
+                PropertyDataId::IconUnderlay as u32,
+                Guid(read_packed_data_id(data, offset, 0x06000000)),
+            );
+        }
+
+        if weenie_flags.contains(WeenieHeaderFlag::MATERIAL_TYPE) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::MaterialType as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            int_properties.insert(
+                PropertyInt::SharedCooldown as u32,
+                LittleEndian::read_u32(&data[*offset..*offset + 4]) as i32,
+            );
+            *offset += 4;
+        }
+
+        if weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN_DURATION) {
+            if *offset + 8 > data.len() {
+                return None;
+            }
+            float_properties.insert(
+                PropertyFloat::CooldownDuration as u32,
+                LittleEndian::read_f64(&data[*offset..*offset + 8]),
+            );
+            *offset += 8;
+        }
+
+        if weenie_flags2.contains(WeenieHeaderFlag2::PET_OWNER) {
+            if *offset + 4 > data.len() {
+                return None;
+            }
+            iid_properties.insert(
+                PropertyInstanceId::PetOwner as u32,
+                Guid(LittleEndian::read_u32(&data[*offset..*offset + 4])),
+            );
+            *offset += 4;
+        }
+
+        *offset = align_to_4(*offset);
+
+        Some(PublicWeenieDescription {
+            guid,
+            weenie_flags,
+            name,
+            wcid,
+            icon_id,
+            item_type,
+            obj_desc_flags,
+            weenie_flags2,
+            house_restrictions,
+            int_properties,
+            int64_properties,
+            bool_properties,
+            float_properties,
+            string_properties,
+            did_properties,
+            iid_properties,
+        })
+    }
+
+    pub fn pack_fields(&self, buf: &mut Vec<u8>) {
+        buf.write_u32::<LittleEndian>(self.weenie_flags.bits())
+            .unwrap();
+        write_string16(buf, self.name.as_deref().unwrap_or(""));
+        write_packed_wclass_id(buf, self.wcid);
+        write_packed_data_id(buf, self.icon_id, 0x06000000);
+        buf.write_u32::<LittleEndian>(self.item_type).unwrap();
+        buf.write_u32::<LittleEndian>(self.obj_desc_flags.bits())
+            .unwrap();
+        pad_to_4(buf);
+
+        if self
+            .obj_desc_flags
+            .contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER)
+        {
+            buf.write_u32::<LittleEndian>(self.weenie_flags2.bits())
+                .unwrap();
+        }
+
+        if self.weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME) {
+            let val = self
+                .string_properties
+                .get(&(PropertyString::PluralName as u32))
+                .map(|s| s.as_str())
+                .unwrap_or("");
+            write_string16(buf, val);
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::ItemsCapacity as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_i8(val as i8).unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::CONTAINERS_CAPACITY)
+        {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::ContainersCapacity as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_i8(val as i8).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::AmmoType as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val as u16).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::VALUE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::Value as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::USABLE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::ItemUseable as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) {
+            let val = self
+                .float_properties
+                .get(&(PropertyFloat::UseRadius as u32))
+                .copied()
+                .unwrap_or(0.0);
+            buf.write_f32::<LittleEndian>(val as f32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::TargetType as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::UiEffects as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::CombatUse as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u8(val as u8).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::Structure as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val as u16).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::MaxStructure as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val as u16).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::StackSize as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val as u16).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::MaxStackSize as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val as u16).unwrap();
+        }
+
+        if self.weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
+            self.iid_properties
+                .get(&(PropertyInstanceId::Container as u32))
+                .unwrap_or(&Guid::NULL)
+                .pack(buf);
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
+            self.iid_properties
+                .get(&(PropertyInstanceId::Wielder as u32))
+                .unwrap_or(&Guid::NULL)
+                .pack(buf);
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::VALID_LOCATIONS)
+        {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::ValidLocations as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION)
+        {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::CurrentWieldedLocation as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::ClothingPriority as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::RADAR_BLIP_COLOR)
+        {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::RadarBlipColor as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u8(val as u8).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::RADAR_BEHAVIOR) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::ShowableOnRadar as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u8(val as u8).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::PSCRIPT) {
+            let val = self
+                .did_properties
+                .get(&(PropertyDataId::PhysicsScript as u32))
+                .map(|g| g.0 as u16)
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::WORKMANSHIP) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::ItemWorkmanship as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_f32::<LittleEndian>(val as f32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::EncumbranceVal as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val as u16).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::SPELL) {
+            let val = self
+                .did_properties
+                .get(&(PropertyDataId::Spell as u32))
+                .map(|g| g.0 as u16)
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::HOUSE_OWNER) {
+            self.iid_properties
+                .get(&(PropertyInstanceId::HouseOwner as u32))
+                .unwrap_or(&Guid::NULL)
+                .pack(buf);
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::HOUSE_RESTRICTIONS)
+        {
+            if let Some(restrictions) = &self.house_restrictions {
+                restrictions.pack(buf);
+            } else {
+                buf.write_u32::<LittleEndian>(0).unwrap();
+                buf.write_u32::<LittleEndian>(0).unwrap();
+            }
+        }
+        if self
+            .weenie_flags
+            .contains(WeenieHeaderFlag::HOOK_ITEM_TYPES)
+        {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::HookItemType as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MONARCH) {
+            self.iid_properties
+                .get(&(PropertyInstanceId::Monarch as u32))
+                .unwrap_or(&Guid::NULL)
+                .pack(buf);
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::HOOK_TYPE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::HookType as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u16::<LittleEndian>(val as u16).unwrap();
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::ICON_OVERLAY) {
+            let val = self
+                .did_properties
+                .get(&(PropertyDataId::IconOverlay as u32))
+                .map(|g| g.0)
+                .unwrap_or(0);
+            write_packed_data_id(buf, val, 0x06000000);
+        }
+        if self
+            .weenie_flags2
+            .contains(WeenieHeaderFlag2::ICON_UNDERLAY)
+        {
+            let val = self
+                .did_properties
+                .get(&(PropertyDataId::IconUnderlay as u32))
+                .map(|g| g.0)
+                .unwrap_or(0);
+            write_packed_data_id(buf, val, 0x06000000);
+        }
+        if self.weenie_flags.contains(WeenieHeaderFlag::MATERIAL_TYPE) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::MaterialType as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self.weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN) {
+            let val = self
+                .int_properties
+                .get(&(PropertyInt::SharedCooldown as u32))
+                .copied()
+                .unwrap_or(0);
+            buf.write_u32::<LittleEndian>(val as u32).unwrap();
+        }
+        if self
+            .weenie_flags2
+            .contains(WeenieHeaderFlag2::COOLDOWN_DURATION)
+        {
+            let val = self
+                .float_properties
+                .get(&(PropertyFloat::CooldownDuration as u32))
+                .copied()
+                .unwrap_or(0.0);
+            buf.write_f64::<LittleEndian>(val).unwrap();
+        }
+        if self.weenie_flags2.contains(WeenieHeaderFlag2::PET_OWNER) {
+            self.iid_properties
+                .get(&(PropertyInstanceId::PetOwner as u32))
+                .unwrap_or(&Guid::NULL)
+                .pack(buf);
+        }
+        pad_to_4(buf);
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ObjectDescriptionData {
-    pub guid: Guid,
     pub model_data: ModelData,
     pub physics_flags: PhysicsDescriptionFlag,
     pub physics_state: PhysicsState,
@@ -206,55 +996,12 @@ pub struct ObjectDescriptionData {
     pub default_script_id: Option<u32>,
     pub default_script_intensity: Option<f32>,
     pub sequences: [u16; 9],
-    pub weenie_flags: WeenieHeaderFlag,
-    pub name: Option<String>,
-    pub wcid: u32,
-    pub icon_id: u32,
-    pub item_type: u32,
-    pub obj_desc_flags: ObjectDescriptionFlag,
-    pub weenie_flags2: WeenieHeaderFlag2,
-    pub plural_name: Option<String>,
-    pub items_capacity: Option<i8>,
-    pub containers_capacity: Option<i8>,
-    pub ammo_type: Option<u16>,
-    pub value: Option<u32>,
-    pub usable: Option<u32>,
-    pub use_radius: Option<f32>,
-    pub target_type: Option<u32>,
-    pub ui_effects: Option<u32>,
-    pub combat_use: Option<u8>,
-    pub structure: Option<u16>,
-    pub max_structure: Option<u16>,
-    pub stack_size: Option<u16>,
-    pub max_stack_size: Option<u16>,
-    pub container_id: Option<Guid>,
-    pub wielder_id: Option<Guid>,
-    pub valid_locations: Option<u32>,
-    pub currently_wielded_location: Option<u32>,
-    pub priority: Option<u32>,
-    pub radar_blip_color: Option<u8>,
-    pub radar_enum: Option<u8>,
-    pub pscript: Option<u16>,
-    pub workmanship: Option<f32>,
-    pub burden: Option<u16>,
-    pub spell: Option<u16>,
-    pub house_owner: Option<Guid>,
-    pub house_restrictions: Option<HouseRestrictionsData>,
-    pub hook_item_types: Option<u32>,
-    pub monarch_id: Option<Guid>,
-    pub hook_type: Option<u16>,
-    pub icon_overlay_id: Option<u32>,
-    pub icon_underlay_id: Option<u32>,
-    pub material_type: Option<u32>,
-    pub cooldown_id: Option<u32>,
-    pub cooldown_duration: Option<f64>,
-    pub pet_owner: Option<Guid>,
+    pub public_weenie_desc: PublicWeenieDescription,
 }
 
 impl Default for ObjectDescriptionData {
     fn default() -> Self {
         Self {
-            guid: Guid::NULL,
             model_data: ModelData::default(),
             physics_flags: PhysicsDescriptionFlag::empty(),
             physics_state: PhysicsState::empty(),
@@ -279,50 +1026,16 @@ impl Default for ObjectDescriptionData {
             default_script_id: None,
             default_script_intensity: None,
             sequences: [0; 9],
-            weenie_flags: WeenieHeaderFlag::empty(),
-            name: None,
-            wcid: 0,
-            icon_id: 0,
-            item_type: 0,
-            obj_desc_flags: ObjectDescriptionFlag::empty(),
-            weenie_flags2: WeenieHeaderFlag2::empty(),
-            plural_name: None,
-            items_capacity: None,
-            containers_capacity: None,
-            ammo_type: None,
-            value: None,
-            usable: None,
-            use_radius: None,
-            target_type: None,
-            ui_effects: None,
-            combat_use: None,
-            structure: None,
-            max_structure: None,
-            stack_size: None,
-            max_stack_size: None,
-            container_id: None,
-            wielder_id: None,
-            valid_locations: None,
-            currently_wielded_location: None,
-            priority: None,
-            radar_blip_color: None,
-            radar_enum: None,
-            pscript: None,
-            workmanship: None,
-            burden: None,
-            spell: None,
-            house_owner: None,
-            house_restrictions: None,
-            hook_item_types: None,
-            monarch_id: None,
-            hook_type: None,
-            icon_overlay_id: None,
-            icon_underlay_id: None,
-            material_type: None,
-            cooldown_id: None,
-            cooldown_duration: None,
-            pet_owner: None,
+            public_weenie_desc: PublicWeenieDescription::default(),
         }
+    }
+}
+
+impl ObjectDescriptionData {
+    pub fn with_guid(guid: Guid) -> Self {
+        let mut obj = Self::default();
+        obj.public_weenie_desc.guid = guid;
+        obj
     }
 }
 
@@ -550,336 +1263,9 @@ impl ProtocolUnpack for ObjectDescriptionData {
         }
         *offset = align_to_4(*offset);
 
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let weenie_flags_bits = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let weenie_flags = WeenieHeaderFlag::from_bits_retain(weenie_flags_bits);
-        *offset += 4;
-
-        let name = read_string16(data, offset);
-        let wcid = read_packed_wclass_id(data, offset);
-        let icon_id = read_packed_data_id(data, offset, 0x06000000);
-        if *offset + 8 > data.len() {
-            return None;
-        }
-        let item_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        let obj_desc_flags_bits = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-        let obj_desc_flags = ObjectDescriptionFlag::from_bits_retain(obj_desc_flags_bits);
-        *offset += 8;
-        *offset = align_to_4(*offset);
-
-        let mut weenie_flags2 = WeenieHeaderFlag2::empty();
-        if obj_desc_flags.contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            weenie_flags2 = WeenieHeaderFlag2::from_bits_retain(LittleEndian::read_u32(
-                &data[*offset..*offset + 4],
-            ));
-            *offset += 4;
-        }
-
-        let mut plural_name = None;
-        if weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME) {
-            plural_name = read_string16(data, offset);
-        }
-
-        let mut items_capacity = None;
-        if weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) {
-            if *offset >= data.len() {
-                return None;
-            }
-            items_capacity = Some(data[*offset] as i8);
-            *offset += 1;
-        }
-
-        let mut containers_capacity = None;
-        if weenie_flags.contains(WeenieHeaderFlag::CONTAINERS_CAPACITY) {
-            if *offset >= data.len() {
-                return None;
-            }
-            containers_capacity = Some(data[*offset] as i8);
-            *offset += 1;
-        }
-
-        let mut ammo_type = None;
-        if weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            ammo_type = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut value = None;
-        if weenie_flags.contains(WeenieHeaderFlag::VALUE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            value = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut usable = None;
-        if weenie_flags.contains(WeenieHeaderFlag::USABLE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            usable = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut use_radius = None;
-        if weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            use_radius = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut target_type = None;
-        if weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            target_type = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut ui_effects = None;
-        if weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            ui_effects = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut combat_use = None;
-        if weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) {
-            if *offset >= data.len() {
-                return None;
-            }
-            combat_use = Some(data[*offset]);
-            *offset += 1;
-        }
-
-        let mut structure = None;
-        if weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            structure = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut max_structure = None;
-        if weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            max_structure = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut stack_size = None;
-        if weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            stack_size = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut max_stack_size = None;
-        if weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            max_stack_size = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut container_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
-            container_id = Some(Guid::unpack(data, offset)?);
-        }
-        let mut wielder_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
-            wielder_id = Some(Guid::unpack(data, offset)?);
-        }
-        let mut valid_locations = None;
-        if weenie_flags.contains(WeenieHeaderFlag::VALID_LOCATIONS) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            valid_locations = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-        let mut currently_wielded_location = None;
-        if weenie_flags.contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            currently_wielded_location = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-        let mut priority = None;
-        if weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            priority = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut radar_blip_color = None;
-        if weenie_flags.contains(WeenieHeaderFlag::RADAR_BLIP_COLOR) {
-            if *offset >= data.len() {
-                return None;
-            }
-            radar_blip_color = Some(data[*offset]);
-            *offset += 1;
-        }
-
-        let mut radar_enum = None;
-        if weenie_flags.contains(WeenieHeaderFlag::RADAR_BEHAVIOR) {
-            if *offset >= data.len() {
-                return None;
-            }
-            radar_enum = Some(data[*offset]);
-            *offset += 1;
-        }
-
-        let mut pscript = None;
-        if weenie_flags.contains(WeenieHeaderFlag::PSCRIPT) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            pscript = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut workmanship = None;
-        if weenie_flags.contains(WeenieHeaderFlag::WORKMANSHIP) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            workmanship = Some(LittleEndian::read_f32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut burden = None;
-        if weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            burden = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut spell = None;
-        if weenie_flags.contains(WeenieHeaderFlag::SPELL) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            spell = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut house_owner = None;
-        if weenie_flags.contains(WeenieHeaderFlag::HOUSE_OWNER) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            house_owner = Some(Guid(LittleEndian::read_u32(&data[*offset..*offset + 4])));
-            *offset += 4;
-        }
-
-        let mut house_restrictions = None;
-        if weenie_flags.contains(WeenieHeaderFlag::HOUSE_RESTRICTIONS) {
-            house_restrictions = Some(HouseRestrictionsData::unpack(data, offset)?);
-        }
-
-        let mut hook_item_types = None;
-        if weenie_flags.contains(WeenieHeaderFlag::HOOK_ITEM_TYPES) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            hook_item_types = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut monarch_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::MONARCH) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            monarch_id = Some(Guid(LittleEndian::read_u32(&data[*offset..*offset + 4])));
-            *offset += 4;
-        }
-
-        let mut hook_type = None;
-        if weenie_flags.contains(WeenieHeaderFlag::HOOK_TYPE) {
-            if *offset + 2 > data.len() {
-                return None;
-            }
-            hook_type = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
-            *offset += 2;
-        }
-
-        let mut icon_overlay_id = None;
-        if weenie_flags.contains(WeenieHeaderFlag::ICON_OVERLAY) {
-            icon_overlay_id = Some(read_packed_data_id(data, offset, 0x06000000));
-        }
-
-        let mut icon_underlay_id = None;
-        if weenie_flags2.contains(WeenieHeaderFlag2::ICON_UNDERLAY) {
-            icon_underlay_id = Some(read_packed_data_id(data, offset, 0x06000000));
-        }
-
-        let mut material_type = None;
-        if weenie_flags.contains(WeenieHeaderFlag::MATERIAL_TYPE) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            material_type = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut cooldown_id = None;
-        if weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            cooldown_id = Some(LittleEndian::read_u32(&data[*offset..*offset + 4]));
-            *offset += 4;
-        }
-
-        let mut cooldown_duration = None;
-        if weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN_DURATION) {
-            if *offset + 8 > data.len() {
-                return None;
-            }
-            cooldown_duration = Some(LittleEndian::read_f64(&data[*offset..*offset + 8]));
-            *offset += 8;
-        }
-
-        let mut pet_owner = None;
-        if weenie_flags2.contains(WeenieHeaderFlag2::PET_OWNER) {
-            if *offset + 4 > data.len() {
-                return None;
-            }
-            pet_owner = Some(Guid(LittleEndian::read_u32(&data[*offset..*offset + 4])));
-            *offset += 4;
-        }
-
-        *offset = align_to_4(*offset);
+        let public_weenie_desc = PublicWeenieDescription::unpack_fields(data, offset, guid)?;
 
         Some(ObjectDescriptionData {
-            guid,
             model_data,
             physics_flags,
             physics_state,
@@ -904,56 +1290,14 @@ impl ProtocolUnpack for ObjectDescriptionData {
             default_script_id,
             default_script_intensity,
             sequences,
-            weenie_flags,
-            name,
-            wcid,
-            icon_id,
-            item_type,
-            obj_desc_flags,
-            weenie_flags2,
-            plural_name,
-            items_capacity,
-            containers_capacity,
-            ammo_type,
-            value,
-            usable,
-            use_radius,
-            target_type,
-            ui_effects,
-            combat_use,
-            structure,
-            max_structure,
-            stack_size,
-            max_stack_size,
-            container_id,
-            wielder_id,
-            valid_locations,
-            currently_wielded_location,
-            priority,
-            radar_blip_color,
-            radar_enum,
-            pscript,
-            workmanship,
-            burden,
-            spell,
-            house_owner,
-            house_restrictions,
-            hook_item_types,
-            monarch_id,
-            hook_type,
-            icon_overlay_id,
-            icon_underlay_id,
-            material_type,
-            cooldown_id,
-            cooldown_duration,
-            pet_owner,
+            public_weenie_desc,
         })
     }
 }
 
 impl ProtocolPack for ObjectDescriptionData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        self.guid.pack(buf);
+        self.public_weenie_desc.guid.pack(buf);
         self.model_data.pack(buf);
         buf.write_u32::<LittleEndian>(self.physics_flags.bits())
             .unwrap();
@@ -1091,188 +1435,7 @@ impl ProtocolPack for ObjectDescriptionData {
         }
         pad_to_4(buf);
 
-        buf.write_u32::<LittleEndian>(self.weenie_flags.bits())
-            .unwrap();
-        write_string16(buf, self.name.as_deref().unwrap_or(""));
-        write_packed_wclass_id(buf, self.wcid);
-        write_packed_data_id(buf, self.icon_id, 0x06000000);
-        buf.write_u32::<LittleEndian>(self.item_type).unwrap();
-        buf.write_u32::<LittleEndian>(self.obj_desc_flags.bits())
-            .unwrap();
-        pad_to_4(buf);
-
-        if self
-            .obj_desc_flags
-            .contains(ObjectDescriptionFlag::INCLUDES_SECOND_HEADER)
-        {
-            buf.write_u32::<LittleEndian>(self.weenie_flags2.bits())
-                .unwrap();
-        }
-
-        if self.weenie_flags.contains(WeenieHeaderFlag::PLURAL_NAME) {
-            write_string16(buf, self.plural_name.as_deref().unwrap_or(""));
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::ITEMS_CAPACITY) {
-            buf.write_i8(self.items_capacity.unwrap_or(0)).unwrap();
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::CONTAINERS_CAPACITY)
-        {
-            buf.write_i8(self.containers_capacity.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::AMMO_TYPE) {
-            buf.write_u16::<LittleEndian>(self.ammo_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::VALUE) {
-            buf.write_u32::<LittleEndian>(self.value.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::USABLE) {
-            buf.write_u32::<LittleEndian>(self.usable.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::USE_RADIUS) {
-            buf.write_f32::<LittleEndian>(self.use_radius.unwrap_or(0.0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::TARGET_TYPE) {
-            buf.write_u32::<LittleEndian>(self.target_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::UI_EFFECTS) {
-            buf.write_u32::<LittleEndian>(self.ui_effects.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::COMBAT_USE) {
-            buf.write_u8(self.combat_use.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::STRUCTURE) {
-            buf.write_u16::<LittleEndian>(self.structure.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STRUCTURE) {
-            buf.write_u16::<LittleEndian>(self.max_structure.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::STACK_SIZE) {
-            buf.write_u16::<LittleEndian>(self.stack_size.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MAX_STACK_SIZE) {
-            buf.write_u16::<LittleEndian>(self.max_stack_size.unwrap_or(0))
-                .unwrap();
-        }
-
-        if self.weenie_flags.contains(WeenieHeaderFlag::CONTAINER) {
-            self.container_id.unwrap().pack(buf);
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::WIELDER) {
-            self.wielder_id.unwrap().pack(buf);
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::VALID_LOCATIONS)
-        {
-            buf.write_u32::<LittleEndian>(self.valid_locations.unwrap_or(0))
-                .unwrap();
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::CURRENTLY_WIELDED_LOCATION)
-        {
-            buf.write_u32::<LittleEndian>(self.currently_wielded_location.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::PRIORITY) {
-            buf.write_u32::<LittleEndian>(self.priority.unwrap_or(0))
-                .unwrap();
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::RADAR_BLIP_COLOR)
-        {
-            buf.write_u8(self.radar_blip_color.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::RADAR_BEHAVIOR) {
-            buf.write_u8(self.radar_enum.unwrap_or(0)).unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::PSCRIPT) {
-            buf.write_u16::<LittleEndian>(self.pscript.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::WORKMANSHIP) {
-            buf.write_f32::<LittleEndian>(self.workmanship.unwrap_or(0.0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::BURDEN) {
-            buf.write_u16::<LittleEndian>(self.burden.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::SPELL) {
-            buf.write_u16::<LittleEndian>(self.spell.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::HOUSE_OWNER) {
-            self.house_owner.unwrap_or(Guid::NULL).pack(buf);
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::HOUSE_RESTRICTIONS)
-        {
-            if let Some(restrictions) = &self.house_restrictions {
-                restrictions.pack(buf);
-            } else {
-                // When house restrictions are absent, the wire format still expects
-                // two u32 fields for the restrictions structure; write them as zeros
-                // to represent "no house restrictions" according to the protocol.
-                buf.write_u32::<LittleEndian>(0).unwrap();
-                buf.write_u32::<LittleEndian>(0).unwrap();
-            }
-        }
-        if self
-            .weenie_flags
-            .contains(WeenieHeaderFlag::HOOK_ITEM_TYPES)
-        {
-            buf.write_u32::<LittleEndian>(self.hook_item_types.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MONARCH) {
-            self.monarch_id.unwrap_or(Guid::NULL).pack(buf);
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::HOOK_TYPE) {
-            buf.write_u16::<LittleEndian>(self.hook_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::ICON_OVERLAY) {
-            write_packed_data_id(buf, self.icon_overlay_id.unwrap_or(0), 0x06000000);
-        }
-        if self
-            .weenie_flags2
-            .contains(WeenieHeaderFlag2::ICON_UNDERLAY)
-        {
-            write_packed_data_id(buf, self.icon_underlay_id.unwrap_or(0), 0x06000000);
-        }
-        if self.weenie_flags.contains(WeenieHeaderFlag::MATERIAL_TYPE) {
-            buf.write_u32::<LittleEndian>(self.material_type.unwrap_or(0))
-                .unwrap();
-        }
-        if self.weenie_flags2.contains(WeenieHeaderFlag2::COOLDOWN) {
-            buf.write_u32::<LittleEndian>(self.cooldown_id.unwrap_or(0))
-                .unwrap();
-        }
-        if self
-            .weenie_flags2
-            .contains(WeenieHeaderFlag2::COOLDOWN_DURATION)
-        {
-            buf.write_f64::<LittleEndian>(self.cooldown_duration.unwrap_or(0.0))
-                .unwrap();
-        }
-        if self.weenie_flags2.contains(WeenieHeaderFlag2::PET_OWNER) {
-            self.pet_owner.unwrap_or(Guid::NULL).pack(buf);
-        }
-        pad_to_4(buf);
+        self.public_weenie_desc.pack_fields(buf);
     }
 }
 
@@ -1284,7 +1447,6 @@ mod tests {
     #[test]
     fn retains_extended_physics_and_weenie_fields_roundtrip() {
         let original = ObjectDescriptionData {
-            guid: Guid(0x50000042),
             model_data: ModelData {
                 header: 0x11,
                 ..Default::default()
@@ -1328,37 +1490,48 @@ mod tests {
             default_script_id: Some(0x33000001),
             default_script_intensity: Some(0.75),
             sequences: [1, 2, 3, 4, 5, 6, 7, 8, 9],
-            weenie_flags: WeenieHeaderFlag::PLURAL_NAME
-                | WeenieHeaderFlag::ITEMS_CAPACITY
-                | WeenieHeaderFlag::VALUE
-                | WeenieHeaderFlag::COMBAT_USE
-                | WeenieHeaderFlag::SPELL
-                | WeenieHeaderFlag::HOUSE_RESTRICTIONS
-                | WeenieHeaderFlag::ICON_OVERLAY
-                | WeenieHeaderFlag::MATERIAL_TYPE,
-            name: Some("Roundtrip Object".to_string()),
-            wcid: 1234,
-            icon_id: 0x06000010,
-            item_type: 1,
-            obj_desc_flags: ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
-            weenie_flags2: WeenieHeaderFlag2::ICON_UNDERLAY | WeenieHeaderFlag2::COOLDOWN,
-            plural_name: Some("Roundtrip Objects".to_string()),
-            items_capacity: Some(12),
-            value: Some(42),
-            combat_use: Some(1),
-            spell: Some(0x9001),
-            house_restrictions: Some(HouseRestrictionsData {
-                version: 0x10000002,
-                bitmask: Some(1),
-                monarch_id: Some(Guid(0x50000077)),
-                open_house: None,
-                bucket_count: 0,
-                entries: vec![(0x50000088, 1)],
-            }),
-            icon_overlay_id: Some(0x06000022),
-            icon_underlay_id: Some(0x06000023),
-            material_type: Some(5),
-            cooldown_id: Some(100),
+            public_weenie_desc: PublicWeenieDescription {
+                guid: Guid(0x50000042),
+                weenie_flags: WeenieHeaderFlag::PLURAL_NAME
+                    | WeenieHeaderFlag::ITEMS_CAPACITY
+                    | WeenieHeaderFlag::VALUE
+                    | WeenieHeaderFlag::COMBAT_USE
+                    | WeenieHeaderFlag::SPELL
+                    | WeenieHeaderFlag::HOUSE_RESTRICTIONS
+                    | WeenieHeaderFlag::ICON_OVERLAY
+                    | WeenieHeaderFlag::MATERIAL_TYPE,
+                name: Some("Roundtrip Object".to_string()),
+                wcid: 1234,
+                icon_id: 0x06000010,
+                item_type: 1,
+                obj_desc_flags: ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
+                weenie_flags2: WeenieHeaderFlag2::ICON_UNDERLAY | WeenieHeaderFlag2::COOLDOWN,
+                house_restrictions: Some(HouseRestrictionsData {
+                    version: 0x10000002,
+                    bitmask: Some(1),
+                    monarch_id: Some(Guid(0x50000077)),
+                    open_house: None,
+                    bucket_count: 0,
+                    entries: vec![(0x50000088, 1)],
+                }),
+                string_properties: BTreeMap::from([(
+                    PropertyString::PluralName as u32,
+                    "Roundtrip Objects".to_string(),
+                )]),
+                int_properties: BTreeMap::from([
+                    (PropertyInt::ItemsCapacity as u32, 12),
+                    (PropertyInt::Value as u32, 42),
+                    (PropertyInt::CombatUse as u32, 1),
+                    (PropertyInt::MaterialType as u32, 5),
+                    (PropertyInt::SharedCooldown as u32, 100),
+                ]),
+                did_properties: BTreeMap::from([
+                    (PropertyDataId::Spell as u32, Guid(0x9001)),
+                    (PropertyDataId::IconOverlay as u32, Guid(0x06000022)),
+                    (PropertyDataId::IconUnderlay as u32, Guid(0x06000023)),
+                ]),
+                ..Default::default()
+            },
             ..Default::default()
         };
 

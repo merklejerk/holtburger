@@ -167,15 +167,15 @@ impl Client {
                 }
                 GameEvent::WeenieError(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
-                        error_id: data.error_id,
-                        message: None,
+                        error: data.error,
+                        parameter: None,
                     });
                     Ok(())
                 }
                 GameEvent::WeenieErrorWithString(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
-                        error_id: data.error_id,
-                        message: Some(data.message.clone()),
+                        error: data.error,
+                        parameter: Some(data.parameter.clone()),
                     });
                     Ok(())
                 }
@@ -187,9 +187,25 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
-                    self.emit_wire_event(WireEvent::UseDone {
-                        error_id: data.error_id,
-                    });
+                    self.emit_wire_event(WireEvent::UseDone { error: data.error });
+                    Ok(())
+                }
+                GameEvent::RegisterTrade(data) => {
+                    let partner_guid = if data.initiator == self.world.player.guid {
+                        data.partner
+                    } else {
+                        data.initiator
+                    };
+                    let partner_name = self
+                        .world
+                        .entities
+                        .get(partner_guid)
+                        .map(|e| e.name.clone())
+                        .unwrap_or_else(|| format!("0x{:08X}", partner_guid.0));
+                    self.emit_wire_event(WireEvent::ServerMessage(format!(
+                        "Trade started with {}.",
+                        partner_name
+                    )));
                     Ok(())
                 }
                 _ => Ok(()),

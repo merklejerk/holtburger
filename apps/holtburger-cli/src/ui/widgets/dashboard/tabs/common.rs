@@ -30,6 +30,14 @@ pub enum Action {
     Cast(bool),
     Confirm(String),
     Cancel,
+    Buy,
+    Sell,
+    AddToTrade,
+    AcceptTrade,
+    DeclineTrade,
+    ResetTrade,
+    Exit,
+    OpenTrade,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,9 +51,11 @@ pub struct Verb {
 pub fn handle_base_action(
     action: &Action,
     target: &CommandTarget,
-    player_guid: Option<Guid>,
-    active_interaction: Option<ActiveInteraction>,
+    game: &GameState,
 ) -> Option<UIEffect> {
+    let player_guid = game.data.player_guid;
+    let active_interaction = game.view.active_interaction;
+
     match (action, target) {
         (Action::Assess, CommandTarget::Entity(e, _)) => Some(UIEffect::Assess(e.guid)),
         (Action::Use, CommandTarget::Entity(e, _)) => {
@@ -58,14 +68,69 @@ pub fn handle_base_action(
         (Action::Drop, CommandTarget::Entity(e, _)) => {
             Some(UIEffect::Command(ClientCommand::Drop(e.guid)))
         }
+        (Action::Buy, CommandTarget::VendorItem(v)) => {
+            game.data.vendor.as_ref().map(|vendor| {
+                UIEffect::Command(ClientCommand::Buy {
+                    vendor: vendor.vendor_guid,
+                    items: vec![
+                        holtburger_protocol::messages::trade::actions::ItemProfileActionData {
+                            object_guid: v.description.guid,
+                            amount: 1, // Default to 1 for now
+                        },
+                    ],
+                })
+            })
+        }
+        (Action::Sell, CommandTarget::Entity(e, _)) => {
+            game.data.vendor.as_ref().map(|vendor| {
+                UIEffect::Command(ClientCommand::Sell {
+                    vendor: vendor.vendor_guid,
+                    items: vec![
+                        holtburger_protocol::messages::trade::actions::ItemProfileActionData {
+                            object_guid: e.guid,
+                            amount: 1, // Default to 1 for now
+                        },
+                    ],
+                })
+            })
+        }
+        (Action::AddToTrade, CommandTarget::Entity(e, _)) => {
+            Some(UIEffect::Command(ClientCommand::AddToTrade {
+                item: e.guid,
+            }))
+        }
+        (Action::AcceptTrade, _) => Some(UIEffect::Command(ClientCommand::AcceptTrade)),
+        (Action::DeclineTrade, _) => Some(UIEffect::Command(ClientCommand::DeclineTrade)),
+        (Action::ResetTrade, _) => Some(UIEffect::Command(ClientCommand::ResetTrade)),
+        (Action::Exit, _) => {
+            if game.data.trade.is_some() {
+                Some(UIEffect::Command(ClientCommand::CloseTrade))
+            } else if game.data.vendor.is_some() {
+                Some(UIEffect::ClearVendor)
+            } else {
+                None
+            }
+        }
+        (Action::OpenTrade, CommandTarget::Entity(e, _)) => {
+            Some(UIEffect::Command(ClientCommand::OpenTrade(e.guid)))
+        }
         (Action::Debug, target) => match target {
             CommandTarget::Spell(sid) => Some(UIEffect::ActivateDebugSpell(*sid)),
             CommandTarget::Enchantment(e) => Some(UIEffect::ActivateDebugEnchantment(*e)),
             CommandTarget::Entity(e, _) => Some(UIEffect::ActivateDebugEntity(e.guid)),
+            CommandTarget::VendorItem(v) => Some(UIEffect::ActivateDebugEntity(v.description.guid)),
             _ => None,
         },
-        (Action::Move, CommandTarget::Entity(e, _)) => Some(UIEffect::Move(e.guid)),
-        (Action::Target, CommandTarget::Entity(e, _)) => Some(UIEffect::Target(e.guid)),
+        (Action::Move, target) => match target {
+            CommandTarget::Entity(e, _) => Some(UIEffect::Move(e.guid)),
+            CommandTarget::VendorItem(v) => Some(UIEffect::Move(v.description.guid)),
+            _ => None,
+        },
+        (Action::Target, target) => match target {
+            CommandTarget::Entity(e, _) => Some(UIEffect::Target(e.guid)),
+            CommandTarget::VendorItem(v) => Some(UIEffect::Target(v.description.guid)),
+            _ => None,
+        },
         (Action::Confirm(_), target) => {
             if let Some(interaction) = active_interaction {
                 match interaction.mode {
@@ -90,7 +155,17 @@ pub fn handle_base_action(
                                 _ => Some(UIEffect::Give(e.guid)),
                             }
                         }
-                        _ => player_guid.map(UIEffect::ApplyMoving),
+                        _ => {
+                            if game.view.dashboard_tab == crate::ui::DashboardTab::Trade {
+                                Some(UIEffect::Command(
+                                    holtburger_core::client::types::ClientCommand::AddToTrade {
+                                        item: interaction.guid,
+                                    },
+                                ))
+                            } else {
+                                player_guid.map(UIEffect::ApplyMoving)
+                            }
+                        }
                     },
                     InteractionMode::Target => match target {
                         CommandTarget::Entity(e, _) => Some(UIEffect::Target(e.guid)),
@@ -147,6 +222,7 @@ pub fn get_interaction_verbs(
     target: &CommandTarget,
     player_guid: Option<Guid>,
     active_interaction: Option<ActiveInteraction>,
+    _dashboard_tab: crate::ui::DashboardTab,
 ) -> Option<Vec<Verb>> {
     let interaction = active_interaction?;
 
@@ -162,14 +238,17 @@ pub fn get_interaction_verbs(
                     let class = classification::classify_entity(e);
                     let is_creature = matches!(
                         class,
-                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                        EntityClass::Player
+                            | EntityClass::Monster
+                            | EntityClass::Npc
+                            | EntityClass::Vendor
                     );
                     let is_self = Some(e.guid) == player_guid;
                     if !is_self {
                         let is_container =
                             matches!(class, EntityClass::Container | EntityClass::Chest);
                         let is_subject = e.guid == interaction.guid;
-                        let is_in_main_pack = e.container_id == player_guid;
+                        let is_in_main_pack = e.container_id() == player_guid;
 
                         if is_subject && !is_in_main_pack {
                             verbs.push(Verb::new(
@@ -196,7 +275,10 @@ pub fn get_interaction_verbs(
                     let class = classification::classify_entity(e);
                     let is_creature = matches!(
                         class,
-                        EntityClass::Player | EntityClass::Monster | EntityClass::Npc
+                        EntityClass::Player
+                            | EntityClass::Monster
+                            | EntityClass::Npc
+                            | EntityClass::Vendor
                     );
 
                     if is_creature || e.guid == interaction.guid {
@@ -223,7 +305,7 @@ pub fn get_interaction_verbs(
             };
             Some(vec![
                 Verb::new(Action::Cast(is_targeted), 'c', label),
-                Verb::new(Action::Debug, 'b', "Debug"),
+                Verb::new(Action::Debug, 'g', "Debug"),
             ])
         }
         _ => {

@@ -1,4 +1,5 @@
 use crate::ui::state::{AppState, ChatMessageKind};
+use crate::ui::widgets::dashboard::tabs::classification;
 use crate::ui::{ActiveInteraction, ContextView, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
@@ -19,6 +20,7 @@ pub enum UIEffect {
     ApplyMoving(Guid),
     Target(Guid),
     CancelInteraction,
+    ClearVendor,
     Log(ChatMessageKind, String),
     DisplayClientInfo,
 }
@@ -73,8 +75,50 @@ impl UpdateResult {
 /// Applies a UI effect to the app state and returns any resulting client commands.
 pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientCommand> {
     match effect {
-        UIEffect::Command(cmd) => vec![cmd],
-        UIEffect::Commands(cmds) => cmds,
+        UIEffect::Command(cmd) => {
+            if let Some(game) = state.game_option_mut() {
+                match &cmd {
+                    ClientCommand::Use(guid) => {
+                        // Check if it's a vendor
+                        if let Some(e) = game.data.entities.get(guid) {
+                            let class = classification::classify_entity(e);
+                            if class == classification::EntityClass::Vendor {
+                                game.view.last_trade_initiation =
+                                    Some((std::time::Instant::now(), *guid));
+                            }
+                        }
+                    }
+                    ClientCommand::OpenTrade(guid) => {
+                        game.view.last_trade_initiation = Some((std::time::Instant::now(), *guid));
+                    }
+                    _ => {}
+                }
+            }
+            vec![cmd]
+        }
+        UIEffect::Commands(cmds) => {
+            if let Some(game) = state.game_option_mut() {
+                for cmd in &cmds {
+                    match cmd {
+                        ClientCommand::Use(guid) => {
+                            if let Some(e) = game.data.entities.get(guid) {
+                                let class = classification::classify_entity(e);
+                                if class == classification::EntityClass::Vendor {
+                                    game.view.last_trade_initiation =
+                                        Some((std::time::Instant::now(), *guid));
+                                }
+                            }
+                        }
+                        ClientCommand::OpenTrade(guid) => {
+                            game.view.last_trade_initiation =
+                                Some((std::time::Instant::now(), *guid));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            cmds
+        }
         UIEffect::Assess(guid) => {
             if let Some(game) = state.game_option_mut() {
                 game.view.context_view = ContextView::Assess(guid);
@@ -178,6 +222,12 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         UIEffect::CancelInteraction => {
             if let Some(game) = state.game_option_mut() {
                 game.view.active_interaction = None;
+            }
+            vec![]
+        }
+        UIEffect::ClearVendor => {
+            if let Some(game) = state.game_option_mut() {
+                game.data.vendor = None;
             }
             vec![]
         }

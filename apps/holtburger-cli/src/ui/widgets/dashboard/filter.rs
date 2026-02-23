@@ -24,14 +24,13 @@ pub fn filter_entities<'a>(
         .values()
         .filter(|e| match filter {
             EntityFilter::World => {
-                let is_combat_implement = e
-                    .valid_locations
-                    .map(|loc| (loc.bits() & PseudoEquipMask::COMBAT_IMPLEMENTS.bits()) != 0)
-                    .unwrap_or(false);
+                let loc = e.valid_locations();
+                let is_combat_implement =
+                    (loc.bits() & PseudoEquipMask::COMBAT_IMPLEMENTS.bits()) != 0;
 
                 classification::is_targetable(e)
                     && (e.position.landblock_id != Guid::NULL
-                        || (e.wielder_id.is_some() && is_combat_implement)
+                        || (e.wielder_id().is_some() && is_combat_implement)
                         || e.physics_parent_id.is_some())
             }
             EntityFilter::Inventory => {
@@ -53,8 +52,8 @@ pub fn filter_entities<'a>(
 
     for e in &candidates {
         let parent_id = match filter {
-            EntityFilter::World => e.container_id.or(e.wielder_id).or(e.physics_parent_id),
-            EntityFilter::Inventory => e.container_id,
+            EntityFilter::World => e.container_id().or(e.wielder_id()).or(e.physics_parent_id),
+            EntityFilter::Inventory => e.container_id(),
         };
 
         let is_root = if let Some(pid) = parent_id {

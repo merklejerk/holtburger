@@ -1,7 +1,8 @@
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    CombatUse, EquipMask, ItemType, ObjectDescriptionFlag, PhysicsState, RadarBehavior, RadarColor,
-    Usable, WeenieHeaderFlag, WeenieHeaderFlag2,
+    AttunedStatus, CombatUse, EquipMask, ItemType, ObjectDescriptionFlag, PhysicsState,
+    PropertyBool, PropertyInstanceId, PropertyInt, RadarBehavior, RadarColor, Usable,
+    WeenieHeaderFlag, WeenieHeaderFlag2,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::object::types::{
@@ -104,6 +105,59 @@ pub struct Entity {
 }
 
 impl Entity {
+    pub fn get_bool_prop(&self, prop: PropertyBool) -> bool {
+        self.bool_properties
+            .get(&(prop as u32))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    pub fn get_int_prop(&self, prop: PropertyInt) -> Option<i32> {
+        self.int_properties.get(&(prop as u32)).copied()
+    }
+
+    pub fn get_instance_prop(&self, prop: PropertyInstanceId) -> Option<Guid> {
+        self.iid_properties.get(&(prop as u32)).copied()
+    }
+
+    pub fn attuned_status(&self) -> AttunedStatus {
+        match self.get_int_prop(PropertyInt::Attuned) {
+            Some(1) => AttunedStatus::Attuned,
+            Some(2) => AttunedStatus::Sticky,
+            _ => AttunedStatus::Normal,
+        }
+    }
+
+    pub fn is_sellable_base(&self) -> bool {
+        // IsSellable defaults to True in ACE if not specified
+        let is_sellable = self
+            .bool_properties
+            .get(&(PropertyBool::IsSellable as u32))
+            .copied()
+            .unwrap_or(true);
+        let is_retained = self.get_bool_prop(PropertyBool::Retained);
+        let value = self.value.unwrap_or(0);
+
+        is_sellable && !is_retained && value >= 1
+    }
+
+    pub fn is_tradable_base(&self) -> bool {
+        let attuned = self.attuned_status();
+        if attuned != AttunedStatus::Normal {
+            return false;
+        }
+
+        // Check for active pet
+        if self.get_int_prop(PropertyInt::PetClass).is_some()
+            && let Some(pet_guid) = self.get_instance_prop(PropertyInstanceId::Pet)
+            && !pet_guid.is_null()
+        {
+            return false;
+        }
+
+        true
+    }
+
     pub fn new(guid: Guid, name: String, position: WorldPosition) -> Self {
         Self {
             guid,

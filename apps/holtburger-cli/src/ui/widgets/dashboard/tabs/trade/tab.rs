@@ -39,10 +39,6 @@ impl TabController for TradeTab {
             verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
 
             verbs.extend(super::verbs::get_verbs(e, game));
-            // Add Sell verb if we are talking to a vendor and not in a p2p trade
-            if game.data.vendor.is_some() && game.data.trade.is_none() {
-                verbs.push(Verb::new(Action::Sell, 's', "Sell"));
-            }
         }
 
         if let Some(trade) = &game.data.trade {

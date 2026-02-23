@@ -23,6 +23,7 @@
 - [ ] Chat tabs (Chat vs combat vs all).
 - [ ] Shift+backspace to clear chat input buffer.
 - [ ] Show enchantment source (caster) in enchantment debug.
+- [ ] Don't show Give verb on items that are attuned/sticky.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -97,13 +98,13 @@
 - [x] Currency tracking in trade tab.
 - [x] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
 - [x] Swap `De[b]ug` with `Debu[g]`.
+- [x] Trade tab.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
     - [ ] Auto-attack on target.
-- [x] Trade tab.
 - [ ] Manage in-world containers.
 - [ ] Stacking/Splitting.
 - [ ] Character creation
@@ -115,7 +116,7 @@
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
 - [ ] Log in chat when items are bought and sold.
-- [ ] Restrict sell verb to vendor item mask.
+- [ ] Restrict sell verb to vendor item mask and attuned.
 - [ ] Still showing conflicting verbs during move interaction.
 
 ### Critical

@@ -57,10 +57,11 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
     if let Some(trade) = &game.data.trade
         && !is_equipped
         && !trade.self_side.items.contains(&e.guid)
+        && game.data.can_add_to_trade(e.guid)
     {
         verbs.push(Verb::new(Action::AddToTrade, 'o', "Offer"));
     // If a vendor session is active, allow selling this item
-    } else if game.data.vendor.is_some() {
+    } else if game.data.vendor.is_some() && game.data.can_sell_to_vendor(e.guid) {
         verbs.push(Verb::new(Action::Sell, 's', "Sell"));
     }
 

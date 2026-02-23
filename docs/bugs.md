@@ -39,3 +39,12 @@ This file documents bugs discovered in the ACE Server during development of Holt
 
 ## Equip outside inventory
 - ...
+
+## Out of bounds
+- Looks like you disappear off the map/radar when you go out of bounds (in a wall)? Untargetable?
+
+## Spells are only 2D checks.
+- Z distance doesn't matter.
+
+## Vendor distance
+- Vendoring is stateless and you can buy/sell so long as you are in an adjacent landblock to the vendor.

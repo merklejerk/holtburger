@@ -6,6 +6,7 @@ pub use crate::messages::misc::actions::*;
 pub use crate::messages::movement::actions::*;
 pub use crate::messages::object::actions::*;
 pub use crate::messages::player::actions::*;
+pub use crate::messages::trade::actions::*;
 
 use crate::opcodes::GameActionOpcode;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
@@ -42,6 +43,14 @@ pub enum GameAction {
     CastUntargetedSpell(Box<CastUntargetedSpellData>),
     ChangeCombatMode(Box<ChangeCombatModeData>),
     CancelAttack(Box<CancelAttackData>),
+    Buy(Box<BuyActionData>),
+    Sell(Box<SellActionData>),
+    OpenTradeNegotiations(Box<OpenTradeNegotiationsActionData>),
+    CloseTradeNegotiations(Box<CloseTradeNegotiationsActionData>),
+    AddToTrade(Box<AddToTradeActionData>),
+    AcceptTrade(Box<AcceptTradeActionData>),
+    DeclineTrade(Box<DeclineTradeActionData>),
+    ResetTrade(Box<ResetTradeActionData>),
     Unknown(u32, Vec<u8>),
 }
 
@@ -124,6 +133,30 @@ impl ProtocolUnpack for GameActionMessage {
                 )),
                 GameActionOpcode::CancelAttack => {
                     GameAction::CancelAttack(Box::new(CancelAttackData::unpack(data, offset)?))
+                }
+                GameActionOpcode::Buy => {
+                    GameAction::Buy(Box::new(BuyActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::Sell => {
+                    GameAction::Sell(Box::new(SellActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::OpenTradeNegotiations => GameAction::OpenTradeNegotiations(
+                    Box::new(OpenTradeNegotiationsActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::CloseTradeNegotiations => GameAction::CloseTradeNegotiations(
+                    Box::new(CloseTradeNegotiationsActionData::unpack(data, offset)?),
+                ),
+                GameActionOpcode::AddToTrade => {
+                    GameAction::AddToTrade(Box::new(AddToTradeActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::AcceptTrade => {
+                    GameAction::AcceptTrade(Box::new(AcceptTradeActionData::unpack(data, offset)?))
+                }
+                GameActionOpcode::DeclineTrade => GameAction::DeclineTrade(Box::new(
+                    DeclineTradeActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::ResetTrade => {
+                    GameAction::ResetTrade(Box::new(ResetTradeActionData::unpack(data, offset)?))
                 }
             },
             None => {
@@ -257,6 +290,46 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::CancelAttack(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::CancelAttack as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::Buy(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::Buy as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::Sell(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::Sell as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::OpenTradeNegotiations(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::OpenTradeNegotiations as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::CloseTradeNegotiations(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::CloseTradeNegotiations as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::AddToTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AddToTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::AcceptTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::AcceptTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::DeclineTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::DeclineTrade as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::ResetTrade(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::ResetTrade as u32)
                     .unwrap();
                 data.pack(buf);
             }

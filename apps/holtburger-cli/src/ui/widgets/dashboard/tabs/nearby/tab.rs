@@ -35,9 +35,12 @@ impl TabController for NearbyTab {
         let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
 
-        if let Some(interaction_verbs) =
-            super::super::common::get_interaction_verbs(&target, player_guid, active_interaction)
-        {
+        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
+            &target,
+            player_guid,
+            active_interaction,
+            game.view.dashboard_tab,
+        ) {
             return interaction_verbs;
         }
 
@@ -68,7 +71,6 @@ impl TabController for NearbyTab {
         game: &mut GameState,
     ) -> Option<UIEffect> {
         let player_guid = game.data.player_guid;
-        let active_interaction = game.view.active_interaction;
 
         let target = self.get_target_at_index(game, index);
 
@@ -97,12 +99,7 @@ impl TabController for NearbyTab {
                     placement: 0,
                 }))
             }
-            _ => super::super::common::handle_base_action(
-                action,
-                &target,
-                player_guid,
-                active_interaction,
-            ),
+            _ => super::super::common::handle_base_action(action, &target, game),
         }
     }
 }

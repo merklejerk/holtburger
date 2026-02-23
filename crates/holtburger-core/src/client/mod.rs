@@ -1,6 +1,7 @@
 use crate::session::Session;
 use crate::world::{StateEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
+use holtburger_protocol::errors::WeenieError;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
@@ -70,26 +71,21 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
-                        kind: ErrorKind::Weenie,
-                        code: Some(*error as u32),
+                        reason: ErrorReason::Weenie(*error, None),
                         message: format!(
                             "Inventory save failed for 0x{:08X}: {:?}",
                             item_guid.0, error
                         ),
-                        is_transient: true,
                     });
             }
-            WireEvent::WeenieError { error_id, message } => {
+            WireEvent::WeenieError { error, parameter } => {
+                let message = crate::errors::format_weenie_error(*error, parameter.as_deref());
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
-                        kind: ErrorKind::Weenie,
-                        code: Some(*error_id),
-                        message: message
-                            .clone()
-                            .unwrap_or_else(|| format!("Weenie error {}", error_id)),
-                        is_transient: true,
+                        reason: ErrorReason::Weenie(*error, parameter.clone()),
+                        message,
                     });
             }
             WireEvent::CharacterError(err) => {
@@ -97,10 +93,8 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
-                        kind: ErrorKind::Character,
-                        code: Some(*err as u32),
+                        reason: ErrorReason::Character(*err),
                         message: format!("Character error: {:?}", err),
-                        is_transient: true,
                     });
             }
             WireEvent::ClientError(msg) => {
@@ -108,21 +102,18 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Client,
-                        kind: ErrorKind::Client,
-                        code: None,
+                        reason: ErrorReason::General(msg.clone()),
                         message: msg.clone(),
-                        is_transient: true,
                     });
             }
-            WireEvent::UseDone { error_id } if *error_id != 0 => {
+            WireEvent::UseDone { error } if *error != WeenieError::None => {
+                let message = crate::errors::format_weenie_error(*error, None);
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
-                        kind: ErrorKind::Weenie,
-                        code: Some(*error_id),
-                        message: format!("Use failed: {}", error_id),
-                        is_transient: true,
+                        reason: ErrorReason::Weenie(*error, None),
+                        message,
                     });
             }
             _ => {}
@@ -249,6 +240,20 @@ impl Client {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::NoClipUpdated { enabled: *enabled });
+            }
+            StateEvent::VendorStateUpdated(vendor) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::VendorStateUpdated {
+                        vendor: vendor.clone(),
+                    });
+            }
+            StateEvent::TradeStateUpdated(trade) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::TradeStateUpdated {
+                        trade: trade.clone(),
+                    });
             }
             _ => {}
         }

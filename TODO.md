@@ -68,7 +68,6 @@
 - [ ] `/set [CHARACTER_OPTION] ...` command.
 - [ ] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
-- [ ] Should still show coords when indoors.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 
 ### High
@@ -121,6 +120,8 @@
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that happen right before the UseDone and pass that along.
+- [ ] Crafting.
+- [ ] Don't show container sizes on creatures in nearby list.
 
 ### Critical
 - [ ] The individual fields in `Entity` are supposed to be stored in property maps!

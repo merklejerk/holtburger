@@ -68,6 +68,7 @@ pub struct HbaReader {
     pub header: HbaHeader,
     pub index: HashMap<u32, HbaEntry>,
     file: File,
+    file_len: u64,
 }
 
 impl HbaReader {
@@ -87,9 +88,11 @@ impl HbaReader {
         }
 
         file.seek(SeekFrom::Start(header.index_offset))?;
-        let mut index = HashMap::new();
+
+        let mut buf_reader = std::io::BufReader::new(&mut file);
+        let mut index = HashMap::with_capacity(header.entry_count as usize);
         for _ in 0..header.entry_count {
-            let entry = HbaEntry::read(&mut file)?;
+            let entry = HbaEntry::read(&mut buf_reader)?;
             if index.contains_key(&entry.id) {
                 return Err(DatError::Corruption(format!(
                     "Duplicate HBA entry id 0x{:08X} in index",
@@ -99,10 +102,13 @@ impl HbaReader {
             index.insert(entry.id, entry);
         }
 
+        let file_len = file.metadata()?.len();
+
         Ok(Self {
             header,
             index,
             file,
+            file_len,
         })
     }
 }
@@ -112,7 +118,7 @@ impl ResourceProvider for HbaReader {
         let entry = self.index.get(&id).ok_or(DatError::NotFound(id))?;
 
         // Validate that the requested range fits within the underlying file.
-        let file_len = self.file.metadata()?.len();
+        let file_len = self.file_len;
         let end = entry
             .offset
             .checked_add(entry.comp_size as u64)
@@ -258,8 +264,8 @@ impl HbaWriter {
         let mut hba_entries = Vec::new();
 
         // Sequential write to disk
+        let mut current_offset = file.stream_position()?;
         for (id, type_id, final_data, original_size, flags) in processed {
-            let current_offset = file.stream_position()?;
             file.write_all(&final_data)?;
 
             hba_entries.push(HbaEntry {
@@ -272,12 +278,17 @@ impl HbaWriter {
                 storage_id: 0,
                 reserved: [0; 2],
             });
+            current_offset += final_data.len() as u64;
         }
 
         // Write index
-        let index_offset = file.stream_position()?;
-        for entry in hba_entries {
-            entry.write(&mut file)?;
+        let index_offset = current_offset;
+        {
+            let mut buf_writer = std::io::BufWriter::new(&mut file);
+            for entry in hba_entries {
+                entry.write(&mut buf_writer)?;
+            }
+            buf_writer.flush()?;
         }
 
         // Update header

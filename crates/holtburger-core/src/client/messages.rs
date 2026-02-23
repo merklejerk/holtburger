@@ -165,6 +165,14 @@ impl Client {
                     });
                     Ok(())
                 }
+                GameEvent::PopupString(data) => {
+                    self.emit_wire_event(WireEvent::ServerMessage(data.message.clone()));
+                    Ok(())
+                }
+                GameEvent::CommunicationTransientString(data) => {
+                    self.emit_wire_event(WireEvent::ServerMessage(data.message.clone()));
+                    Ok(())
+                }
                 GameEvent::WeenieError(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
                         error: data.error,

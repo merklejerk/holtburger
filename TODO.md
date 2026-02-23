@@ -62,7 +62,6 @@
 - [ ] Use sibling files for tests.
 - [ ] Startup is slow. Slow DAT parsing?
 - [ ] Auto-follow.
-- [ ] Handle CommunicationTransientString nad PopupString. Some useful error messages manifest there.
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
@@ -99,6 +98,8 @@
 - [x] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
 - [x] Swap `De[b]ug` with `Debu[g]`.
 - [x] Trade tab.
+- [x] Restrict sell verb to vendor item mask and attuned.
+- [x] Handle CommunicationTransientString and PopupString. Some useful error messages manifest there.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -116,7 +117,6 @@
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
 - [ ] Log in chat when items are bought and sold.
-- [ ] Restrict sell verb to vendor item mask and attuned.
 - [ ] Still showing conflicting verbs during move interaction.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
@@ -135,3 +135,4 @@
     - When they go out of range.
     - When they are explicitly deleted.
     - When a trade is closed.
+- [ ] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.

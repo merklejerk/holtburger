@@ -12,7 +12,7 @@ pub mod input;
 pub mod tabs;
 
 pub use self::tabs::common::{Action, Verb};
-pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab};
+pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
 
 pub mod assess;
 pub mod debug;
@@ -37,6 +37,7 @@ pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
         DashboardTab::Inventory => Box::new(InventoryTab),
         DashboardTab::Character => Box::new(CharacterTab),
         DashboardTab::Spells => Box::new(SpellsTab),
+        DashboardTab::Trade => Box::new(TradeTab),
     }
 }
 
@@ -56,7 +57,10 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
         (DashboardTab::Spells, "4", "Spells"),
     ];
 
-    let bottom_tabs = [(DashboardTab::Equip, "5", "Equip")];
+    let bottom_tabs = [
+        (DashboardTab::Equip, "5", "Equip"),
+        (DashboardTab::Trade, "6", "Trade"),
+    ];
 
     let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], game: &GameState| {
         let mut spans = Vec::new();
@@ -77,14 +81,18 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
             }
 
             let is_active = active_tab == *tab;
+            let is_trade_active = *tab == DashboardTab::Trade
+                && (game.data.trade.is_some() || game.data.vendor.is_some());
+
+            let mut style = Style::default();
             if is_active {
-                spans.push(Span::styled(
-                    format!(" [{}] {} ", key, label),
-                    Style::default().add_modifier(Modifier::BOLD),
-                ));
-            } else {
-                spans.push(Span::raw(format!(" [{}] {} ", key, label)));
+                style = style.add_modifier(Modifier::BOLD);
             }
+            if is_trade_active {
+                style = style.fg(Color::Green);
+            }
+
+            spans.push(Span::styled(format!(" [{}] {} ", key, label), style));
         }
 
         if focused == FocusedPane::Dashboard {

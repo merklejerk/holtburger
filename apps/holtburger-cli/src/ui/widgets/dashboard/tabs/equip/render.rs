@@ -10,6 +10,7 @@ use holtburger_core::client::types::TargetSlot;
 use holtburger_core::world::entity::Entity;
 
 use crate::ui::state::GameState;
+use crate::ui::theme;
 
 pub enum EquipTabLine<'a> {
     Header(String, bool),
@@ -20,8 +21,8 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game);
     let total = items.len();
     let dashboard_list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ");
+        .highlight_style(theme::selection_style())
+        .highlight_symbol(theme::SELECTION_SYMBOL);
 
     game.view
         .dashboard_list_state
@@ -45,9 +46,9 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+                .style(theme::scrollbar_style())
+                .track_style(theme::scrollbar_track_style())
+                .thumb_style(theme::scrollbar_thumb_style()),
             area,
             &mut scrollbar_state,
         );
@@ -58,7 +59,8 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     let lines = get_lines(game);
     let mut list_items = Vec::new();
 
-    for line in lines {
+    for (i, line) in lines.into_iter().enumerate() {
+        let is_selected = i == game.view.selected_dashboard_index;
         match line {
             EquipTabLine::Header(name, occupied) => {
                 let color = if occupied {
@@ -66,10 +68,13 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                 } else {
                     Color::DarkGray
                 };
-                list_items.push(ListItem::new(Line::from(vec![Span::styled(
-                    format!("--- {} ---", name),
-                    Style::default().fg(color).add_modifier(Modifier::BOLD),
-                )])));
+                list_items.push(
+                    ListItem::new(Line::from(vec![Span::styled(
+                        format!("--- {} ---", name),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    )]))
+                    .style(theme::list_item_style(is_selected)),
+                );
             }
             EquipTabLine::Item(item, is_equipped_here, is_equipped_elsewhere, _) => {
                 let mut spans = Vec::new();
@@ -89,7 +94,9 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     }),
                 ));
 
-                list_items.push(ListItem::new(Line::from(spans)));
+                list_items.push(
+                    ListItem::new(Line::from(spans)).style(theme::list_item_style(is_selected)),
+                );
             }
         }
     }
@@ -148,7 +155,7 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
         .inventory
         .iter()
         .filter_map(|guid| game.data.entities.get(guid))
-        .filter(|e| e.valid_locations.is_some_and(|v| !v.is_empty()))
+        .filter(|e| !e.valid_locations().is_empty())
         .collect();
 
     // Sort all equippable items by name once to keep consistent ordering within buckets
@@ -168,7 +175,7 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
         };
 
         for item in &equippable_items {
-            let valid = item.valid_locations.unwrap_or(EquipMask::NONE);
+            let valid = item.valid_locations();
 
             if valid.intersects(mask) {
                 let current_mask = game

@@ -1,3 +1,4 @@
+use crate::ui::DashboardTab;
 use crate::ui::state::AppState;
 use holtburger_core::{ClientViewEvent, StateEvent, WireEvent};
 
@@ -54,6 +55,34 @@ impl AppState {
             }
             ClientViewEvent::EntityRemoved { guid } => {
                 self.handle_entity_removed(guid);
+            }
+            ClientViewEvent::VendorStateUpdated { vendor } => {
+                if let Some(game) = self.game_option_mut() {
+                    let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
+                    game.data.vendor = vendor;
+                    // If we just opened a vendor and we initiated it, switch to Trade tab.
+                    if let Some(v_guid) = vendor_guid
+                        && let Some((last_time, target_guid)) = game.view.last_trade_initiation
+                        && target_guid == v_guid
+                        && last_time.elapsed() < std::time::Duration::from_secs(5)
+                    {
+                        game.view.dashboard_tab = DashboardTab::Trade;
+                    }
+                }
+            }
+            ClientViewEvent::TradeStateUpdated { trade } => {
+                if let Some(game) = self.game_option_mut() {
+                    let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
+                    game.data.trade = trade;
+                    // If we just opened a trade and we initiated it, switch to Trade tab.
+                    if let Some(p_guid) = partner_guid
+                        && let Some((last_time, target_guid)) = game.view.last_trade_initiation
+                        && target_guid == p_guid
+                        && last_time.elapsed() < std::time::Duration::from_secs(5)
+                    {
+                        game.view.dashboard_tab = DashboardTab::Trade;
+                    }
+                }
             }
             ClientViewEvent::ServerTimeUpdated { .. } | ClientViewEvent::NoClipUpdated { .. } => {
                 self.handle_navigation_event(event);

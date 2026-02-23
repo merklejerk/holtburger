@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
@@ -8,6 +8,7 @@ use ratatui::widgets::{
 
 use super::super::classification::{EntityClass, classify_entity, get_entity_color};
 use crate::ui::state::GameState;
+use crate::ui::theme;
 use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
 use holtburger_core::world::entity::Entity;
@@ -21,7 +22,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     // Sticky summary line for the player's main inventory container
     if let Some(player_guid) = game.data.player_guid
         && let Some(player_entity) = game.data.entities.get(&player_guid)
-        && let Some(capacity) = player_entity.items_capacity
+        && let Some(capacity) = player_entity.items_capacity()
     {
         let count = counts.get(&player_guid).cloned().unwrap_or(0);
 
@@ -36,7 +37,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         let text = format!("Main Pack ({}/{})", count, capacity);
         let summary = Paragraph::new(Line::from(vec![Span::styled(
             text,
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::SUMMARY_FG),
         )]));
         f.render_widget(summary, top_area);
     }
@@ -44,8 +45,8 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game, &counts);
     let total = items.len();
     let dashboard_list = List::new(items)
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD))
-        .highlight_symbol("> ");
+        .highlight_style(theme::selection_style())
+        .highlight_symbol(theme::SELECTION_SYMBOL);
 
     game.view
         .dashboard_list_state
@@ -73,9 +74,9 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 .track_symbol(Some(" "))
                 .thumb_symbol("█")
                 .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
+                .style(theme::scrollbar_style())
+                .track_style(theme::scrollbar_track_style())
+                .thumb_style(theme::scrollbar_thumb_style()),
             bottom_area,
             &mut scrollbar_state,
         );
@@ -94,6 +95,12 @@ fn get_list_items(
 
     for (i, (e, _, depth)) in entities.iter().enumerate() {
         let is_equipped = equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
+        let is_offered = game
+            .data
+            .trade
+            .as_ref()
+            .map(|t| t.self_side.items.contains(&e.guid))
+            .unwrap_or(false);
 
         let container_count = container_counts.get(&e.guid).cloned();
 
@@ -102,6 +109,7 @@ fn get_list_items(
             *depth,
             i == game.view.selected_dashboard_index,
             is_equipped,
+            is_offered,
             container_count,
         ));
     }
@@ -114,20 +122,16 @@ fn render_inventory_item(
     e: &Entity,
     depth: usize,
     highlight: bool,
-
     is_equipped: bool,
+    is_offered: bool,
     container_count: Option<usize>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
     let color = get_entity_color(class);
-    let item_style = if highlight {
-        Style::default().bg(Color::DarkGray)
-    } else {
-        Style::default()
-    };
+    let item_style = theme::list_item_style(highlight);
 
     let mut text_style = Style::default().fg(color);
-    if is_equipped {
+    if is_equipped || is_offered {
         text_style = text_style.add_modifier(Modifier::BOLD);
     }
 
@@ -137,12 +141,14 @@ fn render_inventory_item(
         format!("<{:08X}>", e.guid)
     } else if is_equipped {
         format!("{} (EQUIPPED)", e.name)
+    } else if is_offered {
+        format!("{} (OFFERED)", e.name)
     } else {
         e.name.clone()
     };
 
     if class != EntityClass::Player {
-        if let Some(capacity) = e.items_capacity {
+        if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);
                 display_name = format!("{} ({}/{})", display_name, count, capacity);

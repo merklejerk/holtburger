@@ -5,6 +5,7 @@ pub const CHARACTER_ENTER_WORLD: &[u8] =
     include_bytes!("../tests/fixtures/character_enter_world.bin");
 pub const CHARACTER_ENTER_WORLD_REQUEST: &[u8] =
     include_bytes!("../tests/fixtures/character_enter_world_request.bin");
+pub const CHARACTER_ERROR: &[u8] = include_bytes!("../tests/fixtures/character_error.bin");
 pub const PLAYER_DESCRIPTION_MINIMAL: &[u8] =
     include_bytes!("../tests/fixtures/player_description_minimal.bin");
 pub const CREATURE_SKILL_MELEE_DEF: &[u8] =

@@ -5,19 +5,48 @@ use super::spatial::SpatialScene;
 use super::stats;
 use binrw::BinRead;
 use holtburger_common::properties::{
-    CombatUse, EnchantmentTypeFlags, EquipMask, ItemType, PropertyFloat, PropertyInstanceId,
-    PropertyInt, PropertyInt64, PropertyValue, RadarBehavior, RadarColor, Usable,
+    EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyValue,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::*;
 
 pub struct ServerTimeSync {
     pub server_time: f64,
     pub local_time: std::time::Instant,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VendorState {
+    pub vendor_guid: Guid,
+    pub items: Vec<holtburger_protocol::messages::trade::events::VendorItemEventData>,
+    pub buy_multiplier: f32,
+    pub sell_multiplier: f32,
+    pub merchandise_item_types: u32,
+    pub alternate_currency_wcid: u32,
+    pub alternate_currency_amount: u32,
+    pub alternate_currency_name: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct TradeSide {
+    pub guid: Guid,
+    pub accepted: bool,
+    pub items: Vec<Guid>, // Guids of items in the trade window
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TradeState {
+    pub partner_guid: Guid,
+    pub initiator_guid: Guid,
+    pub trade_stamp: f64,
+    pub self_side: TradeSide,
+    pub partner_side: TradeSide,
 }
 
 /// The authoritative state of the game world.
@@ -39,6 +68,8 @@ pub struct WorldState {
     pub skill_table: Option<Arc<SkillTable>>,
     pub spell_table: Option<Arc<SpellTable>>,
     pub scene: SpatialScene,
+    pub vendor: Option<VendorState>,
+    pub trade: Option<TradeState>,
 }
 
 impl WorldState {
@@ -196,6 +227,8 @@ impl WorldState {
             skill_table,
             spell_table,
             scene: SpatialScene::new(),
+            vendor: None,
+            trade: None,
         }
     }
 
@@ -226,7 +259,7 @@ impl WorldState {
 
             // Find children in self.entities
             for (&guid, entity) in &self.entities.entities {
-                if entity.container_id == Some(current) {
+                if entity.container_id() == Some(current) {
                     stack.push(guid);
                 }
             }
@@ -255,93 +288,30 @@ impl WorldState {
 
         match msg {
             GameMessage::ObjectCreate(data) => {
-                let entity_name = data.name.clone().unwrap_or_else(|| "Unknown".to_string());
+                let entity_name = data
+                    .public_weenie_desc
+                    .name
+                    .as_deref()
+                    .unwrap_or("Unknown")
+                    .to_string();
 
-                let mut entity = Entity::new(data.guid, entity_name, data.pos.unwrap_or_default());
-                entity.wcid = Some(data.wcid);
-                entity.flags = data.obj_desc_flags;
-                entity.weenie_flags = data.weenie_flags;
-                entity.weenie_flags2 = data.weenie_flags2;
-                entity.item_type = Some(ItemType::from_bits_truncate(data.item_type));
-                entity.physics_state = data.physics_state;
-                entity.physics_parent_id = data.parent_id;
-                entity.container_id = data.container_id;
-                entity.wielder_id = data.wielder_id;
-
-                if let Some(v) = data.velocity {
-                    entity.velocity = v;
-                }
-                if let Some(a) = data.acceleration {
-                    entity.acceleration = a;
-                }
-                if let Some(o) = data.omega {
-                    entity.omega = o;
-                }
-                entity.gfx_id = data.mtable_id;
-                entity.icon_id = Some(data.icon_id);
-
-                entity.obj_scale = data.obj_scale;
-                entity.friction = data.friction;
-                entity.elasticity = data.elasticity;
-                entity.translucency = data.translucency;
-
-                entity.plural_name = data.plural_name.clone();
-                entity.items_capacity = data.items_capacity;
-                entity.containers_capacity = data.containers_capacity;
-                entity.ammo_type = data.ammo_type;
-                entity.value = data.value;
-                entity.usable = data.usable.map(Usable::from_bits_truncate);
-                entity.use_radius = data.use_radius;
-                entity.target_type = data.target_type.map(ItemType::from_bits_truncate);
-                entity.ui_effects = data.ui_effects;
-                entity.combat_use = data.combat_use.and_then(CombatUse::from_repr);
-                entity.structure = data.structure;
-                entity.max_structure = data.max_structure;
-                entity.stack_size = data.stack_size;
-                entity.max_stack_size = data.max_stack_size;
-                entity.valid_locations = data.valid_locations.map(EquipMask::from_bits_truncate);
-                entity.currently_wielded_location = data
-                    .currently_wielded_location
-                    .map(EquipMask::from_bits_truncate);
-                entity.priority = data.priority;
-                entity.radar_blip_color = data.radar_blip_color.and_then(RadarColor::from_repr);
-                entity.radar_enum = data.radar_enum.and_then(RadarBehavior::from_repr);
-                entity.pscript = data.pscript;
-                entity.workmanship = data.workmanship;
-                entity.burden = data.burden;
-                entity.spell = data.spell;
-                entity.cooldown_id = data.cooldown_id;
-                entity.cooldown_duration = data.cooldown_duration;
-
-                entity.mtable_id = data.mtable_id;
-                entity.stable_id = data.stable_id;
-                entity.petable_id = data.petable_id;
-                entity.csetup_id = data.csetup_id;
-                entity.parent_loc = data.parent_loc;
-                entity.default_script_id = data.default_script_id;
-                entity.default_script_intensity = data.default_script_intensity;
-                entity.autonomous_movement = data.autonomous_movement;
-                entity.animation_frame = data.animation_frame;
-                entity.house_owner = data.house_owner;
-                entity.hook_item_types = data.hook_item_types.map(ItemType::from_bits_truncate);
-                entity.monarch_id = data.monarch_id;
-                entity.hook_type = data.hook_type;
-                entity.icon_overlay_id = data.icon_overlay_id;
-                entity.icon_underlay_id = data.icon_underlay_id;
-                entity.material_type = data.material_type;
-                entity.pet_owner = data.pet_owner;
-                entity.sequences = data.sequences;
+                let mut entity = Entity::new(
+                    data.public_weenie_desc.guid,
+                    entity_name,
+                    data.pos.unwrap_or_default(),
+                );
+                entity.apply_description(data);
 
                 // Update inventory tracking for new objects appearing in containers
-                if let Some(cid) = data.container_id
+                if let Some(cid) = entity.container_id()
                     && (cid == self.player.guid || self.player.inventory.contains(&cid))
                 {
-                    self.player.add_to_inventory(data.guid);
+                    self.player.add_to_inventory(entity.guid);
                 }
-                if let Some(wid) = data.wielder_id
+                if let Some(wid) = entity.wielder_id()
                     && wid == self.player.guid
                 {
-                    self.player.add_to_inventory(data.guid);
+                    self.player.add_to_inventory(entity.guid);
                 }
 
                 self.add_entity(entity.clone());
@@ -379,8 +349,8 @@ impl WorldState {
                 let mut should_remove = true;
                 #[allow(clippy::collapsible_if)]
                 if let Some(entity) = self.entities.get(guid) {
-                    if entity.container_id.is_some()
-                        || entity.wielder_id.is_some()
+                    if entity.container_id().is_some()
+                        || entity.wielder_id().is_some()
                         || entity.physics_parent_id.is_some()
                     {
                         should_remove = false;
@@ -562,13 +532,19 @@ impl WorldState {
                 match &ev.event {
                     GameEvent::InventoryPutObjInContainer(data) => {
                         if let Some(entity) = self.entities.get_mut(data.item_guid) {
-                            if entity.wielder_id == Some(self.player.guid) {
+                            if entity.wielder_id() == Some(self.player.guid) {
                                 self.player.unwield_item(data.item_guid);
                             }
 
-                            entity.container_id = Some(data.container_guid);
-                            entity.wielder_id = None;
-                            entity.currently_wielded_location = Some(EquipMask::NONE);
+                            entity.set_instance_prop(
+                                PropertyInstanceId::Container,
+                                data.container_guid,
+                            );
+                            entity.set_instance_prop(PropertyInstanceId::Wielder, Guid::NULL);
+                            entity.set_int_prop(
+                                PropertyInt::CurrentWieldedLocation,
+                                EquipMask::NONE.bits() as i32,
+                            );
                             entity.position.landblock_id = Guid::NULL;
 
                             // Update player inventory set recursively
@@ -585,12 +561,15 @@ impl WorldState {
                     }
                     GameEvent::InventoryPutObjectIn3D(data) => {
                         if let Some(entity) = self.entities.get_mut(data.object_guid) {
-                            if entity.wielder_id == Some(self.player.guid) {
+                            if entity.wielder_id() == Some(self.player.guid) {
                                 self.player.unwield_item(data.object_guid);
                             }
-                            entity.container_id = None;
-                            entity.wielder_id = None;
-                            entity.currently_wielded_location = Some(EquipMask::NONE);
+                            entity.set_instance_prop(PropertyInstanceId::Container, Guid::NULL);
+                            entity.set_instance_prop(PropertyInstanceId::Wielder, Guid::NULL);
+                            entity.set_int_prop(
+                                PropertyInt::CurrentWieldedLocation,
+                                EquipMask::NONE.bits() as i32,
+                            );
 
                             // Recursively remove from inventory tracking
                             self.update_player_inventory_recursive(data.object_guid, false);
@@ -605,9 +584,12 @@ impl WorldState {
                     GameEvent::WieldObject(data) => {
                         if let Some(entity) = self.entities.get_mut(data.object_guid) {
                             // The target of the GameEvent message is the wielder
-                            entity.wielder_id = Some(ev.target);
-                            entity.container_id = None;
-                            entity.currently_wielded_location = Some(data.equip_mask);
+                            entity.set_instance_prop(PropertyInstanceId::Wielder, ev.target);
+                            entity.set_instance_prop(PropertyInstanceId::Container, Guid::NULL);
+                            entity.set_int_prop(
+                                PropertyInt::CurrentWieldedLocation,
+                                data.equip_mask.bits() as i32,
+                            );
                             entity.position.landblock_id = Guid::NULL;
 
                             if ev.target == self.player.guid {
@@ -622,20 +604,120 @@ impl WorldState {
                         }
                     }
                     GameEvent::WeenieError(data) => {
-                        events.push(StateEvent::WeenieError {
-                            error_id: data.error_id,
-                        });
+                        events.push(StateEvent::WeenieError { error: data.error });
+
+                        if data.error == WeenieError::TradeComplete
+                            && let Some(trade) = self.trade.as_mut()
+                        {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            trade.self_side.items.clear();
+                            trade.partner_side.items.clear();
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
                     }
                     GameEvent::WeenieErrorWithString(data) => {
                         events.push(StateEvent::WeenieErrorWithString {
-                            error_id: data.error_id,
-                            message: data.message.clone(),
+                            error: data.error,
+                            parameter: data.parameter.clone(),
                         });
                     }
                     GameEvent::UseDone(data) => {
-                        events.push(StateEvent::UseDone {
-                            error_id: data.error_id,
-                        });
+                        events.push(StateEvent::UseDone { error: data.error });
+                    }
+                    GameEvent::ApproachVendor(data) => {
+                        let vendor_state = VendorState {
+                            vendor_guid: data.vendor_guid,
+                            items: data.items.clone(),
+                            buy_multiplier: data.buy_multiplier,
+                            sell_multiplier: data.sell_multiplier,
+                            merchandise_item_types: data.merchandise_item_types,
+                            alternate_currency_wcid: data.alternate_currency_wcid,
+                            alternate_currency_amount: data.alternate_currency_amount,
+                            alternate_currency_name: data.alternate_currency_name.clone(),
+                        };
+                        self.vendor = Some(vendor_state.clone());
+                        events.push(StateEvent::VendorStateUpdated(Some(vendor_state)));
+                    }
+                    GameEvent::RegisterTrade(data) => {
+                        let partner_guid = if data.initiator == self.player.guid {
+                            data.partner
+                        } else {
+                            data.initiator
+                        };
+                        let trade_state = TradeState {
+                            partner_guid,
+                            initiator_guid: data.initiator,
+                            trade_stamp: 0.0,
+                            self_side: TradeSide {
+                                guid: self.player.guid,
+                                accepted: false,
+                                items: Vec::new(),
+                            },
+                            partner_side: TradeSide {
+                                guid: partner_guid,
+                                accepted: false,
+                                items: Vec::new(),
+                            },
+                        };
+                        self.trade = Some(trade_state.clone());
+                        events.push(StateEvent::TradeStateUpdated(Some(trade_state)));
+                    }
+                    GameEvent::AddToTrade(data) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            if data.trade_side == 0x01 {
+                                trade.self_side.items.push(data.object_guid);
+                            } else {
+                                trade.partner_side.items.push(data.object_guid);
+                            }
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::AcceptTrade(data) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            if data.who_accepted == self.player.guid {
+                                trade.self_side.accepted = true;
+                            } else {
+                                trade.partner_side.accepted = true;
+                            }
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::ResetTrade(_) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            trade.self_side.items.clear();
+                            trade.partner_side.items.clear();
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::DeclineTrade(_) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::ClearTradeAcceptance => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::TradeFailure(_) => {
+                        if let Some(trade) = self.trade.as_mut() {
+                            trade.self_side.accepted = false;
+                            trade.partner_side.accepted = false;
+                            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                        }
+                    }
+                    GameEvent::CloseTrade(_) => {
+                        self.trade = None;
+                        events.push(StateEvent::TradeStateUpdated(None));
                     }
                     GameEvent::IdentifyObjectResponse(data) => {
                         let guid = data.object_guid;
@@ -705,14 +787,14 @@ impl WorldState {
             GameMessage::SetStackSize(data) => {
                 let guid = data.object_guid;
                 if let Some(entity) = self.entities.get_mut(guid) {
-                    // PropertyInt.StackSize = 15
-                    entity.int_properties.insert(15, data.stack_size as i32);
+                    // PropertyInt.StackSize = 12
+                    entity.int_properties.insert(12, data.stack_size as i32);
                     // PropertyInt.Value = 19
                     entity.int_properties.insert(19, data.value as i32);
                 }
                 events.push(StateEvent::PropertyUpdated {
                     guid,
-                    property_id: 15,
+                    property_id: 12,
                     value: PropertyValue::Int(data.stack_size as i32),
                 });
                 events.push(StateEvent::PropertyUpdated {
@@ -762,10 +844,6 @@ impl WorldState {
                     self.player.emit_derived_stats(&mut events);
                 } else if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.int_properties.insert(data.property, data.value);
-                    if data.property == PropertyInt::CurrentWieldedLocation as u32 {
-                        entity.currently_wielded_location =
-                            Some(EquipMask::from_bits_truncate(data.value as u32));
-                    }
                 }
                 events.push(StateEvent::PropertyUpdated {
                     guid: target_guid,
@@ -1026,11 +1104,6 @@ impl WorldState {
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {
                             PropertyInstanceId::Container => {
-                                entity.container_id = if data.value == Guid::NULL {
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1040,12 +1113,10 @@ impl WorldState {
                                 }
                             }
                             PropertyInstanceId::Wielder => {
-                                entity.wielder_id = if data.value == Guid::NULL {
+                                if data.value == Guid::NULL {
                                     entity.physics_parent_id = None;
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
+                                }
+
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1079,11 +1150,6 @@ impl WorldState {
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {
                             PropertyInstanceId::Container => {
-                                entity.container_id = if data.value == Guid::NULL {
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1093,12 +1159,10 @@ impl WorldState {
                                 }
                             }
                             PropertyInstanceId::Wielder => {
-                                entity.wielder_id = if data.value == Guid::NULL {
+                                if data.value == Guid::NULL {
                                     entity.physics_parent_id = None;
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
+                                }
+
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1466,7 +1530,7 @@ mod tests {
         let events = state.handle_message(&msg);
 
         let entity = state.entities.get(item_guid).unwrap();
-        assert_eq!(entity.container_id, Some(container_guid));
+        assert_eq!(entity.container_id(), Some(container_guid));
         assert_eq!(entity.position.landblock_id, Guid::NULL);
 
         // Check for StateEvent::PropertyUpdated
@@ -1486,8 +1550,8 @@ mod tests {
         let obj_guid = Guid(0x1);
 
         let mut item = Entity::new(obj_guid, "Item".to_string(), WorldPosition::default());
-        item.container_id = Some(Guid(0x2));
-        item.wielder_id = Some(Guid(0x3));
+        item.set_container_id(Some(Guid(0x2)));
+        item.set_wielder_id(Some(Guid(0x3)));
         state.entities.insert(item);
 
         let data = InventoryPutObjectIn3DData {
@@ -1503,8 +1567,8 @@ mod tests {
         let events = state.handle_message(&msg);
 
         let entity = state.entities.get(obj_guid).unwrap();
-        assert_eq!(entity.container_id, None);
-        assert_eq!(entity.wielder_id, None);
+        assert_eq!(entity.container_id(), None);
+        assert_eq!(entity.wielder_id(), None);
 
         assert!(events.iter().any(|e| matches!(
             e,
@@ -1542,8 +1606,8 @@ mod tests {
         let events = state.handle_message(&msg);
 
         let entity = state.entities.get(obj_guid).unwrap();
-        assert_eq!(entity.wielder_id, Some(wielder_guid));
-        assert_eq!(entity.container_id, None);
+        assert_eq!(entity.wielder_id(), Some(wielder_guid));
+        assert_eq!(entity.container_id(), None);
 
         assert!(events.iter().any(|e| matches!(
             e,
@@ -1705,7 +1769,7 @@ mod tests {
             initial_pos.landblock_id
         );
         assert_eq!(
-            state.entities.get(player_guid).unwrap().wielder_id,
+            state.entities.get(player_guid).unwrap().wielder_id(),
             Some(Guid(0x8000031B))
         );
     }

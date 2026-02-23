@@ -1,7 +1,6 @@
 use crate::ui::state::ChatMessageKind;
 use crate::ui::state::{AppState, GameState, Page, SelectionState};
-use holtburger_core::ErrorKind;
-use holtburger_core::{ClientState, ClientViewEvent, WireEvent};
+use holtburger_core::{ClientState, ClientViewEvent, ErrorReason, WireEvent};
 use holtburger_protocol::errors::CharacterError;
 
 impl AppState {
@@ -15,14 +14,9 @@ impl AppState {
                 }
             }
             ClientViewEvent::ErrorRaised {
-                kind,
-                code,
-                message,
-                ..
+                reason, message, ..
             } => {
-                if let (ErrorKind::Character, Some(error_code)) = (kind, code) {
-                    let error =
-                        CharacterError::from_repr(error_code).unwrap_or(CharacterError::None);
+                if let ErrorReason::Character(error) = reason {
                     if error == CharacterError::Logon {
                         self.logon_retry.schedule();
                         self.chat.log(
@@ -46,11 +40,11 @@ impl AppState {
                     }
                 }
 
-                let chat_kind = match kind {
-                    ErrorKind::Weenie | ErrorKind::Character | ErrorKind::Client => {
-                        ChatMessageKind::Error
-                    }
-                    ErrorKind::Transport => ChatMessageKind::Warning,
+                let chat_kind = match reason {
+                    ErrorReason::Weenie(_, _)
+                    | ErrorReason::Character(_)
+                    | ErrorReason::General(_) => ChatMessageKind::Error,
+                    ErrorReason::Transport(_) => ChatMessageKind::Warning,
                 };
                 self.chat.log(chat_kind, format!("[!] {}", message));
             }

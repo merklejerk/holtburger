@@ -5,8 +5,8 @@ use super::spatial::SpatialScene;
 use super::stats;
 use binrw::BinRead;
 use holtburger_common::properties::{
-    CombatUse, EnchantmentTypeFlags, EquipMask, ItemType, PropertyFloat, PropertyInstanceId,
-    PropertyInt, PropertyInt64, PropertyValue, RadarBehavior, RadarColor, Usable,
+    EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyValue,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
@@ -259,7 +259,7 @@ impl WorldState {
 
             // Find children in self.entities
             for (&guid, entity) in &self.entities.entities {
-                if entity.container_id == Some(current) {
+                if entity.container_id() == Some(current) {
                     stack.push(guid);
                 }
             }
@@ -299,114 +299,18 @@ impl WorldState {
                     entity_name,
                     data.pos.unwrap_or_default(),
                 );
-                entity.wcid = Some(data.public_weenie_desc.wcid);
-                entity.flags = data.public_weenie_desc.obj_desc_flags;
-                entity.weenie_flags = data.public_weenie_desc.weenie_flags;
-                entity.weenie_flags2 = data.public_weenie_desc.weenie_flags2;
-                entity.item_type = Some(ItemType::from_bits_truncate(
-                    data.public_weenie_desc.item_type,
-                ));
-                entity.physics_state = data.physics_state;
-                entity.physics_parent_id = data.parent_id;
-                entity.container_id = data.public_weenie_desc.container_id;
-                entity.wielder_id = data.public_weenie_desc.wielder_id;
-
-                if let Some(v) = data.velocity {
-                    entity.velocity = v;
-                }
-                if let Some(a) = data.acceleration {
-                    entity.acceleration = a;
-                }
-                if let Some(o) = data.omega {
-                    entity.omega = o;
-                }
-                entity.gfx_id = data.mtable_id;
-                entity.icon_id = Some(data.public_weenie_desc.icon_id);
-
-                entity.obj_scale = data.obj_scale;
-                entity.friction = data.friction;
-                entity.elasticity = data.elasticity;
-                entity.translucency = data.translucency;
-
-                entity.plural_name = data.public_weenie_desc.plural_name.clone();
-                entity.items_capacity = data.public_weenie_desc.items_capacity;
-                entity.containers_capacity = data.public_weenie_desc.containers_capacity;
-                entity.ammo_type = data.public_weenie_desc.ammo_type;
-                entity.value = data.public_weenie_desc.value;
-                entity.usable = data
-                    .public_weenie_desc
-                    .usable
-                    .map(Usable::from_bits_truncate);
-                entity.use_radius = data.public_weenie_desc.use_radius;
-                entity.target_type = data
-                    .public_weenie_desc
-                    .target_type
-                    .map(ItemType::from_bits_truncate);
-                entity.ui_effects = data.public_weenie_desc.ui_effects;
-                entity.combat_use = data
-                    .public_weenie_desc
-                    .combat_use
-                    .and_then(CombatUse::from_repr);
-                entity.structure = data.public_weenie_desc.structure;
-                entity.max_structure = data.public_weenie_desc.max_structure;
-                entity.stack_size = data.public_weenie_desc.stack_size;
-                entity.max_stack_size = data.public_weenie_desc.max_stack_size;
-                entity.valid_locations = data
-                    .public_weenie_desc
-                    .valid_locations
-                    .map(EquipMask::from_bits_truncate);
-                entity.currently_wielded_location = data
-                    .public_weenie_desc
-                    .currently_wielded_location
-                    .map(EquipMask::from_bits_truncate);
-                entity.priority = data.public_weenie_desc.priority;
-                entity.radar_blip_color = data
-                    .public_weenie_desc
-                    .radar_blip_color
-                    .and_then(RadarColor::from_repr);
-                entity.radar_enum = data
-                    .public_weenie_desc
-                    .radar_enum
-                    .and_then(RadarBehavior::from_repr);
-                entity.pscript = data.public_weenie_desc.pscript;
-                entity.workmanship = data.public_weenie_desc.workmanship;
-                entity.burden = data.public_weenie_desc.burden;
-                entity.spell = data.public_weenie_desc.spell;
-                entity.cooldown_id = data.public_weenie_desc.cooldown_id;
-                entity.cooldown_duration = data.public_weenie_desc.cooldown_duration;
-
-                entity.mtable_id = data.mtable_id;
-                entity.stable_id = data.stable_id;
-                entity.petable_id = data.petable_id;
-                entity.csetup_id = data.csetup_id;
-                entity.parent_loc = data.parent_loc;
-                entity.default_script_id = data.default_script_id;
-                entity.default_script_intensity = data.default_script_intensity;
-                entity.autonomous_movement = data.autonomous_movement;
-                entity.animation_frame = data.animation_frame;
-                entity.house_owner = data.public_weenie_desc.house_owner;
-                entity.hook_item_types = data
-                    .public_weenie_desc
-                    .hook_item_types
-                    .map(ItemType::from_bits_truncate);
-                entity.monarch_id = data.public_weenie_desc.monarch_id;
-                entity.hook_type = data.public_weenie_desc.hook_type;
-                entity.icon_overlay_id = data.public_weenie_desc.icon_overlay_id;
-                entity.icon_underlay_id = data.public_weenie_desc.icon_underlay_id;
-                entity.material_type = data.public_weenie_desc.material_type;
-                entity.pet_owner = data.public_weenie_desc.pet_owner;
-                entity.sequences = data.sequences;
+                entity.apply_description(data.clone());
 
                 // Update inventory tracking for new objects appearing in containers
-                if let Some(cid) = data.public_weenie_desc.container_id
+                if let Some(cid) = entity.container_id()
                     && (cid == self.player.guid || self.player.inventory.contains(&cid))
                 {
-                    self.player.add_to_inventory(data.public_weenie_desc.guid);
+                    self.player.add_to_inventory(entity.guid);
                 }
-                if let Some(wid) = data.public_weenie_desc.wielder_id
+                if let Some(wid) = entity.wielder_id()
                     && wid == self.player.guid
                 {
-                    self.player.add_to_inventory(data.public_weenie_desc.guid);
+                    self.player.add_to_inventory(entity.guid);
                 }
 
                 self.add_entity(entity.clone());
@@ -444,8 +348,8 @@ impl WorldState {
                 let mut should_remove = true;
                 #[allow(clippy::collapsible_if)]
                 if let Some(entity) = self.entities.get(guid) {
-                    if entity.container_id.is_some()
-                        || entity.wielder_id.is_some()
+                    if entity.container_id().is_some()
+                        || entity.wielder_id().is_some()
                         || entity.physics_parent_id.is_some()
                     {
                         should_remove = false;
@@ -627,13 +531,19 @@ impl WorldState {
                 match &ev.event {
                     GameEvent::InventoryPutObjInContainer(data) => {
                         if let Some(entity) = self.entities.get_mut(data.item_guid) {
-                            if entity.wielder_id == Some(self.player.guid) {
+                            if entity.wielder_id() == Some(self.player.guid) {
                                 self.player.unwield_item(data.item_guid);
                             }
 
-                            entity.container_id = Some(data.container_guid);
-                            entity.wielder_id = None;
-                            entity.currently_wielded_location = Some(EquipMask::NONE);
+                            entity.set_instance_prop(
+                                PropertyInstanceId::Container,
+                                data.container_guid,
+                            );
+                            entity.set_instance_prop(PropertyInstanceId::Wielder, Guid::NULL);
+                            entity.set_int_prop(
+                                PropertyInt::CurrentWieldedLocation,
+                                EquipMask::NONE.bits() as i32,
+                            );
                             entity.position.landblock_id = Guid::NULL;
 
                             // Update player inventory set recursively
@@ -650,12 +560,15 @@ impl WorldState {
                     }
                     GameEvent::InventoryPutObjectIn3D(data) => {
                         if let Some(entity) = self.entities.get_mut(data.object_guid) {
-                            if entity.wielder_id == Some(self.player.guid) {
+                            if entity.wielder_id() == Some(self.player.guid) {
                                 self.player.unwield_item(data.object_guid);
                             }
-                            entity.container_id = None;
-                            entity.wielder_id = None;
-                            entity.currently_wielded_location = Some(EquipMask::NONE);
+                            entity.set_instance_prop(PropertyInstanceId::Container, Guid::NULL);
+                            entity.set_instance_prop(PropertyInstanceId::Wielder, Guid::NULL);
+                            entity.set_int_prop(
+                                PropertyInt::CurrentWieldedLocation,
+                                EquipMask::NONE.bits() as i32,
+                            );
 
                             // Recursively remove from inventory tracking
                             self.update_player_inventory_recursive(data.object_guid, false);
@@ -670,9 +583,12 @@ impl WorldState {
                     GameEvent::WieldObject(data) => {
                         if let Some(entity) = self.entities.get_mut(data.object_guid) {
                             // The target of the GameEvent message is the wielder
-                            entity.wielder_id = Some(ev.target);
-                            entity.container_id = None;
-                            entity.currently_wielded_location = Some(data.equip_mask);
+                            entity.set_instance_prop(PropertyInstanceId::Wielder, ev.target);
+                            entity.set_instance_prop(PropertyInstanceId::Container, Guid::NULL);
+                            entity.set_int_prop(
+                                PropertyInt::CurrentWieldedLocation,
+                                data.equip_mask.bits() as i32,
+                            );
                             entity.position.landblock_id = Guid::NULL;
 
                             if ev.target == self.player.guid {
@@ -870,14 +786,14 @@ impl WorldState {
             GameMessage::SetStackSize(data) => {
                 let guid = data.object_guid;
                 if let Some(entity) = self.entities.get_mut(guid) {
-                    // PropertyInt.StackSize = 15
-                    entity.int_properties.insert(15, data.stack_size as i32);
+                    // PropertyInt.StackSize = 12
+                    entity.int_properties.insert(12, data.stack_size as i32);
                     // PropertyInt.Value = 19
                     entity.int_properties.insert(19, data.value as i32);
                 }
                 events.push(StateEvent::PropertyUpdated {
                     guid,
-                    property_id: 15,
+                    property_id: 12,
                     value: PropertyValue::Int(data.stack_size as i32),
                 });
                 events.push(StateEvent::PropertyUpdated {
@@ -927,10 +843,6 @@ impl WorldState {
                     self.player.emit_derived_stats(&mut events);
                 } else if let Some(entity) = self.entities.get_mut(target_guid) {
                     entity.int_properties.insert(data.property, data.value);
-                    if data.property == PropertyInt::CurrentWieldedLocation as u32 {
-                        entity.currently_wielded_location =
-                            Some(EquipMask::from_bits_truncate(data.value as u32));
-                    }
                 }
                 events.push(StateEvent::PropertyUpdated {
                     guid: target_guid,
@@ -1191,11 +1103,6 @@ impl WorldState {
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {
                             PropertyInstanceId::Container => {
-                                entity.container_id = if data.value == Guid::NULL {
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1205,12 +1112,10 @@ impl WorldState {
                                 }
                             }
                             PropertyInstanceId::Wielder => {
-                                entity.wielder_id = if data.value == Guid::NULL {
+                                if data.value == Guid::NULL {
                                     entity.physics_parent_id = None;
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
+                                }
+
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1244,11 +1149,6 @@ impl WorldState {
                     if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
                         match prop {
                             PropertyInstanceId::Container => {
-                                entity.container_id = if data.value == Guid::NULL {
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1258,12 +1158,10 @@ impl WorldState {
                                 }
                             }
                             PropertyInstanceId::Wielder => {
-                                entity.wielder_id = if data.value == Guid::NULL {
+                                if data.value == Guid::NULL {
                                     entity.physics_parent_id = None;
-                                    None
-                                } else {
-                                    Some(data.value)
-                                };
+                                }
+
                                 if data.value != Guid::NULL && target_guid != self.player.guid {
                                     let mut pos = entity.position;
                                     pos.landblock_id = Guid::NULL;
@@ -1631,7 +1529,7 @@ mod tests {
         let events = state.handle_message(&msg);
 
         let entity = state.entities.get(item_guid).unwrap();
-        assert_eq!(entity.container_id, Some(container_guid));
+        assert_eq!(entity.container_id(), Some(container_guid));
         assert_eq!(entity.position.landblock_id, Guid::NULL);
 
         // Check for StateEvent::PropertyUpdated
@@ -1651,8 +1549,8 @@ mod tests {
         let obj_guid = Guid(0x1);
 
         let mut item = Entity::new(obj_guid, "Item".to_string(), WorldPosition::default());
-        item.container_id = Some(Guid(0x2));
-        item.wielder_id = Some(Guid(0x3));
+        item.set_container_id(Some(Guid(0x2)));
+        item.set_wielder_id(Some(Guid(0x3)));
         state.entities.insert(item);
 
         let data = InventoryPutObjectIn3DData {
@@ -1668,8 +1566,8 @@ mod tests {
         let events = state.handle_message(&msg);
 
         let entity = state.entities.get(obj_guid).unwrap();
-        assert_eq!(entity.container_id, None);
-        assert_eq!(entity.wielder_id, None);
+        assert_eq!(entity.container_id(), None);
+        assert_eq!(entity.wielder_id(), None);
 
         assert!(events.iter().any(|e| matches!(
             e,
@@ -1707,8 +1605,8 @@ mod tests {
         let events = state.handle_message(&msg);
 
         let entity = state.entities.get(obj_guid).unwrap();
-        assert_eq!(entity.wielder_id, Some(wielder_guid));
-        assert_eq!(entity.container_id, None);
+        assert_eq!(entity.wielder_id(), Some(wielder_guid));
+        assert_eq!(entity.container_id(), None);
 
         assert!(events.iter().any(|e| matches!(
             e,
@@ -1870,7 +1768,7 @@ mod tests {
             initial_pos.landblock_id
         );
         assert_eq!(
-            state.entities.get(player_guid).unwrap().wielder_id,
+            state.entities.get(player_guid).unwrap().wielder_id(),
             Some(Guid(0x8000031B))
         );
     }

@@ -561,7 +561,7 @@ impl Client {
             .world
             .entities
             .get(item)
-            .and_then(|e| e.valid_locations)
+            .map(|e| e.valid_locations())
             .unwrap_or(EquipMask::NONE);
 
         let resolved_slot = slot.unwrap_or(TargetSlot::EquipMask(item_mask));

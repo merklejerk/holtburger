@@ -302,7 +302,7 @@ impl Entity {
     }
 
     pub fn csetup_id(&self) -> Option<Guid> {
-        self.get_data_prop(PropertyDataId::ClothingBase)
+        self.get_data_prop(PropertyDataId::Setup)
     }
 
     pub fn default_script_id(&self) -> Option<Guid> {

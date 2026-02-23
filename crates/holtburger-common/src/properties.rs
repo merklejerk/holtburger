@@ -1274,12 +1274,15 @@ pub enum RadarColor {
     BrightGreen = 0x10,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr, Display, Default)]
 #[repr(u8)]
 pub enum RadarBehavior {
-    ShowNever = 0,
-    ShowAlways = 1,
-    ShowDistance = 2,
+    #[default]
+    Undefined = 0,
+    ShowNever = 1,
+    ShowMovement = 2,
+    ShowAttacking = 3,
+    ShowAlways = 4,
 }
 
 bitflags! {

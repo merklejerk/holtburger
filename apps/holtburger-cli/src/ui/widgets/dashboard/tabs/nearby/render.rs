@@ -93,7 +93,7 @@ fn render_nearby_item(
     };
 
     if class != EntityClass::Player {
-        if let Some(capacity) = e.items_capacity {
+        if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);
                 display_name = format!("{} ({}/{})", display_name, count, capacity);

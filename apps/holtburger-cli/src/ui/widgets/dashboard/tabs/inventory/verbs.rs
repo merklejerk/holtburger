@@ -36,7 +36,8 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
 
     verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
 
-    let is_equipped = if let (Some(pguid), Some(wielder)) = (game.data.player_guid, e.wielder_id) {
+    let is_equipped = if let (Some(pguid), Some(wielder)) = (game.data.player_guid, e.wielder_id())
+    {
         pguid == wielder
     } else {
         false

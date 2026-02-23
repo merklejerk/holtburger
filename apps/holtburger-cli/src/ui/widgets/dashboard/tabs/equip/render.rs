@@ -155,7 +155,7 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
         .inventory
         .iter()
         .filter_map(|guid| game.data.entities.get(guid))
-        .filter(|e| e.valid_locations.is_some_and(|v| !v.is_empty()))
+        .filter(|e| !e.valid_locations().is_empty())
         .collect();
 
     // Sort all equippable items by name once to keep consistent ordering within buckets
@@ -175,7 +175,7 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
         };
 
         for item in &equippable_items {
-            let valid = item.valid_locations.unwrap_or(EquipMask::NONE);
+            let valid = item.valid_locations();
 
             if valid.intersects(mask) {
                 let current_mask = game

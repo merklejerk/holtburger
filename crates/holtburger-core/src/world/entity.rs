@@ -1,10 +1,11 @@
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    AttunedStatus, CombatUse, EquipMask, ItemType, ObjectDescriptionFlag, PhysicsState,
-    PropertyBool, PropertyInstanceId, PropertyInt, RadarBehavior, RadarColor, Usable,
+    AttunedStatus, EquipMask, ItemType, ObjectDescriptionFlag, PhysicsState, PropertyBool,
+    PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString,
     WeenieHeaderFlag, WeenieHeaderFlag2,
 };
 use holtburger_common::{Guid, Vector3};
+use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
@@ -28,57 +29,8 @@ pub struct Entity {
     pub item_type: Option<ItemType>,
     pub physics_state: PhysicsState,
     pub physics_parent_id: Option<Guid>,
-    pub container_id: Option<Guid>,
-    pub wielder_id: Option<Guid>,
+    pub autonomous_movement: bool,
 
-    pub obj_scale: Option<f32>,
-    pub friction: Option<f32>,
-    pub elasticity: Option<f32>,
-    pub translucency: Option<f32>,
-
-    pub plural_name: Option<String>,
-    pub items_capacity: Option<i8>,
-    pub containers_capacity: Option<i8>,
-    pub ammo_type: Option<u16>,
-    pub value: Option<u32>,
-    pub usable: Option<Usable>,
-    pub use_radius: Option<f32>,
-    pub target_type: Option<ItemType>,
-    pub ui_effects: Option<u32>,
-    pub combat_use: Option<CombatUse>,
-    pub structure: Option<u16>,
-    pub max_structure: Option<u16>,
-    pub stack_size: Option<u16>,
-    pub max_stack_size: Option<u16>,
-    pub valid_locations: Option<EquipMask>,
-    pub currently_wielded_location: Option<EquipMask>,
-    pub priority: Option<u32>,
-    pub radar_blip_color: Option<RadarColor>,
-    pub radar_enum: Option<RadarBehavior>,
-    pub pscript: Option<u16>,
-    pub workmanship: Option<f32>,
-    pub burden: Option<u16>,
-    pub spell: Option<u16>,
-    pub cooldown_id: Option<u32>,
-    pub cooldown_duration: Option<f64>,
-
-    pub mtable_id: Option<u32>,
-    pub stable_id: Option<u32>,
-    pub petable_id: Option<u32>,
-    pub csetup_id: Option<u32>,
-    pub parent_loc: Option<u32>,
-    pub default_script_id: Option<u32>,
-    pub default_script_intensity: Option<f32>,
-    pub autonomous_movement: Option<bool>,
-    pub animation_frame: Option<u32>,
-    pub house_owner: Option<Guid>,
-    pub hook_item_types: Option<ItemType>,
-    pub monarch_id: Option<Guid>,
-    pub hook_type: Option<u16>,
-    pub icon_overlay_id: Option<u32>,
-    pub icon_underlay_id: Option<u32>,
-    pub material_type: Option<u32>,
-    pub pet_owner: Option<Guid>,
     pub sequences: [u16; 9],
 
     pub int_properties: BTreeMap<u32, i32>,
@@ -117,7 +69,300 @@ impl Entity {
     }
 
     pub fn get_instance_prop(&self, prop: PropertyInstanceId) -> Option<Guid> {
-        self.iid_properties.get(&(prop as u32)).copied()
+        self.iid_properties
+            .get(&(prop as u32))
+            .copied()
+            .filter(|g| !g.is_null())
+    }
+
+    pub fn get_data_prop(&self, prop: PropertyDataId) -> Option<Guid> {
+        self.did_properties
+            .get(&(prop as u32))
+            .copied()
+            .filter(|g| !g.is_null())
+    }
+
+    pub fn get_float_prop(&self, prop: PropertyFloat) -> Option<f64> {
+        self.float_properties.get(&(prop as u32)).copied()
+    }
+
+    pub fn get_string_prop(&self, prop: PropertyString) -> Option<&str> {
+        self.string_properties
+            .get(&(prop as u32))
+            .map(|s| s.as_str())
+    }
+
+    pub fn set_int_prop(&mut self, prop: PropertyInt, val: i32) {
+        self.int_properties.insert(prop as u32, val);
+    }
+
+    pub fn set_bool_prop(&mut self, prop: PropertyBool, val: bool) {
+        self.bool_properties.insert(prop as u32, val);
+    }
+
+    pub fn set_instance_prop(&mut self, prop: PropertyInstanceId, val: Guid) {
+        if val.is_null() {
+            self.iid_properties.remove(&(prop as u32));
+        } else {
+            self.iid_properties.insert(prop as u32, val);
+        }
+    }
+
+    pub fn set_data_prop(&mut self, prop: PropertyDataId, val: Guid) {
+        if val.is_null() {
+            self.did_properties.remove(&(prop as u32));
+        } else {
+            self.did_properties.insert(prop as u32, val);
+        }
+    }
+
+    pub fn set_float_prop(&mut self, prop: PropertyFloat, val: f64) {
+        self.float_properties.insert(prop as u32, val);
+    }
+
+    pub fn set_string_prop(&mut self, prop: PropertyString, val: String) {
+        self.string_properties.insert(prop as u32, val);
+    }
+
+    pub fn set_from_maps(
+        &mut self,
+        ints: BTreeMap<u32, i32>,
+        floats: BTreeMap<u32, f64>,
+        bools: BTreeMap<u32, bool>,
+        strings: BTreeMap<u32, String>,
+        dids: BTreeMap<u32, Guid>,
+        iids: BTreeMap<u32, Guid>,
+    ) {
+        self.int_properties.extend(ints);
+        self.float_properties.extend(floats);
+        self.bool_properties.extend(bools);
+        self.string_properties.extend(strings);
+        self.did_properties.extend(dids);
+        self.iid_properties.extend(iids);
+    }
+
+    pub fn container_id(&self) -> Option<Guid> {
+        self.get_instance_prop(PropertyInstanceId::Container)
+    }
+
+    pub fn set_container_id(&mut self, val: Option<Guid>) {
+        self.set_instance_prop(PropertyInstanceId::Container, val.unwrap_or(Guid::NULL))
+    }
+
+    pub fn wielder_id(&self) -> Option<Guid> {
+        self.get_instance_prop(PropertyInstanceId::Wielder)
+    }
+
+    pub fn set_wielder_id(&mut self, val: Option<Guid>) {
+        self.set_instance_prop(PropertyInstanceId::Wielder, val.unwrap_or(Guid::NULL))
+    }
+
+    pub fn item_value(&self) -> u32 {
+        self.get_int_prop(PropertyInt::Value).unwrap_or(0) as u32
+    }
+
+    pub fn items_capacity(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::ItemsCapacity)
+            .map(|v| v as u32)
+    }
+
+    pub fn containers_capacity(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::ContainersCapacity)
+            .map(|v| v as u32)
+    }
+
+    pub fn stack_size(&self) -> u32 {
+        self.get_int_prop(PropertyInt::StackSize).unwrap_or(1) as u32
+    }
+
+    pub fn is_stackable_base(&self) -> bool {
+        self.get_int_prop(PropertyInt::MaxStackSize).unwrap_or(0) > 1
+    }
+
+    pub fn plural_name(&self) -> Option<&str> {
+        self.get_string_prop(PropertyString::PluralName)
+    }
+
+    pub fn obj_scale(&self) -> Option<f64> {
+        self.get_float_prop(PropertyFloat::DefaultScale)
+    }
+
+    pub fn friction(&self) -> Option<f64> {
+        self.get_float_prop(PropertyFloat::Friction)
+    }
+
+    pub fn elasticity(&self) -> Option<f64> {
+        self.get_float_prop(PropertyFloat::Elasticity)
+    }
+
+    pub fn translucency(&self) -> Option<f64> {
+        self.get_float_prop(PropertyFloat::Translucency)
+    }
+
+    pub fn mass(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::Mass).map(|v| v as u32)
+    }
+
+    pub fn workmanship(&self) -> Option<f64> {
+        self.get_int_prop(PropertyInt::ItemWorkmanship)
+            .map(|v| v as f64)
+    }
+
+    pub fn burden(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::EncumbranceVal)
+            .map(|v| v as u32)
+    }
+
+    pub fn item_type_int(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::ItemType).map(|v| v as u32)
+    }
+
+    pub fn ammo_type(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::AmmoType).map(|v| v as u32)
+    }
+
+    pub fn usable(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::ItemUseable)
+            .map(|v| v as u32)
+    }
+
+    pub fn use_radius(&self) -> Option<f64> {
+        self.get_float_prop(PropertyFloat::UseRadius)
+    }
+
+    pub fn target_type(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::TargetType).map(|v| v as u32)
+    }
+
+    pub fn ui_effects(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::UiEffects).map(|v| v as u32)
+    }
+
+    pub fn combat_use(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::CombatUse).map(|v| v as u32)
+    }
+
+    pub fn structure(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::Structure).map(|v| v as u32)
+    }
+
+    pub fn max_structure(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::MaxStructure)
+            .map(|v| v as u32)
+    }
+
+    pub fn max_stack_size(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::MaxStackSize)
+            .map(|v| v as u32)
+    }
+
+    pub fn priority(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::ClothingPriority)
+            .map(|v| v as u32)
+    }
+
+    pub fn radar_blip_color(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::RadarBlipColor)
+            .map(|v| v as u32)
+    }
+
+    pub fn radar_enum(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::ShowableOnRadar)
+            .map(|v| v as u32)
+    }
+
+    pub fn pscript(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::PhysicsScript)
+    }
+
+    pub fn spell(&self) -> Option<Guid> {
+        // ACE uses PropertyDataId.Spell for casting property?
+        self.get_data_prop(PropertyDataId::Spell)
+    }
+
+    pub fn cooldown_id(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::SharedCooldown)
+            .map(|v| v as u32)
+    }
+
+    pub fn cooldown_duration(&self) -> Option<f64> {
+        self.get_float_prop(PropertyFloat::CooldownDuration)
+    }
+
+    pub fn mtable_id(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::MotionTable)
+    }
+
+    pub fn stable_id(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::SoundTable)
+    }
+
+    pub fn petable_id(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::PhysicsEffectTable)
+    }
+
+    pub fn csetup_id(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::Setup)
+    }
+
+    pub fn default_script_id(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::PhysicsScript)
+    }
+
+    pub fn default_script_intensity(&self) -> Option<f64> {
+        self.get_float_prop(PropertyFloat::PhysicsScriptIntensity)
+    }
+
+    pub fn house_owner_id(&self) -> Option<Guid> {
+        self.get_instance_prop(PropertyInstanceId::HouseOwner)
+    }
+
+    pub fn monarch_id(&self) -> Option<Guid> {
+        self.get_instance_prop(PropertyInstanceId::Monarch)
+    }
+
+    pub fn pet_owner_id(&self) -> Option<Guid> {
+        self.get_instance_prop(PropertyInstanceId::PetOwner)
+    }
+
+    pub fn icon_overlay_id(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::IconOverlay)
+    }
+
+    pub fn icon_underlay_id(&self) -> Option<Guid> {
+        self.get_data_prop(PropertyDataId::IconUnderlay)
+    }
+
+    pub fn material_type(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::MaterialType)
+            .map(|v| v as u32)
+    }
+
+    pub fn hook_type(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::HookType).map(|v| v as u32)
+    }
+
+    pub fn hook_item_types(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::HookItemType)
+            .map(|v| v as u32)
+    }
+
+    pub fn hook_placement(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::HookPlacement)
+            .map(|v| v as u32)
+    }
+
+    pub fn valid_locations(&self) -> EquipMask {
+        EquipMask::from_bits_truncate(
+            self.get_int_prop(PropertyInt::ValidLocations).unwrap_or(0) as u32
+        )
+    }
+
+    pub fn wield_location(&self) -> EquipMask {
+        EquipMask::from_bits_truncate(
+            self.get_int_prop(PropertyInt::CurrentWieldedLocation)
+                .unwrap_or(0) as u32,
+        )
     }
 
     pub fn attuned_status(&self) -> AttunedStatus {
@@ -128,6 +373,78 @@ impl Entity {
         }
     }
 
+    pub fn apply_description(&mut self, data: Box<ObjectDescriptionData>) {
+        self.wcid = Some(data.public_weenie_desc.wcid);
+        self.flags = data.public_weenie_desc.obj_desc_flags;
+        self.weenie_flags = data.public_weenie_desc.weenie_flags;
+        self.weenie_flags2 = data.public_weenie_desc.weenie_flags2;
+        self.item_type = Some(ItemType::from_bits_truncate(
+            data.public_weenie_desc.item_type,
+        ));
+        self.physics_state = data.physics_state;
+        self.physics_parent_id = data.parent_id;
+
+        if let Some(v) = data.velocity {
+            self.velocity = v;
+        }
+        if let Some(a) = data.acceleration {
+            self.acceleration = a;
+        }
+        if let Some(o) = data.omega {
+            self.omega = o;
+        }
+
+        self.icon_id = Some(data.public_weenie_desc.icon_id);
+        self.sequences = data.sequences;
+
+        // Apply properties from PublicWeenieDescription
+        self.set_from_maps(
+            data.public_weenie_desc.int_properties,
+            data.public_weenie_desc.float_properties,
+            data.public_weenie_desc.bool_properties,
+            data.public_weenie_desc.string_properties,
+            data.public_weenie_desc.did_properties,
+            data.public_weenie_desc.iid_properties,
+        );
+
+        // Physics properties that are also in maps in ACE
+        if let Some(val) = data.mtable_id {
+            self.set_data_prop(PropertyDataId::MotionTable, Guid(val));
+        }
+        if let Some(val) = data.stable_id {
+            self.set_data_prop(PropertyDataId::SoundTable, Guid(val));
+        }
+        if let Some(val) = data.petable_id {
+            self.set_data_prop(PropertyDataId::PhysicsEffectTable, Guid(val));
+        }
+        if let Some(val) = data.csetup_id {
+            self.set_data_prop(PropertyDataId::Setup, Guid(val));
+        }
+        if let Some(val) = data.obj_scale {
+            self.set_float_prop(PropertyFloat::DefaultScale, val as f64);
+        }
+        if let Some(val) = data.friction {
+            self.set_float_prop(PropertyFloat::Friction, val as f64);
+        }
+        if let Some(val) = data.elasticity {
+            self.set_float_prop(PropertyFloat::Elasticity, val as f64);
+        }
+        if let Some(val) = data.translucency {
+            self.set_float_prop(PropertyFloat::Translucency, val as f64);
+        }
+        if let Some(val) = data.default_script_id {
+            self.set_data_prop(PropertyDataId::PhysicsScript, Guid(val));
+        }
+        if let Some(val) = data.default_script_intensity {
+            self.set_float_prop(PropertyFloat::PhysicsScriptIntensity, val as f64);
+        }
+        if let Some(val) = data.autonomous_movement {
+            self.autonomous_movement = val;
+        }
+        // PhysicsState as PropertyInt (93)
+        self.set_int_prop(PropertyInt::PhysicsState, data.physics_state.bits() as i32);
+    }
+
     pub fn is_sellable_base(&self) -> bool {
         // IsSellable defaults to True in ACE if not specified
         let is_sellable = self
@@ -136,7 +453,7 @@ impl Entity {
             .copied()
             .unwrap_or(true);
         let is_retained = self.get_bool_prop(PropertyBool::Retained);
-        let value = self.value.unwrap_or(0);
+        let value = self.item_value();
 
         is_sellable && !is_retained && value >= 1
     }
@@ -187,54 +504,7 @@ impl Entity {
             item_type: None,
             physics_state: PhysicsState::NONE,
             physics_parent_id: None,
-            container_id: None,
-            wielder_id: None,
-            obj_scale: None,
-            friction: None,
-            elasticity: None,
-            translucency: None,
-            plural_name: None,
-            items_capacity: None,
-            containers_capacity: None,
-            ammo_type: None,
-            value: None,
-            usable: None,
-            use_radius: None,
-            target_type: None,
-            ui_effects: None,
-            combat_use: None,
-            structure: None,
-            max_structure: None,
-            stack_size: None,
-            max_stack_size: None,
-            valid_locations: None,
-            currently_wielded_location: None,
-            priority: None,
-            radar_blip_color: None,
-            radar_enum: None,
-            pscript: None,
-            workmanship: None,
-            burden: None,
-            spell: None,
-            cooldown_id: None,
-            cooldown_duration: None,
-            mtable_id: None,
-            stable_id: None,
-            petable_id: None,
-            csetup_id: None,
-            parent_loc: None,
-            default_script_id: None,
-            default_script_intensity: None,
-            autonomous_movement: None,
-            animation_frame: None,
-            house_owner: None,
-            hook_item_types: None,
-            monarch_id: None,
-            hook_type: None,
-            icon_overlay_id: None,
-            icon_underlay_id: None,
-            material_type: None,
-            pet_owner: None,
+            autonomous_movement: false,
             sequences: [0; 9],
             int_properties: BTreeMap::new(),
             int64_properties: BTreeMap::new(),

@@ -240,137 +240,132 @@ While `0x0013 PlayerDescription` provides the initial state, stats can change du
 
 ### `0x02DD` PrivateUpdateSkill
 Updates a single skill. See [stats.md](stats.md) for SkillID mappings.
-- `uint8` `Sequence`.
-- `uint32` `SkillID`.
-- `uint32` `Ranks`.
-- `uint16` `AdjustPP` (Typically 1).
-- `uint32` `AdvancementClass` (Training level).
-- `uint32` `ExperienceSpent`.
-- `uint32` `InitLevel`.
-- `uint32` `Resistance`.
-- `double` `LastUsedTime`.
+- `uint8` `Sequence`
+- `uint32` `SkillID`
+- `uint16` `Ranks`
+- `uint16` `AdjustPP`
+- `uint32` `ExperienceSpent`
+- `uint32` `AdvancementClass` (Training level)
+- `uint32` `InitLevel`
+- `uint32` `Resistance`
+- `double` `LastUsedTime`
 
 ### `0x02E3` PrivateUpdateAttribute
 Updates a single attribute.
-- `uint8` `Sequence`.
-- `uint32` `AttributeID`.
-- `uint32` `Ranks`.
-- `uint32` `StartingValue`.
-- `uint32` `ExperienceSpent`.
+- `uint8` `Sequence`
+- `uint32` `AttributeID`
+- `uint32` `Ranks`
+- `uint32` `StartingValue`
+- `uint32` `ExperienceSpent`
 
-### `0x02E7` PrivateUpdateVital (Maximum)
+### `0x02E7` PrivateUpdateVital
 Updates a single vital's maximum potential. Use `VitalID` mappings: Health=2, Stamina=4, Mana=6.
-- `uint8` `Sequence`.
-- `uint32` `VitalID`.
-- `uint32` `Ranks`.
-- `uint32` `StartingValue`.
-- `uint32` `ExperienceSpent`.
+- `uint8` `Sequence`
+- `uint32` `VitalID`
+- `uint32` `Ranks`
+- `uint32` `StartingValue`
+- `uint32` `ExperienceSpent`
+- `uint32` `CurrentValue` (New current value after max change)
 
 ### `0x02E9` PrivateUpdateVitalCurrent
 Updates the current value of a vital (e.g., during health regeneration).
-- `uint8` `Sequence`.
-- `uint32` `VitalID`.
-- `uint32` `CurrentValue`.
-- `uint32` `Sequence`.
-- `uint32` `VitalID`.
-- `uint32` `Ranks`.
-- `uint32` `StartingValue`.
-- `uint32` `ExperienceSpent`.
-- `uint32` `CurrentValue`.
+- `uint8` `Sequence`
+- `uint32` `VitalID`
+- `uint32` `CurrentValue`
 
 ---
 
 ## 3. Position and Physics (S2C)
 
-### `0xF748` UpdatePosition
+### `0xF745` ObjectCreate (S2C) / `0xF7DB` UpdateObject (S2C)
+Used to spawn objects or fully refresh their state in the client's view. These two opcodes are structurally identical.
+
+#### 1. `ModelDescription` Structure
+The `ModelDescription` always appears first:
+1. `uint8`: Model Marker (usually 0x11).
+2. `uint8`: Number of SubPalettes.
+3. `uint8`: Number of Texture Changes.
+4. `uint8`: Number of AnimPart Changes.
+5. `SubPalettesVector`: For each, a `PackedDword` ID (SubPaletteID), `uint8` Offset, and `uint8` Length.
+6. `TexturesVector`: For each, `uint8` PartIndex and two `PackedDword` IDs (OldTextureID/NewTextureID).
+7. `AnimPartsVector`: For each, `uint8` Index and one `PackedDword` ID (ModelID).
+8. **Alignment:** Align cursor to 4-byte boundary after this section.
+
+#### 2. `PhysicsDescription` Header
+Determines the physical state and position of the object.
+1. `uint32`: `PhysicsFlags` (Ordered processing below).
+2. `uint32`: `PhysicsState` (Bitmask for collisions, gravity, etc.).
+
+Optional fields follow in this precise order based on `PhysicsFlags`:
+
+| Bitmask | Field | Type | Description |
+| :--- | :--- | :--- | :--- |
+| `0x010000` | `MovementData` | `Variable` | Size-prefixed move record (Autonomous flag follows if length > 0). |
+| `0x020000` | `AnimationFrame` | `uint32` | Placement ID. Exclusive with MovementData. |
+| `0x008000` | `Position` | `Variable` | `CellID` (u32), `Vector3` (3xf32), and optional `Quaternion` based on local bitmask. |
+| `0x000002` | `MTable` | `uint32` | Motion Table. |
+| `0x000800` | `STable` | `uint32` | Sound Table. |
+| `0x001000` | `PeTable` | `uint32` | Physical Effects Table. |
+| `0x000001` | `CSetup` | `uint32` | Combat Setup. |
+| `0x000020` | `Parent` | `uint64` | `ParentGUID` (u32) + `LocationID` (u32). |
+| `0x000040` | `Children` | `Vector` | Count + (GUID + LocationID) per child. |
+| `0x000080` | `ObjScale` | `float` | Scaling factor. |
+| `0x000100` | `Friction` | `float` | Movement friction. |
+| `0x000200` | `Elasticity` | `float` | Bounciness. |
+| `0x040000` | `Translucency` | `float` | Alpha/Transparency. |
+| `0x000004` | `Velocity` | `Vector3` | Current XYZ velocity. |
+| `0x000008` | `Acceleration` | `Vector3` | Current XYZ acceleration. |
+| `0x000010` | `Omega` | `Vector3` | Angular velocity. |
+| `0x002000` | `DefaultScript`| `uint32` | Script ID. |
+| `0x004000` | `ScriptInt` | `uint32` | Script intensity. |
+
+**Sequence Block:** After all flag-fields, a **20-byte aligned block** follows. This typically contains 9x `uint16` sequence counters (Position, Movement, State, Vector, Teleport, ServerControl, ForcePosition, VisualDesc, Instance).
+
+#### 3. `WeenieHeader`
+The core identity and metadata for the object.
+1. `uint32`: `WeenieHeaderFlags` (ordered fields below).
+2. `String16L`: `Name` (Object name).
+3. `PackedDword`: `WeenieClassID` (Template ID).
+4. `PackedDword`: `IconID`.
+5. `uint32`: `ItemType` (Bitmask e.g. 0x02 Armor, 0x10 Creature).
+6. `uint32`: `ObjectDescriptionFlags`.
+
+**Second Header:** If `ObjectDescriptionFlags` includes `0x04000000` (IncludesSecondHeader), a `uint32 WeenieHeaderFlags2` follows immediately.
+
+#### 4. Optional Weenie Fields
+Fields appear in order of bits set in `WeenieHeaderFlags`:
+(Listing truncated for brevity, refer to source for full bitmasks)
+
+**Alignment:** Align cursor to 4-byte boundary after this section.
+
+### `0xF74B` SetState (S2C)
+Used to update the `PhysicsState` bitmask of an object (e.g., hiding/revealing an object or making it ethereal).
+- `uint32` `GUID`
+- `uint32` `PhysicsState`
+- `uint32` `InstanceSeq`
+- `uint32` `StateSeq`
+
+### `0xF74A` PickupEvent (S2C)
+Signals that an object has been picked up from the world. Typically triggers a despawn in the client.
+- `uint32` `GUID`
+
+### `0xF749` ParentEvent (S2C)
+Signals that an object has been physically linked to another object. This primary affects the object's physics and coordinate system (making its position relative to the parent).
+- `uint32` `ParentGUID`
+- `uint32` `ChildGUID`
+- `uint32` `LocationID`
+- `uint32` `Placement`
+- `uint16` `ParentInstanceSeq`
+- `uint16` `ChildPositionSeq`
+
+### `0xF748` UpdatePosition (S2C)
 Sent frequently to sync object locations. Contains `PositionPack`.
 
-### `0xF74C` UpdateMotion
-Sent for object animations and movement state changes.
+### `0xF74C` UpdateMotion (S2C)
+Sent for object animations and movement state changes. Includes `MovementPack`.
 
-### `0xF74E` VectorUpdate
+### `0xF74E` VectorUpdate (S2C)
 Sent to sync object velocity and angular velocity.
-
----
-
-## 4. Other Game Messages
-
-### `0xF74C` UpdateMotion
-Synchronizes movement and animation states for objects.
-- `uint32` `GUID`: The object moving.
-- `uint32` `InstanceSequence`.
-- `byte[]` `MovementData`: Header + Animation/Position state.
-
----
-
-## 5. GameEvents (`0xF7B0`)
-
-GameEvents are a high-level wrapper (opcode `0xF7B0`) used for asynchronous server-sent events.
-
-### Payload Structure
-1. `uint32`: Target GUID (The object the event is about).
-2. `uint32`: Sequence Number.
-3. `uint32`: Event Opcode.
-4. `Variable`: Event Data.
-
-### Magic & Enchantment Events
-
-#### `0x02C7` MagicDispelEnchantment
-Silently removes a specific enchantment.
-- `uint16`: Spell ID.
-- `uint16`: Layer ID.
-
-#### `0x02C8` MagicDispelMultipleEnchantments
-Silently removes multiple enchantments.
-- `uint32`: Count.
-- For each item:
-  - `uint16`: Spell ID.
-  - `uint16`: Layer ID.
-
-#### `0x02C2` MagicUpdateEnchantment
-Updates or adds an enchantment to the target.
-- `Enchantment`: Full enchantment structure.
-
-#### `0x02C3` MagicRemoveEnchantment
-Removes an enchantment (typically due to expiration).
-- `uint16`: Spell ID.
-- `uint16`: Layer ID.
-
-#### `0x02C6` MagicPurgeEnchantments
-Removes all enchantments from the target. (No extra data).
-
-#### `0x0312` MagicPurgeBadEnchantments
-Removes all negative/harmful enchantments from the target. (No extra data).
-
----
-
-## 5. Common Client-to-Server (C2S) Messages
-
-### `0xF7C8` CharacterEnterWorldRequest
-Initial request to select a character slot.
-- `uint32` `CharacterID`.
-
-### `0xF657` CharacterEnterWorld
-Final handshake for world admission.
-- `uint32` `CharacterID`.
-- `String16L` `AccountName`.
-
----
-
-## 3. Game Actions (`0xF7B1`)
-Primary way clients send commands and interactions to the server.
-
-| Offset | Type | Name | Description |
-| :--- | :--- | :--- | :--- |
-| `0` | `uint32` | `Opcode` | `0xF7B1`. |
-| `4` | `uint32` | `Sequence` | Action sequence number. |
-| `8` | `uint32` | `ActionType` | The specific action (see below). |
-| `12` | `byte[]` | `Data` | Action-specific payload. |
-
-#### Common Action Types:
-- **`0x00A1` LoginComplete:** Signals character is ready to spawn.
-- **`0x0015` Talk:** Sends a message to the public channel or a specific person.
-  - `String16L` Message Text.
 
 ---
 
@@ -378,156 +373,102 @@ Primary way clients send commands and interactions to the server.
 
 The `GameEvent` message is a multiplexer for a wide variety of UI, magic, and world events.
 
-**Structure:**
+**Payload Structure:**
 1. `uint32`: Truncated Target GUID (4 bytes).
 2. `uint32`: Sequence Number.
 3. `uint32`: Sub-Opcode (`EventType`).
 4. `Byte[]`: Payload.
 
+### Magic & Enchantment Events
+
 | Sub-Opcode | Name | Description |
 | :--- | :--- | :--- |
-| `0x0013` | `PlayerDescription` | Sent on login. Detailed below. |
-| `0x0282` | `StartGame` | Signals the client to start the game loop. |
-| `0x0147` | `ChannelBroadcast` | Public channel chat messages. |
-| `0x02BD` | `Tell` | Private message details. |
-| `0x02C2` | `MagicUpdateEnchantment` | See [magic.md](magic.md). |
-| `0x02C3` | `MagicRemoveEnchantment`| See [magic.md](magic.md). |
-| `0x02C4` | `MagicUpdateMultipleEnchantments` | See [magic.md](magic.md). |
-| `0x02C5` | `MagicRemoveMultipleEnchantments` | See [magic.md](magic.md). |
-| `0x02C6` | `MagicPurgeEnchantments` | Clear all enchantments. |
-| `0x02C7` | `MagicDispelEnchantment` | Silent removal of a single enchantment. |
-| `0x02C8` | `MagicDispelMultipleEnchantments` | Silent removal of multiple enchantments. |
-| `0x0312` | `MagicPurgeBadEnchantments` | Remove all debuffs. |
+| `0x02C2` | `MagicUpdateEnchantment` | Update or add an enchantment. |
+| `0x02C3` | `MagicRemoveEnchantment` | Remove an enchantment (expiration). |
+| `0x02C4` | `MagicUpdateMultipleEnchantments` | Batch update of multiple enchantments. |
+| `0x02C6` | `MagicPurgeEnchantments` | Clear all enchantments from target. |
+| `0x02C7` | `MagicDispelEnchantment` | Silent removal of a specific enchantment. |
+| `0x0312` | `MagicPurgeBadEnchantments` | Remove all harmful/negative enchantments. |
 
 ### `0x0013` PlayerDescription
-
-This message is sent when the player first enters the world. It provides a complete snapshot of the player's character, including properties, status, attributes, skills, and enchantments.
+Sent as a **GameEvent** when the player first enters the world. It provides a complete snapshot of the player's character, including properties, status, attributes, skills, and enchantments.
 
 #### Structure
-
 1. **Header**
    - `uint32`: `propertyFlags` (determines which property tables follow).
    - `uint32`: `weenieType` (usually `0x0001` for player).
-
 2. **Property Tables**
-   Tables for `Int32`, `Int64`, `Bool`, etc., appear in the order defined by the bits in `propertyFlags`. Each table starts with a 4-byte header: `uint16 count` and `uint16 numBuckets`.
-
+   Tables for `Int32`, `Int64`, `Bool`, etc., appear in order of flag bits. Each starts with Header: `uint16 count`, `uint16 numBuckets`.
+   Note: Strings in property tables are not padded.
 3. **Status Data**
-   - `uint32`: `vectorFlags` (determines which status vectors follow).
-   - `uint32`: `hasHealthStats` (boolean flag).
-
+   - `uint32`: `vectorFlags` (Attributes, Skills, Spells, Enchantments).
+   - `uint32`: `hasHealthStats` (bool).
 4. **Status Vectors**
-   Vectors for `Attribute`, `Skill`, etc., appear in the order defined by the bits in `vectorFlags`.
-
-| Bitmask | Vector | Structure |
-| :--- | :--- | :--- |
-| `0x0001` | `Attribute` | `uint32` cache_mask + entry for each set bit (Ranks, StartingValue, ExperienceSpent). |
-| `0x0002` | `Skill` | `uint16` count + `uint16` buckets + `Skill` entries. |
-| `0x0100` | `Spell` | `uint16` count + `uint16` buckets + (u32 SpellID, f32 unk). |
-| `0x0200` | `Enchantment` | See [Enchantment Registry](magic.md#initial-synchronization) in `magic.md`. |
+   - **Attributes (0x01)**: `uint32` mask + entries (Ranks, StartingValue, Experience).
+   - **Skills (0x02)**: `u16 count`, `u16 buckets` + entries (SkillID, Ranks, Advancement, etc).
+   - **Enchantments (0x200)**: Masked sync of all active effects.
 
 ---
 
-## 5. Movement and Positioning
-Positioning is handled via specialized messages documented in [movement.md](movement.md).
+## 5. Client Actions (`0xF7B1`)
 
-### `0xF7B0:0x0013` PlayerDescription (S2C)
-The full description of the player's character, including properties, skills, spells, and enchantments.
-Sent during login.
+Primary way clients send commands and interactions to the server.
 
-Structure:
-1. `Opcode`: `0xF7B0` + `Sequence` + `EventID 0x0013`.
-2. `PropertyFlags`: `uint32` bitmask determining the presence of property tables.
-3. `WeenieType`: `uint32`.
-4. **Property Tables**: For each flag set (Int32, Int64, Bool, etc.), a `PackableHashTable` follows.
-   - Header: `u16 Count`, `u16 Buckets`.
-   - **Important**: Strings in Property Tables are **NOT padded**.
-5. `VectorFlags`: `uint32` bitmask determining vectors (Attributes, Skills, Spells, Enchantments).
-   - `0x0001` Attributes: Complex structure.
-   - `0x0002` Skills:
-     - Header: `u16 Count`, `u16 Buckets`.
-     - **Skill Entry (32 bytes)**:
-       - `u32` SkillID.
-       - `u32` Ranks.
-       - **Note**: The `Status` field (u16) is **MISSING** in this message compared to ACE server structure.
-       - `u32` AdvancementClass.
-       - `u32` Experience.
-       - `u32` InitLevel.
-       - `u32` TaskDifficulty (or generic).
-       - `f64` LastUsedTime.
-   - `0x0100` Spells.
-   - `0x0200` Enchantments: Starts with an `EnchantmentMask` (u32).
+**Structure:**
+1. `uint32`: Sequence Number.
+2. `uint32`: ActionType (e.g. `0x0015` Talk).
+3. `Byte[]`: Payload.
+
+#### Common Actions:
+- **`0x00A1` LoginComplete:** Character is ready to spawn.
+- **`0x0015` Talk:** Send chat or commands.
+- **`0x0036` Use:** Interact with world objects or items.
 
 ---
 
 ## 6. Trade and Vendors
 
-Trading and interacting with vendors involves a specialized set of opcodes for opening sessions, updating the trade window, and finalizing transactions.
+Interactions with vendors and other players use a combination of `GameEvent` (S2C) and `GameAction` (C2S) messages.
 
-### `0x01A7` VendorOpen (S2C)
-Sent by the server when a vendor interaction begins.
+### Vendors
+
+#### `0xF7B0:0x0062` ApproachVendor (S2C)
+Sent when a merchant interaction begins. Includes full inventory and pricing.
 
 | Type | Name | Description |
 | :--- | :--- | :--- |
 | `uint32` | `VendorID` | GUID of the vendor. |
-| `float32` | `BuyMultiplier` | Price multiplier when buying from the vendor. |
-| `float32` | `SellMultiplier` | Price multiplier when selling to the vendor. |
-| `uint32` | `ItemCount` | Number of items in the vendor's inventory. |
+| `uint32` | `ItemTypes` | Bitmask of item types accepted. |
+| `uint32` | `MinValue` | Minimum item value accepted. |
+| `uint32` | `MaxValue` | Maximum item value accepted. |
+| `uint32` | `DealMagical` | Whether vendor handles magical items. |
+| `float32` | `BuyMultiplier` | Price multiplier for buying (e.g. 1.25). |
+| `float32` | `SellMultiplier` | Price multiplier for selling (e.g. 0.75). |
+| `uint32` | `AltWCID` | WCID of alternate currency (if used). |
+| `uint32` | `AltAmount` | Amount of alternate currency required. |
+| `String16L` | `AltName` | Name of alternate currency. |
+| `uint32` | `ItemCount` | Number of items in vendor's inventory. |
 | `VendorItem[]` | `Items` | List of items available for purchase. |
 
-**VendorItem Structure**:
-1. `uint32`: `PackedStackSize`.
-2. `PublicWeenieDescription`: (Standard weenie structure).
+#### `0xF7B1:0x005F` Buy (C2S)
+Request to purchase items. Payload: `VendorID` (u32), `ItemCount` (u32), `ItemProfile[]`.
 
-### `0x005F` TradeRegister (S2C)
-Sent when a player-to-player trade negotiation starts.
+#### `0xF7B1:0x0060` Sell (C2S)
+Request to sell items. Payload: `VendorID` (u32), `ItemCount` (u32), `ItemProfile[]`.
 
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `uint32` | `InitiatorID` | GUID of the player who started the trade. |
-| `uint32` | `PartnerID` | GUID of the trade partner. |
+---
 
-### `0x0060` TradeUpdate (S2C)
-Updates the contents or status of a trade window.
+### Player-to-Player Trade
 
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `uint32` | `Side` | 1 = Self, 2 = Partner. |
-| `uint32` | `ItemCount` | Number of items currently in this side of the window. |
-| `uint32[]` | `Items` | List of item GUIDs. |
-| `bool` | `Accepted` | Whether this side has clicked "Accept". |
-
-### `0x0061` TradeEnd (S2C)
-Sent when a trade session is closed or completed.
-
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `uint32` | `Reason` | 1 = Success, 2 = Canceled, 3 = Error. |
-
-### `0x0062` TradeReset (S2C)
-Clears both sides of the trade window.
-
-### `0x005D` TradeAccept (C2S)
-Sent by the client to accept the current trade offer.
-
-### `0x005E` TradeDecline (C2S)
-Sent by the client to decline/cancel the trade.
-
-### `0x01A2` Buy (C2S)
-Sent to purchase items from a vendor.
-
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `uint32` | `VendorID` | GUID of the vendor. |
-| `uint32` | `ItemCount` | Number of items to buy. |
-| `ItemProfile[]` | `Items` | List of `(GUID, Amount)` pairs. |
-
-### `0x01A3` Sell (C2S)
-Sent to sell items to a vendor.
-
-| Type | Name | Description |
-| :--- | :--- | :--- |
-| `uint32` | `VendorID` | GUID of the vendor. |
-| `uint32` | `ItemCount` | Number of items to sell. |
-| `ItemProfile[]` | `Items` | List of `(GUID, Amount)` pairs. |
+| Opcode | Name | Type | Description |
+| :--- | :--- | :--- | :--- |
+| `0xF7B0:0x01FD` | `RegisterTrade` | S2C | Initiates trade handshake. |
+| `0xF7B0:0x01FE` | `OpenTrade` | S2C | Confirms trade window is open. |
+| `0xF7B0:0x01FF` | `CloseTrade` | S2C | Ends trade session (Success/Cancel). |
+| `0xF7B0:0x0200` | `AddToTrade` | S2C | Partner added item to window. |
+| `0xF7B0:0x0202` | `AcceptTrade` | S2C | Participant accepted agreement. |
+| `0xF7B0:0x0203` | `DeclineTrade` | S2C | Participant declined/canceled. |
+| `0xF7B0:0x0205` | `ResetTrade` | S2C | Acceptance cleared due to change. |
+| `0xF7B1:0x01FA` | `AcceptTrade` | C2S | Client accepts current offer. |
+| `0xF7B1:0x01FB` | `DeclineTrade` | C2S | Client cancels trade. |
 

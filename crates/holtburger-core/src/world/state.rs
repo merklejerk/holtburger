@@ -291,15 +291,16 @@ impl WorldState {
                 let entity_name = data
                     .public_weenie_desc
                     .name
-                    .clone()
-                    .unwrap_or_else(|| "Unknown".to_string());
+                    .as_deref()
+                    .unwrap_or("Unknown")
+                    .to_string();
 
                 let mut entity = Entity::new(
                     data.public_weenie_desc.guid,
                     entity_name,
                     data.pos.unwrap_or_default(),
                 );
-                entity.apply_description(data.clone());
+                entity.apply_description(data);
 
                 // Update inventory tracking for new objects appearing in containers
                 if let Some(cid) = entity.container_id()

@@ -46,11 +46,6 @@ impl TabController for InventoryTab {
 
         if let CommandTarget::Entity(e, _) = target {
             verbs.extend(verbs::get_verbs(e, game));
-
-            // If a vendor session is active, allow selling this item
-            if game.data.vendor.is_some() {
-                verbs.push(Verb::new(Action::Sell, 's', "Sell"));
-            }
         }
 
         verbs

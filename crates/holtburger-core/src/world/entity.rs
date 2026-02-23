@@ -373,7 +373,7 @@ impl Entity {
         }
     }
 
-    pub fn apply_description(&mut self, data: Box<ObjectDescriptionData>) {
+    pub fn apply_description(&mut self, data: &ObjectDescriptionData) {
         self.wcid = Some(data.public_weenie_desc.wcid);
         self.flags = data.public_weenie_desc.obj_desc_flags;
         self.weenie_flags = data.public_weenie_desc.weenie_flags;
@@ -399,12 +399,12 @@ impl Entity {
 
         // Apply properties from PublicWeenieDescription
         self.set_from_maps(
-            data.public_weenie_desc.int_properties,
-            data.public_weenie_desc.float_properties,
-            data.public_weenie_desc.bool_properties,
-            data.public_weenie_desc.string_properties,
-            data.public_weenie_desc.did_properties,
-            data.public_weenie_desc.iid_properties,
+            data.public_weenie_desc.int_properties.clone(),
+            data.public_weenie_desc.float_properties.clone(),
+            data.public_weenie_desc.bool_properties.clone(),
+            data.public_weenie_desc.string_properties.clone(),
+            data.public_weenie_desc.did_properties.clone(),
+            data.public_weenie_desc.iid_properties.clone(),
         );
 
         // Physics properties that are also in maps in ACE

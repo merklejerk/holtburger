@@ -108,25 +108,24 @@ impl DatDatabase {
             file,
         };
 
-        let mut buf_reader = std::io::BufReader::new(db.file.try_clone().unwrap());
-        db.read_directory(&mut buf_reader)?;
+        db.read_directory()?;
 
         Ok(db)
     }
 
-    fn read_directory(&mut self, reader: &mut std::io::BufReader<File>) -> Result<()> {
+    fn read_directory(&mut self) -> Result<()> {
         let root_offset = self.header.root_offset;
-        self.read_node(reader, root_offset)?;
+        self.read_node(root_offset)?;
         Ok(())
     }
 
-    fn read_node(&mut self, reader: &mut std::io::BufReader<File>, offset: u32) -> Result<()> {
+    fn read_node(&mut self, offset: u32) -> Result<()> {
         if offset == 0 {
             return Ok(());
         }
 
         // RootOffset and other addresses already point to the DATA start (at byte 4 of the sector)
-        let data = self.read_file_data_buffered(reader, offset, DIRECTORY_NODE_SIZE as u32)?;
+        let data = self.read_file_data(offset, DIRECTORY_NODE_SIZE as u32)?;
         let mut cursor = Cursor::new(data);
 
         let mut branches = [0u32; 62];
@@ -146,7 +145,7 @@ impl DatDatabase {
         if branches[0] != 0 {
             for &branch in branches.iter().take(entry_count as usize + 1) {
                 if branch != 0 {
-                    self.read_node(reader, branch)?;
+                    self.read_node(branch)?;
                 }
             }
         }
@@ -163,46 +162,6 @@ impl DatDatabase {
         } else {
             Ok(data)
         }
-    }
-
-    fn read_file_data_buffered(
-        &self,
-        reader: &mut std::io::BufReader<File>,
-        offset: u32,
-        size: u32,
-    ) -> Result<Vec<u8>> {
-        use std::io::Read;
-        let mut buffer = vec![0u8; size as usize];
-        let mut buffer_offset = 0;
-        let mut remaining_size = size;
-        let mut current_offset = offset;
-
-        while remaining_size > 0 {
-            let mut ptr_bytes = [0u8; 4];
-            reader.seek(SeekFrom::Start(current_offset as u64))?;
-            reader.read_exact(&mut ptr_bytes)?;
-            let next_address = u32::from_le_bytes(ptr_bytes);
-
-            if next_address == 0 {
-                reader.seek(SeekFrom::Start((current_offset + 4) as u64))?;
-                reader.read_exact(
-                    &mut buffer[buffer_offset..(buffer_offset + remaining_size as usize)],
-                )?;
-                remaining_size = 0;
-            } else {
-                let block_data_size = (self.header.block_size - 4) as usize;
-                let to_read = (remaining_size as usize).min(block_data_size);
-
-                reader.seek(SeekFrom::Start((current_offset + 4) as u64))?;
-                reader.read_exact(&mut buffer[buffer_offset..(buffer_offset + to_read)])?;
-
-                buffer_offset += to_read;
-                remaining_size -= to_read as u32;
-                current_offset = next_address;
-            }
-        }
-
-        Ok(buffer)
     }
 
     pub fn read_file_data(&self, offset: u32, size: u32) -> Result<Vec<u8>> {

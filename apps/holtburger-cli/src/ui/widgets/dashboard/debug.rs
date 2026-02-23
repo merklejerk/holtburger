@@ -261,7 +261,7 @@ pub fn get_debug_info(
                     lines.push(Line::from(format!("  CSetup:    0x{:0x}", v.0)));
                 }
                 if let Some(v) = e.physics_parent_id {
-                    lines.push(Line::from(format!("  ParentLoc: 0x{:0x}", v.0)));
+                    lines.push(Line::from(format!("  PhysParentId: 0x{:0x}", v.0)));
                 }
                 if let Some(v) = e.default_script_id() {
                     lines.push(Line::from(format!(

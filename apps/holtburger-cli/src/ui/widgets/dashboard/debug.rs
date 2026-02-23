@@ -249,19 +249,19 @@ pub fn get_debug_info(
             {
                 lines.push(Line::from("-- Technical Data --"));
                 if let Some(v) = e.mtable_id() {
-                    lines.push(Line::from(format!("  MTable:    0x{:0x}", v.0)));
+                    lines.push(Line::from(format!("  MTable:    0x{:08X}", v.0)));
                 }
                 if let Some(v) = e.stable_id() {
-                    lines.push(Line::from(format!("  STable:    0x{:0x}", v.0)));
+                    lines.push(Line::from(format!("  STable:    0x{:08X}", v.0)));
                 }
                 if let Some(v) = e.petable_id() {
-                    lines.push(Line::from(format!("  PETable:   0x{:0x}", v.0)));
+                    lines.push(Line::from(format!("  PETable:   0x{:08X}", v.0)));
                 }
                 if let Some(v) = e.csetup_id() {
-                    lines.push(Line::from(format!("  CSetup:    0x{:0x}", v.0)));
+                    lines.push(Line::from(format!("  CSetup:    0x{:08X}", v.0)));
                 }
                 if let Some(v) = e.physics_parent_id {
-                    lines.push(Line::from(format!("  PhysParentId: 0x{:0x}", v.0)));
+                    lines.push(Line::from(format!("  PhysParentId: 0x{:08X}", v.0)));
                 }
                 if let Some(v) = e.default_script_id() {
                     lines.push(Line::from(format!(

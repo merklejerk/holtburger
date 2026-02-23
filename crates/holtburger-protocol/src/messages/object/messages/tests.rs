@@ -6,16 +6,26 @@ use crate::test_helpers::assert_pack_unpack_parity;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
-    ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
-    WeenieHeaderFlag2,
+    ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, PropertyDataId, PropertyFloat,
+    PropertyInstanceId, PropertyInt, PropertyString, WeenieHeaderFlag, WeenieHeaderFlag2,
 };
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::{Guid, Vector3};
+use std::collections::BTreeMap;
 
 #[test]
 fn test_object_description_data_parity_minimal() {
     let expected = ObjectDescriptionData {
-        guid: Guid(0x12345678),
+        public_weenie_desc: PublicWeenieDescription {
+            guid: Guid(0x12345678),
+            name: Some("Minimal".to_string()),
+            wcid: 1234,
+            icon_id: 0x06000000,
+            item_type: 0,
+            obj_desc_flags: ObjectDescriptionFlag::ATTACKABLE,
+            weenie_flags2: WeenieHeaderFlag2::empty(),
+            ..PublicWeenieDescription::default()
+        },
         model_data: ModelData {
             header: 0x11,
             extra: [0, 0, 0],
@@ -30,12 +40,6 @@ fn test_object_description_data_parity_minimal() {
             | PhysicsState::LIGHTING_ON
             | PhysicsState::EDGE_SLIDE,
         animation_frame: Some(101),
-        name: Some("Minimal".to_string()),
-        wcid: 1234,
-        icon_id: 0x06000000,
-        item_type: 0,
-        obj_desc_flags: ObjectDescriptionFlag::ATTACKABLE,
-        weenie_flags2: WeenieHeaderFlag2::empty(),
         ..ObjectDescriptionData::default()
     };
 
@@ -45,7 +49,51 @@ fn test_object_description_data_parity_minimal() {
 #[test]
 fn test_object_description_data_parity_complex() {
     let expected = ObjectDescriptionData {
-        guid: Guid(0x12345678),
+        public_weenie_desc: PublicWeenieDescription {
+            guid: Guid(0x12345678),
+            weenie_flags: WeenieHeaderFlag::PLURAL_NAME
+                | WeenieHeaderFlag::ITEMS_CAPACITY
+                | WeenieHeaderFlag::VALUE
+                | WeenieHeaderFlag::USABLE
+                | WeenieHeaderFlag::USE_RADIUS
+                | WeenieHeaderFlag::COMBAT_USE
+                | WeenieHeaderFlag::STACK_SIZE
+                | WeenieHeaderFlag::CONTAINER
+                | WeenieHeaderFlag::WIELDER
+                | WeenieHeaderFlag::BURDEN
+                | WeenieHeaderFlag::SPELL
+                | WeenieHeaderFlag::PSCRIPT,
+            name: Some("SuperComplex".to_string()),
+            wcid: 1234,
+            icon_id: 0x06001234,
+            item_type: 0x80,
+            obj_desc_flags: ObjectDescriptionFlag::ATTACKABLE
+                | ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
+            weenie_flags2: WeenieHeaderFlag2::COOLDOWN,
+            int_properties: BTreeMap::from([
+                (PropertyInt::ItemsCapacity as u32, 100),
+                (PropertyInt::Value as u32, 1000),
+                (PropertyInt::ItemUseable as u32, 0x02),
+                (PropertyInt::CombatUse as u32, 1),
+                (PropertyInt::StackSize as u32, 5),
+                (PropertyInt::EncumbranceVal as u32, 100),
+                (PropertyInt::SharedCooldown as u32, 5),
+            ]),
+            float_properties: BTreeMap::from([(PropertyFloat::UseRadius as u32, 5.0)]),
+            string_properties: BTreeMap::from([(
+                PropertyString::PluralName as u32,
+                "SuperComplexes".to_string(),
+            )]),
+            did_properties: BTreeMap::from([
+                (PropertyDataId::Spell as u32, Guid(1)),
+                (PropertyDataId::PhysicsScript as u32, Guid(1)),
+            ]),
+            iid_properties: BTreeMap::from([
+                (PropertyInstanceId::Container as u32, 0x20000002.into()),
+                (PropertyInstanceId::Wielder as u32, 0x20000001.into()),
+            ]),
+            ..PublicWeenieDescription::default()
+        },
         model_data: ModelData {
             header: 0x11,
             extra: [1, 1, 1],
@@ -94,38 +142,6 @@ fn test_object_description_data_parity_complex() {
         default_script_id: Some(0x0F000001),
         default_script_intensity: Some(0.5),
         sequences: [0, 0, 0, 0, 0, 0, 0, 0, 9],
-        weenie_flags: WeenieHeaderFlag::PLURAL_NAME
-            | WeenieHeaderFlag::ITEMS_CAPACITY
-            | WeenieHeaderFlag::VALUE
-            | WeenieHeaderFlag::USABLE
-            | WeenieHeaderFlag::USE_RADIUS
-            | WeenieHeaderFlag::COMBAT_USE
-            | WeenieHeaderFlag::STACK_SIZE
-            | WeenieHeaderFlag::CONTAINER
-            | WeenieHeaderFlag::WIELDER
-            | WeenieHeaderFlag::BURDEN
-            | WeenieHeaderFlag::SPELL
-            | WeenieHeaderFlag::PSCRIPT,
-        name: Some("SuperComplex".to_string()),
-        plural_name: Some("SuperComplexes".to_string()),
-        wcid: 1234,
-        icon_id: 0x06001234,
-        item_type: 0x80,
-        items_capacity: Some(100),
-        value: Some(1000),
-        usable: Some(0x02),
-        use_radius: Some(5.0),
-        combat_use: Some(1),
-        stack_size: Some(5),
-        container_id: Some(0x20000002.into()),
-        wielder_id: Some(0x20000001.into()),
-        burden: Some(100),
-        spell: Some(1),
-        obj_desc_flags: ObjectDescriptionFlag::ATTACKABLE
-            | ObjectDescriptionFlag::INCLUDES_SECOND_HEADER,
-        weenie_flags2: WeenieHeaderFlag2::COOLDOWN,
-        cooldown_id: Some(5),
-        pscript: Some(1),
         ..ObjectDescriptionData::default()
     };
 

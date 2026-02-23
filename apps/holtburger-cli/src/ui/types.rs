@@ -15,6 +15,7 @@ pub enum StatType {
 #[derive(Debug, Clone)]
 pub enum CommandTarget<'a> {
     Entity(&'a Entity, Option<TargetSlot>),
+    VendorItem(&'a holtburger_protocol::messages::trade::events::VendorItemEventData),
     Enchantment(Enchantment),
     Stat(StatType, Option<u64>, Option<u32>),
     Spell(u32),
@@ -39,6 +40,13 @@ pub enum Modal {
     Retry { message: String, end_time: Instant },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TradeFocus {
+    #[default]
+    Local,
+    Partner,
+}
+
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum DashboardTab {
     Nearby,
@@ -46,6 +54,7 @@ pub enum DashboardTab {
     Character,
     Spells,
     Equip,
+    Trade,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

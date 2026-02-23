@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::ItemType;
+use holtburger_common::properties::{AttunedStatus, ItemType};
 use holtburger_core::world::entity::Entity;
 use holtburger_core::world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Skill, SkillType, Vital, VitalType,
@@ -57,6 +57,10 @@ pub struct GameData {
     pub inventory: HashSet<Guid>,
     /// Map of GUIDs currently equipped on the character.
     pub equipment: HashMap<Guid, EquipMask>,
+    /// Current vendor state (inventory and multipliers).
+    pub vendor: Option<holtburger_core::world::state::VendorState>,
+    /// Current active trade with another player.
+    pub trade: Option<holtburger_core::world::state::TradeState>,
 }
 
 use holtburger_protocol::messages::EquipMask;
@@ -86,6 +90,8 @@ impl Default for GameData {
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
+            vendor: None,
+            trade: None,
         }
     }
 }
@@ -133,7 +139,7 @@ impl GameData {
 
             let mut children = Vec::new();
             for (&guid, entity) in &self.entities {
-                if entity.container_id == Some(current) {
+                if entity.container_id() == Some(current) {
                     children.push(guid);
                 }
             }
@@ -157,10 +163,102 @@ impl GameData {
     pub fn get_container_counts(&self) -> HashMap<Guid, usize> {
         let mut counts = HashMap::new();
         for e in self.entities.values() {
-            if let Some(cid) = e.container_id {
+            if let Some(cid) = e.container_id() {
                 *counts.entry(cid).or_default() += 1;
             }
         }
         counts
+    }
+
+    pub fn get_pyreal_balance(&self) -> u32 {
+        let mut total = 0;
+        for guid in &self.inventory {
+            if let Some(entity) = self.entities.get(guid)
+                && entity
+                    .item_type
+                    .is_some_and(|it| it.intersects(ItemType::MONEY))
+            {
+                total += entity.stack_size();
+            }
+        }
+        total
+    }
+
+    /// Recursively checks if an item or any of its contents are attuned or sticky.
+    ///
+    /// Containers cannot be traded if they contain even a single
+    /// attuned or sticky item.
+    pub fn is_attuned_recursive(&self, guid: Guid) -> bool {
+        let e = match self.entities.get(&guid) {
+            Some(e) => e,
+            None => return false,
+        };
+
+        // Base case: the item itself is attuned
+        if e.attuned_status() != AttunedStatus::Normal {
+            return true;
+        }
+
+        // Recursive case: check all items contained within this one
+        for other_guid in &self.inventory {
+            if let Some(other) = self.entities.get(other_guid)
+                && other.container_id() == Some(guid)
+                && self.is_attuned_recursive(*other_guid)
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    pub fn can_sell_to_vendor(&self, guid: Guid) -> bool {
+        let e = match self.entities.get(&guid) {
+            Some(e) => e,
+            None => return false,
+        };
+
+        if !e.is_sellable_base() {
+            return false;
+        }
+
+        // Must be empty
+        for other_guid in &self.inventory {
+            if let Some(other) = self.entities.get(other_guid)
+                && other.container_id() == Some(guid)
+            {
+                return false;
+            }
+        }
+
+        if let Some(vendor) = &self.vendor {
+            if let Some(it) = e.item_type {
+                if (it.bits() & vendor.merchandise_item_types) == 0 {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn can_add_to_trade(&self, guid: Guid) -> bool {
+        let e = match self.entities.get(&guid) {
+            Some(e) => e,
+            None => return false,
+        };
+
+        if !e.is_tradable_base() {
+            return false;
+        }
+
+        if self.is_attuned_recursive(guid) {
+            return false;
+        }
+
+        // We don't check for unique on target yet since we don't know target inventory
+        true
     }
 }

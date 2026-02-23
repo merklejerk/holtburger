@@ -12,11 +12,13 @@ pub mod movement;
 pub mod network;
 pub mod object;
 pub mod player;
+pub mod trade;
 pub mod transport;
 pub mod utils;
 
 pub use game_action::*;
 pub use game_event::*;
 pub use game_message::*;
+pub use trade::*;
 pub use transport::*;
 pub use utils::*;

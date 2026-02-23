@@ -9,7 +9,7 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
         Verb::new(Action::Assess, 'a', "Assess"),
         Verb::new(Action::Target, 't', "Target"),
     ];
-    if e.wielder_id.is_some() || e.physics_parent_id.is_some() {
+    if e.wielder_id().is_some() || e.physics_parent_id.is_some() {
         return verbs;
     }
 
@@ -17,11 +17,13 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
     let class = classification::classify_entity(e);
 
     match class {
-        EntityClass::Npc
-        | EntityClass::Portal
-        | EntityClass::Door
-        | EntityClass::LifeStone
-        | EntityClass::Chest => {
+        EntityClass::Vendor => {
+            verbs.push(Verb::new(Action::Use, 's', "Shop"));
+        }
+        EntityClass::Npc => {
+            verbs.push(Verb::new(Action::Use, 'k', "Talk"));
+        }
+        EntityClass::Portal | EntityClass::Door | EntityClass::LifeStone | EntityClass::Chest => {
             verbs.push(Verb::new(Action::Use, 'u', "Use"));
         }
         EntityClass::Weapon
@@ -43,11 +45,15 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
         // Nearby entities allow Approach
         verbs.push(Verb::new(Action::Approach, 'r', "Approach"));
 
+        if class == EntityClass::Player {
+            verbs.push(Verb::new(Action::OpenTrade, 'd', "Trade"));
+        }
+
         if !e.flags.intersects(ObjectDescriptionFlag::STUCK) {
             verbs.push(Verb::new(Action::PickUp, 'p', "Pick up"));
         }
     }
 
-    verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
+    verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
     verbs
 }

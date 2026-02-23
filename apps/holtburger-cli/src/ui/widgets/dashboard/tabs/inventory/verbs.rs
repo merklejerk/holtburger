@@ -12,6 +12,7 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
 
     match class {
         EntityClass::Npc
+        | EntityClass::Vendor
         | EntityClass::Portal
         | EntityClass::Door
         | EntityClass::LifeStone
@@ -35,7 +36,8 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
 
     verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
 
-    let is_equipped = if let (Some(pguid), Some(wielder)) = (game.data.player_guid, e.wielder_id) {
+    let is_equipped = if let (Some(pguid), Some(wielder)) = (game.data.player_guid, e.wielder_id())
+    {
         pguid == wielder
     } else {
         false
@@ -53,7 +55,18 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
         verbs.push(Verb::new(Action::Move, 'm', "Move"));
     }
 
-    verbs.push(Verb::new(Action::Debug, 'b', "Debug"));
+    if let Some(trade) = &game.data.trade
+        && !is_equipped
+        && !trade.self_side.items.contains(&e.guid)
+        && game.data.can_add_to_trade(e.guid)
+    {
+        verbs.push(Verb::new(Action::AddToTrade, 'o', "Offer"));
+    // If a vendor session is active, allow selling this item
+    } else if game.data.vendor.is_some() && game.data.can_sell_to_vendor(e.guid) {
+        verbs.push(Verb::new(Action::Sell, 's', "Sell"));
+    }
+
+    verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
 
     verbs
 }

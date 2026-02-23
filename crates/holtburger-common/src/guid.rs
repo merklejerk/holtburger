@@ -16,6 +16,10 @@ impl fmt::UpperHex for Guid {
 impl Guid {
     pub const NULL: Guid = Guid(0);
 
+    pub fn is_null(&self) -> bool {
+        self.0 == 0
+    }
+
     pub fn is_player(&self) -> bool {
         (self.0 & 0xF0000000) == 0x50000000
     }

@@ -29,6 +29,8 @@ pub enum GameEvent {
     WieldObject(Box<WieldObjectData>),
     Tell(Box<TellData>),
     ChannelBroadcast(Box<ChannelBroadcastData>),
+    PopupString(Box<PopupStringData>),
+    CommunicationTransientString(Box<CommunicationTransientStringData>),
     StartGame,
     MagicUpdateEnchantment(Box<MagicUpdateEnchantmentData>),
     MagicUpdateMultipleEnchantments(Box<MagicUpdateMultipleEnchantmentsData>),
@@ -97,6 +99,14 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::ChannelBroadcast => GameEvent::ChannelBroadcast(Box::new(
                     ChannelBroadcastData::unpack(data, offset)?,
                 )),
+                GameEventOpcode::PopupString => {
+                    GameEvent::PopupString(Box::new(PopupStringData::unpack(data, offset)?))
+                }
+                GameEventOpcode::CommunicationTransientString => {
+                    GameEvent::CommunicationTransientString(Box::new(
+                        CommunicationTransientStringData::unpack(data, offset)?,
+                    ))
+                }
                 GameEventOpcode::StartGame => GameEvent::StartGame,
                 GameEventOpcode::MagicUpdateEnchantment => {
                     let mut d = MagicUpdateEnchantmentData::unpack(data, offset)?;
@@ -263,6 +273,16 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::ChannelBroadcast(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ChannelBroadcast as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::PopupString(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::PopupString as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::CommunicationTransientString(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CommunicationTransientString as u32)
                     .unwrap();
                 data.pack(buf);
             }

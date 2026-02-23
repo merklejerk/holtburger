@@ -248,7 +248,7 @@ pub fn get_interaction_verbs(
                         let is_container =
                             matches!(class, EntityClass::Container | EntityClass::Chest);
                         let is_subject = e.guid == interaction.guid;
-                        let is_in_main_pack = e.container_id == player_guid;
+                        let is_in_main_pack = e.container_id() == player_guid;
 
                         if is_subject && !is_in_main_pack {
                             verbs.push(Verb::new(

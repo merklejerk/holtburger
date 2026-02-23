@@ -9,7 +9,7 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
         Verb::new(Action::Assess, 'a', "Assess"),
         Verb::new(Action::Target, 't', "Target"),
     ];
-    if e.wielder_id.is_some() || e.physics_parent_id.is_some() {
+    if e.wielder_id().is_some() || e.physics_parent_id.is_some() {
         return verbs;
     }
 

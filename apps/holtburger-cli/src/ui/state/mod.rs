@@ -70,7 +70,7 @@ impl AppState {
         let mut counts = HashMap::new();
         if let Page::Game(game) = &self.page {
             for e in game.data.entities.values() {
-                if let Some(cid) = e.container_id {
+                if let Some(cid) = e.container_id() {
                     *counts.entry(cid).or_default() += 1;
                 }
             }
@@ -238,7 +238,7 @@ impl AppState {
                 // Find children in game.data.entities
                 let mut children = Vec::new();
                 for (&guid, entity) in &game.data.entities {
-                    if entity.container_id == Some(current) {
+                    if entity.container_id() == Some(current) {
                         children.push(guid);
                     }
                 }

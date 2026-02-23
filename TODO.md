@@ -120,6 +120,7 @@
 - [ ] Still showing conflicting verbs during move interaction.
 
 ### Critical
+- [ ] The individual fields in `Entity` are supposed to be stored in property maps!
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.

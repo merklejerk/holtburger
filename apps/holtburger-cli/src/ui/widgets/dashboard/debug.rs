@@ -35,10 +35,7 @@ pub fn get_debug_info(
                 v.description.name.as_deref().unwrap_or("Unknown")
             )));
             lines.push(Line::from(format!("GUID:   {:08X}", v.description.guid)));
-            lines.push(Line::from(format!(
-                "Value:  {}",
-                v.description.value.unwrap_or(0)
-            )));
+            lines.push(Line::from(format!("Value:  {}", v.description.value())));
             lines.push(Line::from(format!("WCID:   {}", v.description.wcid)));
         }
         CommandTarget::Entity(e, _) => {
@@ -59,7 +56,7 @@ pub fn get_debug_info(
                 )));
             }
 
-            if let Some(container_id) = e.container_id {
+            if let Some(container_id) = e.container_id() {
                 let container_name =
                     name_lookup(container_id).unwrap_or_else(|| "Unknown".to_string());
                 lines.push(Line::from(format!(
@@ -68,7 +65,7 @@ pub fn get_debug_info(
                 )));
             }
 
-            if let Some(wielder_id) = e.wielder_id {
+            if let Some(wielder_id) = e.wielder_id() {
                 let wielder_name = name_lookup(wielder_id).unwrap_or_else(|| "Unknown".to_string());
                 lines.push(Line::from(format!(
                     "Wielder:     {:08X} ({})",
@@ -124,193 +121,191 @@ pub fn get_debug_info(
             )));
             lines.push(Line::from(format!("Coords: {:?}", e.position.coords)));
 
-            if let Some(s) = e.obj_scale {
+            if let Some(s) = e.obj_scale() {
                 lines.push(Line::from(format!("Scale:  {:.4}", s)));
             }
-            if let Some(f) = e.friction {
+            if let Some(f) = e.friction() {
                 lines.push(Line::from(format!("Frict:  {:.4}", f)));
             }
-            if let Some(el) = e.elasticity {
+            if let Some(el) = e.elasticity() {
                 lines.push(Line::from(format!("Elast:  {:.4}", el)));
             }
-            if let Some(t) = e.translucency {
+            if let Some(t) = e.translucency() {
                 lines.push(Line::from(format!("Transl: {:.4}", t)));
             }
 
-            if e.plural_name.is_some()
-                || e.items_capacity.is_some()
-                || e.containers_capacity.is_some()
-                || e.ammo_type.is_some()
-                || e.value.is_some()
-                || e.usable.is_some()
-                || e.use_radius.is_some()
-                || e.workmanship.is_some()
-                || e.burden.is_some()
-                || e.target_type.is_some()
-                || e.ui_effects.is_some()
-                || e.combat_use.is_some()
-                || e.stack_size.is_some()
-                || e.valid_locations.is_some()
-                || e.currently_wielded_location.is_some()
+            if e.plural_name().is_some()
+                || e.items_capacity().is_some()
+                || e.containers_capacity().is_some()
+                || e.ammo_type().is_some()
+                || e.item_value() > 0
+                || e.usable().is_some()
+                || e.use_radius().is_some()
+                || e.workmanship().is_some()
+                || e.burden().is_some()
+                || e.target_type().is_some()
+                || e.ui_effects().is_some()
+                || e.combat_use().is_some()
+                || e.stack_size() > 1
+                || !e.valid_locations().is_empty()
+                || !e.wield_location().is_empty()
             {
                 lines.push(Line::from("-- Weenie Data --"));
-                if let Some(p) = &e.plural_name {
+                if let Some(p) = &e.plural_name() {
                     lines.push(Line::from(format!("  Plural:    {}", p)));
                 }
-                if let Some(v) = e.items_capacity {
+                if let Some(v) = e.items_capacity() {
                     lines.push(Line::from(format!("  ICapacity: {}", v)));
                 }
-                if let Some(v) = e.containers_capacity {
+                if let Some(v) = e.containers_capacity() {
                     lines.push(Line::from(format!("  CCapacity: {}", v)));
                 }
-                if let Some(v) = e.ammo_type {
+                if let Some(v) = e.ammo_type() {
                     lines.push(Line::from(format!("  AmmoType:  {}", v)));
                 }
-                if let Some(v) = e.value {
-                    lines.push(Line::from(format!("  Value:     {}", v)));
+                if e.item_value() > 0 {
+                    lines.push(Line::from(format!("  Value:     {}", e.item_value())));
                 }
-                if let Some(v) = e.usable {
-                    lines.push(Line::from(format!("  Usable:    {:08X}", v.bits())));
-                    for (name, _) in v.iter_names() {
-                        lines.push(Line::from(format!("    - {}", name)));
-                    }
+                if let Some(v) = e.usable() {
+                    lines.push(Line::from(format!("  Usable:    0x{:08X}", v)));
                 }
-                if let Some(v) = e.use_radius {
+                if let Some(v) = e.use_radius() {
                     lines.push(Line::from(format!("  UseRadius: {:.2}", v)));
                 }
-                if let Some(v) = e.workmanship {
+                if let Some(v) = e.workmanship() {
                     lines.push(Line::from(format!("  Work:      {:.2}", v)));
                 }
-                if let Some(v) = e.burden {
+                if let Some(v) = e.burden() {
                     lines.push(Line::from(format!("  Burden:    {}", v)));
                 }
-                if let Some(v) = e.target_type {
-                    lines.push(Line::from(format!("  TargetTyp: {:08X}", v.bits())));
-                    for (name, _) in v.iter_names() {
-                        lines.push(Line::from(format!("    - {}", name)));
-                    }
+                if let Some(v) = e.target_type() {
+                    lines.push(Line::from(format!("  TargetTyp: 0x{:08X}", v)));
                 }
-                if let Some(v) = e.ui_effects {
+                if let Some(v) = e.ui_effects() {
                     lines.push(Line::from(format!("  UIEffects: 0x{:08X}", v)));
                 }
-                if let Some(v) = e.combat_use {
-                    lines.push(Line::from(format!("  CombatUse: {} ({:02X})", v, v as u32)));
+                if let Some(v) = e.combat_use() {
+                    lines.push(Line::from(format!("  CombatUse: {} ({:02X})", v, v)));
                 }
-                if let Some(v) = e.structure {
+                if let Some(v) = e.structure() {
                     lines.push(Line::from(format!(
                         "  Struct:    {}/{}",
                         v,
-                        e.max_structure.unwrap_or(0)
+                        e.max_structure().unwrap_or(0)
                     )));
                 }
-                if let Some(v) = e.stack_size {
+                if e.stack_size() > 1 || e.max_stack_size().unwrap_or(1) > 1 {
                     lines.push(Line::from(format!(
                         "  Stack:     {}/{}",
-                        v,
-                        e.max_stack_size.unwrap_or(0)
+                        e.stack_size(),
+                        e.max_stack_size().unwrap_or(0)
                     )));
                 }
-                if let Some(v) = e.valid_locations {
-                    lines.push(Line::from(format!("  ValidLocs: {:08X}", v.bits())));
-                    for (name, _) in v.iter_names() {
+                let valid = e.valid_locations();
+                if !valid.is_empty() {
+                    lines.push(Line::from(format!("  ValidLocs: {:08X}", valid.bits())));
+                    for (name, _) in valid.iter_names() {
                         lines.push(Line::from(format!("    - {}", name)));
                     }
                 }
-                if let Some(v) = e.currently_wielded_location {
-                    lines.push(Line::from(format!("  WieldLoc:  {:08X}", v.bits())));
-                    for (name, _) in v.iter_names() {
+                let wield = e.wield_location();
+                if !wield.is_empty() {
+                    lines.push(Line::from(format!("  WieldLoc:  {:08X}", wield.bits())));
+                    for (name, _) in wield.iter_names() {
                         lines.push(Line::from(format!("    - {}", name)));
                     }
                 }
-                if let Some(v) = e.priority {
+                if let Some(v) = e.priority() {
                     lines.push(Line::from(format!("  Priority:  {}", v)));
                 }
-                if let Some(v) = e.radar_blip_color {
+                if let Some(v) = e.radar_blip_color() {
                     lines.push(Line::from(format!("  RadarBlip: {} ({:?})", v, v)));
                 }
-                if let Some(v) = e.radar_enum {
+                if let Some(v) = e.radar_enum() {
                     lines.push(Line::from(format!("  RadarEnum: {} ({:?})", v, v)));
                 }
-                if let Some(v) = e.pscript {
+                if let Some(v) = e.pscript() {
                     lines.push(Line::from(format!("  PScript:   {}", v)));
                 }
-                if let Some(v) = e.spell {
+                if let Some(v) = e.spell() {
                     lines.push(Line::from(format!("  Spell:     {}", v)));
                 }
-                if let Some(v) = e.cooldown_id {
+                if let Some(v) = e.cooldown_id() {
                     lines.push(Line::from(format!(
                         "  CD:        #{} ({})",
                         v,
-                        format_duration(e.cooldown_duration.unwrap_or(0.0))
+                        format_duration(e.cooldown_duration().unwrap_or(0.0))
                     )));
                 }
             }
 
-            if e.mtable_id.is_some()
-                || e.stable_id.is_some()
-                || e.petable_id.is_some()
-                || e.csetup_id.is_some()
-                || e.parent_loc.is_some()
-                || e.default_script_id.is_some()
-                || e.autonomous_movement.is_some()
-                || e.animation_frame.is_some()
+            if e.mtable_id().is_some()
+                || e.stable_id().is_some()
+                || e.petable_id().is_some()
+                || e.csetup_id().is_some()
+                || e.physics_parent_id.is_some()
+                || e.default_script_id().is_some()
+                || e.autonomous_movement
             {
                 lines.push(Line::from("-- Technical Data --"));
-                if let Some(v) = e.mtable_id {
-                    lines.push(Line::from(format!("  MTable:    0x{:08X}", v)));
+                if let Some(v) = e.mtable_id() {
+                    lines.push(Line::from(format!("  MTable:    0x{:08X}", v.0)));
                 }
-                if let Some(v) = e.stable_id {
-                    lines.push(Line::from(format!("  STable:    0x{:08X}", v)));
+                if let Some(v) = e.stable_id() {
+                    lines.push(Line::from(format!("  STable:    0x{:08X}", v.0)));
                 }
-                if let Some(v) = e.petable_id {
-                    lines.push(Line::from(format!("  PETable:   0x{:08X}", v)));
+                if let Some(v) = e.petable_id() {
+                    lines.push(Line::from(format!("  PETable:   0x{:08X}", v.0)));
                 }
-                if let Some(v) = e.csetup_id {
-                    lines.push(Line::from(format!("  CSetup:    0x{:08X}", v)));
+                if let Some(v) = e.csetup_id() {
+                    lines.push(Line::from(format!("  CSetup:    0x{:08X}", v.0)));
                 }
-                if let Some(v) = e.parent_loc {
-                    lines.push(Line::from(format!("  ParentLoc: 0x{:08X}", v)));
+                if let Some(v) = e.physics_parent_id {
+                    lines.push(Line::from(format!("  PhysParentId: 0x{:08X}", v.0)));
                 }
-                if let Some(v) = e.default_script_id {
+                if let Some(v) = e.default_script_id() {
                     lines.push(Line::from(format!(
                         "  DefScript: {} ({:.2})",
                         v,
-                        e.default_script_intensity.unwrap_or(0.0)
+                        e.default_script_intensity().unwrap_or(0.0)
                     )));
                 }
-                if let Some(v) = e.autonomous_movement {
-                    lines.push(Line::from(format!("  AutoMove:  {}", v)));
-                }
-                if let Some(v) = e.animation_frame {
-                    lines.push(Line::from(format!("  AnimFrame: 0x{:08X}", v)));
-                }
-            }
-
-            if e.house_owner.is_some() || e.monarch_id.is_some() || e.pet_owner.is_some() {
-                lines.push(Line::from("-- Ownership --"));
-                if let Some(v) = e.house_owner {
-                    lines.push(Line::from(format!("  HouseOwn:  {:08X}", v)));
-                }
-                if let Some(v) = e.monarch_id {
-                    lines.push(Line::from(format!("  Monarch:   {:08X}", v)));
-                }
-                if let Some(v) = e.pet_owner {
-                    lines.push(Line::from(format!("  PetOwner:  {:08X}", v)));
+                if e.autonomous_movement {
+                    lines.push(Line::from(format!(
+                        "  AutoMove:  {}",
+                        e.autonomous_movement
+                    )));
                 }
             }
 
-            if e.icon_overlay_id.is_some()
-                || e.icon_underlay_id.is_some()
-                || e.material_type.is_some()
+            if e.house_owner_id().is_some()
+                || e.monarch_id().is_some()
+                || e.pet_owner_id().is_some()
             {
-                lines.push(Line::from("-- Appearance Overlay --"));
-                if let Some(v) = e.icon_overlay_id {
-                    lines.push(Line::from(format!("  Overlay:   0x{:08X}", v)));
+                lines.push(Line::from("-- Ownership --"));
+                if let Some(v) = e.house_owner_id() {
+                    lines.push(Line::from(format!("  HouseOwn:  {:08X}", v.0)));
                 }
-                if let Some(v) = e.icon_underlay_id {
-                    lines.push(Line::from(format!("  Underlay:  0x{:08X}", v)));
+                if let Some(v) = e.monarch_id() {
+                    lines.push(Line::from(format!("  Monarch:   {:08X}", v.0)));
                 }
-                if let Some(v) = e.material_type {
+                if let Some(v) = e.pet_owner_id() {
+                    lines.push(Line::from(format!("  PetOwner:  {:08X}", v.0)));
+                }
+            }
+
+            if e.icon_overlay_id().is_some()
+                || e.icon_underlay_id().is_some()
+                || e.material_type().is_some()
+            {
+                lines.push(Line::from("-- Extra --"));
+                if let Some(v) = e.icon_overlay_id() {
+                    lines.push(Line::from(format!("  IconOver:  0x{:08X}", v.0)));
+                }
+                if let Some(v) = e.icon_underlay_id() {
+                    lines.push(Line::from(format!("  IconUnder: 0x{:08X}", v.0)));
+                }
+                if let Some(v) = e.material_type() {
                     lines.push(Line::from(format!("  Material:  0x{:08X}", v)));
                 }
             }
@@ -380,12 +375,13 @@ pub fn get_debug_info(
                 )));
             }
 
-            if e.hook_type.is_some() || e.hook_item_types.is_some() || e.hook_profile.is_some() {
+            if e.hook_type().is_some() || e.hook_item_types().is_some() || e.hook_profile.is_some()
+            {
                 lines.push(Line::from("-- Hooks --"));
-                if let Some(v) = e.hook_type {
+                if let Some(v) = e.hook_type() {
                     lines.push(Line::from(format!("  Type:      0x{:04X}", v)));
                 }
-                if let Some(v) = e.hook_item_types {
+                if let Some(v) = e.hook_item_types() {
                     lines.push(Line::from(format!("  ItemTypes: {:?}", v)));
                 }
                 if let Some(hook) = &e.hook_profile {

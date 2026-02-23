@@ -22,7 +22,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     // Sticky summary line for the player's main inventory container
     if let Some(player_guid) = game.data.player_guid
         && let Some(player_entity) = game.data.entities.get(&player_guid)
-        && let Some(capacity) = player_entity.items_capacity
+        && let Some(capacity) = player_entity.items_capacity()
     {
         let count = counts.get(&player_guid).cloned().unwrap_or(0);
 
@@ -148,7 +148,7 @@ fn render_inventory_item(
     };
 
     if class != EntityClass::Player {
-        if let Some(capacity) = e.items_capacity {
+        if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);
                 display_name = format!("{} ({}/{})", display_name, count, capacity);

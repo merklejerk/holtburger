@@ -1,5 +1,4 @@
 use crate::ui::state::{AppState, Page};
-use holtburger_common::properties::{EquipMask, PropertyInt};
 use holtburger_core::world::entity::Entity;
 
 impl AppState {
@@ -15,11 +14,11 @@ impl AppState {
 
             // Update inventory tracking
             if let Some(pguid) = pguid {
-                if let Some(cid) = entity.container_id
+                if let Some(cid) = entity.container_id()
                     && (cid == pguid || game.data.inventory.contains(&cid))
                 {
                     game.data.inventory.insert(guid);
-                } else if let Some(wid) = entity.wielder_id
+                } else if let Some(wid) = entity.wielder_id()
                     && wid == pguid
                 {
                     game.data.inventory.insert(guid);
@@ -31,26 +30,13 @@ impl AppState {
 
             // Update equipment tracking
             if let Some(pguid) = pguid
-                && entity.wielder_id == Some(pguid)
+                && entity.wielder_id() == Some(pguid)
             {
-                if let Some(mask) = entity.currently_wielded_location {
-                    if mask.is_empty() {
-                        game.data.equipment.remove(&guid);
-                    } else {
-                        game.data.equipment.insert(guid, mask);
-                    }
-                } else if let Some(&loc) = entity
-                    .int_properties
-                    .get(&(PropertyInt::CurrentWieldedLocation as u32))
-                {
-                    let mask = EquipMask::from_bits_truncate(loc as u32);
-                    if mask.is_empty() {
-                        game.data.equipment.remove(&guid);
-                    } else {
-                        game.data.equipment.insert(guid, mask);
-                    }
-                } else {
+                let mask = entity.wield_location();
+                if mask.is_empty() {
                     game.data.equipment.remove(&guid);
+                } else {
+                    game.data.equipment.insert(guid, mask);
                 }
             } else {
                 game.data.equipment.remove(&guid);

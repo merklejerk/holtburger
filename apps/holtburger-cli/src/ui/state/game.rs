@@ -139,7 +139,7 @@ impl GameData {
 
             let mut children = Vec::new();
             for (&guid, entity) in &self.entities {
-                if entity.container_id == Some(current) {
+                if entity.container_id() == Some(current) {
                     children.push(guid);
                 }
             }
@@ -163,7 +163,7 @@ impl GameData {
     pub fn get_container_counts(&self) -> HashMap<Guid, usize> {
         let mut counts = HashMap::new();
         for e in self.entities.values() {
-            if let Some(cid) = e.container_id {
+            if let Some(cid) = e.container_id() {
                 *counts.entry(cid).or_default() += 1;
             }
         }
@@ -178,7 +178,7 @@ impl GameData {
                     .item_type
                     .is_some_and(|it| it.intersects(ItemType::MONEY))
             {
-                total += entity.stack_size.unwrap_or(1) as u32;
+                total += entity.stack_size();
             }
         }
         total
@@ -202,7 +202,7 @@ impl GameData {
         // Recursive case: check all items contained within this one
         for other_guid in &self.inventory {
             if let Some(other) = self.entities.get(other_guid)
-                && other.container_id == Some(guid)
+                && other.container_id() == Some(guid)
                 && self.is_attuned_recursive(*other_guid)
             {
                 return true;
@@ -225,7 +225,7 @@ impl GameData {
         // Must be empty
         for other_guid in &self.inventory {
             if let Some(other) = self.entities.get(other_guid)
-                && other.container_id == Some(guid)
+                && other.container_id() == Some(guid)
             {
                 return false;
             }

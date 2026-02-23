@@ -246,7 +246,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     sell_rate = PROMISSORY_NOTE_SELL_RATE;
                 }
 
-                let base_value = m.description.value.unwrap_or(0) as f32;
+                let base_value = m.description.value() as f32;
                 let price = ((sell_rate * base_value) - VENDOR_CEIL_OFFSET)
                     .ceil()
                     .max(DEFAULT_PRICE as f32) as u32;

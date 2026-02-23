@@ -14,15 +14,15 @@
 - [x] Move netpulse and client state icon to right of input.
 - [x] Move compass to status bar.
 - [x] Move network time to status bar.
+- [x] NPCs with VENDOR flag should display [S]hop instead of [U]se.
+- [x] NPCs without VENDOR flag should display [T]alk.
+- [x] Vendor entity class?
 - [ ] [Entity](crates/holtburger-core/src/world/entity.rs) struct should consolidate `armor_profile`, `creature_profile`, `weapon_profile` under a single enum. Profiles are exclusive of each other.
 - [ ] Jump doesn't work.
 - [ ] Add and resolve `SpellCategory` enum.
 - [ ] Chat tabs (Chat vs combat vs all).
 - [ ] Shift+backspace to clear chat input buffer.
 - [ ] Show enchantment source (caster) in enchantment debug.
-- [ ] NPCs with VENDOR flag should display [S]hop instead of [U]se.
-- [ ] NPCs without VENDOR flag should display [T]alk.
-- [x] Vendor entity class?
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -48,6 +48,8 @@
 - [x] Show capacity (`(x/X)`) indicators on containers.
 - [x] Popup for "retrying..." mode.
 - [x] TUI client needs major refactors. (Done: Page-based architecture with isolated GameState)
+- [x] Auto-switch to trade tab when INITIATING a trade/vendor.
+- [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -63,12 +65,11 @@
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
-- [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
 - [ ] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
-- [x] Auto-switch to trade tab when INITIATING a trade/vendor.
 - [ ] Should still show coords when indoors.
+- [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -92,6 +93,10 @@
 - [x] Pasting into the chat is slow.
 - [x] Equipped items should still appear in Inv tab.
 - [x] Show player in nearby tab.
+- [x] Alt currencies display as pyreals in vendor tab.
+- [x] Currency tracking in trade tab.
+- [x] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
+- [x] Swap `De[b]ug` with `Debu[g]`.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -109,12 +114,8 @@
 - [ ] Stack not updating when consumed/spent (try Bunch of Nanners, pyreals).
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
-- [x] Alt currencies display as pyreals in vendor tab.
-- [x] Currency tracking in trade tab.
 - [ ] Log in chat when items are bought and sold.
 - [ ] Restrict sell verb to vendor item mask.
-- [x] Add `[A]ssess` and  and `De[b]ug` verbs to Trade tab items.
-- [x] Swap `De[b]ug` with `Debu[g]`.
 - [ ] Still showing conflicting verbs during move interaction.
 
 ### Critical

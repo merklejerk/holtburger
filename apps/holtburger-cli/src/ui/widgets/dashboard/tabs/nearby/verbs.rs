@@ -17,12 +17,13 @@ pub fn get_verbs(e: &Entity, game: &GameState) -> Vec<Verb> {
     let class = classification::classify_entity(e);
 
     match class {
-        EntityClass::Npc
-        | EntityClass::Vendor
-        | EntityClass::Portal
-        | EntityClass::Door
-        | EntityClass::LifeStone
-        | EntityClass::Chest => {
+        EntityClass::Vendor => {
+            verbs.push(Verb::new(Action::Use, 's', "Shop"));
+        }
+        EntityClass::Npc => {
+            verbs.push(Verb::new(Action::Use, 'k', "Talk"));
+        }
+        EntityClass::Portal | EntityClass::Door | EntityClass::LifeStone | EntityClass::Chest => {
             verbs.push(Verb::new(Action::Use, 'u', "Use"));
         }
         EntityClass::Weapon

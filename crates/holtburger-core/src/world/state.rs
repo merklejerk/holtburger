@@ -190,29 +190,13 @@ impl WorldState {
         portal_dat: Option<Arc<dyn ResourceProvider>>,
         cell_dat: Option<Arc<dyn ResourceProvider>>,
     ) -> Self {
-        let mut xp_table = None;
         let mut skill_table = None;
-        let mut spell_table = None;
         if let Some(db) = &portal_dat {
-            // XP Table
-            if let Ok(data) = db.get_file(XpTable::FILE_ID) {
-                let mut cursor = std::io::Cursor::new(data);
-                if let Ok(table) = XpTable::read(&mut cursor) {
-                    xp_table = Some(table);
-                }
-            }
             // Skill Table
             if let Ok(data) = db.get_file(SkillTable::FILE_ID) {
                 let mut cursor = std::io::Cursor::new(data);
                 if let Ok(table) = SkillTable::read(&mut cursor) {
                     skill_table = Some(Arc::new(table));
-                }
-            }
-            // Spell Table
-            if let Ok(data) = db.get_file(SpellTable::FILE_ID) {
-                let mut cursor = std::io::Cursor::new(data);
-                if let Ok(table) = SpellTable::read(&mut cursor) {
-                    spell_table = Some(Arc::new(table));
                 }
             }
         }
@@ -223,12 +207,29 @@ impl WorldState {
             server_time: None,
             portal_dat,
             cell_dat,
-            xp_table,
+            xp_table: None,
             skill_table,
-            spell_table,
+            spell_table: None,
             scene: SpatialScene::new(),
             vendor: None,
             trade: None,
+        }
+    }
+
+    pub fn load_deferred_tables(&mut self) {
+        if let Some(db) = &self.portal_dat {
+            if self.xp_table.is_none()
+                && let Ok(data) = db.get_file(XpTable::FILE_ID)
+                && let Ok(table) = XpTable::read(&mut std::io::Cursor::new(data))
+            {
+                self.xp_table = Some(table);
+            }
+            if self.spell_table.is_none()
+                && let Ok(data) = db.get_file(SpellTable::FILE_ID)
+                && let Ok(table) = SpellTable::read(&mut std::io::Cursor::new(data))
+            {
+                self.spell_table = Some(Arc::new(table));
+            }
         }
     }
 

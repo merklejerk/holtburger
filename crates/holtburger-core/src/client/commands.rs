@@ -94,6 +94,7 @@ impl Client {
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
+                self.world.load_deferred_tables();
                 self.state = ClientState::EnteringWorld;
                 self.send_status_event();
                 self.auth.select_character(id, &mut self.session).await
@@ -108,6 +109,7 @@ impl Client {
                         char_name,
                         char_guid
                     );
+                    self.world.load_deferred_tables();
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
                     self.auth
@@ -122,6 +124,7 @@ impl Client {
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
+                    self.world.load_deferred_tables();
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
                     self.auth.select_character(char_id, &mut self.session).await

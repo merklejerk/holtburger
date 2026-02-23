@@ -118,6 +118,9 @@
 - [ ] Log in chat when items are bought and sold.
 - [ ] Restrict sell verb to vendor item mask and attuned.
 - [ ] Still showing conflicting verbs during move interaction.
+- [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
+    - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
+    - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that happen right before the UseDone and pass that along.
 
 ### Critical
 - [ ] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -129,3 +132,6 @@
 - [x] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
 - [ ] Do we prune entities?
+    - When they go out of range.
+    - When they are explicitly deleted.
+    - When a trade is closed.

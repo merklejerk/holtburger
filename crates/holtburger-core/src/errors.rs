@@ -258,11 +258,8 @@ pub fn format_weenie_error(error: WeenieError, parameter: Option<&str>) -> Strin
 
     // If we have a custom template, use it.
     if let Some(t) = template {
-        if let Some(p) = parameter {
-            return t.replace("{}", p);
-        } else {
-            return t.to_string();
-        }
+        let p = parameter.unwrap_or("Unknown");
+        return t.replace("{}", p);
     }
 
     // Fallback: Convert the enum name "PascalCase" to "Sentence case"

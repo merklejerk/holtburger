@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
@@ -223,9 +223,9 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         let summary = Paragraph::new(Line::from(vec![
             Span::styled("Buy: ", Style::default().fg(theme::SUMMARY_FG)),
-            Span::raw(format!("{:.2}  ", vendor.sell_multiplier)),
+            Span::raw(format!("{:.2}x  ", vendor.sell_multiplier)),
             Span::styled("Sell: ", Style::default().fg(theme::SUMMARY_FG)),
-            Span::raw(format!("{:.2}  ", vendor.buy_multiplier)),
+            Span::raw(format!("{:.2}x  ", vendor.buy_multiplier)),
             Span::styled("Bal: ", Style::default().fg(theme::SUMMARY_FG)),
             Span::styled(balance, Style::default().fg(theme::MONEY_FG)),
         ]));
@@ -291,10 +291,38 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         );
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
-        let block = Block::default().borders(Borders::ALL).title("Trade");
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        f.render_widget(Paragraph::new(msg), inner);
+        let horizontal_margin = 2;
+        let wrap_width = area.width.saturating_sub(horizontal_margin * 2);
+
+        let needs_wrap = match &game.view.trade_no_session_msg_cache {
+            Some((w, _)) => *w != wrap_width,
+            None => true,
+        };
+
+        if needs_wrap {
+            let wrapped = crate::ui::utils::wrap_text(msg, wrap_width as usize);
+            game.view.trade_no_session_msg_cache = Some((wrap_width, wrapped));
+        }
+
+        if let Some((_, wrapped)) = &game.view.trade_no_session_msg_cache {
+            let lines: Vec<Line> = wrapped.iter().map(|s| Line::from(s.as_str())).collect();
+            let msg_height = lines.len() as u16;
+            let vertical_margin = area.height.saturating_sub(msg_height) / 2;
+
+            let vertical_chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(vertical_margin),
+                    Constraint::Length(msg_height),
+                    Constraint::Min(0),
+                ])
+                .split(area);
+
+            f.render_widget(
+                Paragraph::new(lines).alignment(Alignment::Center),
+                vertical_chunks[1],
+            );
+        }
     }
 }
 

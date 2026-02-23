@@ -662,10 +662,10 @@ pub enum GameEventOpcode {
     // ChannelList = 0x0148,
     // /// S2C: Index of a specific chat channel.
     // ChannelIndex = 0x0149,
-    // /// S2C: Displays a modal popup dialog with a message.
-    // PopupString = 0x0004,
-    // /// S2C: Displays a temporary ticker-like message on the screen.
-    // CommunicationTransientString = 0x02EB,
+    /// S2C: Displays a modal popup dialog with a message.
+    PopupString = 0x0004,
+    /// S2C: Displays a temporary ticker-like message on the screen.
+    CommunicationTransientString = 0x02EB,
     // /// S2C: Triggers a character emote action.
     // Emote = 0x01E2,
     // /// S2C: Synchronizes the client's squelch (ignore) list.

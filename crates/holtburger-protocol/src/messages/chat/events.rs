@@ -75,6 +75,42 @@ impl ProtocolPack for ChannelBroadcastData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommunicationTransientStringData {
+    pub message: String,
+}
+
+impl ProtocolUnpack for CommunicationTransientStringData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        Some(CommunicationTransientStringData { message })
+    }
+}
+
+impl ProtocolPack for CommunicationTransientStringData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.message);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopupStringData {
+    pub message: String,
+}
+
+impl ProtocolUnpack for PopupStringData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        Some(PopupStringData { message })
+    }
+}
+
+impl ProtocolPack for PopupStringData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.message);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +208,36 @@ mod tests {
             panic!("Expected SoulEmote");
         };
         assert_eq!(*msg, expected);
+    }
+
+    #[test]
+    fn test_communication_transient_string_parity() {
+        let expected = CommunicationTransientStringData {
+            message: "Fixed casting state".to_string(),
+        };
+        // 13 00 46 69 78 65 64 20 63 61 73 74 69 6E 67 20 73 74 61 74 65 00 00 00
+        let hex = "13 00 46 69 78 65 64 20 63 61 73 74 69 6E 67 20 73 74 61 74 65 00 00 00";
+        let data: Vec<u8> = hex
+            .split_whitespace()
+            .map(|s| u8::from_str_radix(s, 16).unwrap())
+            .collect();
+
+        assert_pack_unpack_parity(&data, &expected);
+    }
+
+    #[test]
+    fn test_popup_string_parity() {
+        let expected = PopupStringData {
+            message: "Welcome to Asheron's Call!".to_string(),
+        };
+        // 1A 00 57 65 6C 63 6F 6D 65 20 74 6F 20 41 73 68 65 72 6F 6E 27 73 20 43 61 6C 6C 21
+        let hex =
+            "1A 00 57 65 6C 63 6F 6D 65 20 74 6F 20 41 73 68 65 72 6F 6E 27 73 20 43 61 6C 6C 21";
+        let data: Vec<u8> = hex
+            .split_whitespace()
+            .map(|s| u8::from_str_radix(s, 16).unwrap())
+            .collect();
+
+        assert_pack_unpack_parity(&data, &expected);
     }
 }

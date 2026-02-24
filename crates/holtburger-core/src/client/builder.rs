@@ -15,8 +15,55 @@ impl Client {
         dats_path: std::path::PathBuf,
     ) -> Result<Self> {
         let target = format!("{}:{}", server_ip, server_port).parse::<SocketAddr>()?;
-        let session = Session::new(target).await?;
-        Self::create_with_session(session, account_name, character_preference, dats_path)
+
+        let session_future = Session::new(target);
+        let dats_path_clone = dats_path.clone();
+
+        let dat_future = tokio::task::spawn_blocking(move || {
+            let mut portal_dat = None;
+            let mut cell_dat = None;
+
+            match holtburger_dat::open_provider(dats_path_clone.join("portal")) {
+                Ok(p) => {
+                    log::info!(
+                        "Loaded portal data from {}",
+                        dats_path_clone.join("portal").display()
+                    );
+                    portal_dat = Some(p);
+                }
+                Err(e) => {
+                    log::warn!("Could not load portal data: {}", e);
+                }
+            }
+
+            match holtburger_dat::open_provider(dats_path_clone.join("cell")) {
+                Ok(p) => {
+                    log::info!(
+                        "Loaded cell data from {}",
+                        dats_path_clone.join("cell").display()
+                    );
+                    cell_dat = Some(p);
+                }
+                Err(e) => {
+                    log::warn!("Could not load cell data: {}", e);
+                }
+            }
+
+            (portal_dat, cell_dat)
+        });
+
+        let (session_res, dat_res) = tokio::join!(session_future, dat_future);
+        let session = session_res?;
+        let (portal_dat, cell_dat) = dat_res?;
+
+        Self::create_with_session_and_dats(
+            session,
+            account_name,
+            character_preference,
+            dats_path,
+            portal_dat,
+            cell_dat,
+        )
     }
 
     pub fn new_replay(
@@ -29,17 +76,9 @@ impl Client {
         // Use 9001 for World server traffic (player spawns!)
         let target = "127.0.0.1:9001".parse::<SocketAddr>()?;
         let session = Session::new_replay(replay_path, target)?;
-        Self::create_with_session(session, account_name, character_preference, dats_path)
-    }
 
-    fn create_with_session(
-        session: Session,
-        account_name: &str,
-        character_preference: Option<String>,
-        dats_path: std::path::PathBuf,
-    ) -> Result<Self> {
-        let mut portal_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>> = None;
-        let mut cell_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>> = None;
+        let mut portal_dat = None;
+        let mut cell_dat = None;
 
         match holtburger_dat::open_provider(dats_path.join("portal")) {
             Ok(p) => {
@@ -64,6 +103,24 @@ impl Client {
             }
         }
 
+        Self::create_with_session_and_dats(
+            session,
+            account_name,
+            character_preference,
+            dats_path,
+            portal_dat,
+            cell_dat,
+        )
+    }
+
+    fn create_with_session_and_dats(
+        session: Session,
+        account_name: &str,
+        character_preference: Option<String>,
+        dats_path: std::path::PathBuf,
+        portal_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>>,
+        cell_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>>,
+    ) -> Result<Self> {
         if portal_dat.is_none() || cell_dat.is_none() {
             return Err(anyhow::anyhow!(
                 "Failed to load required DAT files from {}. Ensure portal.dat/hba and cell.dat/hba exist.",

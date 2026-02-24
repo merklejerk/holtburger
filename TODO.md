@@ -102,8 +102,8 @@
 - [x] Restrict sell verb to vendor item mask and attuned.
 - [x] Handle CommunicationTransientString and PopupString. Some useful error messages manifest there.
 - [x] Stack not updating when consumed/spent (try Bunch of Nanners, pyreals).
-- [ ] Show count for stacked items.
-- [ ] Don't show container sizes on creatures in nearby list.
+- [x] Show count for stacked items.
+- [x] Don't show container sizes on creatures in nearby list.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -124,22 +124,11 @@
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Crafting.
-<<<<<<< HEAD
-
-### Critical
-- [ ] The individual fields in `Entity` are supposed to be stored in property maps!
 - [ ] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
 - [x] Server only takes IP?
-=======
-- [ ] Don't show container sizes on creatures in nearby list.
-- [ ] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
-
-### Critical
-- [x] The individual fields in `Entity` are supposed to be stored in property maps!
->>>>>>> 6a341b6 (update README)
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.

@@ -108,15 +108,10 @@ impl Provider {
             Self::Dat(db) => {
                 let entry = &db.files[&id];
                 println!(
-                    "{:08X} - {:<25} - Size: {}{:<10} - Offset: {:08X} - Flags: {:08X}",
+                    "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:08X}",
                     id,
                     entry.file_type().to_string(),
                     entry.size,
-                    if entry.is_compressed() {
-                        " (compressed)"
-                    } else {
-                        ""
-                    },
                     entry.offset,
                     entry.bit_flags
                 );
@@ -124,15 +119,10 @@ impl Provider {
             Self::Hba(hba) => {
                 if let Ok(entry) = hba.find_entry(id) {
                     println!(
-                        "{:08X} - {:<25} - Size: {}{:<10} - Offset: {:08X} - Flags: {:02X}",
+                        "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:02X}",
                         id,
                         DatFileType::from_id(id).to_string(),
                         entry.size,
-                        if entry.is_compressed() {
-                            " (compressed)"
-                        } else {
-                            ""
-                        },
                         entry.offset,
                         entry.flags
                     );

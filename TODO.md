@@ -72,6 +72,7 @@
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Active panel needs to be much more obvious.
 - [ ] Show item emojis in trade window.
+- [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -112,7 +113,7 @@
 - [ ] Missile combat.
     - [ ] Auto-attack on target.
 - [ ] Manage in-world containers.
-- [ ] Stacking/Splitting.
+- [~] Stacking/Splitting.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -130,6 +131,7 @@
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
 - [x] Server only takes IP?
+- [ ] flags and weenie flags should also be converted to properties!
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.
@@ -141,4 +143,4 @@
     - When they go out of range.
     - When they are explicitly deleted.
     - When a trade is closed.
-- [ ] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
+- [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.

@@ -71,6 +71,7 @@
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Active panel needs to be much more obvious.
+- [ ] Show item emojis in trade window.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

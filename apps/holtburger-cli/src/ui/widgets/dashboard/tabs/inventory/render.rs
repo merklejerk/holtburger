@@ -11,6 +11,7 @@ use crate::ui::state::GameState;
 use crate::ui::theme;
 use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
+use holtburger_core::world::context::WorldContextExt;
 use holtburger_core::world::entity::Entity;
 use std::collections::HashMap;
 

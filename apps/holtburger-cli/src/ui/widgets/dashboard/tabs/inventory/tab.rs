@@ -11,6 +11,7 @@ use crate::ui::update::effect::UIEffect;
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
 use holtburger_common::properties::{ObjectDescriptionFlag, PropertyInt};
 use holtburger_core::client::types::ClientCommand;
+use holtburger_core::world::context::WorldContextExt;
 use holtburger_core::world::entity::Entity;
 
 pub struct InventoryTab;

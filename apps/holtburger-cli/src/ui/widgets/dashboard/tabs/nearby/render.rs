@@ -6,6 +6,7 @@ use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, Scrollba
 use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
+use holtburger_core::world::context::WorldContextExt;
 use holtburger_core::world::entity::Entity;
 
 pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {

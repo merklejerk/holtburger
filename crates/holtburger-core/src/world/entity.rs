@@ -373,6 +373,10 @@ impl Entity {
         }
     }
 
+    pub fn is_attuned_sticky(&self) -> bool {
+        self.attuned_status() != AttunedStatus::Normal
+    }
+
     pub fn apply_description(&mut self, data: &ObjectDescriptionData) {
         self.wcid = Some(data.public_weenie_desc.wcid);
         self.flags = data.public_weenie_desc.obj_desc_flags;
@@ -447,15 +451,10 @@ impl Entity {
 
     pub fn is_sellable(&self) -> bool {
         // IsSellable defaults to True in ACE if not specified
-        let is_sellable = self
-            .bool_properties
+        self.bool_properties
             .get(&(PropertyBool::IsSellable as u32))
             .copied()
-            .unwrap_or(true);
-        let is_retained = self.get_bool_prop(PropertyBool::Retained);
-        let value = self.item_value();
-
-        is_sellable && !is_retained && value >= 1
+            .unwrap_or(true)
     }
 
     pub fn is_tradable(&self) -> bool {

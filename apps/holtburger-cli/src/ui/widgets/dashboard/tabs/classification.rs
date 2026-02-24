@@ -76,6 +76,13 @@ impl EntityClass {
             EntityClass::Unknown => "?",
         }
     }
+
+    pub fn is_creature(&self) -> bool {
+        matches!(
+            self,
+            EntityClass::Player | EntityClass::Npc | EntityClass::Vendor | EntityClass::Monster
+        )
+    }
 }
 
 pub fn get_entity_color(class: EntityClass) -> Color {

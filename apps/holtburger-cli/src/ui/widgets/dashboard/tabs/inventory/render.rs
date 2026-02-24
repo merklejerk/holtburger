@@ -6,7 +6,7 @@ use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::super::classification::{EntityClass, classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use holtburger_common::Guid;
@@ -139,15 +139,23 @@ fn render_inventory_item(
 
     let mut display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
-    } else if is_equipped {
-        format!("{} (EQUIPPED)", e.name)
-    } else if is_offered {
-        format!("{} (OFFERED)", e.name)
     } else {
-        e.name.clone()
+        let mut name = e.name.clone();
+        let stack_size = e.stack_size();
+        if stack_size > 1 {
+            name = format!("{} ({}x)", name, stack_size);
+        }
+
+        if is_equipped {
+            format!("{} (EQUIPPED)", name)
+        } else if is_offered {
+            format!("{} (OFFERED)", name)
+        } else {
+            name
+        }
     };
 
-    if class != EntityClass::Player {
+    if !class.is_creature() {
         if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);

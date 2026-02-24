@@ -86,8 +86,14 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     spans.push(Span::raw("    "));
                 }
 
+                let mut name = item.name.clone();
+                let stack_size = item.stack_size();
+                if stack_size > 1 {
+                    name = format!("{} ({}x)", name, stack_size);
+                }
+
                 spans.push(Span::styled(
-                    item.name.clone(),
+                    name,
                     Style::default().fg({
                         let class = classify_entity(item);
                         get_entity_color(class)

@@ -70,6 +70,7 @@
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
+- [ ] Active panel needs to be much more obvious.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -116,7 +117,7 @@
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
-- [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
+- [ ] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
 - [ ] Log in chat when items are bought and sold.
 - [ ] Still showing conflicting verbs during move interaction.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
@@ -134,8 +135,7 @@
 - [x] Server only takes IP?
 =======
 - [ ] Don't show container sizes on creatures in nearby list.
-- [ ] Keypresses are doubled under windows. According to google:
-    - The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events. 
+- [ ] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

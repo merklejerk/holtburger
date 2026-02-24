@@ -47,6 +47,7 @@ pub enum GameEvent {
     UseDone(Box<UseDoneEventData>),
     IdentifyObjectResponse(Box<IdentifyObjectResponseEventData>),
     InventoryServerSaveFailed(Box<InventoryServerSaveFailedEventData>),
+    CloseGroundContainer(Box<CloseGroundContainerEventData>),
     UpdateHealth(Box<UpdateHealthEventData>),
     RegisterTrade(Box<RegisterTradeEventData>),
     OpenTrade(Box<OpenTradeEventData>),
@@ -179,6 +180,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::InventoryServerSaveFailed => GameEvent::InventoryServerSaveFailed(
                     Box::new(InventoryServerSaveFailedEventData::unpack(data, offset)?),
                 ),
+                GameEventOpcode::CloseGroundContainer => GameEvent::CloseGroundContainer(Box::new(
+                    CloseGroundContainerEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::UpdateHealth => {
                     GameEvent::UpdateHealth(Box::new(UpdateHealthEventData::unpack(data, offset)?))
                 }
@@ -370,6 +374,11 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::InventoryServerSaveFailed(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::InventoryServerSaveFailed as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::CloseGroundContainer(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CloseGroundContainer as u32)
                     .unwrap();
                 data.pack(buf);
             }

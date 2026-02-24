@@ -218,6 +218,49 @@ impl ProtocolPack for GiveObjectRequestActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct StackableSplitTo3DActionData {
+    pub stack_guid: Guid,
+    pub amount: i32,
+}
+
+impl ProtocolUnpack for StackableSplitTo3DActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let stack_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let amount = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(StackableSplitTo3DActionData { stack_guid, amount })
+    }
+}
+
+impl ProtocolPack for StackableSplitTo3DActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.stack_guid.pack(buf);
+        buf.write_i32::<LittleEndian>(self.amount).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct NoLongerViewingContentsActionData {
+    pub container_guid: Guid,
+}
+
+impl ProtocolUnpack for NoLongerViewingContentsActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let container_guid = Guid::unpack(data, offset)?;
+        Some(NoLongerViewingContentsActionData { container_guid })
+    }
+}
+
+impl ProtocolPack for NoLongerViewingContentsActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.container_guid.pack(buf);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +363,33 @@ mod tests {
                     container_guid: Guid(0x50000003),
                     place: 5,
                     amount: 10,
+                },
+            )),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_stackable_split_to_3d_fixture() {
+        let hex_str = "B1F700000100000056000000785634120A000000";
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 1,
+            action: GameAction::StackableSplitTo3D(Box::new(StackableSplitTo3DActionData {
+                stack_guid: Guid(0x12345678),
+                amount: 10,
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_no_longer_viewing_contents_fixture() {
+        let hex_str = "B1F70000020000009501000021436587";
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 2,
+            action: GameAction::NoLongerViewingContents(Box::new(
+                NoLongerViewingContentsActionData {
+                    container_guid: Guid(0x87654321),
                 },
             )),
         }));

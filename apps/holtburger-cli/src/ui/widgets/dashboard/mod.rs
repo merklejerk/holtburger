@@ -118,7 +118,7 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
-            Constraint::Length(2), // Tooltip area
+            Constraint::Length(3), // Verb bar (1 line border + 2 lines text)
         ])
         .split(inner_area);
 
@@ -127,7 +127,7 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     // Tab-specific rendering
     get_tab_controller(dashboard_tab).render(f, game, dashboard_inner_chunks[0]);
 
-    if let Some(action_bar) = crate::ui::utils::render_action_bar(game) {
-        f.render_widget(action_bar, dashboard_inner_chunks[1]);
+    if let Some(verb_bar) = crate::ui::utils::render_verb_bar(game) {
+        f.render_widget(verb_bar, dashboard_inner_chunks[1]);
     }
 }

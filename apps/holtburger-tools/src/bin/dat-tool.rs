@@ -6,9 +6,6 @@ use std::path::{Path, PathBuf};
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    #[arg(short, long, value_name = "FILE")]
-    dat: Option<PathBuf>,
-
     #[command(subcommand)]
     command: Commands,
 }
@@ -57,7 +54,7 @@ impl Provider {
     fn list_ids(&self) -> Vec<u32> {
         let mut ids = match self {
             Self::Dat(db) => db.files.keys().copied().collect::<Vec<_>>(),
-            Self::Hba(hba) => hba.index.keys().copied().collect::<Vec<_>>(),
+            Self::Hba(hba) => hba.entries().filter_map(|e| e.ok().map(|e| e.id)).collect(),
         };
         ids.sort();
         ids
@@ -73,7 +70,7 @@ impl Provider {
     fn file_count(&self) -> usize {
         match self {
             Self::Dat(db) => db.files.len(),
-            Self::Hba(hba) => hba.index.len(),
+            Self::Hba(hba) => hba.header.entry_count as usize,
         }
     }
 
@@ -91,7 +88,7 @@ impl Provider {
                 }
             }
             Self::Hba(hba) => {
-                if let Some(entry) = hba.index.get(&id) {
+                if let Ok(entry) = hba.find_entry(id) {
                     println!("File ID: {:08X}", entry.id);
                     println!("Type:    {}", DatFileType::from_id(entry.id));
                     println!("Size:    {}", entry.size);
@@ -120,15 +117,16 @@ impl Provider {
                 );
             }
             Self::Hba(hba) => {
-                let entry = &hba.index[&id];
-                println!(
-                    "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:02X}",
-                    id,
-                    DatFileType::from_id(id).to_string(),
-                    entry.size,
-                    entry.offset,
-                    entry.flags
-                );
+                if let Ok(entry) = hba.find_entry(id) {
+                    println!(
+                        "{:08X} - {:<25} - Size: {:<10} - Offset: {:08X} - Flags: {:02X}",
+                        id,
+                        DatFileType::from_id(id).to_string(),
+                        entry.size,
+                        entry.offset,
+                        entry.flags
+                    );
+                }
             }
         }
     }
@@ -152,15 +150,27 @@ fn parse_id_auto(raw: &str) -> Result<u32> {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// List meta info about the HBA/DAT file itself
+    Meta {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
+    },
     /// List all files in the DAT
-    List,
+    List {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
+    },
     /// Get info about a specific file ID
     Info {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
     },
     /// Export a file to disk
     Export {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
         #[arg(short, long, value_name = "OUT")]
@@ -168,6 +178,8 @@ enum Commands {
     },
     /// Extract a file to its native format if possible
     Extract {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
         #[arg(short, long, value_name = "OUT")]
@@ -175,16 +187,22 @@ enum Commands {
     },
     /// Inspect a Weenie template
     Weenie {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
     },
     /// Scan table records for a WCID-based Weenie entry
     WeenieFind {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
         #[arg(value_name = "WCID")]
         wcid: String,
     },
     /// Inspect a Landblock
     Landblock {
+        /// Path to the DAT or HBA file
+        path: PathBuf,
         #[arg(value_name = "ID")]
         id: String,
     },
@@ -241,45 +259,61 @@ fn pack_hba(input: &Path, output: &Path, compress: bool) -> Result<()> {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if let Commands::HbaPack {
-        input,
-        output,
-        compress,
-    } = &cli.command
-    {
-        return pack_hba(input, output, *compress);
-    }
-
-    let dat_path = cli
-        .dat
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("--dat is required for this command"))?;
-    let provider = Provider::open(dat_path)?;
-    println!(
-        "Loaded {} provider with {} files.",
-        provider.kind_name(),
-        provider.file_count()
-    );
-
     match cli.command {
-        Commands::List => {
+        Commands::HbaPack {
+            input,
+            output,
+            compress,
+        } => pack_hba(&input, &output, compress),
+
+        Commands::Meta { path } => {
+            let provider = Provider::open(&path)?;
+            println!(
+                "Loaded {} provider with {} files.",
+                provider.kind_name(),
+                provider.file_count()
+            );
+            println!("--- Meta Information ---");
+            println!("Provider:    {}", provider.kind_name());
+            println!("File Count:  {}", provider.file_count());
+            match &provider {
+                Provider::Hba(hba) => {
+                    println!("Version:     {}", hba.header.version);
+                    println!("Index Offs:  0x{:08X}", hba.header.index_offset);
+                    println!("Meta Size:   {}", hba.header.metadata_size);
+                    println!("Profile:     0x{:02X}", hba.header.profile);
+                }
+                Provider::Dat(_db) => {
+                    println!("Note: Detailed DAT meta not yet implemented.");
+                }
+            }
+            Ok(())
+        }
+        Commands::List { path } => {
+            let provider = Provider::open(&path)?;
             let ids = provider.list_ids();
             for id in ids {
                 provider.print_list_entry(id);
             }
+            Ok(())
         }
-        Commands::Info { id } => {
+        Commands::Info { path, id } => {
+            let provider = Provider::open(&path)?;
             let id_val = parse_id_auto(&id)?;
             provider.print_info(id_val);
+            Ok(())
         }
-        Commands::Export { id, output } => {
+        Commands::Export { path, id, output } => {
+            let provider = Provider::open(&path)?;
             let id_val = parse_id_auto(&id)?;
             let data = provider.get_file(id_val)?;
             let out_path = output.unwrap_or_else(|| PathBuf::from(format!("{:08X}.bin", id_val)));
             std::fs::write(&out_path, data)?;
             println!("Exported {:08X} to {:?}", id_val, out_path);
+            Ok(())
         }
-        Commands::Extract { id, output } => {
+        Commands::Extract { path, id, output } => {
+            let provider = Provider::open(&path)?;
             let id_val = parse_id_auto(&id)?;
             let data = provider.get_file(id_val)?;
 
@@ -345,8 +379,10 @@ fn main() -> Result<()> {
                     std::fs::write(&out_path, data)?;
                 }
             }
+            Ok(())
         }
-        Commands::Weenie { id } => {
+        Commands::Weenie { path, id } => {
+            let provider = Provider::open(&path)?;
             let parsed = parse_id_auto(&id)?;
             let direct_ids = vec![parsed];
 
@@ -379,8 +415,10 @@ fn main() -> Result<()> {
             } else {
                 println!("Could not decode a Weenie record from ID {:08X}.", parsed);
             }
+            Ok(())
         }
-        Commands::WeenieFind { wcid } => {
+        Commands::WeenieFind { path, wcid } => {
+            let provider = Provider::open(&path)?;
             let target_wcid = parse_id_auto(&wcid)?;
             let candidate_ids: Vec<u32> = provider
                 .list_ids()
@@ -421,8 +459,10 @@ fn main() -> Result<()> {
                     target_wcid
                 );
             }
+            Ok(())
         }
-        Commands::Landblock { id } => {
+        Commands::Landblock { path, id } => {
+            let provider = Provider::open(&path)?;
             let mut id_val = parse_id_auto(&id)?;
 
             // Auto-fix ID if they passed base landblock ID
@@ -458,9 +498,7 @@ fn main() -> Result<()> {
                     );
                 }
             }
+            Ok(())
         }
-        Commands::HbaPack { .. } => unreachable!(),
     }
-
-    Ok(())
 }

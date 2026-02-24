@@ -8,6 +8,7 @@ use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, InteractionMode};
 use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
+use holtburger_core::world::context::WorldContextExt;
 
 pub struct SpellsTab;
 

@@ -69,6 +69,74 @@ impl ProtocolPack for StackableSplitToWieldData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct StackableMergeData {
+    pub merge_from_guid: Guid,
+    pub merge_to_guid: Guid,
+    pub amount: i32,
+}
+
+impl ProtocolUnpack for StackableMergeData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let merge_from_guid = Guid::unpack(data, offset)?;
+        let merge_to_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let amount = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(StackableMergeData {
+            merge_from_guid,
+            merge_to_guid,
+            amount,
+        })
+    }
+}
+
+impl ProtocolPack for StackableMergeData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.merge_from_guid.pack(buf);
+        self.merge_to_guid.pack(buf);
+        buf.write_i32::<LittleEndian>(self.amount).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct StackableSplitToContainerData {
+    pub stack_guid: Guid,
+    pub container_guid: Guid,
+    pub place: i32,
+    pub amount: i32,
+}
+
+impl ProtocolUnpack for StackableSplitToContainerData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let stack_guid = Guid::unpack(data, offset)?;
+        let container_guid = Guid::unpack(data, offset)?;
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let place = LittleEndian::read_i32(&data[*offset..*offset + 4]);
+        let amount = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
+        *offset += 8;
+        Some(StackableSplitToContainerData {
+            stack_guid,
+            container_guid,
+            place,
+            amount,
+        })
+    }
+}
+
+impl ProtocolPack for StackableSplitToContainerData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.stack_guid.pack(buf);
+        self.container_guid.pack(buf);
+        buf.write_i32::<LittleEndian>(self.place).unwrap();
+        buf.write_i32::<LittleEndian>(self.amount).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct DropItemData {
     pub item_guid: Guid,
 }
@@ -219,6 +287,41 @@ mod tests {
                 item_guid: Guid(0x50000002),
                 amount: 123,
             })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_stackable_merge_fixture() {
+        // StackableMerge hex from ACE: 01 00 00 50 02 00 00 50 0A 00 00 00
+        // Header: B1F70000 Sequence: 01000000 ActionOpcode: 54000000
+        let hex_str = "B1F70000010000005400000001000050020000500A000000";
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 1,
+            action: GameAction::StackableMerge(Box::new(StackableMergeData {
+                merge_from_guid: Guid(0x50000001),
+                merge_to_guid: Guid(0x50000002),
+                amount: 10,
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_stackable_split_to_container_fixture() {
+        // StackableSplitToContainer hex from ACE: 01 00 00 50 03 00 00 50 05 00 00 00 0A 00 00 00
+        // Header: B1F70000 Sequence: 02000000 ActionOpcode: 55000000
+        let hex_str = "B1F7000002000000550000000100005003000050050000000A000000";
+        let expected = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 2,
+            action: GameAction::StackableSplitToContainer(Box::new(
+                StackableSplitToContainerData {
+                    stack_guid: Guid(0x50000001),
+                    container_guid: Guid(0x50000003),
+                    place: 5,
+                    amount: 10,
+                },
+            )),
         }));
         assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
     }

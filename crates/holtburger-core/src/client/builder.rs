@@ -8,13 +8,22 @@ use super::{Client, ClientState, auth::AuthState, movement::MovementSystem};
 
 impl Client {
     pub async fn new(
-        server_ip: &str,
+        server_host: &str,
         server_port: u16,
         account_name: &str,
         character_preference: Option<String>,
         dats_path: std::path::PathBuf,
     ) -> Result<Self> {
-        let target = format!("{}:{}", server_ip, server_port).parse::<SocketAddr>()?;
+        let target = tokio::net::lookup_host(format!("{}:{}", server_host, server_port))
+            .await?
+            .next()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Could not resolve server address: {}:{}",
+                    server_host,
+                    server_port
+                )
+            })?;
 
         let session_future = Session::new(target);
         let dats_path_clone = dats_path.clone();

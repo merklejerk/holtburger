@@ -91,7 +91,7 @@ pub struct Attribute {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PlayerDescriptionData {
+pub struct PlayerDescriptionEventData {
     /// The player's unique identifier (GUID).
     pub guid: Guid,
     /// Message sequence number used for ordering.
@@ -228,7 +228,7 @@ fn find_inventory_start_after_gameplay_options(
     None
 }
 
-impl PlayerDescriptionData {
+impl PlayerDescriptionEventData {
     pub fn unpack(guid: Guid, sequence: u32, data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 8 > data.len() {
             return None;
@@ -625,7 +625,7 @@ impl PlayerDescriptionData {
             .unwrap_or("Unknown".to_string());
         let pos = positions.get(&1_u32).cloned();
 
-        Some(PlayerDescriptionData {
+        Some(PlayerDescriptionEventData {
             guid,
             sequence,
             name,
@@ -657,7 +657,7 @@ impl PlayerDescriptionData {
     }
 }
 
-impl ProtocolPack for PlayerDescriptionData {
+impl ProtocolPack for PlayerDescriptionEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         let mut p_flags = DescriptionPropertyFlag::empty();
         if !self.properties_int.is_empty() {
@@ -923,7 +923,7 @@ impl ProtocolPack for PlayerDescriptionData {
     }
 }
 
-impl ProtocolUnpack for PlayerDescriptionData {
+impl ProtocolUnpack for PlayerDescriptionEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         Self::unpack(Guid(0), 0, data, offset)
     }

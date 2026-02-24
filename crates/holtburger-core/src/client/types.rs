@@ -10,7 +10,7 @@ use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
-use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsItem};
+use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsEventItem};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -89,7 +89,7 @@ pub enum WireEvent {
     PingResponse,
     ViewContents {
         container: Guid,
-        items: Vec<ViewContentsItem>,
+        items: Vec<ViewContentsEventItem>,
     },
     RawMessage(Vec<u8>),
     LogMessage(String),

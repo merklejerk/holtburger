@@ -6,7 +6,7 @@
 //! Format Layout:
 //! - Header (28 bytes)
 //! - File Data (sequential)
-//! - Index (Entry Count * 28 bytes)
+//! - Index (Entry Count * 28 bytes) - MUST be sorted by ID for binary search.
 //!
 //! File naming convention for packing: [ID].[TYPE] (both in hex).
 
@@ -66,11 +66,13 @@ impl HbaEntry {
 #[derive(Debug)]
 pub struct HbaReader {
     pub header: HbaHeader,
-    pub index: HashMap<u32, HbaEntry>,
     file: File,
+    file_len: u64,
 }
 
 impl HbaReader {
+    pub const ENTRY_SIZE: u64 = 28;
+
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let mut file = File::open(&path).map_err(|e| DatError::PathError {
             path: path.as_ref().to_path_buf(),
@@ -86,33 +88,118 @@ impl HbaReader {
             return Err(DatError::UnsupportedVersion(header.version));
         }
 
-        file.seek(SeekFrom::Start(header.index_offset))?;
-        let mut index = HashMap::new();
-        for _ in 0..header.entry_count {
-            let entry = HbaEntry::read(&mut file)?;
-            if index.contains_key(&entry.id) {
-                return Err(DatError::Corruption(format!(
-                    "Duplicate HBA entry id 0x{:08X} in index",
-                    entry.id
-                )));
-            }
-            index.insert(entry.id, entry);
+        let file_len = file.metadata()?.len();
+
+        // Validate that the index range fits within the file.
+        let index_end = header
+            .index_offset
+            .checked_add(header.entry_count as u64 * Self::ENTRY_SIZE)
+            .ok_or_else(|| DatError::Corruption("HBA index range overflow".into()))?;
+
+        if index_end > file_len {
+            return Err(DatError::Corruption(format!(
+                "HBA index extends beyond file size ({} > {})",
+                index_end, file_len
+            )));
+        }
+
+        // Basic sanity check: index shouldn't start within the header.
+        if header.index_offset < 28 {
+            return Err(DatError::Corruption(format!(
+                "HBA index offset {} is within header area",
+                header.index_offset
+            )));
         }
 
         Ok(Self {
             header,
-            index,
             file,
+            file_len,
         })
+    }
+
+    /// Performs an on-disk binary search to find an entry by ID.
+    /// This is O(log n) IO operations, which is memory-efficient for large archives.
+    ///
+    /// The index MUST be sorted by ID for this to work correctly.
+    pub fn find_entry(&self, id: u32) -> Result<HbaEntry> {
+        if self.header.entry_count == 0 {
+            return Err(DatError::NotFound(id));
+        }
+
+        let mut low = 0;
+        let mut high = self.header.entry_count - 1;
+
+        while low <= high {
+            let mid = low + (high - low) / 2;
+            let offset = self.header.index_offset + (mid as u64 * Self::ENTRY_SIZE);
+
+            let mut buffer = [0u8; Self::ENTRY_SIZE as usize];
+            self.file.read_exact_at_compat(&mut buffer, offset)?;
+
+            let entry = HbaEntry::read(&mut Cursor::new(&buffer))?;
+
+            match entry.id.cmp(&id) {
+                std::cmp::Ordering::Equal => return Ok(entry),
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Greater => {
+                    if mid == 0 {
+                        break;
+                    }
+                    high = mid - 1;
+                }
+            }
+        }
+
+        Err(DatError::NotFound(id))
+    }
+
+    /// Returns an iterator over all entries.
+    pub fn entries(&self) -> HbaEntryIterator<'_> {
+        HbaEntryIterator {
+            reader: self,
+            current: 0,
+        }
+    }
+}
+
+pub struct HbaEntryIterator<'a> {
+    reader: &'a HbaReader,
+    current: u32,
+}
+
+impl<'a> Iterator for HbaEntryIterator<'a> {
+    type Item = Result<HbaEntry>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current >= self.reader.header.entry_count {
+            return None;
+        }
+
+        let offset =
+            self.reader.header.index_offset + (self.current as u64 * HbaReader::ENTRY_SIZE);
+        let mut buffer = [0u8; HbaReader::ENTRY_SIZE as usize];
+
+        if let Err(e) = self.reader.file.read_exact_at_compat(&mut buffer, offset) {
+            return Some(Err(e.into()));
+        }
+
+        let entry = match HbaEntry::read(&mut Cursor::new(&buffer)) {
+            Ok(e) => e,
+            Err(e) => return Some(Err(e.into())),
+        };
+
+        self.current += 1;
+        Some(Ok(entry))
     }
 }
 
 impl ResourceProvider for HbaReader {
     fn get_file(&self, id: u32) -> Result<Vec<u8>> {
-        let entry = self.index.get(&id).ok_or(DatError::NotFound(id))?;
+        let entry = self.find_entry(id)?;
 
         // Validate that the requested range fits within the underlying file.
-        let file_len = self.file.metadata()?.len();
+        let file_len = self.file_len;
         let end = entry
             .offset
             .checked_add(entry.comp_size as u64)
@@ -153,7 +240,7 @@ impl ResourceProvider for HbaReader {
     }
 
     fn get_metadata(&self, id: u32) -> Option<crate::FileMetadata> {
-        self.index.get(&id).map(|entry| crate::FileMetadata {
+        self.find_entry(id).ok().map(|entry| crate::FileMetadata {
             id: entry.id,
             size: entry.size,
             is_pruned: entry.is_pruned(),
@@ -258,8 +345,8 @@ impl HbaWriter {
         let mut hba_entries = Vec::new();
 
         // Sequential write to disk
+        let mut current_offset = file.stream_position()?;
         for (id, type_id, final_data, original_size, flags) in processed {
-            let current_offset = file.stream_position()?;
             file.write_all(&final_data)?;
 
             hba_entries.push(HbaEntry {
@@ -272,12 +359,17 @@ impl HbaWriter {
                 storage_id: 0,
                 reserved: [0; 2],
             });
+            current_offset += final_data.len() as u64;
         }
 
         // Write index
-        let index_offset = file.stream_position()?;
-        for entry in hba_entries {
-            entry.write(&mut file)?;
+        let index_offset = current_offset;
+        {
+            let mut buf_writer = std::io::BufWriter::new(&mut file);
+            for entry in hba_entries {
+                entry.write(&mut buf_writer)?;
+            }
+            buf_writer.flush()?;
         }
 
         // Update header
@@ -313,8 +405,8 @@ mod tests {
         assert!(reader.exists(0x2222));
         assert_eq!(reader.get_file(0x1111)?, vec![1, 2, 3]);
         assert_eq!(reader.get_file(0x2222)?, vec![4, 5, 6]);
-        assert_eq!(reader.index.get(&0x1111).unwrap().type_id, 0x01);
-        assert_eq!(reader.index.get(&0x2222).unwrap().type_id, 0x02);
+        assert_eq!(reader.find_entry(0x1111).unwrap().type_id, 0x01);
+        assert_eq!(reader.find_entry(0x2222).unwrap().type_id, 0x02);
 
         Ok(())
     }
@@ -331,7 +423,7 @@ mod tests {
         writer.write(&path)?;
 
         let reader = HbaReader::open(&path)?;
-        let entry = reader.index.get(&0x9999).unwrap();
+        let entry = reader.find_entry(0x9999).unwrap();
         assert!(entry.is_compressed());
         assert!(entry.comp_size < entry.size);
         assert_eq!(reader.get_file(0x9999)?, data);
@@ -365,7 +457,6 @@ mod tests {
 
         let reader = HbaReader::open(&path)?;
         assert_eq!(reader.header.entry_count, 0);
-        assert_eq!(reader.index.len(), 0);
 
         Ok(())
     }

@@ -14,7 +14,7 @@ pub fn render_character_selection(f: &mut Frame, state: &SelectionState, area: R
             ratatui::text::Line::from("No characters found on this account."),
             ratatui::text::Line::from("Please create a character using the official client first."),
             ratatui::text::Line::from(""),
-            ratatui::text::Line::from("Press 'q' to quit"),
+            ratatui::text::Line::from("Press Ctrl+q to quit"),
         ];
         let paragraph = ratatui::widgets::Paragraph::new(text)
             .block(block)

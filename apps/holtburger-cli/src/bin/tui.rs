@@ -72,10 +72,12 @@ impl log::Log for TuiLogger {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None, disable_help_flag = true)]
 struct Args {
-    #[arg(short, long, default_value = "127.0.0.1")]
-    server: String,
+    #[arg(short, long)]
+    server: Option<String>,
+    #[arg(short = 'h', long, default_value = "127.0.0.1")]
+    host: String,
     #[arg(short, long, default_value_t = 9000)]
     port: u16,
     #[arg(short, long)]
@@ -94,11 +96,32 @@ struct Args {
     verbose: u8,
     #[arg(short, long)]
     dats: Option<String>,
+    #[arg(long, action = clap::ArgAction::Help)]
+    help: Option<bool>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    let (host, port) = if let Some(server) = &args.server {
+        if let Some((h, p)) = server.split_once(':') {
+            (
+                h.to_string(),
+                p.parse::<u16>().unwrap_or_else(|_| {
+                    eprintln!(
+                        "Invalid port in server string, using default: {}",
+                        args.port
+                    );
+                    args.port
+                }),
+            )
+        } else {
+            (server.clone(), args.port)
+        }
+    } else {
+        (args.host.clone(), args.port)
+    };
 
     let dats_path = args
         .dats
@@ -158,8 +181,8 @@ async fn main() -> Result<()> {
 
     println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
     let mut client = match Client::new(
-        &args.server,
-        args.port,
+        &host,
+        port,
         &args.account,
         args.character.clone(),
         dats_path.clone(),

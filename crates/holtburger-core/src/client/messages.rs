@@ -112,6 +112,8 @@ impl Client {
                 if let Some(id) =
                     find_preferred_character(&self.auth.characters, &self.auth.character_preference)
                 {
+                    log::info!("Auto-selecting character: 0x{:08X}", id);
+                    self.world.load_deferred_tables();
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
                     self.auth.select_character(id, &mut self.session).await?;

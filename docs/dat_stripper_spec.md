@@ -89,7 +89,7 @@ The following rules determine which files are included in the Lite DATs.
 | **Animation** | `0x03` | Contains **Animation Hooks** (attack timing) and frame counts. |
 | **MotionTable** | `0x09` | Connects motions to animations; essential for timing. |
 | **Environment** | `0x0D` | Dungeon/Interior structure. |
-| **CombatTable** | `0x30` | Combat logic tables. |
+| **CombatManeuverTable** | `0x30` | Combat logic tables. |
 | **PhysicsScript** | `0x33`, `0x34` | Physics simulation scripts. |
 | **SkillTable** | `0x0E...04` | Skill formulas and data. |
 | **SpellTable** | `0x0E...0E` | Spell data. |

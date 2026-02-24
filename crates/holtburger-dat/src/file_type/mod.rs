@@ -24,14 +24,14 @@ pub enum DatFileType {
     SurfaceTexture = 0x05,
     Texture = 0x06,
     Surface = 0x08,
-    AnimationDone = 0x09,
+    MotionTable = 0x09,
     Audio = 0x0A,
     EnvCell = 0x0D,
     Table = 0x0E,
     Clothing = 0x10,
     Scene = 0x12,
     Region = 0x13,
-    CombatTable = 0x30,
+    CombatManeuverTable = 0x30,
     PhysicsScript = 0x33,
     PhysicsScriptTable = 0x34,
     LanguageString = 0x31,
@@ -52,15 +52,13 @@ impl DatFileType {
             self,
             DatFileType::Model
                 | DatFileType::SetupModel
-                | DatFileType::Animation
-                | DatFileType::AnimationDone
+                | DatFileType::MotionTable
                 | DatFileType::EnvCell
                 | DatFileType::Table
                 | DatFileType::Region
-                | DatFileType::CombatTable
+                | DatFileType::CombatManeuverTable
                 | DatFileType::PhysicsScript
                 | DatFileType::PhysicsScriptTable
-                | DatFileType::LanguageString
                 | DatFileType::Landblock
                 | DatFileType::LandblockInfo
                 | DatFileType::IndoorCell
@@ -92,14 +90,14 @@ impl DatFileType {
             0x05 => DatFileType::SurfaceTexture,
             0x06 | 0x07 => DatFileType::Texture,
             0x08 => DatFileType::Surface,
-            0x09 => DatFileType::AnimationDone,
+            0x09 => DatFileType::MotionTable,
             0x0A => DatFileType::Audio,
             0x0D => DatFileType::EnvCell,
             0x0E => DatFileType::Table,
             0x10 => DatFileType::Clothing,
             0x12 => DatFileType::Scene,
             0x13 => DatFileType::Region,
-            0x30 => DatFileType::CombatTable,
+            0x30 => DatFileType::CombatManeuverTable,
             0x33 => DatFileType::PhysicsScript,
             0x34 => DatFileType::PhysicsScriptTable,
             0x31 => DatFileType::LanguageString,
@@ -125,14 +123,14 @@ impl fmt::Display for DatFileType {
             DatFileType::SurfaceTexture => "SurfaceTexture (TEX)",
             DatFileType::Texture => "Texture (DDS/JPG)",
             DatFileType::Surface => "Surface (SUR)",
-            DatFileType::AnimationDone => "AnimationDone (DSC)",
+            DatFileType::MotionTable => "MotionTable (DSC)",
             DatFileType::Audio => "Audio (WAV)",
             DatFileType::EnvCell => "EnvCell (ENV)",
             DatFileType::Table => "Table",
             DatFileType::Clothing => "Clothing (CLO)",
             DatFileType::Scene => "Scene (SCN)",
             DatFileType::Region => "Region (RGN)",
-            DatFileType::CombatTable => "CombatTable",
+            DatFileType::CombatManeuverTable => "CombatManeuverTable",
             DatFileType::PhysicsScript => "PhysicsScript",
             DatFileType::PhysicsScriptTable => "PhysicsScriptTable",
             DatFileType::LanguageString => "LanguageString",

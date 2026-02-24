@@ -445,7 +445,7 @@ impl Entity {
         self.set_int_prop(PropertyInt::PhysicsState, data.physics_state.bits() as i32);
     }
 
-    pub fn is_sellable_base(&self) -> bool {
+    pub fn is_sellable(&self) -> bool {
         // IsSellable defaults to True in ACE if not specified
         let is_sellable = self
             .bool_properties
@@ -458,7 +458,7 @@ impl Entity {
         is_sellable && !is_retained && value >= 1
     }
 
-    pub fn is_tradable_base(&self) -> bool {
+    pub fn is_tradable(&self) -> bool {
         let attuned = self.attuned_status();
         if attuned != AttunedStatus::Normal {
             return false;

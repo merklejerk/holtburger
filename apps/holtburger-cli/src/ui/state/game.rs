@@ -218,7 +218,7 @@ impl GameData {
             None => return false,
         };
 
-        if !e.is_sellable_base() {
+        if !e.is_sellable() {
             return false;
         }
 
@@ -250,7 +250,7 @@ impl GameData {
             None => return false,
         };
 
-        if !e.is_tradable_base() {
+        if !e.is_tradable() {
             return false;
         }
 

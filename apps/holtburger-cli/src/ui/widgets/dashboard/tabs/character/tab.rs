@@ -3,10 +3,9 @@ use ratatui::layout::Rect;
 
 use super::super::common::{Action, Verb};
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
-use super::verbs;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, StatType};
+use crate::ui::types::{CommandTarget, InteractionMode, StatType};
 use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 
@@ -18,22 +17,28 @@ impl TabController for CharacterTab {
     }
 
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
-        let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
-
         let target = self.get_target_at_index(game, index);
-        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
-            &target,
-            player_guid,
-            active_interaction,
-            game.view.dashboard_tab,
-        ) {
-            return interaction_verbs;
+
+        if let Some(interaction) = active_interaction
+            && interaction.mode != InteractionMode::Target
+        {
+            return vec![Verb::new(Action::Cancel, '\x1b', "Cancel")];
         }
 
         match target {
             CommandTarget::Stat(_, xp_cost, sp_cost) => {
-                verbs::get_verbs(xp_cost.is_some(), sp_cost.is_some())
+                let mut verbs = Vec::new();
+
+                if xp_cost.is_some() {
+                    verbs.push(Verb::new(Action::LevelUp, 'l', "Level Up"));
+                }
+
+                if sp_cost.is_some() {
+                    verbs.push(Verb::new(Action::Train, 'n', "Train"));
+                }
+
+                verbs
             }
             _ => vec![Verb::new(Action::Debug, 'g', "Debug")],
         }

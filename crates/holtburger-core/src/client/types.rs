@@ -166,6 +166,16 @@ pub enum ClientCommand {
     Use(Guid),
     Drop(Guid),
     Get(Guid),
+    Stack {
+        source: Guid,
+        destination: Guid,
+        amount: i32,
+    },
+    Split {
+        item: Guid,
+        container: Guid,
+        amount: i32,
+    },
     MoveItem {
         item: Guid,
         container: Guid,

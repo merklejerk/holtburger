@@ -31,7 +31,7 @@ impl EntityClass {
         match self {
             EntityClass::Player => "🧙",
             EntityClass::Npc => "🙋",
-            EntityClass::Vendor => "💰",
+            EntityClass::Vendor => "🛒",
             EntityClass::Monster => "😈",
             EntityClass::Weapon => "🔪",
             EntityClass::Wand => "🪄",
@@ -87,14 +87,14 @@ impl EntityClass {
 
 pub fn get_entity_color(class: EntityClass) -> Color {
     match class {
-        EntityClass::Player => Color::White,
+        EntityClass::Player => Color::Yellow,
         EntityClass::Npc => Color::LightGreen,
         EntityClass::Vendor => Color::LightGreen,
         EntityClass::Monster => Color::Red,
-        EntityClass::Container | EntityClass::Chest => Color::Yellow,
+        EntityClass::Container | EntityClass::Chest => Color::White,
         EntityClass::LifeStone => Color::Blue,
         EntityClass::Portal => Color::LightMagenta,
-        EntityClass::Door | EntityClass::StaticObject => Color::LightYellow,
+        EntityClass::Door | EntityClass::StaticObject => Color::White,
         EntityClass::Unknown => Color::DarkGray,
         _ => Color::White,
     }

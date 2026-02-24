@@ -772,7 +772,7 @@ Source: `ACE.Entity.Enum.Properties`
 | 1 | Setup | | DAT ID for the object's 3D model and visual setup. |
 | 2 | MotionTable | L | DAT ID for movement and animation state machine. |
 | 3 | SoundTable | | DAT ID mapping sound effects to actions. |
-| 4 | CombatTable | L | DAT ID for combat-specific animations and logic. |
+| 4 | CombatManeuverTable | L | DAT ID for combat-specific animations and logic. |
 | 5 | QualityFilter | | |
 | 6 | PaletteBase | | DAT ID for the starting palette template. |
 | 7 | ClothingBase | | DAT ID for the character's clothing base visual. |

@@ -1468,6 +1468,40 @@ mod tests {
     }
 
     #[test]
+    fn test_load_deferred_tables_noop_without_portal_dat() {
+        let mut state = WorldState::new(None, None);
+        assert!(state.xp_table.is_none());
+        assert!(state.spell_table.is_none());
+
+        // Calling load_deferred_tables with no provider should be a clean no-op
+        state.load_deferred_tables();
+
+        assert!(state.xp_table.is_none());
+        assert!(state.spell_table.is_none());
+    }
+
+    #[test]
+    fn test_load_deferred_tables_gracefully_handles_read_failure() {
+        struct MockFailedProvider;
+        impl holtburger_dat::ResourceProvider for MockFailedProvider {
+            fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
+                Err(holtburger_dat::error::DatError::NotFound(id))
+            }
+            fn get_metadata(&self, _id: u32) -> Option<holtburger_dat::FileMetadata> {
+                None
+            }
+        }
+
+        let mut state = WorldState::new(Some(Arc::new(MockFailedProvider)), None);
+
+        // This shouldn't panic or error out the whole thing if reading fails
+        state.load_deferred_tables();
+
+        assert!(state.xp_table.is_none());
+        assert!(state.spell_table.is_none());
+    }
+
+    #[test]
     fn test_player_mirror_invariant_on_autonomous_sync() {
         let mut state = WorldState::new(None, None);
         let player_guid = Guid(0x50000123);

@@ -50,6 +50,7 @@
 - [x] Popup for "retrying..." mode.
 - [x] TUI client needs major refactors. (Done: Page-based architecture with isolated GameState)
 - [x] Auto-switch to trade tab when INITIATING a trade/vendor.
+- [x] Startup is slow. Slow DAT parsing?
 - [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
@@ -60,7 +61,6 @@
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
-- [ ] Startup is slow. Slow DAT parsing?
 - [ ] Auto-follow.
 - [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
@@ -69,6 +69,7 @@
 - [ ] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
+- [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -99,6 +100,7 @@
 - [x] Trade tab.
 - [x] Restrict sell verb to vendor item mask and attuned.
 - [x] Handle CommunicationTransientString and PopupString. Some useful error messages manifest there.
+- [x] Stack not updating when consumed/spent (try Bunch of Nanners, pyreals).
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -112,7 +114,6 @@
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Show count for stacked items.
-- [ ] Stack not updating when consumed/spent (try Bunch of Nanners, pyreals).
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] Character description fails to populate when using `-c` CLI arg. Also a message appears that says character list is empty (but still logs you in).
 - [ ] Log in chat when items are bought and sold.

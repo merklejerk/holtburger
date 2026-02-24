@@ -11,7 +11,7 @@ use crate::ui::state::GameState;
 use crate::ui::theme;
 use crate::ui::types::TradeFocus;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
-use holtburger_common::properties::ItemType;
+use holtburger_common::properties::{ItemType, PropertyInt};
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if let Some(trade) = &game.data.trade {
@@ -39,15 +39,17 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, guid)| {
-                let name = game
-                    .data
-                    .entities
-                    .get(guid)
-                    .map(|e| e.name.as_str())
-                    .unwrap_or("Unknown Item");
+                let mut name = "Unknown Item".to_string();
+                if let Some(e) = game.data.entities.get(guid) {
+                    name = e.name.clone();
+                    let stack_size = e.stack_size();
+                    if stack_size > 1 {
+                        name = format!("{} ({}x)", name, stack_size);
+                    }
+                }
                 let is_selected =
                     trade_focus == TradeFocus::Local && i == game.view.selected_dashboard_index;
-                ListItem::new(name.to_string()).style(theme::list_item_style(is_selected))
+                ListItem::new(name).style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -122,15 +124,17 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, guid)| {
-                let name = game
-                    .data
-                    .entities
-                    .get(guid)
-                    .map(|e| e.name.as_str())
-                    .unwrap_or("Unknown Item");
+                let mut name = "Unknown Item".to_string();
+                if let Some(e) = game.data.entities.get(guid) {
+                    name = e.name.clone();
+                    let stack_size = e.stack_size();
+                    if stack_size > 1 {
+                        name = format!("{} ({})", name, stack_size);
+                    }
+                }
                 let is_selected =
                     trade_focus == TradeFocus::Partner && i == game.view.selected_dashboard_index;
-                ListItem::new(name.to_string()).style(theme::list_item_style(is_selected))
+                ListItem::new(name).style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -236,7 +240,23 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, m)| {
-                let name = m.description.name.as_deref().unwrap_or("Unknown Item");
+                let mut name = m
+                    .description
+                    .name
+                    .as_deref()
+                    .unwrap_or("Unknown Item")
+                    .to_string();
+
+                let stack_size = m
+                    .description
+                    .int_properties
+                    .get(&(PropertyInt::StackSize as u32))
+                    .cloned()
+                    .unwrap_or(1) as u32;
+
+                if stack_size > 1 {
+                    name = format!("{} ({})", name, stack_size);
+                }
 
                 // Calculate vendor's sell price (player pays this)
                 // Ground truth: Math.Max(1, (uint)Math.Ceiling(((float)sellRate * (value ?? 0)) - 0.1))

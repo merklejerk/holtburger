@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use super::super::classification::{EntityClass, classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use holtburger_core::world::entity::Entity;
@@ -92,7 +92,12 @@ fn render_nearby_item(
         e.name.clone()
     };
 
-    if class != EntityClass::Player {
+    let stack_size = e.stack_size();
+    if stack_size > 1 {
+        display_name = format!("{} ({}x)", display_name, stack_size);
+    }
+
+    if !class.is_creature() {
         if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);

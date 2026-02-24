@@ -52,7 +52,7 @@ impl AnimationHook {
             1 => 4,   // Sound (Id)
             2 => 4,   // SoundTable (SoundType)
             3 => 28,  // Attack (AttackCone)
-            4 => 0,   // AnimationDone
+            4 => 0,   // AnimationDone (MotionTable command)
             5 => 6,   // ReplaceObject (PartIndex: u16, PartID: u32)
             6 => 4,   // Ethereal (Ethereal: i32)
             7 => 16,  // TransparentPart (Part, Start, End, Time)

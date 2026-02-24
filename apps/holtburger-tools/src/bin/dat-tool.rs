@@ -112,7 +112,11 @@ impl Provider {
                     id,
                     entry.file_type().to_string(),
                     entry.size,
-                    if entry.is_compressed() { " (compressed)" } else { "" },
+                    if entry.is_compressed() {
+                        " (compressed)"
+                    } else {
+                        ""
+                    },
                     entry.offset,
                     entry.bit_flags
                 );
@@ -124,7 +128,11 @@ impl Provider {
                         id,
                         DatFileType::from_id(id).to_string(),
                         entry.size,
-                        if entry.is_compressed() { " (compressed)" } else { "" },
+                        if entry.is_compressed() {
+                            " (compressed)"
+                        } else {
+                            ""
+                        },
                         entry.offset,
                         entry.flags
                     );

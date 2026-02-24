@@ -6,7 +6,7 @@
 //! Format Layout:
 //! - Header (28 bytes)
 //! - File Data (sequential)
-//! - Index (Entry Count * 28 bytes)
+//! - Index (Entry Count * 28 bytes) - MUST be sorted by ID for binary search.
 //!
 //! File naming convention for packing: [ID].[TYPE] (both in hex).
 
@@ -90,6 +90,27 @@ impl HbaReader {
 
         let file_len = file.metadata()?.len();
 
+        // Validate that the index range fits within the file.
+        let index_end = header
+            .index_offset
+            .checked_add(header.entry_count as u64 * Self::ENTRY_SIZE)
+            .ok_or_else(|| DatError::Corruption("HBA index range overflow".into()))?;
+
+        if index_end > file_len {
+            return Err(DatError::Corruption(format!(
+                "HBA index extends beyond file size ({} > {})",
+                index_end, file_len
+            )));
+        }
+
+        // Basic sanity check: index shouldn't start within the header.
+        if header.index_offset < 28 {
+            return Err(DatError::Corruption(format!(
+                "HBA index offset {} is within header area",
+                header.index_offset
+            )));
+        }
+
         Ok(Self {
             header,
             file,
@@ -99,6 +120,8 @@ impl HbaReader {
 
     /// Performs an on-disk binary search to find an entry by ID.
     /// This is O(log n) IO operations, which is memory-efficient for large archives.
+    ///
+    /// The index MUST be sorted by ID for this to work correctly.
     pub fn find_entry(&self, id: u32) -> Result<HbaEntry> {
         if self.header.entry_count == 0 {
             return Err(DatError::NotFound(id));

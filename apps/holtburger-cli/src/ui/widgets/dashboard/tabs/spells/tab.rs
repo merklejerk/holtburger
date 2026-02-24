@@ -3,10 +3,9 @@ use ratatui::layout::Rect;
 
 use super::super::common::{Action, Verb};
 use super::render::render_spells_tab;
-use super::verbs;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
+use crate::ui::types::{CommandTarget, InteractionMode};
 use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 
@@ -18,20 +17,33 @@ impl TabController for SpellsTab {
     }
 
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
-        let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
 
-        let target = self.get_target_at_index(game, index);
-        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
-            &target,
-            player_guid,
-            active_interaction,
-            game.view.dashboard_tab,
-        ) {
-            return interaction_verbs;
+        let get_default_verbs = |is_targeted: bool| {
+            let label = if is_targeted {
+                "Cast on target"
+            } else {
+                "Cast on self"
+            };
+            vec![
+                Verb::new(Action::Cast(is_targeted), 'c', label),
+                Verb::new(Action::Debug, 'g', "Debug"),
+            ]
+        };
+
+        if let Some(interaction) = active_interaction {
+            let is_targeted = interaction.mode == InteractionMode::Target
+                || interaction.mode == InteractionMode::Healing;
+
+            let target = self.get_target_at_index(game, index);
+            if let CommandTarget::Spell(_) = target {
+                return get_default_verbs(is_targeted);
+            } else if interaction.mode != InteractionMode::Target {
+                return vec![Verb::new(Action::Cancel, '\x1b', "Cancel")];
+            }
         }
 
-        verbs::get_verbs(false)
+        get_default_verbs(false)
     }
 
     fn handle_action(

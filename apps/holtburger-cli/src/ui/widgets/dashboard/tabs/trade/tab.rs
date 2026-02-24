@@ -5,7 +5,7 @@ use super::super::common::{Action, Verb};
 use super::render::render_trade_tab;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, TradeFocus};
+use crate::ui::types::{CommandTarget, InteractionMode, TradeFocus};
 use crate::ui::update::effect::UIEffect;
 
 pub struct TradeTab;
@@ -21,24 +21,84 @@ impl TabController for TradeTab {
         let active_interaction = game.view.active_interaction;
         let target = self.get_target_at_index(game, index);
 
-        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
-            &target,
-            player_guid,
-            active_interaction,
-            game.view.dashboard_tab,
-        ) {
-            verbs.extend(interaction_verbs);
+        if let Some(interaction) = active_interaction {
+            if let CommandTarget::Entity(e, _) = &target {
+                match interaction.mode {
+                    InteractionMode::Moving => {
+                        let class = super::super::classification::classify_entity(e);
+                        use super::super::classification::EntityClass;
+                        let is_creature = matches!(
+                            class,
+                            EntityClass::Player
+                                | EntityClass::Monster
+                                | EntityClass::Npc
+                                | EntityClass::Vendor
+                        );
+                        let is_self = Some(e.guid) == player_guid;
+                        if !is_self {
+                            let is_container =
+                                matches!(class, EntityClass::Container | EntityClass::Chest);
+                            let is_subject = e.guid == interaction.guid;
+                            let is_in_main_pack = e.container_id() == player_guid;
+
+                            if is_subject && !is_in_main_pack {
+                                verbs.push(Verb::new(
+                                    Action::Confirm("Move to main pack".to_string()),
+                                    '\r',
+                                    "Move to main pack",
+                                ));
+                            } else if is_container {
+                                verbs.push(Verb::new(
+                                    Action::Confirm(format!("Move to {}", e.name)),
+                                    '\r',
+                                    format!("Move to {}", e.name),
+                                ));
+                            } else if is_creature {
+                                verbs.push(Verb::new(
+                                    Action::Confirm(format!("Give to {}", e.name)),
+                                    '\r',
+                                    format!("Give to {}", e.name),
+                                ));
+                            }
+                        }
+                    }
+                    InteractionMode::Healing => {
+                        let class = super::super::classification::classify_entity(e);
+                        use super::super::classification::EntityClass;
+                        let is_creature = matches!(
+                            class,
+                            EntityClass::Player
+                                | EntityClass::Monster
+                                | EntityClass::Npc
+                                | EntityClass::Vendor
+                        );
+
+                        if is_creature || e.guid == interaction.guid {
+                            let label = if Some(e.guid) == player_guid || e.guid == interaction.guid
+                            {
+                                "Heal yourself".to_string()
+                            } else {
+                                format!("Heal {}", e.name)
+                            };
+                            verbs.push(Verb::new(Action::Confirm(label.clone()), '\r', label));
+                        }
+                    }
+                    InteractionMode::Target => {}
+                }
+            }
+
+            if interaction.mode != InteractionMode::Target {
+                verbs.push(Verb::new(Action::Cancel, '\x1b', "Cancel"));
+            }
         }
 
         if let CommandTarget::VendorItem(_) = target {
             verbs.push(Verb::new(Action::Buy, 'b', "Buy"));
         }
 
-        if let CommandTarget::Entity(e, _) = target {
+        if let CommandTarget::Entity(_, _) = target {
             verbs.push(Verb::new(Action::Assess, 'a', "Assess"));
             verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
-
-            verbs.extend(super::verbs::get_verbs(e, game));
         }
 
         if let Some(trade) = &game.data.trade {

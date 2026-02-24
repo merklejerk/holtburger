@@ -1,9 +1,9 @@
 use super::super::assess;
 use super::super::debug;
-use super::classification::{self, EntityClass};
+use super::classification;
 use crate::ui::UIEffect;
 use crate::ui::state::GameState;
-use crate::ui::types::{ActiveInteraction, CommandTarget, ContextView, InteractionMode};
+use crate::ui::types::{CommandTarget, ContextView, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
@@ -38,6 +38,8 @@ pub enum Action {
     ResetTrade,
     Exit,
     OpenTrade,
+    Stack(Guid),
+    Split,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,6 +115,22 @@ pub fn handle_base_action(
         }
         (Action::OpenTrade, CommandTarget::Entity(e, _)) => {
             Some(UIEffect::Command(ClientCommand::OpenTrade(e.guid)))
+        }
+        (Action::Stack(target_guid), CommandTarget::Entity(e, _)) => {
+            Some(UIEffect::Command(ClientCommand::Stack {
+                source: e.guid,
+                destination: *target_guid,
+                amount: 1, // Default for verb
+            }))
+        }
+        (Action::Split, CommandTarget::Entity(e, _)) => {
+            game.data.player_guid.map(|player_guid| {
+                UIEffect::Command(ClientCommand::Split {
+                    item: e.guid,
+                    container: player_guid,
+                    amount: 1, // Default for verb
+                })
+            })
         }
         (Action::Debug, target) => match target {
             CommandTarget::Spell(sid) => Some(UIEffect::ActivateDebugSpell(*sid)),
@@ -213,107 +231,6 @@ impl Verb {
             format!("{}[{}]{}", before, actual_char, after)
         } else {
             format!("[{}] {}", shortcut_upper, label)
-        }
-    }
-}
-
-/// Helper to get verbs for a specific interaction mode (Moving, Healing, or Targeting).
-pub fn get_interaction_verbs(
-    target: &CommandTarget,
-    player_guid: Option<Guid>,
-    active_interaction: Option<ActiveInteraction>,
-    _dashboard_tab: crate::ui::DashboardTab,
-) -> Option<Vec<Verb>> {
-    let interaction = active_interaction?;
-
-    match target {
-        CommandTarget::Entity(e, _) => {
-            if interaction.mode == InteractionMode::Target {
-                return None;
-            }
-
-            let mut verbs = Vec::new();
-            match interaction.mode {
-                InteractionMode::Moving => {
-                    let class = classification::classify_entity(e);
-                    let is_creature = matches!(
-                        class,
-                        EntityClass::Player
-                            | EntityClass::Monster
-                            | EntityClass::Npc
-                            | EntityClass::Vendor
-                    );
-                    let is_self = Some(e.guid) == player_guid;
-                    if !is_self {
-                        let is_container =
-                            matches!(class, EntityClass::Container | EntityClass::Chest);
-                        let is_subject = e.guid == interaction.guid;
-                        let is_in_main_pack = e.container_id() == player_guid;
-
-                        if is_subject && !is_in_main_pack {
-                            verbs.push(Verb::new(
-                                Action::Confirm("Move to main pack".to_string()),
-                                '\r',
-                                "Move to main pack",
-                            ));
-                        } else if is_container {
-                            verbs.push(Verb::new(
-                                Action::Confirm(format!("Move to {}", e.name)),
-                                '\r',
-                                format!("Move to {}", e.name),
-                            ));
-                        } else if is_creature {
-                            verbs.push(Verb::new(
-                                Action::Confirm(format!("Give to {}", e.name)),
-                                '\r',
-                                format!("Give to {}", e.name),
-                            ));
-                        }
-                    }
-                }
-                InteractionMode::Healing => {
-                    let class = classification::classify_entity(e);
-                    let is_creature = matches!(
-                        class,
-                        EntityClass::Player
-                            | EntityClass::Monster
-                            | EntityClass::Npc
-                            | EntityClass::Vendor
-                    );
-
-                    if is_creature || e.guid == interaction.guid {
-                        let label = if Some(e.guid) == player_guid || e.guid == interaction.guid {
-                            "Heal yourself".to_string()
-                        } else {
-                            format!("Heal {}", e.name)
-                        };
-                        verbs.push(Verb::new(Action::Confirm(label.clone()), '\r', label));
-                    }
-                }
-                InteractionMode::Target => unreachable!(),
-            }
-            verbs.push(Verb::new(Action::Cancel, '\x1b', "Cancel"));
-            Some(verbs)
-        }
-        CommandTarget::Spell(_) => {
-            let is_targeted = interaction.mode == InteractionMode::Target
-                || interaction.mode == InteractionMode::Healing;
-            let label = if is_targeted {
-                "Cast on target"
-            } else {
-                "Cast on self"
-            };
-            Some(vec![
-                Verb::new(Action::Cast(is_targeted), 'c', label),
-                Verb::new(Action::Debug, 'g', "Debug"),
-            ])
-        }
-        _ => {
-            if interaction.mode == InteractionMode::Target {
-                None
-            } else {
-                Some(vec![Verb::new(Action::Cancel, '\x1b', "Cancel")])
-            }
         }
     }
 }

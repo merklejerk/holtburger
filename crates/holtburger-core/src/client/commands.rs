@@ -39,6 +39,8 @@ impl Client {
 
             ClientCommand::Drop(_)
             | ClientCommand::Get(_)
+            | ClientCommand::Stack { .. }
+            | ClientCommand::Split { .. }
             | ClientCommand::MoveItem { .. }
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
@@ -300,6 +302,47 @@ impl Client {
                         item_guid: guid,
                         container_guid: self.world.player.guid,
                         placement: 0,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::Stack {
+                source,
+                destination,
+                amount,
+            } => {
+                log::info!(
+                    ">>> Stacking 0x{:08X} ({}x) onto 0x{:08X}",
+                    source,
+                    amount,
+                    destination
+                );
+                self.send_game_action(GameAction::StackableMerge(Box::new(
+                    StackableMergeActionData {
+                        merge_from_guid: source,
+                        merge_to_guid: destination,
+                        amount,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::Split {
+                item,
+                container,
+                amount,
+            } => {
+                log::info!(
+                    ">>> Splitting 0x{:08X} ({}x) to container 0x{:08X}",
+                    item,
+                    amount,
+                    container
+                );
+                self.send_game_action(GameAction::StackableSplitToContainer(Box::new(
+                    StackableSplitToContainerActionData {
+                        stack_guid: item,
+                        container_guid: container,
+                        place: 0, // Auto-placement
+                        amount,
                     },
                 )))
                 .await

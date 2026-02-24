@@ -287,10 +287,10 @@ pub enum GameActionOpcode {
     Buy = 0x005F,
     /// C2S: Sell item(s) to a vendor.
     Sell = 0x0060,
-    // /// C2S: Merge two stacks of items.
-    // StackableMerge = 0x0054,
-    // /// C2S: Split an item stack into a container.
-    // StackableSplitToContainer = 0x0055,
+    /// C2S: Merge two stacks of items.
+    StackableMerge = 0x0054,
+    /// C2S: Split an item stack into a container.
+    StackableSplitToContainer = 0x0055,
     // /// C2S: Split an item stack onto the ground.
     // StackableSplitTo3D = 0x0056,
     /// C2S: Split stackable items and wield.

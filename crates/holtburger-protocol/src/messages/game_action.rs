@@ -24,6 +24,8 @@ pub enum GameAction {
     AutonomousPosition(Box<AutonomousPositionActionData>),
     MoveToState(Box<MoveToStateData>),
     GetAndWieldItem(Box<GetAndWieldItemData>),
+    StackableMerge(Box<StackableMergeData>),
+    StackableSplitToContainer(Box<StackableSplitToContainerData>),
     StackableSplitToWield(Box<StackableSplitToWieldData>),
     Talk(Box<TalkData>),
     Tell(Box<TellActionData>),
@@ -79,6 +81,14 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::GetAndWieldItem => GameAction::GetAndWieldItem(Box::new(
                     GetAndWieldItemData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::StackableMerge => {
+                    GameAction::StackableMerge(Box::new(StackableMergeData::unpack(data, offset)?))
+                }
+                GameActionOpcode::StackableSplitToContainer => {
+                    GameAction::StackableSplitToContainer(Box::new(
+                        StackableSplitToContainerData::unpack(data, offset)?,
+                    ))
+                }
                 GameActionOpcode::StackableSplitToWield => GameAction::StackableSplitToWield(
                     Box::new(StackableSplitToWieldData::unpack(data, offset)?),
                 ),
@@ -195,6 +205,16 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::GetAndWieldItem(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::GetAndWieldItem as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::StackableMerge(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::StackableMerge as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::StackableSplitToContainer(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::StackableSplitToContainer as u32)
                     .unwrap();
                 data.pack(buf);
             }

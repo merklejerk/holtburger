@@ -164,6 +164,24 @@ impl ProtocolPack for InventoryServerSaveFailedEventData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct CloseGroundContainerEventData {
+    pub container_guid: Guid,
+}
+
+impl ProtocolUnpack for CloseGroundContainerEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let container_guid = Guid::unpack(data, offset)?;
+        Some(CloseGroundContainerEventData { container_guid })
+    }
+}
+
+impl ProtocolPack for CloseGroundContainerEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.container_guid.pack(buf);
+    }
+}
+
 // #[cfg(test)]
 #[cfg(test)]
 mod tests {
@@ -257,5 +275,18 @@ mod tests {
             )),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_close_ground_container_fixture() {
+        let hex_str = "B0F7000001000050030000005200000021436587";
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 3,
+            event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
+                container_guid: Guid(0x87654321),
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
     }
 }

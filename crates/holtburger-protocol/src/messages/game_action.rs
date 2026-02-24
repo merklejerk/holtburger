@@ -26,6 +26,7 @@ pub enum GameAction {
     GetAndWieldItem(Box<GetAndWieldItemActionData>),
     StackableMerge(Box<StackableMergeActionData>),
     StackableSplitToContainer(Box<StackableSplitToContainerActionData>),
+    StackableSplitTo3D(Box<StackableSplitTo3DActionData>),
     StackableSplitToWield(Box<StackableSplitToWieldActionData>),
     Talk(Box<TalkActionData>),
     Tell(Box<TellActionData>),
@@ -33,6 +34,7 @@ pub enum GameAction {
     DropItem(Box<DropItemActionData>),
     PutItemInContainer(Box<PutItemInContainerActionData>),
     Use(Box<UseActionData>),
+    NoLongerViewingContents(Box<NoLongerViewingContentsActionData>),
     UseWithTarget(Box<UseWithTargetActionData>),
     IdentifyObject(Box<IdentifyObjectActionData>),
     LoginComplete(Box<LoginCompleteActionData>),
@@ -89,6 +91,9 @@ impl ProtocolUnpack for GameActionMessage {
                         StackableSplitToContainerActionData::unpack(data, offset)?,
                     ))
                 }
+                GameActionOpcode::StackableSplitTo3D => GameAction::StackableSplitTo3D(Box::new(
+                    StackableSplitTo3DActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::StackableSplitToWield => GameAction::StackableSplitToWield(
                     Box::new(StackableSplitToWieldActionData::unpack(data, offset)?),
                 ),
@@ -110,6 +115,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Use => {
                     GameAction::Use(Box::new(UseActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::NoLongerViewingContents => GameAction::NoLongerViewingContents(
+                    Box::new(NoLongerViewingContentsActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::UseWithTarget => GameAction::UseWithTarget(Box::new(
                     UseWithTargetActionData::unpack(data, offset)?,
                 )),
@@ -220,6 +228,11 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::StackableSplitTo3D(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::StackableSplitTo3D as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::StackableSplitToWield(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::StackableSplitToWield as u32)
                     .unwrap();
@@ -252,6 +265,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::Use(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Use as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::NoLongerViewingContents(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::NoLongerViewingContents as u32)
                     .unwrap();
                 data.pack(buf);
             }

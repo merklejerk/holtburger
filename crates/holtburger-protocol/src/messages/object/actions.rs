@@ -1,4 +1,6 @@
-pub use crate::messages::object::types::{IdentifyObjectData, UseData, UseWithTargetData};
+pub use crate::messages::object::types::{
+    IdentifyObjectActionData, UseActionData, UseWithTargetActionData,
+};
 
 #[cfg(test)]
 mod tests {
@@ -13,7 +15,7 @@ mod tests {
     fn test_use_parity() {
         let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 6,
-            action: GameAction::Use(Box::new(UseData {
+            action: GameAction::Use(Box::new(UseActionData {
                 guid: Guid(0x33333333),
             })),
         }));
@@ -25,7 +27,7 @@ mod tests {
         let hex = "B1F7000007000000C800000044332211";
         let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 7,
-            action: GameAction::IdentifyObject(Box::new(IdentifyObjectData {
+            action: GameAction::IdentifyObject(Box::new(IdentifyObjectActionData {
                 guid: Guid(0x11223344),
             })),
         }));

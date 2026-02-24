@@ -20,31 +20,31 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
-    Jump(Box<JumpData>),
+    Jump(Box<JumpActionData>),
     AutonomousPosition(Box<AutonomousPositionActionData>),
-    MoveToState(Box<MoveToStateData>),
-    GetAndWieldItem(Box<GetAndWieldItemData>),
-    StackableMerge(Box<StackableMergeData>),
-    StackableSplitToContainer(Box<StackableSplitToContainerData>),
-    StackableSplitToWield(Box<StackableSplitToWieldData>),
-    Talk(Box<TalkData>),
+    MoveToState(Box<MoveToStateActionData>),
+    GetAndWieldItem(Box<GetAndWieldItemActionData>),
+    StackableMerge(Box<StackableMergeActionData>),
+    StackableSplitToContainer(Box<StackableSplitToContainerActionData>),
+    StackableSplitToWield(Box<StackableSplitToWieldActionData>),
+    Talk(Box<TalkActionData>),
     Tell(Box<TellActionData>),
-    PingRequest(Box<PingRequestData>),
-    DropItem(Box<DropItemData>),
-    PutItemInContainer(Box<PutItemInContainerData>),
-    Use(Box<UseData>),
-    UseWithTarget(Box<UseWithTargetData>),
-    IdentifyObject(Box<IdentifyObjectData>),
-    LoginComplete(Box<LoginCompleteData>),
-    RaiseAttribute(Box<RaiseAttributeData>),
-    RaiseVital(Box<RaiseVitalData>),
-    RaiseSkill(Box<RaiseSkillData>),
-    TrainSkill(Box<TrainSkillData>),
-    GiveObjectRequest(Box<GiveObjectRequestData>),
-    CastTargetedSpell(Box<CastTargetedSpellData>),
-    CastUntargetedSpell(Box<CastUntargetedSpellData>),
-    ChangeCombatMode(Box<ChangeCombatModeData>),
-    CancelAttack(Box<CancelAttackData>),
+    PingRequest(Box<PingRequestActionData>),
+    DropItem(Box<DropItemActionData>),
+    PutItemInContainer(Box<PutItemInContainerActionData>),
+    Use(Box<UseActionData>),
+    UseWithTarget(Box<UseWithTargetActionData>),
+    IdentifyObject(Box<IdentifyObjectActionData>),
+    LoginComplete(Box<LoginCompleteActionData>),
+    RaiseAttribute(Box<RaiseAttributeActionData>),
+    RaiseVital(Box<RaiseVitalActionData>),
+    RaiseSkill(Box<RaiseSkillActionData>),
+    TrainSkill(Box<TrainSkillActionData>),
+    GiveObjectRequest(Box<GiveObjectRequestActionData>),
+    CastTargetedSpell(Box<CastTargetedSpellActionData>),
+    CastUntargetedSpell(Box<CastUntargetedSpellActionData>),
+    ChangeCombatMode(Box<ChangeCombatModeActionData>),
+    CancelAttack(Box<CancelAttackActionData>),
     Buy(Box<BuyActionData>),
     Sell(Box<SellActionData>),
     OpenTradeNegotiations(Box<OpenTradeNegotiationsActionData>),
@@ -70,80 +70,82 @@ impl ProtocolUnpack for GameActionMessage {
         let action_data = match action_op {
             Some(op) => match op {
                 GameActionOpcode::Jump => {
-                    GameAction::Jump(Box::new(JumpData::unpack(data, offset)?))
+                    GameAction::Jump(Box::new(JumpActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::AutonomousPosition => GameAction::AutonomousPosition(Box::new(
                     AutonomousPositionActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::MoveToState => {
-                    GameAction::MoveToState(Box::new(MoveToStateData::unpack(data, offset)?))
+                    GameAction::MoveToState(Box::new(MoveToStateActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::GetAndWieldItem => GameAction::GetAndWieldItem(Box::new(
-                    GetAndWieldItemData::unpack(data, offset)?,
+                    GetAndWieldItemActionData::unpack(data, offset)?,
                 )),
-                GameActionOpcode::StackableMerge => {
-                    GameAction::StackableMerge(Box::new(StackableMergeData::unpack(data, offset)?))
-                }
+                GameActionOpcode::StackableMerge => GameAction::StackableMerge(Box::new(
+                    StackableMergeActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::StackableSplitToContainer => {
                     GameAction::StackableSplitToContainer(Box::new(
-                        StackableSplitToContainerData::unpack(data, offset)?,
+                        StackableSplitToContainerActionData::unpack(data, offset)?,
                     ))
                 }
                 GameActionOpcode::StackableSplitToWield => GameAction::StackableSplitToWield(
-                    Box::new(StackableSplitToWieldData::unpack(data, offset)?),
+                    Box::new(StackableSplitToWieldActionData::unpack(data, offset)?),
                 ),
                 GameActionOpcode::Talk => {
-                    GameAction::Talk(Box::new(TalkData::unpack(data, offset)?))
+                    GameAction::Talk(Box::new(TalkActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::Tell => {
                     GameAction::Tell(Box::new(TellActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::PingRequest => {
-                    GameAction::PingRequest(Box::new(PingRequestData::unpack(data, offset)?))
+                    GameAction::PingRequest(Box::new(PingRequestActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::DropItem => {
-                    GameAction::DropItem(Box::new(DropItemData::unpack(data, offset)?))
+                    GameAction::DropItem(Box::new(DropItemActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::PutItemInContainer => GameAction::PutItemInContainer(Box::new(
-                    PutItemInContainerData::unpack(data, offset)?,
+                    PutItemInContainerActionData::unpack(data, offset)?,
                 )),
-                GameActionOpcode::Use => GameAction::Use(Box::new(UseData::unpack(data, offset)?)),
-                GameActionOpcode::UseWithTarget => {
-                    GameAction::UseWithTarget(Box::new(UseWithTargetData::unpack(data, offset)?))
+                GameActionOpcode::Use => {
+                    GameAction::Use(Box::new(UseActionData::unpack(data, offset)?))
                 }
-                GameActionOpcode::IdentifyObject => {
-                    GameAction::IdentifyObject(Box::new(IdentifyObjectData::unpack(data, offset)?))
-                }
-                GameActionOpcode::LoginComplete => {
-                    GameAction::LoginComplete(Box::new(LoginCompleteData::unpack(data, offset)?))
-                }
-                GameActionOpcode::RaiseAttribute => {
-                    GameAction::RaiseAttribute(Box::new(RaiseAttributeData::unpack(data, offset)?))
-                }
+                GameActionOpcode::UseWithTarget => GameAction::UseWithTarget(Box::new(
+                    UseWithTargetActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::IdentifyObject => GameAction::IdentifyObject(Box::new(
+                    IdentifyObjectActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::LoginComplete => GameAction::LoginComplete(Box::new(
+                    LoginCompleteActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::RaiseAttribute => GameAction::RaiseAttribute(Box::new(
+                    RaiseAttributeActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::RaiseVital => {
-                    GameAction::RaiseVital(Box::new(RaiseVitalData::unpack(data, offset)?))
+                    GameAction::RaiseVital(Box::new(RaiseVitalActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::RaiseSkill => {
-                    GameAction::RaiseSkill(Box::new(RaiseSkillData::unpack(data, offset)?))
+                    GameAction::RaiseSkill(Box::new(RaiseSkillActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::TrainSkill => {
-                    GameAction::TrainSkill(Box::new(TrainSkillData::unpack(data, offset)?))
+                    GameAction::TrainSkill(Box::new(TrainSkillActionData::unpack(data, offset)?))
                 }
                 GameActionOpcode::GiveObjectRequest => GameAction::GiveObjectRequest(Box::new(
-                    GiveObjectRequestData::unpack(data, offset)?,
+                    GiveObjectRequestActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::CastTargetedSpell => GameAction::CastTargetedSpell(Box::new(
-                    CastTargetedSpellData::unpack(data, offset)?,
+                    CastTargetedSpellActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::CastUntargetedSpell => GameAction::CastUntargetedSpell(Box::new(
-                    CastUntargetedSpellData::unpack(data, offset)?,
+                    CastUntargetedSpellActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::ChangeCombatMode => GameAction::ChangeCombatMode(Box::new(
-                    ChangeCombatModeData::unpack(data, offset)?,
+                    ChangeCombatModeActionData::unpack(data, offset)?,
                 )),
-                GameActionOpcode::CancelAttack => {
-                    GameAction::CancelAttack(Box::new(CancelAttackData::unpack(data, offset)?))
-                }
+                GameActionOpcode::CancelAttack => GameAction::CancelAttack(Box::new(
+                    CancelAttackActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::Buy => {
                     GameAction::Buy(Box::new(BuyActionData::unpack(data, offset)?))
                 }

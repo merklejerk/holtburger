@@ -7,7 +7,7 @@ use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct MoveToStateData {
+pub struct MoveToStateActionData {
     pub raw_motion_state: RawMotionState,
     pub position: WorldPosition,
     pub instance_sequence: u16,
@@ -17,7 +17,7 @@ pub struct MoveToStateData {
     pub contact_long_jump: u8,
 }
 
-impl ProtocolUnpack for MoveToStateData {
+impl ProtocolUnpack for MoveToStateActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let raw_motion_state = RawMotionState::unpack(data, offset)?;
         let position = WorldPosition::unpack(data, offset)?;
@@ -38,7 +38,7 @@ impl ProtocolUnpack for MoveToStateData {
         // Align to 4 bytes
         align_offset(offset, 4);
 
-        Some(MoveToStateData {
+        Some(MoveToStateActionData {
             raw_motion_state,
             position,
             instance_sequence,
@@ -50,7 +50,7 @@ impl ProtocolUnpack for MoveToStateData {
     }
 }
 
-impl ProtocolPack for MoveToStateData {
+impl ProtocolPack for MoveToStateActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.raw_motion_state.pack(buf);
         self.position.pack(buf);
@@ -70,7 +70,7 @@ impl ProtocolPack for MoveToStateData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct JumpData {
+pub struct JumpActionData {
     pub extent: f32,
     pub velocity: holtburger_common::Vector3,
     pub instance_sequence: u16,
@@ -81,7 +81,7 @@ pub struct JumpData {
     pub spell_id: u32,
 }
 
-impl ProtocolUnpack for JumpData {
+impl ProtocolUnpack for JumpActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 32 > data.len() {
             return None;
@@ -106,7 +106,7 @@ impl ProtocolUnpack for JumpData {
         let spell_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
-        Some(JumpData {
+        Some(JumpActionData {
             extent,
             velocity: holtburger_common::Vector3 { x, y, z },
             instance_sequence,
@@ -119,7 +119,7 @@ impl ProtocolUnpack for JumpData {
     }
 }
 
-impl ProtocolPack for JumpData {
+impl ProtocolPack for JumpActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_f32::<LittleEndian>(self.extent).unwrap();
         buf.write_f32::<LittleEndian>(self.velocity.x).unwrap();
@@ -203,7 +203,7 @@ mod tests {
         let hex = "B1F700002A0000001BF60000000020410000803F000000400000404001000200030004007856341200000000";
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0x2A,
-            action: GameAction::Jump(Box::new(JumpData {
+            action: GameAction::Jump(Box::new(JumpActionData {
                 extent: 10.0,
                 velocity: holtburger_common::Vector3 {
                     x: 1.0,
@@ -226,7 +226,7 @@ mod tests {
         let fixture = test_fixtures::MOVE_TO_STATE;
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0x5678,
-            action: GameAction::MoveToState(Box::new(MoveToStateData {
+            action: GameAction::MoveToState(Box::new(MoveToStateActionData {
                 raw_motion_state: RawMotionState {
                     flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
                     current_hold_key: Some(2),

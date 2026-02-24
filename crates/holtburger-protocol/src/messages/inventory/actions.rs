@@ -5,12 +5,12 @@ use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct GetAndWieldItemData {
+pub struct GetAndWieldItemActionData {
     pub item_guid: Guid,
     pub equip_mask: EquipMask,
 }
 
-impl ProtocolUnpack for GetAndWieldItemData {
+impl ProtocolUnpack for GetAndWieldItemActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -19,14 +19,14 @@ impl ProtocolUnpack for GetAndWieldItemData {
         let equip_mask =
             EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
-        Some(GetAndWieldItemData {
+        Some(GetAndWieldItemActionData {
             item_guid,
             equip_mask,
         })
     }
 }
 
-impl ProtocolPack for GetAndWieldItemData {
+impl ProtocolPack for GetAndWieldItemActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.item_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.equip_mask.bits())
@@ -35,13 +35,13 @@ impl ProtocolPack for GetAndWieldItemData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct StackableSplitToWieldData {
+pub struct StackableSplitToWieldActionData {
     pub stack_guid: Guid,
     pub equip_mask: EquipMask,
     pub amount: i32,
 }
 
-impl ProtocolUnpack for StackableSplitToWieldData {
+impl ProtocolUnpack for StackableSplitToWieldActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let stack_guid = Guid::unpack(data, offset)?;
         if *offset + 8 > data.len() {
@@ -51,7 +51,7 @@ impl ProtocolUnpack for StackableSplitToWieldData {
             EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         let amount = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
-        Some(StackableSplitToWieldData {
+        Some(StackableSplitToWieldActionData {
             stack_guid,
             equip_mask,
             amount,
@@ -59,7 +59,7 @@ impl ProtocolUnpack for StackableSplitToWieldData {
     }
 }
 
-impl ProtocolPack for StackableSplitToWieldData {
+impl ProtocolPack for StackableSplitToWieldActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.stack_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.equip_mask.bits())
@@ -69,13 +69,13 @@ impl ProtocolPack for StackableSplitToWieldData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct StackableMergeData {
+pub struct StackableMergeActionData {
     pub merge_from_guid: Guid,
     pub merge_to_guid: Guid,
     pub amount: i32,
 }
 
-impl ProtocolUnpack for StackableMergeData {
+impl ProtocolUnpack for StackableMergeActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let merge_from_guid = Guid::unpack(data, offset)?;
         let merge_to_guid = Guid::unpack(data, offset)?;
@@ -84,7 +84,7 @@ impl ProtocolUnpack for StackableMergeData {
         }
         let amount = LittleEndian::read_i32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(StackableMergeData {
+        Some(StackableMergeActionData {
             merge_from_guid,
             merge_to_guid,
             amount,
@@ -92,7 +92,7 @@ impl ProtocolUnpack for StackableMergeData {
     }
 }
 
-impl ProtocolPack for StackableMergeData {
+impl ProtocolPack for StackableMergeActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.merge_from_guid.pack(buf);
         self.merge_to_guid.pack(buf);
@@ -101,14 +101,14 @@ impl ProtocolPack for StackableMergeData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct StackableSplitToContainerData {
+pub struct StackableSplitToContainerActionData {
     pub stack_guid: Guid,
     pub container_guid: Guid,
     pub place: i32,
     pub amount: i32,
 }
 
-impl ProtocolUnpack for StackableSplitToContainerData {
+impl ProtocolUnpack for StackableSplitToContainerActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let stack_guid = Guid::unpack(data, offset)?;
         let container_guid = Guid::unpack(data, offset)?;
@@ -118,7 +118,7 @@ impl ProtocolUnpack for StackableSplitToContainerData {
         let place = LittleEndian::read_i32(&data[*offset..*offset + 4]);
         let amount = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
-        Some(StackableSplitToContainerData {
+        Some(StackableSplitToContainerActionData {
             stack_guid,
             container_guid,
             place,
@@ -127,7 +127,7 @@ impl ProtocolUnpack for StackableSplitToContainerData {
     }
 }
 
-impl ProtocolPack for StackableSplitToContainerData {
+impl ProtocolPack for StackableSplitToContainerActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.stack_guid.pack(buf);
         self.container_guid.pack(buf);
@@ -137,31 +137,31 @@ impl ProtocolPack for StackableSplitToContainerData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct DropItemData {
+pub struct DropItemActionData {
     pub item_guid: Guid,
 }
 
-impl ProtocolUnpack for DropItemData {
+impl ProtocolUnpack for DropItemActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
-        Some(DropItemData { item_guid })
+        Some(DropItemActionData { item_guid })
     }
 }
 
-impl ProtocolPack for DropItemData {
+impl ProtocolPack for DropItemActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.item_guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct PutItemInContainerData {
+pub struct PutItemInContainerActionData {
     pub item_guid: Guid,
     pub container_guid: Guid,
     pub placement: u32,
 }
 
-impl ProtocolUnpack for PutItemInContainerData {
+impl ProtocolUnpack for PutItemInContainerActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
         let container_guid = Guid::unpack(data, offset)?;
@@ -170,7 +170,7 @@ impl ProtocolUnpack for PutItemInContainerData {
         }
         let placement = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(PutItemInContainerData {
+        Some(PutItemInContainerActionData {
             item_guid,
             container_guid,
             placement,
@@ -178,7 +178,7 @@ impl ProtocolUnpack for PutItemInContainerData {
     }
 }
 
-impl ProtocolPack for PutItemInContainerData {
+impl ProtocolPack for PutItemInContainerActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.item_guid.pack(buf);
         self.container_guid.pack(buf);
@@ -187,13 +187,13 @@ impl ProtocolPack for PutItemInContainerData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct GiveObjectRequestData {
+pub struct GiveObjectRequestActionData {
     pub target_guid: Guid,
     pub item_guid: Guid,
     pub amount: i32,
 }
 
-impl ProtocolUnpack for GiveObjectRequestData {
+impl ProtocolUnpack for GiveObjectRequestActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let target_guid = Guid::unpack(data, offset)?;
         let item_guid = Guid::unpack(data, offset)?;
@@ -202,7 +202,7 @@ impl ProtocolUnpack for GiveObjectRequestData {
         }
         let amount = LittleEndian::read_i32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(GiveObjectRequestData {
+        Some(GiveObjectRequestActionData {
             target_guid,
             item_guid,
             amount,
@@ -210,7 +210,7 @@ impl ProtocolUnpack for GiveObjectRequestData {
     }
 }
 
-impl ProtocolPack for GiveObjectRequestData {
+impl ProtocolPack for GiveObjectRequestActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.target_guid.pack(buf);
         self.item_guid.pack(buf);
@@ -231,7 +231,7 @@ mod tests {
         let hex_str = "B1F700002A0000001A0000000100005000001000";
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 42,
-            action: GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
+            action: GameAction::GetAndWieldItem(Box::new(GetAndWieldItemActionData {
                 item_guid: Guid(0x50000001),
                 equip_mask: EquipMask::MELEE_WEAPON,
             })),
@@ -244,7 +244,7 @@ mod tests {
         let hex_str = "B1F700002B0000009B010000020000500000800032000000";
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 43,
-            action: GameAction::StackableSplitToWield(Box::new(StackableSplitToWieldData {
+            action: GameAction::StackableSplitToWield(Box::new(StackableSplitToWieldActionData {
                 stack_guid: Guid(0x50000002),
                 equip_mask: EquipMask::MISSILE_AMMO,
                 amount: 50,
@@ -257,7 +257,7 @@ mod tests {
     fn test_drop_item_parity() {
         let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 4,
-            action: GameAction::DropItem(Box::new(DropItemData {
+            action: GameAction::DropItem(Box::new(DropItemActionData {
                 item_guid: Guid(0x12345678),
             })),
         }));
@@ -268,7 +268,7 @@ mod tests {
     fn test_put_item_parity() {
         let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 5,
-            action: GameAction::PutItemInContainer(Box::new(PutItemInContainerData {
+            action: GameAction::PutItemInContainer(Box::new(PutItemInContainerActionData {
                 item_guid: Guid(0x11111111),
                 container_guid: Guid(0x22222222),
                 placement: 0,
@@ -282,7 +282,7 @@ mod tests {
         let hex_str = "B1F7000078560000CD00000001000050020000507B000000";
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 0x5678,
-            action: GameAction::GiveObjectRequest(Box::new(GiveObjectRequestData {
+            action: GameAction::GiveObjectRequest(Box::new(GiveObjectRequestActionData {
                 target_guid: Guid(0x50000001),
                 item_guid: Guid(0x50000002),
                 amount: 123,
@@ -298,7 +298,7 @@ mod tests {
         let hex_str = "B1F70000010000005400000001000050020000500A000000";
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 1,
-            action: GameAction::StackableMerge(Box::new(StackableMergeData {
+            action: GameAction::StackableMerge(Box::new(StackableMergeActionData {
                 merge_from_guid: Guid(0x50000001),
                 merge_to_guid: Guid(0x50000002),
                 amount: 10,
@@ -315,7 +315,7 @@ mod tests {
         let expected = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 2,
             action: GameAction::StackableSplitToContainer(Box::new(
-                StackableSplitToContainerData {
+                StackableSplitToContainerActionData {
                     stack_guid: Guid(0x50000001),
                     container_guid: Guid(0x50000003),
                     place: 5,

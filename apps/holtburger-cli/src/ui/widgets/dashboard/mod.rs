@@ -127,7 +127,6 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     // Tab-specific rendering
     get_tab_controller(dashboard_tab).render(f, game, dashboard_inner_chunks[0]);
 
-    if let Some(verb_bar) = crate::ui::utils::render_verb_bar(game) {
-        f.render_widget(verb_bar, dashboard_inner_chunks[1]);
-    }
+    let verb_bar = crate::ui::utils::render_verb_bar(game);
+    f.render_widget(verb_bar, dashboard_inner_chunks[1]);
 }

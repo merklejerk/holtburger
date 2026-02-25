@@ -175,7 +175,7 @@ impl Entity {
         self.get_int_prop(PropertyInt::StackSize).unwrap_or(1) as u32
     }
 
-    pub fn is_stackable_base(&self) -> bool {
+    pub fn is_stackable(&self) -> bool {
         self.get_int_prop(PropertyInt::MaxStackSize).unwrap_or(0) > 1
     }
 
@@ -251,9 +251,8 @@ impl Entity {
             .map(|v| v as u32)
     }
 
-    pub fn max_stack_size(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::MaxStackSize)
-            .map(|v| v as u32)
+    pub fn max_stack_size(&self) -> u32 {
+        self.get_int_prop(PropertyInt::MaxStackSize).unwrap_or(1) as u32
     }
 
     pub fn priority(&self) -> Option<u32> {

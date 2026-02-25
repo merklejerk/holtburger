@@ -36,6 +36,14 @@ impl Interaction {
                 },
                 Self::Moving { item_guid } => match target {
                     CommandTarget::Entity(e, _) if e.guid != *item_guid => {
+                        if let Some(source_e) = game.data.entities.get(item_guid)
+                            && source_e.is_stackable()
+                            && source_e.wcid == e.wcid
+                            && e.stack_size() < e.max_stack_size()
+                        {
+                            return Some(UIEffect::ApplyStacking(e.guid));
+                        }
+
                         let class = classification::classify_entity(e);
                         match class {
                             classification::EntityClass::Container

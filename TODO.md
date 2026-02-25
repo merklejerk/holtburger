@@ -53,6 +53,7 @@
 - [x] Startup is slow. Slow DAT parsing?
 - [x] Weenie errors are just showing the first word or something in chat.
 - [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
+- [x] Show item emojis in trade window.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -71,8 +72,8 @@
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Active panel needs to be much more obvious.
-- [ ] Show item emojis in trade window.
 - [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
+- [ ] Actions and `handle_base_action()` don't belong in `common.rs`.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -109,6 +110,8 @@
 - [x] Reintroduce `[ENTER] Move into main pack` verb.
 - [x] Still showing conflicting verbs during move interaction.
 - [x] Tabs should manage their own current index. E.g., should not be passed into `get_verbs()`. (SCRAPPED)
+- [x] Stacking/Splitting.
+- [x] Merging by ItemType is wrong! Lots of things share ItemTypes. WeenieIDs maybe?
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -116,7 +119,6 @@
 - [ ] Missile combat.
     - [ ] Auto-attack on target.
 - [ ] Manage in-world containers.
-- [~] Stacking/Splitting.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -129,6 +131,8 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Crafting.
 - [ ] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
+- [ ] Should split into the same container.
+- [ ] Precise splitting.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -1,12 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
     ScrollbarState,
 };
 
+use super::super::classification::{classify_description, classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use crate::ui::types::TradeFocus;
@@ -41,17 +42,26 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, guid)| {
-                let mut name = "Unknown Item".to_string();
+                let mut display_name = "Unknown Item".to_string();
+                let mut emoji = "❓";
+                let mut color = Color::White;
                 if let Some(e) = game.data.entities.get(guid) {
-                    name = e.name.clone();
+                    display_name = e.name.clone();
                     let stack_size = e.stack_size();
                     if stack_size > 1 {
-                        name = format!("{} ({}x)", name, stack_size);
+                        display_name = format!("{} ({}x)", display_name, stack_size);
                     }
+
+                    let class = classify_entity(e);
+                    emoji = class.emoji();
+                    color = get_entity_color(class);
                 }
                 let is_selected =
                     trade_focus == TradeFocus::Local && i == game.view.selected_dashboard_index();
-                ListItem::new(name).style(theme::list_item_style(is_selected))
+
+                let text = format!("[{}] {}", emoji, display_name);
+                ListItem::new(Line::styled(text, Style::default().fg(color)))
+                    .style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -129,16 +139,25 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, guid)| {
-                let mut name = "Unknown Item".to_string();
+                let mut display_name = "Unknown Item".to_string();
+                let mut emoji = "❓";
+                let mut color = Color::White;
                 if let Some(e) = game.data.entities.get(guid) {
-                    name = e.name.clone();
+                    display_name = e.name.clone();
                     let stack_size = e.stack_size();
                     if stack_size > 1 {
-                        name = format!("{} ({})", name, stack_size);
+                        display_name = format!("{} ({}x)", display_name, stack_size);
                     }
+
+                    let class = classify_entity(e);
+                    emoji = class.emoji();
+                    color = get_entity_color(class);
                 }
                 let is_selected = trade_focus == TradeFocus::Partner && i == selected_index;
-                ListItem::new(name).style(theme::list_item_style(is_selected))
+
+                let text = format!("[{}] {}", emoji, display_name);
+                ListItem::new(Line::styled(text, Style::default().fg(color)))
+                    .style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -245,7 +264,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, m)| {
-                let mut name = m
+                let mut display_name = m
                     .description
                     .name
                     .as_deref()
@@ -260,8 +279,13 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     .unwrap_or(1) as u32;
 
                 if stack_size > 1 {
-                    name = format!("{} ({})", name, stack_size);
+                    display_name = format!("{} ({}x)", display_name, stack_size);
                 }
+
+                let class = classify_description(&m.description);
+                let emoji = class.emoji();
+                let color = get_entity_color(class);
+                let full_name = format!("[{}] {}", emoji, display_name);
 
                 // Calculate vendor's sell price (player pays this)
                 // Ground truth: Math.Max(1, (uint)Math.Ceiling(((float)sellRate * (value ?? 0)) - 0.1))
@@ -285,7 +309,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 };
 
                 ListItem::new(Line::from(vec![
-                    Span::raw(format!("{:<30}", name)),
+                    Span::styled(format!("{:<30}", full_name), Style::default().fg(color)),
                     Span::styled(
                         format!("{:>10}{}", price, currency_suffix),
                         Style::default().fg(theme::MONEY_FG),

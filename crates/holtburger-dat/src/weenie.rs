@@ -2,7 +2,8 @@ use crate::Result;
 use crate::utils::{align_boundary, read_pstring};
 use binrw::BinRead;
 use binrw::io::Cursor;
-use holtburger_common::properties::{PropertyDataId, PropertyString};
+use holtburger_common::Guid;
+use holtburger_common::properties::{PropertyDataId, PropertyString, WorldObjectProperties};
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 
@@ -10,13 +11,7 @@ use std::io::{Read, Seek};
 pub struct Weenie {
     pub wcid: u32,
     pub weenie_type: u32,
-    pub properties_int: HashMap<u32, i32>,
-    pub properties_int64: HashMap<u32, i64>,
-    pub properties_bool: HashMap<u32, bool>,
-    pub properties_float: HashMap<u32, f64>,
-    pub properties_string: HashMap<u32, String>,
-    pub properties_did: HashMap<u32, u32>,
-    pub properties_iid: HashMap<u32, u32>,
+    pub properties: WorldObjectProperties,
 }
 
 impl Weenie {
@@ -41,7 +36,7 @@ impl Weenie {
         for _ in 0..count_int {
             let key = u32::read_le(reader)?;
             let value = i32::read_le(reader)?;
-            weenie.properties_int.insert(key, value);
+            weenie.properties.apply_raw_int(key, value);
         }
 
         // Int64 Bucket
@@ -49,7 +44,7 @@ impl Weenie {
         for _ in 0..count_int64 {
             let key = u32::read_le(reader)?;
             let value = i64::read_le(reader)?;
-            weenie.properties_int64.insert(key, value);
+            weenie.properties.apply_raw_int64(key, value);
         }
 
         // Bool Bucket
@@ -57,7 +52,7 @@ impl Weenie {
         for _ in 0..count_bool {
             let key = u32::read_le(reader)?;
             let value = u8::read(reader)? != 0;
-            weenie.properties_bool.insert(key, value);
+            weenie.properties.apply_raw_bool(key, value);
         }
 
         // Float Bucket
@@ -65,7 +60,7 @@ impl Weenie {
         for _ in 0..count_float {
             let key = u32::read_le(reader)?;
             let value = f64::read_le(reader)?;
-            weenie.properties_float.insert(key, value);
+            weenie.properties.apply_raw_float(key, value);
         }
 
         // String Bucket
@@ -73,7 +68,7 @@ impl Weenie {
         for _ in 0..count_string {
             let key = u32::read_le(reader)?;
             let value = read_pstring(reader, 2)?;
-            weenie.properties_string.insert(key, value);
+            weenie.properties.apply_raw_string(key, value);
             let _ = align_boundary(reader, 4);
         }
 
@@ -82,7 +77,7 @@ impl Weenie {
         for _ in 0..count_did {
             let key = u32::read_le(reader)?;
             let value = u32::read_le(reader)?;
-            weenie.properties_did.insert(key, value);
+            weenie.properties.apply_raw_did(key, Guid(value));
         }
 
         // IID Bucket
@@ -90,20 +85,18 @@ impl Weenie {
         for _ in 0..count_iid {
             let key = u32::read_le(reader)?;
             let value = u32::read_le(reader)?;
-            weenie.properties_iid.insert(key, value);
+            weenie.properties.apply_raw_iid(key, Guid(value));
         }
 
         Ok(weenie)
     }
 
     pub fn name(&self) -> Option<&String> {
-        self.properties_string.get(&(PropertyString::Name as u32))
+        self.properties.strings.get(&PropertyString::Name)
     }
 
     pub fn icon_id(&self) -> Option<u32> {
-        self.properties_did
-            .get(&(PropertyDataId::Icon as u32))
-            .copied()
+        self.properties.dids.get(&PropertyDataId::Icon).map(|g| g.0)
     }
 }
 

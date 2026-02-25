@@ -2,7 +2,9 @@ use super::PlayerState;
 use crate::world::StateEvent;
 use crate::world::player::types::LastSentStats;
 use crate::world::stats;
-use holtburger_common::properties::{EnchantmentTypeFlags, PropertyFloat, PropertyInt};
+use holtburger_common::properties::{
+    EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessors,
+};
 
 impl PlayerState {
     pub fn get_attribute_multiplier(&self, attr: stats::AttributeType) -> f32 {
@@ -235,11 +237,7 @@ impl PlayerState {
         }
 
         // Recalculate Armor
-        let base_armor = self
-            .int_properties
-            .get(&(PropertyInt::ArmorLevel as u32))
-            .cloned()
-            .unwrap_or(0);
+        let base_armor = self.get_int_prop_default(PropertyInt::ArmorLevel);
         self.armor = i32::max(
             -400, // Reasonable floor for degenerate cases
             crate::world::magic::get_enchanted_armor(base_armor, &self.enchantments),
@@ -247,11 +245,7 @@ impl PlayerState {
 
         // Recalculate Resistances
         let get_r = |prop: PropertyFloat| {
-            let base = self
-                .float_properties
-                .get(&(prop as u32))
-                .cloned()
-                .unwrap_or(1.0);
+            let base = self.get_float_prop(prop).unwrap_or(1.0);
             crate::world::magic::get_enchanted_resistance(
                 base as f32,
                 &self.enchantments,

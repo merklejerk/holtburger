@@ -7,6 +7,7 @@ use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::{PropertyString, WorldObjectProperties};
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use std::collections::BTreeMap;
 
@@ -102,20 +103,8 @@ pub struct PlayerDescriptionEventData {
     pub wee_type: u32,
     /// The player's current world position (cell + coordinates).
     pub pos: Option<WorldPosition>,
-    /// Sparse integer properties (e.g. Strength, Level, Burden).
-    pub properties_int: BTreeMap<u32, i32>,
-    /// Sparse 64-bit integer properties (e.g. Total XP, Luminance XP).
-    pub properties_int64: BTreeMap<u32, i64>,
-    /// Sparse boolean properties (e.g. IsPK, IsMuted).
-    pub properties_bool: BTreeMap<u32, bool>,
-    /// Sparse floating point properties (e.g. RunSpeed, Magic Resistance).
-    pub properties_float: BTreeMap<u32, f64>,
-    /// Sparse string properties (e.g. Title, Account Name).
-    pub properties_string: BTreeMap<u32, String>,
-    /// Sparse Data ID properties (e.g. Icon, Sound, Surface Type).
-    pub properties_did: BTreeMap<u32, Guid>,
-    /// Sparse Instance ID properties (e.g. Container ID, Wielder ID).
-    pub properties_iid: BTreeMap<u32, Guid>,
+    /// All sparse properties (ints, floats, dids, etc.).
+    pub properties: WorldObjectProperties,
     /// Visual sub-positions for specific equipment slots or parts.
     pub positions: BTreeMap<u32, WorldPosition>,
     /// Primary character attributes (Strength, Endurance, etc.).
@@ -240,13 +229,7 @@ impl PlayerDescriptionEventData {
         let wee_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
-        let mut properties_int = BTreeMap::new();
-        let mut properties_bool = BTreeMap::new();
-        let mut properties_float = BTreeMap::new();
-        let mut properties_did = BTreeMap::new();
-        let mut properties_string = BTreeMap::new();
-        let mut properties_iid = BTreeMap::new();
-        let mut properties_int64 = BTreeMap::new();
+        let mut properties = holtburger_common::properties::WorldObjectProperties::default();
         let mut positions = BTreeMap::new();
 
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT32) {
@@ -262,7 +245,7 @@ impl PlayerDescriptionEventData {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
-                properties_int.insert(key, val);
+                properties.apply_raw_int(key, val);
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_INT64) {
@@ -278,7 +261,7 @@ impl PlayerDescriptionEventData {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_i64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
-                properties_int64.insert(key, val);
+                properties.apply_raw_int64(key, val);
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_BOOL) {
@@ -294,7 +277,7 @@ impl PlayerDescriptionEventData {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) != 0;
                 *offset += 8;
-                properties_bool.insert(key, val);
+                properties.apply_raw_bool(key, val);
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DOUBLE) {
@@ -310,7 +293,7 @@ impl PlayerDescriptionEventData {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let val = LittleEndian::read_f64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
-                properties_float.insert(key, val);
+                properties.apply_raw_float(key, val);
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_STRING) {
@@ -326,7 +309,7 @@ impl PlayerDescriptionEventData {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let val = read_string16(data, offset)?;
-                properties_string.insert(key, val);
+                properties.apply_raw_string(key, val);
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_DID) {
@@ -342,7 +325,7 @@ impl PlayerDescriptionEventData {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let val = Guid::unpack(data, offset)?;
-                properties_did.insert(key, val);
+                properties.apply_raw_did(key, val);
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::PROPERTY_IID) {
@@ -358,7 +341,7 @@ impl PlayerDescriptionEventData {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let val = Guid::unpack(data, offset)?;
-                properties_iid.insert(key, val);
+                properties.apply_raw_iid(key, val);
             }
         }
         if property_flags.contains(DescriptionPropertyFlag::POSITION) {
@@ -619,8 +602,9 @@ impl PlayerDescriptionEventData {
                 (inv, eq)
             };
 
-        let name = properties_string
-            .get(&1_u32)
+        let name = properties
+            .strings
+            .get(&PropertyString::Name)
             .cloned()
             .unwrap_or("Unknown".to_string());
         let pos = positions.get(&1_u32).cloned();
@@ -631,13 +615,7 @@ impl PlayerDescriptionEventData {
             name,
             wee_type,
             pos,
-            properties_int,
-            properties_int64,
-            properties_bool,
-            properties_float,
-            properties_string,
-            properties_did,
-            properties_iid,
+            properties,
             positions,
             attributes,
             skills,
@@ -660,28 +638,28 @@ impl PlayerDescriptionEventData {
 impl ProtocolPack for PlayerDescriptionEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         let mut p_flags = DescriptionPropertyFlag::empty();
-        if !self.properties_int.is_empty() {
+        if !self.properties.ints.0.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::PROPERTY_INT32);
         }
-        if !self.properties_bool.is_empty() {
+        if !self.properties.bools.0.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::PROPERTY_BOOL);
         }
-        if !self.properties_float.is_empty() {
+        if !self.properties.floats.0.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::PROPERTY_DOUBLE);
         }
-        if !self.properties_did.is_empty() {
+        if !self.properties.dids.0.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::PROPERTY_DID);
         }
-        if !self.properties_string.is_empty() {
+        if !self.properties.strings.0.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::PROPERTY_STRING);
         }
         if !self.positions.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::POSITION);
         }
-        if !self.properties_iid.is_empty() {
+        if !self.properties.iids.0.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::PROPERTY_IID);
         }
-        if !self.properties_int64.is_empty() {
+        if !self.properties.int64s.0.is_empty() {
             p_flags.insert(DescriptionPropertyFlag::PROPERTY_INT64);
         }
 
@@ -689,80 +667,80 @@ impl ProtocolPack for PlayerDescriptionEventData {
         buf.write_u32::<LittleEndian>(self.wee_type).unwrap();
 
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_INT32) {
-            buf.write_u16::<LittleEndian>(self.properties_int.len() as u16)
+            buf.write_u16::<LittleEndian>(self.properties.ints.0.len() as u16)
                 .unwrap();
             buf.write_u16::<LittleEndian>(64).unwrap();
-            let mut items: Vec<_> = self.properties_int.iter().collect();
-            ac_hash_sort(&mut items, 64, |k| *k);
+            let mut items: Vec<_> = self.properties.ints.iter().collect();
+            ac_hash_sort(&mut items, 64, |k| *k as u32);
             for (k, v) in items {
-                buf.write_u32::<LittleEndian>(*k).unwrap();
+                buf.write_u32::<LittleEndian>(*k as u32).unwrap();
                 buf.write_i32::<LittleEndian>(*v).unwrap();
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_INT64) {
-            buf.write_u16::<LittleEndian>(self.properties_int64.len() as u16)
+            buf.write_u16::<LittleEndian>(self.properties.int64s.0.len() as u16)
                 .unwrap();
             buf.write_u16::<LittleEndian>(64).unwrap();
-            let mut items: Vec<_> = self.properties_int64.iter().collect();
-            ac_hash_sort(&mut items, 64, |k| *k);
+            let mut items: Vec<_> = self.properties.int64s.iter().collect();
+            ac_hash_sort(&mut items, 64, |k| *k as u32);
             for (k, v) in items {
-                buf.write_u32::<LittleEndian>(*k).unwrap();
+                buf.write_u32::<LittleEndian>(*k as u32).unwrap();
                 buf.write_i64::<LittleEndian>(*v).unwrap();
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_BOOL) {
-            buf.write_u16::<LittleEndian>(self.properties_bool.len() as u16)
+            buf.write_u16::<LittleEndian>(self.properties.bools.0.len() as u16)
                 .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
-            let mut items: Vec<_> = self.properties_bool.iter().collect();
-            ac_hash_sort(&mut items, 32, |k| *k);
+            let mut items: Vec<_> = self.properties.bools.iter().collect();
+            ac_hash_sort(&mut items, 32, |k| *k as u32);
             for (k, v) in items {
-                buf.write_u32::<LittleEndian>(*k).unwrap();
+                buf.write_u32::<LittleEndian>(*k as u32).unwrap();
                 buf.write_u32::<LittleEndian>(if *v { 1 } else { 0 })
                     .unwrap();
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_DOUBLE) {
-            buf.write_u16::<LittleEndian>(self.properties_float.len() as u16)
+            buf.write_u16::<LittleEndian>(self.properties.floats.0.len() as u16)
                 .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
-            let mut items: Vec<_> = self.properties_float.iter().collect();
-            ac_hash_sort(&mut items, 32, |k| *k);
+            let mut items: Vec<_> = self.properties.floats.iter().collect();
+            ac_hash_sort(&mut items, 32, |k| *k as u32);
             for (k, v) in items {
-                buf.write_u32::<LittleEndian>(*k).unwrap();
+                buf.write_u32::<LittleEndian>(*k as u32).unwrap();
                 buf.write_f64::<LittleEndian>(*v).unwrap();
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_STRING) {
-            buf.write_u16::<LittleEndian>(self.properties_string.len() as u16)
+            buf.write_u16::<LittleEndian>(self.properties.strings.0.len() as u16)
                 .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
-            let mut items: Vec<_> = self.properties_string.iter().collect();
-            ac_hash_sort(&mut items, 32, |k| *k);
+            let mut items: Vec<_> = self.properties.strings.iter().collect();
+            ac_hash_sort(&mut items, 32, |k| *k as u32);
             for (k, v) in items {
-                buf.write_u32::<LittleEndian>(*k).unwrap();
+                buf.write_u32::<LittleEndian>(*k as u32).unwrap();
                 write_string16(buf, v);
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_DID) {
-            buf.write_u16::<LittleEndian>(self.properties_did.len() as u16)
+            buf.write_u16::<LittleEndian>(self.properties.dids.0.len() as u16)
                 .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
-            let mut items: Vec<_> = self.properties_did.iter().collect();
-            ac_hash_sort(&mut items, 32, |k| *k);
+            let mut items: Vec<_> = self.properties.dids.iter().collect();
+            ac_hash_sort(&mut items, 32, |k| *k as u32);
             for (k, v) in items {
-                buf.write_u32::<LittleEndian>(*k).unwrap();
+                buf.write_u32::<LittleEndian>(*k as u32).unwrap();
                 v.pack(buf);
             }
         }
         if p_flags.contains(DescriptionPropertyFlag::PROPERTY_IID) {
-            buf.write_u16::<LittleEndian>(self.properties_iid.len() as u16)
+            buf.write_u16::<LittleEndian>(self.properties.iids.0.len() as u16)
                 .unwrap();
             buf.write_u16::<LittleEndian>(32).unwrap();
-            let mut items: Vec<_> = self.properties_iid.iter().collect();
-            ac_hash_sort(&mut items, 32, |k| *k);
+            let mut items: Vec<_> = self.properties.iids.iter().collect();
+            ac_hash_sort(&mut items, 32, |k| *k as u32);
             for (k, v) in items {
-                buf.write_u32::<LittleEndian>(*k).unwrap();
+                buf.write_u32::<LittleEndian>(*k as u32).unwrap();
                 v.pack(buf);
             }
         }

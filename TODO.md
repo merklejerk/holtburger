@@ -74,6 +74,8 @@
 - [ ] Active panel needs to be much more obvious.
 - [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
 - [ ] Actions and `handle_base_action()` don't belong in `common.rs`.
+- [ ] HATE `world/state.rs`
+- [ ] `PlayerState` is duplicating state. The property maps should be the one source of truth.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -138,6 +140,7 @@
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
 - [x] Server only takes IP?
 - [ ] flags and weenie flags should also be converted to properties!
+- [ ] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows Defender by attempting to run it once, hit "Learn More" and then select "Run anyway".
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.

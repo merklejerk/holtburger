@@ -4,16 +4,16 @@ use holtburger_common::Guid;
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicUpdateEnchantmentData {
+pub struct MagicUpdateEnchantmentEventData {
     pub target: Guid,
     pub sequence: u32,
     pub enchantment: Enchantment,
 }
 
-impl ProtocolUnpack for MagicUpdateEnchantmentData {
+impl ProtocolUnpack for MagicUpdateEnchantmentEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let enchantment = Enchantment::unpack(data, offset)?;
-        Some(MagicUpdateEnchantmentData {
+        Some(MagicUpdateEnchantmentEventData {
             target: Guid::NULL,
             sequence: 0,
             enchantment,
@@ -21,20 +21,20 @@ impl ProtocolUnpack for MagicUpdateEnchantmentData {
     }
 }
 
-impl ProtocolPack for MagicUpdateEnchantmentData {
+impl ProtocolPack for MagicUpdateEnchantmentEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.enchantment.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicUpdateMultipleEnchantmentsData {
+pub struct MagicUpdateMultipleEnchantmentsEventData {
     pub target: Guid,
     pub sequence: u32,
     pub enchantments: Vec<Enchantment>,
 }
 
-impl ProtocolUnpack for MagicUpdateMultipleEnchantmentsData {
+impl ProtocolUnpack for MagicUpdateMultipleEnchantmentsEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -45,7 +45,7 @@ impl ProtocolUnpack for MagicUpdateMultipleEnchantmentsData {
         for _ in 0..count {
             enchantments.push(Enchantment::unpack(data, offset)?);
         }
-        Some(MagicUpdateMultipleEnchantmentsData {
+        Some(MagicUpdateMultipleEnchantmentsEventData {
             target: Guid::NULL,
             sequence: 0,
             enchantments,
@@ -53,7 +53,7 @@ impl ProtocolUnpack for MagicUpdateMultipleEnchantmentsData {
     }
 }
 
-impl ProtocolPack for MagicUpdateMultipleEnchantmentsData {
+impl ProtocolPack for MagicUpdateMultipleEnchantmentsEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&(self.enchantments.len() as u32).to_le_bytes());
         for enchantment in &self.enchantments {
@@ -63,14 +63,14 @@ impl ProtocolPack for MagicUpdateMultipleEnchantmentsData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicRemoveEnchantmentData {
+pub struct MagicRemoveEnchantmentEventData {
     pub target: Guid,
     pub sequence: u32,
     pub spell_id: u16,
     pub layer: u16,
 }
 
-impl ProtocolUnpack for MagicRemoveEnchantmentData {
+impl ProtocolUnpack for MagicRemoveEnchantmentEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -78,7 +78,7 @@ impl ProtocolUnpack for MagicRemoveEnchantmentData {
         let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         *offset += 4;
-        Some(MagicRemoveEnchantmentData {
+        Some(MagicRemoveEnchantmentEventData {
             target: Guid::NULL,
             sequence: 0,
             spell_id,
@@ -87,7 +87,7 @@ impl ProtocolUnpack for MagicRemoveEnchantmentData {
     }
 }
 
-impl ProtocolPack for MagicRemoveEnchantmentData {
+impl ProtocolPack for MagicRemoveEnchantmentEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.spell_id.to_le_bytes());
         buf.extend_from_slice(&self.layer.to_le_bytes());
@@ -95,13 +95,13 @@ impl ProtocolPack for MagicRemoveEnchantmentData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicRemoveMultipleEnchantmentsData {
+pub struct MagicRemoveMultipleEnchantmentsEventData {
     pub target: Guid,
     pub sequence: u32,
     pub spells: Vec<(u16, u16)>, // spell_id, layer
 }
 
-impl ProtocolUnpack for MagicRemoveMultipleEnchantmentsData {
+impl ProtocolUnpack for MagicRemoveMultipleEnchantmentsEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -118,7 +118,7 @@ impl ProtocolUnpack for MagicRemoveMultipleEnchantmentsData {
             *offset += 4;
             spells.push((spell_id, layer));
         }
-        Some(MagicRemoveMultipleEnchantmentsData {
+        Some(MagicRemoveMultipleEnchantmentsEventData {
             target: Guid::NULL,
             sequence: 0,
             spells,
@@ -126,7 +126,7 @@ impl ProtocolUnpack for MagicRemoveMultipleEnchantmentsData {
     }
 }
 
-impl ProtocolPack for MagicRemoveMultipleEnchantmentsData {
+impl ProtocolPack for MagicRemoveMultipleEnchantmentsEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&(self.spells.len() as u32).to_le_bytes());
         for (sid, layer) in &self.spells {
@@ -137,12 +137,12 @@ impl ProtocolPack for MagicRemoveMultipleEnchantmentsData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicUpdateSpellData {
+pub struct MagicUpdateSpellEventData {
     pub spell_id: u16,
     pub layer: u16,
 }
 
-impl ProtocolUnpack for MagicUpdateSpellData {
+impl ProtocolUnpack for MagicUpdateSpellEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -150,11 +150,11 @@ impl ProtocolUnpack for MagicUpdateSpellData {
         let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         *offset += 4;
-        Some(MagicUpdateSpellData { spell_id, layer })
+        Some(MagicUpdateSpellEventData { spell_id, layer })
     }
 }
 
-impl ProtocolPack for MagicUpdateSpellData {
+impl ProtocolPack for MagicUpdateSpellEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u16::<LittleEndian>(self.spell_id).unwrap();
         buf.write_u16::<LittleEndian>(self.layer).unwrap();
@@ -162,12 +162,12 @@ impl ProtocolPack for MagicUpdateSpellData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicRemoveSpellData {
+pub struct MagicRemoveSpellEventData {
     pub spell_id: u16,
     pub layer: u16,
 }
 
-impl ProtocolUnpack for MagicRemoveSpellData {
+impl ProtocolUnpack for MagicRemoveSpellEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -175,11 +175,11 @@ impl ProtocolUnpack for MagicRemoveSpellData {
         let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         *offset += 4;
-        Some(MagicRemoveSpellData { spell_id, layer })
+        Some(MagicRemoveSpellEventData { spell_id, layer })
     }
 }
 
-impl ProtocolPack for MagicRemoveSpellData {
+impl ProtocolPack for MagicRemoveSpellEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u16::<LittleEndian>(self.spell_id).unwrap();
         buf.write_u16::<LittleEndian>(self.layer).unwrap();
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn test_magic_update_spell_parity() {
-        let expected = MagicUpdateSpellData {
+        let expected = MagicUpdateSpellEventData {
             spell_id: 0x1234,
             layer: 1,
         };
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_magic_remove_spell_parity() {
-        let expected = MagicRemoveSpellData {
+        let expected = MagicRemoveSpellEventData {
             spell_id: 0x5678,
             layer: 0,
         };
@@ -215,52 +215,52 @@ mod tests {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicPurgeEnchantmentsData {
+pub struct MagicPurgeEnchantmentsEventData {
     pub target: Guid,
     pub sequence: u32,
 }
 
-impl ProtocolUnpack for MagicPurgeEnchantmentsData {
+impl ProtocolUnpack for MagicPurgeEnchantmentsEventData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(MagicPurgeEnchantmentsData {
+        Some(MagicPurgeEnchantmentsEventData {
             target: Guid::NULL,
             sequence: 0,
         })
     }
 }
 
-impl ProtocolPack for MagicPurgeEnchantmentsData {
+impl ProtocolPack for MagicPurgeEnchantmentsEventData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicPurgeBadEnchantmentsData {
+pub struct MagicPurgeBadEnchantmentsEventData {
     pub target: Guid,
     pub sequence: u32,
 }
 
-impl ProtocolUnpack for MagicPurgeBadEnchantmentsData {
+impl ProtocolUnpack for MagicPurgeBadEnchantmentsEventData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(MagicPurgeBadEnchantmentsData {
+        Some(MagicPurgeBadEnchantmentsEventData {
             target: Guid::NULL,
             sequence: 0,
         })
     }
 }
 
-impl ProtocolPack for MagicPurgeBadEnchantmentsData {
+impl ProtocolPack for MagicPurgeBadEnchantmentsEventData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicDispelEnchantmentData {
+pub struct MagicDispelEnchantmentEventData {
     pub target: Guid,
     pub sequence: u32,
     pub spell_id: u16,
     pub layer: u16,
 }
 
-impl ProtocolUnpack for MagicDispelEnchantmentData {
+impl ProtocolUnpack for MagicDispelEnchantmentEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -268,7 +268,7 @@ impl ProtocolUnpack for MagicDispelEnchantmentData {
         let spell_id = LittleEndian::read_u16(&data[*offset..*offset + 2]);
         let layer = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         *offset += 4;
-        Some(MagicDispelEnchantmentData {
+        Some(MagicDispelEnchantmentEventData {
             target: Guid::NULL,
             sequence: 0,
             spell_id,
@@ -277,7 +277,7 @@ impl ProtocolUnpack for MagicDispelEnchantmentData {
     }
 }
 
-impl ProtocolPack for MagicDispelEnchantmentData {
+impl ProtocolPack for MagicDispelEnchantmentEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.spell_id.to_le_bytes());
         buf.extend_from_slice(&self.layer.to_le_bytes());
@@ -285,13 +285,13 @@ impl ProtocolPack for MagicDispelEnchantmentData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MagicDispelMultipleEnchantmentsData {
+pub struct MagicDispelMultipleEnchantmentsEventData {
     pub target: Guid,
     pub sequence: u32,
     pub spells: Vec<(u16, u16)>,
 }
 
-impl ProtocolUnpack for MagicDispelMultipleEnchantmentsData {
+impl ProtocolUnpack for MagicDispelMultipleEnchantmentsEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -308,7 +308,7 @@ impl ProtocolUnpack for MagicDispelMultipleEnchantmentsData {
             *offset += 4;
             spells.push((spell_id, layer));
         }
-        Some(MagicDispelMultipleEnchantmentsData {
+        Some(MagicDispelMultipleEnchantmentsEventData {
             target: Guid::NULL,
             sequence: 0,
             spells,
@@ -316,7 +316,7 @@ impl ProtocolUnpack for MagicDispelMultipleEnchantmentsData {
     }
 }
 
-impl ProtocolPack for MagicDispelMultipleEnchantmentsData {
+impl ProtocolPack for MagicDispelMultipleEnchantmentsEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&(self.spells.len() as u32).to_le_bytes());
         for (spell_id, layer) in &self.spells {

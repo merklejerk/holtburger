@@ -287,16 +287,16 @@ pub enum GameActionOpcode {
     Buy = 0x005F,
     /// C2S: Sell item(s) to a vendor.
     Sell = 0x0060,
-    // /// C2S: Merge two stacks of items.
-    // StackableMerge = 0x0054,
-    // /// C2S: Split an item stack into a container.
-    // StackableSplitToContainer = 0x0055,
-    // /// C2S: Split an item stack onto the ground.
-    // StackableSplitTo3D = 0x0056,
+    /// C2S: Merge two stacks of items.
+    StackableMerge = 0x0054,
+    /// C2S: Split an item stack into a container.
+    StackableSplitToContainer = 0x0055,
+    /// C2S: Split an item stack onto the ground.
+    StackableSplitTo3D = 0x0056,
     /// C2S: Split stackable items and wield.
     StackableSplitToWield = 0x019B,
-    // /// C2S: Stop viewing a container's contents.
-    // NoLongerViewingContents = 0x0195,
+    /// C2S: Stop viewing a container's contents.
+    NoLongerViewingContents = 0x0195,
     // /// C2S: Use components to create a tinkering tool.
     // CreateTinkeringTool = 0x027D,
     // /// C2S: Query current mana levels of an item.
@@ -692,8 +692,8 @@ pub enum GameEventOpcode {
     // AllegianceInfoResponse = 0x027C,
 
     // --- Inventory & World (Extra) ---
-    // /// S2C: Closes the view of a container on the ground.
-    // CloseGroundContainer = 0x0052,
+    /// S2C: Closes the view of a container on the ground.
+    CloseGroundContainer = 0x0052,
     /// S2C: Notification that an inventory save operation failed on the server.
     InventoryServerSaveFailed = 0x00A0,
     // --- Visuals & Identification ---

@@ -1,27 +1,27 @@
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PingRequestData;
+pub struct PingRequestActionData;
 
-impl ProtocolUnpack for PingRequestData {
+impl ProtocolUnpack for PingRequestActionData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(Self)
     }
 }
 
-impl ProtocolPack for PingRequestData {
+impl ProtocolPack for PingRequestActionData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LoginCompleteData;
+pub struct LoginCompleteActionData;
 
-impl ProtocolUnpack for LoginCompleteData {
+impl ProtocolUnpack for LoginCompleteActionData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(Self)
     }
 }
 
-impl ProtocolPack for LoginCompleteData {
+impl ProtocolPack for LoginCompleteActionData {
     fn pack(&self, _buf: &mut Vec<u8>) {}
 }

@@ -3,9 +3,10 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
-use super::super::classification::{EntityClass, classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
+use holtburger_core::world::context::WorldContextExt;
 use holtburger_core::world::entity::Entity;
 
 pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
@@ -15,10 +16,11 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
+    let selected_index = game.view.selected_dashboard_index();
     game.view
-        .dashboard_list_state
-        .select(Some(game.view.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
+        .dashboard_list_state()
+        .select(Some(selected_index));
+    f.render_stateful_widget(dashboard_list, area, game.view.dashboard_list_state());
 
     // Render Scrollbar
     let height = area.height as usize;
@@ -27,7 +29,7 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
             game.view
-                .selected_dashboard_index
+                .selected_dashboard_index()
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -61,7 +63,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
             e,
             display_dist,
             *depth,
-            i == game.view.selected_dashboard_index,
+            i == game.view.selected_dashboard_index(),
             container_count,
         ));
     }
@@ -92,7 +94,12 @@ fn render_nearby_item(
         e.name.clone()
     };
 
-    if class != EntityClass::Player {
+    let stack_size = e.stack_size();
+    if stack_size > 1 {
+        display_name = format!("{} ({}x)", display_name, stack_size);
+    }
+
+    if !class.is_creature() {
         if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);

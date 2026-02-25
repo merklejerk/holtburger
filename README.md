@@ -1,6 +1,6 @@
 # Holtburger 🍔
 
-Holtburger is a modern, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. It's still early days so it's not particularly useful yet, but stay tuned!
+Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. It's still early days so it's not particularly useful yet, but stay tuned!
 
 ![tui client screenshot](screenshot.png)
 
@@ -32,6 +32,7 @@ Pre-compiled binaries for the nightly builds are available on the [Releases](htt
 2.  Extract the contents.
 3.  Run the `holtburger-cli` (or `holtburger-cli.exe` on Windows) binary.
 
+
 ### Flatpak (Linux)
 For Linux users, a Flatpak bundle is built nightly:
 ```bash
@@ -57,7 +58,12 @@ Simply run the executable from your terminal. If you are in the folder where you
 ./holtburger-cli [ARGS]
 ```
 
-### Using Flatpak
+### Windows
+The TUI/CLI client requires a modern terminal emulator to render correctly. The built in Command Prompt or PowerShell on Windows are not adequate. Fortunately, there are a number of options available, even directly from Microsoft, such as the [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) app.
+
+After you have extracted the windows zip file to a folder, open up your terminal emulator of choice, navigate to said folder, and run `holtburger-cli.exe --help` to get started.
+
+### Using Flatpak (Linux)
 ```bash
 flatpak run io.github.merklejerk.holtburger-cli [ARGS]
 ```

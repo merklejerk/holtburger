@@ -973,7 +973,7 @@ pub enum PropertyInstanceId {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
     pub struct ItemType: u32 {
         const MELEE_WEAPON = 0x00000001;
         const ARMOR = 0x00000002;

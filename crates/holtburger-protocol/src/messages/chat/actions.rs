@@ -2,18 +2,18 @@ use crate::messages::utils::{read_string16, write_string16};
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TalkData {
+pub struct TalkActionData {
     pub message: String,
 }
 
-impl ProtocolUnpack for TalkData {
+impl ProtocolUnpack for TalkActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
-        Some(TalkData { message })
+        Some(TalkActionData { message })
     }
 }
 
-impl ProtocolPack for TalkData {
+impl ProtocolPack for TalkActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         write_string16(buf, &self.message);
     }
@@ -52,7 +52,7 @@ mod tests {
     fn test_talk_parity() {
         let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 1,
-            action: GameAction::Talk(Box::new(TalkData {
+            action: GameAction::Talk(Box::new(TalkActionData {
                 message: "Hello World".to_string(),
             })),
         }));

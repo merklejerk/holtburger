@@ -21,33 +21,34 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
-    PlayerDescription(Box<PlayerDescriptionData>),
-    PingResponse(Box<PingResponseData>),
-    ViewContents(Box<ViewContentsData>),
-    InventoryPutObjInContainer(Box<InventoryPutObjInContainerData>),
-    InventoryPutObjectIn3D(Box<InventoryPutObjectIn3DData>),
-    WieldObject(Box<WieldObjectData>),
-    Tell(Box<TellData>),
-    ChannelBroadcast(Box<ChannelBroadcastData>),
-    PopupString(Box<PopupStringData>),
-    CommunicationTransientString(Box<CommunicationTransientStringData>),
+    PlayerDescription(Box<PlayerDescriptionEventData>),
+    PingResponse(Box<PingResponseEventData>),
+    ViewContents(Box<ViewContentsEventData>),
+    InventoryPutObjInContainer(Box<InventoryPutObjInContainerEventData>),
+    InventoryPutObjectIn3D(Box<InventoryPutObjectIn3DEventData>),
+    WieldObject(Box<WieldObjectEventData>),
+    Tell(Box<TellEventData>),
+    ChannelBroadcast(Box<ChannelBroadcastEventData>),
+    PopupString(Box<PopupStringEventData>),
+    CommunicationTransientString(Box<CommunicationTransientStringEventData>),
     StartGame,
-    MagicUpdateEnchantment(Box<MagicUpdateEnchantmentData>),
-    MagicUpdateMultipleEnchantments(Box<MagicUpdateMultipleEnchantmentsData>),
-    MagicRemoveEnchantment(Box<MagicRemoveEnchantmentData>),
-    MagicRemoveMultipleEnchantments(Box<MagicRemoveMultipleEnchantmentsData>),
-    MagicPurgeEnchantments(Box<MagicPurgeEnchantmentsData>),
-    MagicPurgeBadEnchantments(Box<MagicPurgeBadEnchantmentsData>),
-    MagicUpdateSpell(Box<MagicUpdateSpellData>),
-    MagicRemoveSpell(Box<MagicRemoveSpellData>),
-    MagicDispelEnchantment(Box<MagicDispelEnchantmentData>),
-    MagicDispelMultipleEnchantments(Box<MagicDispelMultipleEnchantmentsData>),
-    WeenieError(Box<WeenieErrorData>),
-    WeenieErrorWithString(Box<WeenieErrorWithStringData>),
-    UseDone(Box<UseDoneData>),
-    IdentifyObjectResponse(Box<IdentifyObjectResponseData>),
-    InventoryServerSaveFailed(Box<InventoryServerSaveFailedData>),
-    UpdateHealth(Box<UpdateHealthData>),
+    MagicUpdateEnchantment(Box<MagicUpdateEnchantmentEventData>),
+    MagicUpdateMultipleEnchantments(Box<MagicUpdateMultipleEnchantmentsEventData>),
+    MagicRemoveEnchantment(Box<MagicRemoveEnchantmentEventData>),
+    MagicRemoveMultipleEnchantments(Box<MagicRemoveMultipleEnchantmentsEventData>),
+    MagicPurgeEnchantments(Box<MagicPurgeEnchantmentsEventData>),
+    MagicPurgeBadEnchantments(Box<MagicPurgeBadEnchantmentsEventData>),
+    MagicUpdateSpell(Box<MagicUpdateSpellEventData>),
+    MagicRemoveSpell(Box<MagicRemoveSpellEventData>),
+    MagicDispelEnchantment(Box<MagicDispelEnchantmentEventData>),
+    MagicDispelMultipleEnchantments(Box<MagicDispelMultipleEnchantmentsEventData>),
+    WeenieError(Box<WeenieErrorEventData>),
+    WeenieErrorWithString(Box<WeenieErrorWithStringEventData>),
+    UseDone(Box<UseDoneEventData>),
+    IdentifyObjectResponse(Box<IdentifyObjectResponseEventData>),
+    InventoryServerSaveFailed(Box<InventoryServerSaveFailedEventData>),
+    CloseGroundContainer(Box<CloseGroundContainerEventData>),
+    UpdateHealth(Box<UpdateHealthEventData>),
     RegisterTrade(Box<RegisterTradeEventData>),
     OpenTrade(Box<OpenTradeEventData>),
     CloseTrade(Box<CloseTradeEventData>),
@@ -76,109 +77,114 @@ impl ProtocolUnpack for GameEventMessage {
         let event = match event_op {
             Some(op) => match op {
                 GameEventOpcode::PlayerDescription => GameEvent::PlayerDescription(Box::new(
-                    PlayerDescriptionData::unpack(target, sequence, data, offset)?,
+                    PlayerDescriptionEventData::unpack(target, sequence, data, offset)?,
                 )),
                 GameEventOpcode::PingResponse => {
-                    GameEvent::PingResponse(Box::new(PingResponseData::unpack(data, offset)?))
+                    GameEvent::PingResponse(Box::new(PingResponseEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::ViewContents => {
-                    GameEvent::ViewContents(Box::new(ViewContentsData::unpack(data, offset)?))
+                    GameEvent::ViewContents(Box::new(ViewContentsEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::InventoryPutObjInContainer => {
                     GameEvent::InventoryPutObjInContainer(Box::new(
-                        InventoryPutObjInContainerData::unpack(data, offset)?,
+                        InventoryPutObjInContainerEventData::unpack(data, offset)?,
                     ))
                 }
                 GameEventOpcode::InventoryPutObjectIn3D => GameEvent::InventoryPutObjectIn3D(
-                    Box::new(InventoryPutObjectIn3DData::unpack(data, offset)?),
+                    Box::new(InventoryPutObjectIn3DEventData::unpack(data, offset)?),
                 ),
                 GameEventOpcode::WieldObject => {
-                    GameEvent::WieldObject(Box::new(WieldObjectData::unpack(data, offset)?))
+                    GameEvent::WieldObject(Box::new(WieldObjectEventData::unpack(data, offset)?))
                 }
-                GameEventOpcode::Tell => GameEvent::Tell(Box::new(TellData::unpack(data, offset)?)),
+                GameEventOpcode::Tell => {
+                    GameEvent::Tell(Box::new(TellEventData::unpack(data, offset)?))
+                }
                 GameEventOpcode::ChannelBroadcast => GameEvent::ChannelBroadcast(Box::new(
-                    ChannelBroadcastData::unpack(data, offset)?,
+                    ChannelBroadcastEventData::unpack(data, offset)?,
                 )),
                 GameEventOpcode::PopupString => {
-                    GameEvent::PopupString(Box::new(PopupStringData::unpack(data, offset)?))
+                    GameEvent::PopupString(Box::new(PopupStringEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::CommunicationTransientString => {
                     GameEvent::CommunicationTransientString(Box::new(
-                        CommunicationTransientStringData::unpack(data, offset)?,
+                        CommunicationTransientStringEventData::unpack(data, offset)?,
                     ))
                 }
                 GameEventOpcode::StartGame => GameEvent::StartGame,
                 GameEventOpcode::MagicUpdateEnchantment => {
-                    let mut d = MagicUpdateEnchantmentData::unpack(data, offset)?;
+                    let mut d = MagicUpdateEnchantmentEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicUpdateEnchantment(Box::new(d))
                 }
                 GameEventOpcode::MagicUpdateMultipleEnchantments => {
-                    let mut d = MagicUpdateMultipleEnchantmentsData::unpack(data, offset)?;
+                    let mut d = MagicUpdateMultipleEnchantmentsEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicUpdateMultipleEnchantments(Box::new(d))
                 }
                 GameEventOpcode::MagicRemoveEnchantment => {
-                    let mut d = MagicRemoveEnchantmentData::unpack(data, offset)?;
+                    let mut d = MagicRemoveEnchantmentEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicRemoveEnchantment(Box::new(d))
                 }
                 GameEventOpcode::MagicRemoveMultipleEnchantments => {
-                    let mut d = MagicRemoveMultipleEnchantmentsData::unpack(data, offset)?;
+                    let mut d = MagicRemoveMultipleEnchantmentsEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicRemoveMultipleEnchantments(Box::new(d))
                 }
                 GameEventOpcode::MagicPurgeEnchantments => {
-                    let mut d = MagicPurgeEnchantmentsData::unpack(data, offset)?;
+                    let mut d = MagicPurgeEnchantmentsEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicPurgeEnchantments(Box::new(d))
                 }
                 GameEventOpcode::MagicPurgeBadEnchantments => {
-                    let mut d = MagicPurgeBadEnchantmentsData::unpack(data, offset)?;
+                    let mut d = MagicPurgeBadEnchantmentsEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicPurgeBadEnchantments(Box::new(d))
                 }
                 GameEventOpcode::MagicUpdateSpell => GameEvent::MagicUpdateSpell(Box::new(
-                    MagicUpdateSpellData::unpack(data, offset)?,
+                    MagicUpdateSpellEventData::unpack(data, offset)?,
                 )),
                 GameEventOpcode::MagicRemoveSpell => GameEvent::MagicRemoveSpell(Box::new(
-                    MagicRemoveSpellData::unpack(data, offset)?,
+                    MagicRemoveSpellEventData::unpack(data, offset)?,
                 )),
                 GameEventOpcode::MagicDispelEnchantment => {
-                    let mut d = MagicDispelEnchantmentData::unpack(data, offset)?;
+                    let mut d = MagicDispelEnchantmentEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicDispelEnchantment(Box::new(d))
                 }
                 GameEventOpcode::MagicDispelMultipleEnchantments => {
-                    let mut d = MagicDispelMultipleEnchantmentsData::unpack(data, offset)?;
+                    let mut d = MagicDispelMultipleEnchantmentsEventData::unpack(data, offset)?;
                     d.target = target;
                     d.sequence = sequence;
                     GameEvent::MagicDispelMultipleEnchantments(Box::new(d))
                 }
                 GameEventOpcode::WeenieError => {
-                    GameEvent::WeenieError(Box::new(WeenieErrorData::unpack(data, offset)?))
+                    GameEvent::WeenieError(Box::new(WeenieErrorEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::WeenieErrorWithString => GameEvent::WeenieErrorWithString(
-                    Box::new(WeenieErrorWithStringData::unpack(data, offset)?),
+                    Box::new(WeenieErrorWithStringEventData::unpack(data, offset)?),
                 ),
                 GameEventOpcode::UseDone => {
-                    GameEvent::UseDone(Box::new(UseDoneData::unpack(data, offset)?))
+                    GameEvent::UseDone(Box::new(UseDoneEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::IdentifyObjectResponse => GameEvent::IdentifyObjectResponse(
-                    Box::new(IdentifyObjectResponseData::unpack(data, offset)?),
+                    Box::new(IdentifyObjectResponseEventData::unpack(data, offset)?),
                 ),
                 GameEventOpcode::InventoryServerSaveFailed => GameEvent::InventoryServerSaveFailed(
-                    Box::new(InventoryServerSaveFailedData::unpack(data, offset)?),
+                    Box::new(InventoryServerSaveFailedEventData::unpack(data, offset)?),
                 ),
+                GameEventOpcode::CloseGroundContainer => GameEvent::CloseGroundContainer(Box::new(
+                    CloseGroundContainerEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::UpdateHealth => {
-                    GameEvent::UpdateHealth(Box::new(UpdateHealthData::unpack(data, offset)?))
+                    GameEvent::UpdateHealth(Box::new(UpdateHealthEventData::unpack(data, offset)?))
                 }
                 GameEventOpcode::RegisterTrade => GameEvent::RegisterTrade(Box::new(
                     RegisterTradeEventData::unpack(data, offset)?,
@@ -368,6 +374,11 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::InventoryServerSaveFailed(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::InventoryServerSaveFailed as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::CloseGroundContainer(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CloseGroundContainer as u32)
                     .unwrap();
                 data.pack(buf);
             }

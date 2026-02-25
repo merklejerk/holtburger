@@ -24,10 +24,11 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
+    let selected_index = game.view.selected_dashboard_index();
     game.view
-        .dashboard_list_state
-        .select(Some(game.view.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
+        .dashboard_list_state()
+        .select(Some(selected_index));
+    f.render_stateful_widget(dashboard_list, area, game.view.dashboard_list_state());
 
     // Render Scrollbar
     let height = area.height as usize;
@@ -36,7 +37,7 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
             game.view
-                .selected_dashboard_index
+                .selected_dashboard_index()
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -60,7 +61,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     let mut list_items = Vec::new();
 
     for (i, line) in lines.into_iter().enumerate() {
-        let is_selected = i == game.view.selected_dashboard_index;
+        let is_selected = i == game.view.selected_dashboard_index();
         match line {
             EquipTabLine::Header(name, occupied) => {
                 let color = if occupied {
@@ -86,8 +87,14 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     spans.push(Span::raw("    "));
                 }
 
+                let mut name = item.name.clone();
+                let stack_size = item.stack_size();
+                if stack_size > 1 {
+                    name = format!("{} ({}x)", name, stack_size);
+                }
+
                 spans.push(Span::styled(
-                    item.name.clone(),
+                    name,
                     Style::default().fg({
                         let class = classify_entity(item);
                         get_entity_color(class)

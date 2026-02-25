@@ -477,59 +477,59 @@ impl ProtocolPack for ModelData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct IdentifyObjectData {
+pub struct IdentifyObjectActionData {
     pub guid: Guid,
 }
 
-impl ProtocolUnpack for IdentifyObjectData {
+impl ProtocolUnpack for IdentifyObjectActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let guid = Guid::unpack(data, offset)?;
-        Some(IdentifyObjectData { guid })
+        Some(IdentifyObjectActionData { guid })
     }
 }
 
-impl ProtocolPack for IdentifyObjectData {
+impl ProtocolPack for IdentifyObjectActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UseData {
+pub struct UseActionData {
     pub guid: Guid,
 }
 
-impl ProtocolUnpack for UseData {
+impl ProtocolUnpack for UseActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let guid = Guid::unpack(data, offset)?;
-        Some(UseData { guid })
+        Some(UseActionData { guid })
     }
 }
 
-impl ProtocolPack for UseData {
+impl ProtocolPack for UseActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct UseWithTargetData {
+pub struct UseWithTargetActionData {
     pub item_guid: Guid,
     pub target_guid: Guid,
 }
 
-impl ProtocolUnpack for UseWithTargetData {
+impl ProtocolUnpack for UseWithTargetActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
         let target_guid = Guid::unpack(data, offset)?;
-        Some(UseWithTargetData {
+        Some(UseWithTargetActionData {
             item_guid,
             target_guid,
         })
     }
 }
 
-impl ProtocolPack for UseWithTargetData {
+impl ProtocolPack for UseWithTargetActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.item_guid.pack(buf);
         self.target_guid.pack(buf);
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn test_identify_object_data_parity() {
-        let expected = IdentifyObjectData {
+        let expected = IdentifyObjectActionData {
             guid: Guid(0x12345678),
         };
         assert_pack_unpack_parity(test_fixtures::IDENTIFY_OBJECT_DATA, &expected);
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_use_data_parity() {
-        let expected = UseData {
+        let expected = UseActionData {
             guid: Guid(0x22222222),
         };
         assert_pack_unpack_parity(test_fixtures::USE_DATA, &expected);
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn test_use_with_target_data_parity() {
-        let expected = UseWithTargetData {
+        let expected = UseWithTargetActionData {
             item_guid: Guid(0x33333333),
             target_guid: Guid(0x44444444),
         };

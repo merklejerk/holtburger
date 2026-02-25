@@ -90,16 +90,13 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     result
 }
 
-pub fn render_verb_bar(game: &GameState) -> Option<Paragraph<'static>> {
+pub fn render_verb_bar(game: &GameState) -> Paragraph<'static> {
     let (tab, index) = (
         game.view.dashboard_tab,
         game.view.selected_dashboard_index(),
     );
 
     let mut verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(game, tab, index);
-    if verbs.is_empty() {
-        return None;
-    }
 
     verbs.sort_by(|a, b| a.label.cmp(&b.label));
 
@@ -111,11 +108,9 @@ pub fn render_verb_bar(game: &GameState) -> Option<Paragraph<'static>> {
         spans.push(Span::raw(verb.display_label().to_string()));
     }
 
-    Some(
-        Paragraph::new(Line::from(spans))
-            .block(Block::default().borders(Borders::TOP))
-            .wrap(ratatui::widgets::Wrap { trim: true }),
-    )
+    Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::TOP))
+        .wrap(ratatui::widgets::Wrap { trim: true })
 }
 
 pub fn get_adjacent_pane(

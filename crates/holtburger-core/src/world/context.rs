@@ -115,9 +115,10 @@ pub trait WorldContextExt: WorldContext {
         }
 
         if let Some(vendor) = self.get_vendor()
-            && (itype.bits() & vendor.merchandise_item_types) == 0 {
-                return false;
-            }
+            && (itype.bits() & vendor.merchandise_item_types) == 0
+        {
+            return false;
+        }
 
         true
     }

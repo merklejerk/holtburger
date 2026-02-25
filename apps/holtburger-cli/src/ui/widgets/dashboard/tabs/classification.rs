@@ -1,5 +1,6 @@
 use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, WeenieType};
 use holtburger_core::world::entity::Entity;
+use holtburger_protocol::messages::object::messages::PublicWeenieDescription;
 use ratatui::style::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,17 +102,33 @@ pub fn get_entity_color(class: EntityClass) -> Color {
 }
 
 pub fn classify_entity(entity: &Entity) -> EntityClass {
-    if entity.flags.intersects(ObjectDescriptionFlag::PLAYER) {
+    classify_raw(entity.flags, entity.item_type, entity.wcid)
+}
+
+pub fn classify_description(desc: &PublicWeenieDescription) -> EntityClass {
+    classify_raw(
+        desc.obj_desc_flags,
+        Some(ItemType::from_bits_truncate(desc.item_type)),
+        Some(desc.wcid),
+    )
+}
+
+fn classify_raw(
+    flags: ObjectDescriptionFlag,
+    item_type: Option<ItemType>,
+    wcid: Option<u32>,
+) -> EntityClass {
+    if flags.intersects(ObjectDescriptionFlag::PLAYER) {
         return EntityClass::Player;
     }
-    let is_stuck = entity.flags.intersects(ObjectDescriptionFlag::STUCK);
-    let is_attackable = entity.flags.intersects(ObjectDescriptionFlag::ATTACKABLE);
-    let is_container = if let Some(it) = entity.item_type {
+    let is_stuck = flags.intersects(ObjectDescriptionFlag::STUCK);
+    let is_attackable = flags.intersects(ObjectDescriptionFlag::ATTACKABLE);
+    let is_container = if let Some(it) = item_type {
         it.intersects(ItemType::CONTAINER)
     } else {
         false
-    } || if let Some(wcid) = entity.wcid {
-        wcid == WeenieType::Container as u32 || wcid == WeenieType::Chest as u32
+    } || if let Some(id) = wcid {
+        id == WeenieType::Container as u32 || id == WeenieType::Chest as u32
     } else {
         false
     };
@@ -122,12 +139,12 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
     }
 
     // Creatures - Check WeenieType or ItemType or GUID range
-    let is_creature = if let Some(it) = entity.item_type {
+    let is_creature = if let Some(it) = item_type {
         it.intersects(ItemType::CREATURE)
     } else {
         false
-    } || if let Some(wcid) = entity.wcid {
-        wcid == WeenieType::Creature as u32 || wcid == WeenieType::Vendor as u32
+    } || if let Some(id) = wcid {
+        id == WeenieType::Creature as u32 || id == WeenieType::Vendor as u32
     } else {
         false
     };
@@ -136,7 +153,7 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
         if is_attackable {
             return EntityClass::Monster;
         }
-        if entity.flags.intersects(ObjectDescriptionFlag::VENDOR) {
+        if flags.intersects(ObjectDescriptionFlag::VENDOR) {
             return EntityClass::Vendor;
         }
         return EntityClass::Npc;
@@ -144,7 +161,7 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
 
     // General purpose refinement for items
     let mut refined_class = None;
-    if let Some(it) = entity.item_type {
+    if let Some(it) = item_type {
         if it.intersects(ItemType::MELEE_WEAPON | ItemType::MISSILE_WEAPON) {
             refined_class = Some(EntityClass::Weapon);
         } else if it.intersects(ItemType::CASTER) {
@@ -181,8 +198,8 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
     }
 
     // Specific WeenieType overrides
-    if let Some(wcid) = entity.wcid {
-        match wcid {
+    if let Some(id) = wcid {
+        match id {
             w if w == WeenieType::LifeStone as u32 => return EntityClass::LifeStone,
             w if w == WeenieType::Door as u32 => return EntityClass::Door,
             w if w == WeenieType::Portal as u32 => return EntityClass::Portal,
@@ -193,16 +210,16 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
     }
 
     // Flag based overrides
-    if entity.flags.intersects(ObjectDescriptionFlag::PORTAL) {
+    if flags.intersects(ObjectDescriptionFlag::PORTAL) {
         return EntityClass::Portal;
     }
-    if entity.flags.intersects(ObjectDescriptionFlag::DOOR) {
+    if flags.intersects(ObjectDescriptionFlag::DOOR) {
         return EntityClass::Door;
     }
-    if entity.flags.intersects(ObjectDescriptionFlag::VENDOR) {
+    if flags.intersects(ObjectDescriptionFlag::VENDOR) {
         return EntityClass::Vendor;
     }
-    if entity.flags.intersects(ObjectDescriptionFlag::PLAYER) {
+    if flags.intersects(ObjectDescriptionFlag::PLAYER) {
         return EntityClass::Player;
     }
 
@@ -216,7 +233,7 @@ pub fn classify_entity(entity: &Entity) -> EntityClass {
         return rc;
     }
 
-    if entity.flags.intersects(ObjectDescriptionFlag::STUCK) {
+    if flags.intersects(ObjectDescriptionFlag::STUCK) {
         return EntityClass::StaticObject;
     }
 

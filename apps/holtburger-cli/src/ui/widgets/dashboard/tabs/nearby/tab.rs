@@ -163,18 +163,41 @@ impl TabController for NearbyTab {
 
         match (action, &target) {
             (Action::PickUp, CommandTarget::Entity(e, _)) => {
-                if let (Some(pguid), EntityClass::Container) =
-                    (player_guid, classification::classify_entity(e))
-                {
-                    // Force the "MoveItem" variant for containers explicitly
-                    Some(UIEffect::Command(ClientCommand::MoveItem {
-                        item: e.guid,
-                        container: pguid,
-                        placement: 0,
-                    }))
-                } else {
-                    Some(UIEffect::Command(ClientCommand::Get(e.guid)))
+                if let Some(pguid) = player_guid {
+                    // Check if it's stackable and we have a matching stack in our inventory
+                    if e.is_stackable() {
+                        let inventory_item = game.data.inventory.iter().find(|&&guid| {
+                            if let Some(other) = game.data.entities.get(&guid) {
+                                other.wcid == e.wcid && other.stack_size() < other.max_stack_size()
+                            } else {
+                                false
+                            }
+                        });
+
+                        if let Some(&destination) = inventory_item {
+                            let dest_e = game.data.entities.get(&destination).unwrap();
+                            let space = dest_e.max_stack_size().saturating_sub(dest_e.stack_size());
+                            let amount = e.stack_size().min(space) as i32;
+
+                            return Some(UIEffect::Command(ClientCommand::Stack {
+                                source: e.guid,
+                                destination,
+                                amount,
+                            }));
+                        }
+                    }
+
+                    if let EntityClass::Container = classification::classify_entity(e) {
+                        // Force the "MoveItem" variant for containers explicitly
+                        return Some(UIEffect::Command(ClientCommand::MoveItem {
+                            item: e.guid,
+                            container: pguid,
+                            placement: 0,
+                        }));
+                    }
                 }
+
+                Some(UIEffect::Command(ClientCommand::Get(e.guid)))
             }
             (Action::Approach, CommandTarget::Entity(e, _)) => {
                 Some(UIEffect::Command(ClientCommand::MoveTo { target: e.guid }))

@@ -57,13 +57,27 @@ impl TabController for InventoryTab {
                     let is_same_item = e.guid == item_guid;
                     let is_in_main_pack = game.data.is_in_main_pack(item_guid);
                     let is_container = matches!(class, EntityClass::Container | EntityClass::Chest);
+
+                    let merge_label = game.data.entities.get(&item_guid).and_then(|source_e| {
+                        if !is_same_item
+                            && source_e.is_stackable()
+                            && source_e.wcid == e.wcid
+                            && e.stack_size() < e.max_stack_size()
+                        {
+                            Some("Merge".to_string())
+                        } else {
+                            None
+                        }
+                    });
+
                     let label = if is_self || is_same_item {
                         if !is_in_main_pack {
                             Some("Move to main pack".to_string())
                         } else {
-                            // Already in main pack.
                             None
                         }
+                    } else if let Some(merge) = merge_label {
+                        Some(merge)
                     } else if is_container {
                         Some(format!("Move to {}", e.name))
                     } else {

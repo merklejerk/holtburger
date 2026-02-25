@@ -18,6 +18,7 @@ pub enum UIEffect {
     Heal(Guid),
     ApplyHealing(Guid),
     ApplyMoving(Guid),
+    ApplyStacking(Guid),
     Target(Guid),
     CancelInteraction,
     ClearVendor,
@@ -207,6 +208,34 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
                     item: item_guid,
                     container: container_guid,
                     placement: 0,
+                };
+                game.view.active_interaction = None;
+                return vec![cmd];
+            }
+            vec![]
+        }
+        UIEffect::ApplyStacking(destination_guid) => {
+            if let Some(game) = state.game_option_mut()
+                && let Some(crate::ui::Interaction::Moving { item_guid }) =
+                    game.view.active_interaction
+            {
+                let amount = if let (Some(source_e), Some(dest_e)) = (
+                    game.data.entities.get(&item_guid),
+                    game.data.entities.get(&destination_guid),
+                ) {
+                    let source_size = source_e.stack_size();
+                    let dest_size = dest_e.stack_size();
+                    let dest_max = dest_e.max_stack_size();
+                    let space = dest_max.saturating_sub(dest_size);
+                    source_size.min(space) as i32
+                } else {
+                    1
+                };
+
+                let cmd = ClientCommand::Stack {
+                    source: item_guid,
+                    destination: destination_guid,
+                    amount,
                 };
                 game.view.active_interaction = None;
                 return vec![cmd];

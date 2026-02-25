@@ -7,12 +7,12 @@ use ratatui::widgets::{
     ScrollbarState,
 };
 
-use super::super::classification::{classify_description, classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, classify_vendor_item, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use crate::ui::types::TradeFocus;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
-use holtburger_common::properties::{ItemType, PropertyInt};
+use holtburger_common::properties::{ItemType, PropertyInt, PropertyString};
 use holtburger_core::world::context::WorldContextExt;
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
@@ -265,24 +265,25 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .enumerate()
             .map(|(i, m)| {
                 let mut display_name = m
-                    .description
-                    .name
-                    .as_deref()
+                    .properties
+                    .strings
+                    .get(&PropertyString::Name)
+                    .map(|s| s.as_str())
                     .unwrap_or("Unknown Item")
                     .to_string();
 
                 let stack_size = m
-                    .description
-                    .int_properties
-                    .get(&(PropertyInt::StackSize as u32))
-                    .cloned()
-                    .unwrap_or(1) as u32;
+                    .properties
+                    .ints
+                    .get(&PropertyInt::StackSize)
+                    .copied()
+                    .unwrap_or(1);
 
                 if stack_size > 1 {
                     display_name = format!("{} ({}x)", display_name, stack_size);
                 }
 
-                let class = classify_description(&m.description);
+                let class = classify_vendor_item(m);
                 let emoji = class.emoji();
                 let color = get_entity_color(class);
                 let full_name = format!("[{}] {}", emoji, display_name);
@@ -291,11 +292,24 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 // Ground truth: Math.Max(1, (uint)Math.Ceiling(((float)sellRate * (value ?? 0)) - 0.1))
                 // Promissory notes have a special rate.
                 let mut sell_rate = vendor.sell_multiplier;
-                if m.description.item_type & ItemType::PROMISSORY_NOTE.bits() != 0 {
+                let item_type_bits = m
+                    .properties
+                    .ints
+                    .get(&PropertyInt::ItemType)
+                    .copied()
+                    .unwrap_or(0) as u32;
+
+                if item_type_bits & ItemType::PROMISSORY_NOTE.bits() != 0 {
                     sell_rate = PROMISSORY_NOTE_SELL_RATE;
                 }
 
-                let base_value = m.description.value() as f32;
+                let base_value = m
+                    .properties
+                    .ints
+                    .get(&PropertyInt::Value)
+                    .copied()
+                    .unwrap_or(0) as f32;
+
                 let price = ((sell_rate * base_value) - VENDOR_CEIL_OFFSET)
                     .ceil()
                     .max(DEFAULT_PRICE as f32) as u32;

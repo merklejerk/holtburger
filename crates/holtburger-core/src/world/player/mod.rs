@@ -2,6 +2,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
+#[cfg(test)]
+use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
+use holtburger_common::properties::{
+    HasProperties, HasPropertiesMut, PropertyInt, PropertyUpdate, WorldObjectProperties,
+    WorldObjectPropertyAccessors,
+};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
@@ -72,20 +78,8 @@ pub struct PlayerState {
     pub spells: BTreeMap<u32, f32>,
     /// Content of the 8 spellbook hotbars (Organization). Each inner vec corresponds to a UI hotbar.
     pub hotbar_spells: Vec<Vec<u32>>,
-    /// Sparse mapping of integer properties (from `PropertyInt`).
-    pub int_properties: BTreeMap<u32, i32>,
-    /// Sparse mapping of 64-bit integer properties (from `PropertyInt64`).
-    pub int64_properties: BTreeMap<u32, i64>,
-    /// Sparse mapping of boolean properties (from `PropertyBool`).
-    pub bool_properties: BTreeMap<u32, bool>,
-    /// Sparse mapping of floating point properties (from `PropertyFloat`).
-    pub float_properties: BTreeMap<u32, f64>,
-    /// Sparse mapping of string properties (from `PropertyString`).
-    pub string_properties: BTreeMap<u32, String>,
-    /// Sparse mapping of Data ID properties (from `PropertyDataId`).
-    pub did_properties: BTreeMap<u32, Guid>,
-    /// Sparse mapping of Instance ID properties (from `PropertyInstanceId`).
-    pub iid_properties: BTreeMap<u32, Guid>,
+    /// All server-sent properties for the player.
+    pub properties: WorldObjectProperties,
     /// Current stance (Peace, Melee, Missile, Magic).
     pub combat_mode: CombatMode,
 
@@ -134,19 +128,35 @@ impl PlayerState {
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
             hotbar_spells: vec![Vec::new(); 8],
-            int_properties: BTreeMap::new(),
-            int64_properties: BTreeMap::new(),
-            bool_properties: BTreeMap::new(),
-            float_properties: BTreeMap::new(),
-            string_properties: BTreeMap::new(),
-            did_properties: BTreeMap::new(),
-            iid_properties: BTreeMap::new(),
+            properties: WorldObjectProperties::default(),
             combat_mode: CombatMode::NonCombat,
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
             last_sent_stats: None,
         }
+    }
+}
+
+impl HasProperties for PlayerState {
+    fn properties(&self) -> &WorldObjectProperties {
+        &self.properties
+    }
+}
+
+impl HasPropertiesMut for PlayerState {
+    fn properties_mut(&mut self) -> &mut WorldObjectProperties {
+        &mut self.properties
+    }
+}
+
+impl PlayerState {
+    pub fn get_int_prop_default(&self, prop: PropertyInt) -> i32 {
+        self.get_int_prop(prop).unwrap_or(0)
+    }
+
+    pub fn set_property(&mut self, update: PropertyUpdate) {
+        self.properties.apply(update);
     }
 
     /// Adds an item to the player's inventory tracking.
@@ -380,9 +390,7 @@ mod tests {
         );
 
         // 4. Armor level check (can stay negative for Armor Self / Imperil logic)
-        player
-            .int_properties
-            .insert(PropertyInt::ArmorLevel as u32, 10);
+        player.set_int_prop(PropertyInt::ArmorLevel, 10);
         player.enchantments.push(Enchantment {
             spell_id: 5,
             layer: 1,

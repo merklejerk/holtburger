@@ -351,37 +351,31 @@ impl PlayerState {
                         self.guid = data.guid;
                         self.name = data.name.clone();
                         self.enchantments = data.enchantments.clone();
-                        self.int_properties = data.properties_int.clone();
-                        self.int64_properties = data.properties_int64.clone();
-                        self.bool_properties = data.properties_bool.clone();
-                        self.float_properties = data.properties_float.clone();
-                        self.string_properties = data.properties_string.clone();
-                        self.did_properties = data.properties_did.clone();
-                        self.iid_properties = data.properties_iid.clone();
+                        self.properties = data.properties.clone();
                         self.spells = data.spells.clone();
                         self.hotbar_spells = data.hotbar_spells.clone();
 
                         // Update Experience and Level from properties
-                        if let Some(&xp) = data
-                            .properties_int64
-                            .get(&(PropertyInt64::TotalExperience as u32))
+                        if let Some(&xp) =
+                            data.properties.int64s.get(&PropertyInt64::TotalExperience)
                         {
                             self.total_experience = xp as u64;
                         }
                         if let Some(&axp) = data
-                            .properties_int64
-                            .get(&(PropertyInt64::AvailableExperience as u32))
+                            .properties
+                            .int64s
+                            .get(&PropertyInt64::AvailableExperience)
                         {
                             self.available_experience = axp as u64;
                         }
                         if let Some(&sp) = data
-                            .properties_int
-                            .get(&(PropertyInt::AvailableSkillCredits as u32))
+                            .properties
+                            .ints
+                            .get(&PropertyInt::AvailableSkillCredits)
                         {
                             self.unspent_skill_points = sp as u32;
                         }
-                        if let Some(&level) = data.properties_int.get(&(PropertyInt::Level as u32))
-                        {
+                        if let Some(&level) = data.properties.ints.get(&PropertyInt::Level) {
                             self.level = level as u32;
                         }
 

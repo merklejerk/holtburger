@@ -1,7 +1,7 @@
 use crate::world::entity::Entity;
-use crate::world::state::VendorState;
+use crate::world::vendor::VendorState;
 use holtburger_common::Guid;
-use holtburger_common::properties::{ItemType, PropertyInstanceId};
+use holtburger_common::properties::{ItemType, PropertyInstanceId, WorldObjectPropertyAccessors};
 use holtburger_protocol::messages::combat::CombatMode;
 
 /// Provides access to the world state for common logic.

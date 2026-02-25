@@ -175,7 +175,7 @@ impl Entity {
         self.get_int_prop(PropertyInt::StackSize).unwrap_or(1) as u32
     }
 
-    pub fn is_stackable_base(&self) -> bool {
+    pub fn is_stackable(&self) -> bool {
         self.get_int_prop(PropertyInt::MaxStackSize).unwrap_or(0) > 1
     }
 
@@ -251,9 +251,8 @@ impl Entity {
             .map(|v| v as u32)
     }
 
-    pub fn max_stack_size(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::MaxStackSize)
-            .map(|v| v as u32)
+    pub fn max_stack_size(&self) -> u32 {
+        self.get_int_prop(PropertyInt::MaxStackSize).unwrap_or(1) as u32
     }
 
     pub fn priority(&self) -> Option<u32> {
@@ -373,6 +372,10 @@ impl Entity {
         }
     }
 
+    pub fn is_attuned_sticky(&self) -> bool {
+        self.attuned_status() != AttunedStatus::Normal
+    }
+
     pub fn apply_description(&mut self, data: &ObjectDescriptionData) {
         self.wcid = Some(data.public_weenie_desc.wcid);
         self.flags = data.public_weenie_desc.obj_desc_flags;
@@ -445,20 +448,15 @@ impl Entity {
         self.set_int_prop(PropertyInt::PhysicsState, data.physics_state.bits() as i32);
     }
 
-    pub fn is_sellable_base(&self) -> bool {
+    pub fn is_sellable(&self) -> bool {
         // IsSellable defaults to True in ACE if not specified
-        let is_sellable = self
-            .bool_properties
+        self.bool_properties
             .get(&(PropertyBool::IsSellable as u32))
             .copied()
-            .unwrap_or(true);
-        let is_retained = self.get_bool_prop(PropertyBool::Retained);
-        let value = self.item_value();
-
-        is_sellable && !is_retained && value >= 1
+            .unwrap_or(true)
     }
 
-    pub fn is_tradable_base(&self) -> bool {
+    pub fn is_tradable(&self) -> bool {
         let attuned = self.attuned_status();
         if attuned != AttunedStatus::Normal {
             return false;

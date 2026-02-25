@@ -500,7 +500,7 @@ impl PlayerState {
                         false // Let WorldState handle the world/entity sync
                     }
                     GameEvent::MagicUpdateEnchantment(data) => {
-                        let MagicUpdateEnchantmentData {
+                        let MagicUpdateEnchantmentEventData {
                             target,
                             enchantment,
                             ..
@@ -523,7 +523,7 @@ impl PlayerState {
                         }
                     }
                     GameEvent::MagicUpdateMultipleEnchantments(data) => {
-                        let MagicUpdateMultipleEnchantmentsData {
+                        let MagicUpdateMultipleEnchantmentsEventData {
                             target,
                             enchantments,
                             ..
@@ -549,7 +549,7 @@ impl PlayerState {
                         }
                     }
                     GameEvent::MagicRemoveEnchantment(data) => {
-                        let MagicRemoveEnchantmentData {
+                        let MagicRemoveEnchantmentEventData {
                             target,
                             spell_id,
                             layer,
@@ -568,7 +568,8 @@ impl PlayerState {
                         }
                     }
                     GameEvent::MagicRemoveMultipleEnchantments(data) => {
-                        let MagicRemoveMultipleEnchantmentsData { target, spells, .. } = &**data;
+                        let MagicRemoveMultipleEnchantmentsEventData { target, spells, .. } =
+                            &**data;
                         if *target == self.guid {
                             for (spell_id, layer) in spells {
                                 self.enchantments
@@ -584,7 +585,7 @@ impl PlayerState {
                         }
                     }
                     GameEvent::MagicDispelEnchantment(data) => {
-                        let MagicDispelEnchantmentData {
+                        let MagicDispelEnchantmentEventData {
                             target,
                             spell_id,
                             layer,
@@ -603,7 +604,8 @@ impl PlayerState {
                         }
                     }
                     GameEvent::MagicDispelMultipleEnchantments(data) => {
-                        let MagicDispelMultipleEnchantmentsData { target, spells, .. } = &**data;
+                        let MagicDispelMultipleEnchantmentsEventData { target, spells, .. } =
+                            &**data;
                         if *target == self.guid {
                             for (spell_id, layer) in spells {
                                 self.enchantments
@@ -619,7 +621,7 @@ impl PlayerState {
                         }
                     }
                     GameEvent::MagicPurgeEnchantments(data) => {
-                        let MagicPurgeEnchantmentsData { target, .. } = &**data;
+                        let MagicPurgeEnchantmentsEventData { target, .. } = &**data;
                         if *target == self.guid {
                             self.enchantments.retain(|e| {
                                 let flags = holtburger_common::properties::EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
@@ -635,7 +637,7 @@ impl PlayerState {
                         }
                     }
                     GameEvent::MagicPurgeBadEnchantments(data) => {
-                        let MagicPurgeBadEnchantmentsData { target, .. } = &**data;
+                        let MagicPurgeBadEnchantmentsEventData { target, .. } = &**data;
                         if *target == self.guid {
                             self.enchantments.retain(|e| {
                                 let flags = holtburger_common::properties::EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
@@ -667,7 +669,7 @@ impl PlayerState {
                         true
                     }
                     GameEvent::UpdateHealth(data) => {
-                        let UpdateHealthData { target, health } = &**data;
+                        let UpdateHealthEventData { target, health } = &**data;
                         let target_guid = if *target == Guid::NULL {
                             self.guid
                         } else {

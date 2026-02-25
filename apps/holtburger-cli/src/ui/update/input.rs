@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use holtburger_common::Guid;
 use holtburger_core::ClientCommand;
+use holtburger_core::world::context::WorldContextExt;
 use ratatui::layout::Rect;
 
 use crate::ui::FocusedPane;
@@ -204,8 +206,8 @@ impl GameState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    self.view.selected_dashboard_index =
-                        self.view.selected_dashboard_index.saturating_sub(1);
+                    let new_idx = self.view.selected_dashboard_index().saturating_sub(1);
+                    self.view.set_selected_dashboard_index(new_idx);
                     result.needs_redraw = true;
                 }
             }
@@ -235,8 +237,8 @@ impl GameState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    self.view.selected_dashboard_index =
-                        self.view.selected_dashboard_index.saturating_add(1);
+                    let new_idx = self.view.selected_dashboard_index().saturating_add(1);
+                    self.view.set_selected_dashboard_index(new_idx);
                     result.needs_redraw = true;
                 }
             }
@@ -402,6 +404,54 @@ impl GameState {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
+                    if command.starts_with("/stack ") {
+                        let parts: Vec<&str> = command.split_whitespace().collect();
+                        if parts.len() >= 3 {
+                            let source = parts[1].strip_prefix("0x").unwrap_or(parts[1]);
+                            let dest = parts[2].strip_prefix("0x").unwrap_or(parts[2]);
+                            let amount = if parts.len() > 3 {
+                                parts[3].parse::<i32>().unwrap_or(1)
+                            } else {
+                                1
+                            };
+
+                            if let (Ok(s), Ok(d)) = (
+                                u32::from_str_radix(source, 16),
+                                u32::from_str_radix(dest, 16),
+                            ) {
+                                result.commands.push(ClientCommand::Stack {
+                                    source: Guid(s),
+                                    destination: Guid(d),
+                                    amount,
+                                });
+                            }
+                        }
+                        input_history.push(command.clone());
+                        *history_index = None;
+                        self.view.focused_pane = self.view.previous_focused_pane;
+                        return result.with_redraw(true);
+                    }
+                    if command.starts_with("/split ") {
+                        let parts: Vec<&str> = command.split_whitespace().collect();
+                        if parts.len() >= 3 {
+                            let item_str = parts[1].strip_prefix("0x").unwrap_or(parts[1]);
+                            let amount = parts[2].parse::<i32>().unwrap_or(1);
+
+                            if let Ok(item) = u32::from_str_radix(item_str, 16)
+                                && let Some(player_guid) = self.data.player_guid
+                            {
+                                result.commands.push(ClientCommand::Split {
+                                    item: Guid(item),
+                                    container: player_guid,
+                                    amount,
+                                });
+                            }
+                        }
+                        input_history.push(command.clone());
+                        *history_index = None;
+                        self.view.focused_pane = self.view.previous_focused_pane;
+                        return result.with_redraw(true);
+                    }
                     if command == "/info" {
                         result.effect =
                             Some(crate::ui::update::effect::UIEffect::DisplayClientInfo);
@@ -414,7 +464,7 @@ impl GameState {
                         use crate::ui::state::ChatMessageKind;
                         chat.log(
                             ChatMessageKind::System,
-                            "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>".to_string()
+                            "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>, /stack <src> <dst> [amount], /split <item> <amount>".to_string()
                         );
                         chat.log(
                             ChatMessageKind::System,

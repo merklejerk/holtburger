@@ -6,18 +6,18 @@ use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ViewContentsItem {
+pub struct ViewContentsEventItem {
     pub guid: Guid,
     pub container_type: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ViewContentsData {
+pub struct ViewContentsEventData {
     pub container: Guid,
-    pub items: Vec<ViewContentsItem>,
+    pub items: Vec<ViewContentsEventItem>,
 }
 
-impl ProtocolUnpack for ViewContentsData {
+impl ProtocolUnpack for ViewContentsEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let container = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -33,16 +33,16 @@ impl ProtocolUnpack for ViewContentsData {
             }
             let container_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
             *offset += 4;
-            items.push(ViewContentsItem {
+            items.push(ViewContentsEventItem {
                 guid,
                 container_type,
             });
         }
-        Some(ViewContentsData { container, items })
+        Some(ViewContentsEventData { container, items })
     }
 }
 
-impl ProtocolPack for ViewContentsData {
+impl ProtocolPack for ViewContentsEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.container.pack(buf);
         buf.write_u32::<LittleEndian>(self.items.len() as u32)
@@ -55,14 +55,14 @@ impl ProtocolPack for ViewContentsData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InventoryPutObjInContainerData {
+pub struct InventoryPutObjInContainerEventData {
     pub item_guid: Guid,
     pub container_guid: Guid,
     pub slot: u32,
     pub container_type: u32,
 }
 
-impl ProtocolUnpack for InventoryPutObjInContainerData {
+impl ProtocolUnpack for InventoryPutObjInContainerEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
         let container_guid = Guid::unpack(data, offset)?;
@@ -72,7 +72,7 @@ impl ProtocolUnpack for InventoryPutObjInContainerData {
         let slot = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let container_type = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
-        Some(InventoryPutObjInContainerData {
+        Some(InventoryPutObjInContainerEventData {
             item_guid,
             container_guid,
             slot,
@@ -81,7 +81,7 @@ impl ProtocolUnpack for InventoryPutObjInContainerData {
     }
 }
 
-impl ProtocolPack for InventoryPutObjInContainerData {
+impl ProtocolPack for InventoryPutObjInContainerEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.item_guid.pack(buf);
         self.container_guid.pack(buf);
@@ -91,30 +91,30 @@ impl ProtocolPack for InventoryPutObjInContainerData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct InventoryPutObjectIn3DData {
+pub struct InventoryPutObjectIn3DEventData {
     pub object_guid: Guid,
 }
 
-impl ProtocolUnpack for InventoryPutObjectIn3DData {
+impl ProtocolUnpack for InventoryPutObjectIn3DEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let object_guid = Guid::unpack(data, offset)?;
-        Some(InventoryPutObjectIn3DData { object_guid })
+        Some(InventoryPutObjectIn3DEventData { object_guid })
     }
 }
 
-impl ProtocolPack for InventoryPutObjectIn3DData {
+impl ProtocolPack for InventoryPutObjectIn3DEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.object_guid.pack(buf);
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct WieldObjectData {
+pub struct WieldObjectEventData {
     pub object_guid: Guid,
     pub equip_mask: EquipMask,
 }
 
-impl ProtocolUnpack for WieldObjectData {
+impl ProtocolUnpack for WieldObjectEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let object_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -123,14 +123,14 @@ impl ProtocolUnpack for WieldObjectData {
         let equip_mask =
             EquipMask::from_bits_truncate(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
-        Some(WieldObjectData {
+        Some(WieldObjectEventData {
             object_guid,
             equip_mask,
         })
     }
 }
 
-impl ProtocolPack for WieldObjectData {
+impl ProtocolPack for WieldObjectEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.equip_mask.bits())
@@ -139,12 +139,12 @@ impl ProtocolPack for WieldObjectData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct InventoryServerSaveFailedData {
+pub struct InventoryServerSaveFailedEventData {
     pub item_guid: Guid,
     pub error: WeenieError,
 }
 
-impl ProtocolUnpack for InventoryServerSaveFailedData {
+impl ProtocolUnpack for InventoryServerSaveFailedEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let item_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -153,14 +153,32 @@ impl ProtocolUnpack for InventoryServerSaveFailedData {
         let error_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
         let error = WeenieError::from_repr(error_raw).unwrap_or(WeenieError::None);
-        Some(InventoryServerSaveFailedData { item_guid, error })
+        Some(InventoryServerSaveFailedEventData { item_guid, error })
     }
 }
 
-impl ProtocolPack for InventoryServerSaveFailedData {
+impl ProtocolPack for InventoryServerSaveFailedEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.item_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.error as u32).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct CloseGroundContainerEventData {
+    pub container_guid: Guid,
+}
+
+impl ProtocolUnpack for CloseGroundContainerEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let container_guid = Guid::unpack(data, offset)?;
+        Some(CloseGroundContainerEventData { container_guid })
+    }
+}
+
+impl ProtocolPack for CloseGroundContainerEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.container_guid.pack(buf);
     }
 }
 
@@ -175,14 +193,14 @@ mod tests {
 
     #[test]
     fn test_view_contents_fixture() {
-        let expected = ViewContentsData {
+        let expected = ViewContentsEventData {
             container: Guid(0x11111111),
             items: vec![
-                ViewContentsItem {
+                ViewContentsEventItem {
                     guid: Guid(0x22222222),
                     container_type: 1,
                 },
-                ViewContentsItem {
+                ViewContentsEventItem {
                     guid: Guid(0x33333333),
                     container_type: 0,
                 },
@@ -202,7 +220,7 @@ mod tests {
             target: Guid(0x50000001),
             sequence: 0x10,
             event: GameEvent::InventoryPutObjInContainer(Box::new(
-                InventoryPutObjInContainerData {
+                InventoryPutObjInContainerEventData {
                     item_guid: Guid(0x80000001),
                     container_guid: Guid(0x80000002),
                     slot: 3,
@@ -220,7 +238,7 @@ mod tests {
         let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x11,
-            event: GameEvent::InventoryPutObjectIn3D(Box::new(InventoryPutObjectIn3DData {
+            event: GameEvent::InventoryPutObjectIn3D(Box::new(InventoryPutObjectIn3DEventData {
                 object_guid: Guid(0x80000001),
             })),
         }));
@@ -234,7 +252,7 @@ mod tests {
         let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x12,
-            event: GameEvent::WieldObject(Box::new(WieldObjectData {
+            event: GameEvent::WieldObject(Box::new(WieldObjectEventData {
                 object_guid: Guid(0x80000001),
                 equip_mask: EquipMask::MELEE_WEAPON,
             })),
@@ -249,11 +267,26 @@ mod tests {
         let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0x50000001),
             sequence: 0x12,
-            event: GameEvent::InventoryServerSaveFailed(Box::new(InventoryServerSaveFailedData {
-                item_guid: Guid(0x80000001),
-                error: WeenieError::TheContainerIsClosed,
-            })),
+            event: GameEvent::InventoryServerSaveFailed(Box::new(
+                InventoryServerSaveFailedEventData {
+                    item_guid: Guid(0x80000001),
+                    error: WeenieError::TheContainerIsClosed,
+                },
+            )),
         }));
         assert_pack_unpack_parity(&hex::decode(hex).unwrap(), &expected);
+    }
+
+    #[test]
+    fn test_close_ground_container_fixture() {
+        let hex_str = "B0F7000001000050030000005200000021436587";
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid(0x50000001),
+            sequence: 3,
+            event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
+                container_guid: Guid(0x87654321),
+            })),
+        }));
+        assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
     }
 }

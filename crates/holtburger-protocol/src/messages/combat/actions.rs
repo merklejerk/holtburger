@@ -4,11 +4,11 @@ use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use super::types::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChangeCombatModeData {
+pub struct ChangeCombatModeActionData {
     pub mode: CombatMode,
 }
 
-impl ProtocolUnpack for ChangeCombatModeData {
+impl ProtocolUnpack for ChangeCombatModeActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let mode_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
@@ -18,22 +18,22 @@ impl ProtocolUnpack for ChangeCombatModeData {
     }
 }
 
-impl ProtocolPack for ChangeCombatModeData {
+impl ProtocolPack for ChangeCombatModeActionData {
     fn pack(&self, writer: &mut Vec<u8>) {
         writer.write_u32::<LittleEndian>(self.mode as u32).unwrap();
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct CancelAttackData {}
+pub struct CancelAttackActionData {}
 
-impl ProtocolUnpack for CancelAttackData {
+impl ProtocolUnpack for CancelAttackActionData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
         Some(Self::default())
     }
 }
 
-impl ProtocolPack for CancelAttackData {
+impl ProtocolPack for CancelAttackActionData {
     fn pack(&self, _writer: &mut Vec<u8>) {}
 }
 
@@ -47,7 +47,7 @@ mod tests {
     fn test_change_combat_mode_parity() {
         let action = GameActionMessage {
             sequence: 0,
-            action: GameAction::ChangeCombatMode(Box::new(ChangeCombatModeData {
+            action: GameAction::ChangeCombatMode(Box::new(ChangeCombatModeActionData {
                 mode: CombatMode::Melee,
             })),
         };
@@ -62,7 +62,7 @@ mod tests {
     fn test_cancel_attack_parity() {
         let action = GameActionMessage {
             sequence: 0,
-            action: GameAction::CancelAttack(Box::new(CancelAttackData {})),
+            action: GameAction::CancelAttack(Box::new(CancelAttackActionData {})),
         };
 
         // Hex from ACE: B7010000

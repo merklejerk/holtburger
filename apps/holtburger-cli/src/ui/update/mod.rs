@@ -7,10 +7,10 @@ pub mod inventory;
 pub mod navigation;
 pub mod world;
 
-use crate::ui::action::AppAction;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 use crate::ui::state::AppState;
 use crate::ui::state::ChatMessageKind;
+use crate::ui::types::AppAction;
 use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 
@@ -154,11 +154,11 @@ impl AppState {
         let dashboard_count = self.dashboard_item_count();
         if let Some(game) = self.game_option_mut() {
             // Enforce dashboard index bounds
-            if game.view.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
-                game.view.selected_dashboard_index = dashboard_count - 1;
+            if game.view.selected_dashboard_index() >= dashboard_count && dashboard_count > 0 {
+                game.view.set_selected_dashboard_index(dashboard_count - 1);
                 result.needs_redraw = true;
-            } else if dashboard_count == 0 && game.view.selected_dashboard_index != 0 {
-                game.view.selected_dashboard_index = 0;
+            } else if dashboard_count == 0 && game.view.selected_dashboard_index() != 0 {
+                game.view.set_selected_dashboard_index(0);
                 result.needs_redraw = true;
             }
 

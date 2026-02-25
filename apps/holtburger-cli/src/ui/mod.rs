@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-pub mod action;
+pub mod interaction;
 pub mod layout;
 pub mod page;
 pub mod state;
@@ -12,7 +12,7 @@ pub mod update;
 pub mod utils;
 pub mod widgets;
 
-pub use self::action::*;
+pub use self::interaction::*;
 pub use self::layout::*;
 pub use self::state::view::*;
 pub use self::state::*;

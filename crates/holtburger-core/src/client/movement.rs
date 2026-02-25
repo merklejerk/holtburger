@@ -109,7 +109,7 @@ impl MovementSystem {
         if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
             self.last_move_sync = now;
 
-            let data = holtburger_protocol::messages::game_action::MoveToStateData {
+            let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
                 raw_motion_state: holtburger_protocol::messages::game_message::RawMotionState {
                     flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
                     current_hold_key: Some(HoldKey::Run as u32),

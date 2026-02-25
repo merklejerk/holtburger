@@ -36,7 +36,7 @@ bitflags! {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct IdentifyObjectResponseData {
+pub struct IdentifyObjectResponseEventData {
     pub object_guid: Guid,
     pub flags: IdentifyResponseFlags,
     pub success: bool,
@@ -60,7 +60,7 @@ pub struct IdentifyObjectResponseData {
     pub armor_levels: Option<ArmorLevels>,
 }
 
-impl ProtocolUnpack for IdentifyObjectResponseData {
+impl ProtocolUnpack for IdentifyObjectResponseEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 12 > data.len() {
             return None;
@@ -209,7 +209,7 @@ impl ProtocolUnpack for IdentifyObjectResponseData {
             armor_levels = Some(ArmorLevels::unpack(data, offset)?);
         }
 
-        Some(IdentifyObjectResponseData {
+        Some(IdentifyObjectResponseEventData {
             object_guid,
             flags,
             success,
@@ -235,7 +235,7 @@ impl ProtocolUnpack for IdentifyObjectResponseData {
     }
 }
 
-impl ProtocolPack for IdentifyObjectResponseData {
+impl ProtocolPack for IdentifyObjectResponseEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.object_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.flags.bits()).unwrap();
@@ -340,12 +340,12 @@ impl ProtocolPack for IdentifyObjectResponseData {
 
 // --- Identify Object Response ---
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct UpdateHealthData {
+pub struct UpdateHealthEventData {
     pub target: Guid,
     pub health: f32,
 }
 
-impl ProtocolUnpack for UpdateHealthData {
+impl ProtocolUnpack for UpdateHealthEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let target = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -353,11 +353,11 @@ impl ProtocolUnpack for UpdateHealthData {
         }
         let health = LittleEndian::read_f32(&data[*offset..*offset + 4]);
         *offset += 4;
-        Some(UpdateHealthData { target, health })
+        Some(UpdateHealthEventData { target, health })
     }
 }
 
-impl ProtocolPack for UpdateHealthData {
+impl ProtocolPack for UpdateHealthEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.target.pack(buf);
         buf.write_f32::<LittleEndian>(self.health).unwrap();
@@ -375,7 +375,7 @@ mod tests {
     fn test_update_health_fixture() {
         let hex = "010000500000003f";
         let data = hex::decode(hex).unwrap();
-        let expected = UpdateHealthData {
+        let expected = UpdateHealthEventData {
             target: Guid(0x50000001),
             health: 0.5,
         };
@@ -438,30 +438,32 @@ mod tests {
             GameMessage::GameEvent(Box::new(crate::messages::game_event::GameEventMessage {
                 target: Guid(0x50000001),
                 sequence: 123,
-                event: GameEvent::IdentifyObjectResponse(Box::new(IdentifyObjectResponseData {
-                    object_guid: Guid(0x50000002),
-                    flags: IdentifyResponseFlags::INT_STATS_TABLE
-                        | IdentifyResponseFlags::STRING_STATS_TABLE,
-                    success: true,
-                    int_stats,
-                    int64_stats: BTreeMap::new(),
-                    bool_stats: BTreeMap::new(),
-                    float_stats: BTreeMap::new(),
-                    string_stats,
-                    did_stats: BTreeMap::new(),
-                    spell_book: Vec::new(),
-                    armor_profile: None,
-                    creature_profile: None,
-                    weapon_profile: None,
-                    hook_profile: None,
-                    armor_highlight: None,
-                    armor_color: None,
-                    weapon_highlight: None,
-                    weapon_color: None,
-                    resist_highlight: None,
-                    resist_color: None,
-                    armor_levels: None,
-                })),
+                event: GameEvent::IdentifyObjectResponse(Box::new(
+                    IdentifyObjectResponseEventData {
+                        object_guid: Guid(0x50000002),
+                        flags: IdentifyResponseFlags::INT_STATS_TABLE
+                            | IdentifyResponseFlags::STRING_STATS_TABLE,
+                        success: true,
+                        int_stats,
+                        int64_stats: BTreeMap::new(),
+                        bool_stats: BTreeMap::new(),
+                        float_stats: BTreeMap::new(),
+                        string_stats,
+                        did_stats: BTreeMap::new(),
+                        spell_book: Vec::new(),
+                        armor_profile: None,
+                        creature_profile: None,
+                        weapon_profile: None,
+                        hook_profile: None,
+                        armor_highlight: None,
+                        armor_color: None,
+                        weapon_highlight: None,
+                        weapon_color: None,
+                        resist_highlight: None,
+                        resist_color: None,
+                        armor_levels: None,
+                    },
+                )),
             }));
 
         assert_pack_unpack_parity(&data, &expected);

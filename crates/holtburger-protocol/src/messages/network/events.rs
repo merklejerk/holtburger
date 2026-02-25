@@ -2,15 +2,15 @@ use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct PingResponseData;
+pub struct PingResponseEventData;
 
-impl ProtocolUnpack for PingResponseData {
+impl ProtocolUnpack for PingResponseEventData {
     fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
-        Some(PingResponseData)
+        Some(PingResponseEventData)
     }
 }
 
-impl ProtocolPack for PingResponseData {
+impl ProtocolPack for PingResponseEventData {
     fn pack(&self, _buf: &mut Vec<u8>) {
         // No payload
     }

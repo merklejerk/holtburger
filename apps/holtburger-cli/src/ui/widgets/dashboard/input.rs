@@ -14,32 +14,26 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
     match key.code {
         KeyCode::Char('1') => {
             game.view.dashboard_tab = DashboardTab::Nearby;
-            game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
         KeyCode::Char('2') => {
             game.view.dashboard_tab = DashboardTab::Inventory;
-            game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
         KeyCode::Char('3') => {
             game.view.dashboard_tab = DashboardTab::Character;
-            game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
         KeyCode::Char('4') => {
             game.view.dashboard_tab = DashboardTab::Spells;
-            game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
         KeyCode::Char('5') => {
             game.view.dashboard_tab = DashboardTab::Equip;
-            game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
         KeyCode::Char('6') => {
             game.view.dashboard_tab = DashboardTab::Trade;
-            game.view.selected_dashboard_index = 0;
             Some(UpdateResult::new())
         }
         KeyCode::Char('z') | KeyCode::Char('Z')
@@ -50,51 +44,53 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             } else {
                 TradeFocus::Local
             };
-            game.view.selected_dashboard_index = 0;
+            game.view.set_selected_dashboard_index(0);
             Some(UpdateResult::new())
         }
         KeyCode::Down => {
             let total = tab.get_item_count(game);
             if total > 0 {
-                game.view.selected_dashboard_index =
-                    (game.view.selected_dashboard_index + 1) % total;
+                let new_idx = (game.view.selected_dashboard_index() + 1) % total;
+                game.view.set_selected_dashboard_index(new_idx);
             }
             Some(UpdateResult::new())
         }
         KeyCode::Up => {
             let total = tab.get_item_count(game);
             if total > 0 {
-                game.view.selected_dashboard_index =
-                    (game.view.selected_dashboard_index + total - 1) % total;
+                let new_idx = (game.view.selected_dashboard_index() + total - 1) % total;
+                game.view.set_selected_dashboard_index(new_idx);
             }
             Some(UpdateResult::new())
         }
         KeyCode::Home => {
-            game.view.selected_dashboard_index = 0;
+            game.view.set_selected_dashboard_index(0);
             Some(UpdateResult::new())
         }
         KeyCode::End => {
             let total = tab.get_item_count(game);
-            game.view.selected_dashboard_index = total.saturating_sub(1);
+            game.view
+                .set_selected_dashboard_index(total.saturating_sub(1));
             Some(UpdateResult::new())
         }
         KeyCode::PageUp => {
             let h = game.view.last_dashboard_height;
             let step = (h / 2) + 1;
-            game.view.selected_dashboard_index =
-                game.view.selected_dashboard_index.saturating_sub(step);
+            let new_idx = game.view.selected_dashboard_index().saturating_sub(step);
+            game.view.set_selected_dashboard_index(new_idx);
             Some(UpdateResult::new())
         }
         KeyCode::PageDown => {
             let total = tab.get_item_count(game);
             let h = game.view.last_dashboard_height;
             let step = (h / 2) + 1;
-            game.view.selected_dashboard_index =
-                (game.view.selected_dashboard_index + step).min(total.saturating_sub(1));
+            let new_idx =
+                (game.view.selected_dashboard_index() + step).min(total.saturating_sub(1));
+            game.view.set_selected_dashboard_index(new_idx);
             Some(UpdateResult::new())
         }
         KeyCode::Enter | KeyCode::Char(_) => {
-            let index = game.view.selected_dashboard_index;
+            let index = game.view.selected_dashboard_index();
             let verbs = tab.get_verbs(game, index);
 
             let shortcut = match key.code {

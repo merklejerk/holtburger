@@ -1,5 +1,5 @@
+use crate::ui::FocusedPane;
 use crate::ui::state::GameState;
-use crate::ui::{FocusedPane, InteractionMode};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -32,11 +32,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
 
     // Left title: Interaction Info / World Name (if needed)
     if let Some(interaction) = game.view.active_interaction {
-        let title_text = match interaction.mode {
-            InteractionMode::Moving => " Moving Item | [ESC] to cancel ",
-            InteractionMode::Healing => " Healing | [ESC] to cancel ",
-            InteractionMode::Target => " Targeting | [ESC] to cancel ",
-        };
+        let title_text = interaction.status_text();
         block = block.title(
             ratatui::widgets::block::Title::from(Span::raw(title_text))
                 .alignment(ratatui::layout::Alignment::Left),
@@ -66,10 +62,16 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
 
     // --- 1. Interaction Info / World Name ---
     if let Some(interaction) = game.view.active_interaction {
-        let (name, guid) = if let Some(entity) = game.data.entities.get(&interaction.guid) {
+        let target_guid = match interaction {
+            crate::ui::Interaction::Moving { item_guid } => item_guid,
+            crate::ui::Interaction::Healing { item_guid } => item_guid,
+            crate::ui::Interaction::Targeting { target_guid } => target_guid,
+        };
+
+        let (name, guid) = if let Some(entity) = game.data.entities.get(&target_guid) {
             (entity.name.as_str(), entity.guid.0)
         } else {
-            ("Unknown Entity", interaction.guid.0)
+            ("Unknown Entity", target_guid.0)
         };
 
         let line = Line::from(vec![

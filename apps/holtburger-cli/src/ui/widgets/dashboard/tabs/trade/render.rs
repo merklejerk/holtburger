@@ -1,17 +1,19 @@
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
     Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
     ScrollbarState,
 };
 
+use super::super::classification::{classify_description, classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use crate::ui::types::TradeFocus;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
-use holtburger_common::properties::ItemType;
+use holtburger_common::properties::{ItemType, PropertyInt};
+use holtburger_core::world::context::WorldContextExt;
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if let Some(trade) = &game.data.trade {
@@ -28,9 +30,10 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
+        let selected_index = game.view.selected_dashboard_index();
         game.view
-            .dashboard_list_state
-            .select(Some(game.view.selected_dashboard_index));
+            .dashboard_list_state()
+            .select(Some(selected_index));
 
         // Self side
         let self_items: Vec<ListItem> = trade
@@ -39,15 +42,26 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, guid)| {
-                let name = game
-                    .data
-                    .entities
-                    .get(guid)
-                    .map(|e| e.name.as_str())
-                    .unwrap_or("Unknown Item");
+                let mut display_name = "Unknown Item".to_string();
+                let mut emoji = "❓";
+                let mut color = Color::White;
+                if let Some(e) = game.data.entities.get(guid) {
+                    display_name = e.name.clone();
+                    let stack_size = e.stack_size();
+                    if stack_size > 1 {
+                        display_name = format!("{} ({}x)", display_name, stack_size);
+                    }
+
+                    let class = classify_entity(e);
+                    emoji = class.emoji();
+                    color = get_entity_color(class);
+                }
                 let is_selected =
-                    trade_focus == TradeFocus::Local && i == game.view.selected_dashboard_index;
-                ListItem::new(name.to_string()).style(theme::list_item_style(is_selected))
+                    trade_focus == TradeFocus::Local && i == game.view.selected_dashboard_index();
+
+                let text = format!("[{}] {}", emoji, display_name);
+                ListItem::new(Line::styled(text, Style::default().fg(color)))
+                    .style(theme::list_item_style(is_selected))
             })
             .collect();
 
@@ -56,6 +70,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         let self_height = self_area.height as usize;
         game.view.last_dashboard_height = self_height; // Both sides same height in 50/50 split
 
+        let mut default_self_state = ListState::default();
         let (self_title, self_state) = match trade_focus {
             TradeFocus::Local => (
                 Line::from(vec![
@@ -66,7 +81,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                         ""
                     }),
                 ]),
-                &mut game.view.dashboard_list_state,
+                game.view.dashboard_list_state(),
             ),
             TradeFocus::Partner => (
                 Line::from(vec![
@@ -78,7 +93,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     }),
                     Span::raw(" ([Z] to switch)"),
                 ]),
-                &mut ListState::default(),
+                &mut default_self_state,
             ),
         };
 
@@ -102,12 +117,14 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         f.render_stateful_widget(self_list, self_area, self_state);
 
+        let selected_index = game.view.selected_dashboard_index();
+
         render_scrollbar(
             f,
             self_area,
             self_item_count,
             if trade_focus == TradeFocus::Local {
-                game.view.selected_dashboard_index
+                selected_index
             } else {
                 0
             },
@@ -122,18 +139,29 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, guid)| {
-                let name = game
-                    .data
-                    .entities
-                    .get(guid)
-                    .map(|e| e.name.as_str())
-                    .unwrap_or("Unknown Item");
-                let is_selected =
-                    trade_focus == TradeFocus::Partner && i == game.view.selected_dashboard_index;
-                ListItem::new(name.to_string()).style(theme::list_item_style(is_selected))
+                let mut display_name = "Unknown Item".to_string();
+                let mut emoji = "❓";
+                let mut color = Color::White;
+                if let Some(e) = game.data.entities.get(guid) {
+                    display_name = e.name.clone();
+                    let stack_size = e.stack_size();
+                    if stack_size > 1 {
+                        display_name = format!("{} ({}x)", display_name, stack_size);
+                    }
+
+                    let class = classify_entity(e);
+                    emoji = class.emoji();
+                    color = get_entity_color(class);
+                }
+                let is_selected = trade_focus == TradeFocus::Partner && i == selected_index;
+
+                let text = format!("[{}] {}", emoji, display_name);
+                ListItem::new(Line::styled(text, Style::default().fg(color)))
+                    .style(theme::list_item_style(is_selected))
             })
             .collect();
 
+        let mut default_partner_state = ListState::default();
         let (partner_title, partner_state) = match trade_focus {
             TradeFocus::Partner => (
                 Line::from(vec![
@@ -144,7 +172,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                         ""
                     }),
                 ]),
-                &mut game.view.dashboard_list_state,
+                game.view.dashboard_list_state(),
             ),
             TradeFocus::Local => (
                 Line::from(vec![
@@ -156,7 +184,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     }),
                     Span::raw(" ([Z] to switch)"),
                 ]),
-                &mut ListState::default(),
+                &mut default_partner_state,
             ),
         };
 
@@ -185,7 +213,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             partner_area,
             partner_item_count,
             if trade_focus == TradeFocus::Partner {
-                game.view.selected_dashboard_index
+                selected_index
             } else {
                 0
             },
@@ -236,7 +264,28 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, m)| {
-                let name = m.description.name.as_deref().unwrap_or("Unknown Item");
+                let mut display_name = m
+                    .description
+                    .name
+                    .as_deref()
+                    .unwrap_or("Unknown Item")
+                    .to_string();
+
+                let stack_size = m
+                    .description
+                    .int_properties
+                    .get(&(PropertyInt::StackSize as u32))
+                    .cloned()
+                    .unwrap_or(1) as u32;
+
+                if stack_size > 1 {
+                    display_name = format!("{} ({}x)", display_name, stack_size);
+                }
+
+                let class = classify_description(&m.description);
+                let emoji = class.emoji();
+                let color = get_entity_color(class);
+                let full_name = format!("[{}] {}", emoji, display_name);
 
                 // Calculate vendor's sell price (player pays this)
                 // Ground truth: Math.Max(1, (uint)Math.Ceiling(((float)sellRate * (value ?? 0)) - 0.1))
@@ -251,7 +300,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     .ceil()
                     .max(DEFAULT_PRICE as f32) as u32;
 
-                let is_selected = i == game.view.selected_dashboard_index;
+                let is_selected = i == game.view.selected_dashboard_index();
 
                 let currency_suffix = if vendor.alternate_currency_wcid == 0 {
                     "p".to_string()
@@ -260,7 +309,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 };
 
                 ListItem::new(Line::from(vec![
-                    Span::raw(format!("{:<30}", name)),
+                    Span::styled(format!("{:<30}", full_name), Style::default().fg(color)),
                     Span::styled(
                         format!("{:>10}{}", price, currency_suffix),
                         Style::default().fg(theme::MONEY_FG),
@@ -275,20 +324,15 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
 
+        let selected_index = game.view.selected_dashboard_index();
         game.view
-            .dashboard_list_state
-            .select(Some(game.view.selected_dashboard_index));
+            .dashboard_list_state()
+            .select(Some(selected_index));
         game.view.last_dashboard_height = list_area.height as usize;
 
-        f.render_stateful_widget(list, list_area, &mut game.view.dashboard_list_state);
+        f.render_stateful_widget(list, list_area, game.view.dashboard_list_state());
 
-        render_scrollbar(
-            f,
-            area,
-            total,
-            game.view.selected_dashboard_index,
-            list_area.height as usize,
-        );
+        render_scrollbar(f, area, total, selected_index, list_area.height as usize);
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let horizontal_margin = 2;

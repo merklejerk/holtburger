@@ -1549,7 +1549,7 @@ mod tests {
             WorldPosition::default(),
         ));
 
-        let data = InventoryPutObjInContainerData {
+        let data = InventoryPutObjInContainerEventData {
             item_guid,
             container_guid,
             slot: 0,
@@ -1589,7 +1589,7 @@ mod tests {
         item.set_wielder_id(Some(Guid(0x3)));
         state.entities.insert(item);
 
-        let data = InventoryPutObjectIn3DData {
+        let data = InventoryPutObjectIn3DEventData {
             object_guid: obj_guid,
         };
         let event = GameEvent::InventoryPutObjectIn3D(Box::new(data));
@@ -1627,7 +1627,7 @@ mod tests {
             WorldPosition::default(),
         ));
 
-        let data = WieldObjectData {
+        let data = WieldObjectEventData {
             object_guid: obj_guid,
             equip_mask: EquipMask::from_bits_truncate(0),
         };
@@ -1686,7 +1686,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let player_name = "TestingPlayer".to_string();
 
-        let data = PlayerDescriptionData {
+        let data = PlayerDescriptionEventData {
             guid: player_guid,
             sequence: 1,
             name: player_name.clone(),

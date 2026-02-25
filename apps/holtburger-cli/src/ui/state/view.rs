@@ -8,10 +8,10 @@ pub struct ViewState {
     pub focused_pane: FocusedPane,
     /// Previous focus, used for returning from modals.
     pub previous_focused_pane: FocusedPane,
-    /// Index of item currently selected in the dashboard.
-    pub selected_dashboard_index: usize,
-    /// Internal state for the dashboard's ratatui List widget.
-    pub dashboard_list_state: ratatui::widgets::ListState,
+    /// Index of item currently selected in the dashboard per tab.
+    pub selected_dashboard_indices: std::collections::HashMap<DashboardTab, usize>,
+    /// Internal state for the dashboard's ratatui List widget per tab.
+    pub dashboard_list_states: std::collections::HashMap<DashboardTab, ratatui::widgets::ListState>,
     /// Used to keep track of height for scrolling.
     pub last_dashboard_height: usize,
     /// Current vertical scroll position of the chat.
@@ -44,13 +44,33 @@ pub struct ViewState {
     pub trade_no_session_msg_cache: Option<(u16, Vec<String>)>,
 }
 
+impl ViewState {
+    pub fn selected_dashboard_index(&self) -> usize {
+        self.selected_dashboard_indices
+            .get(&self.dashboard_tab)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    pub fn set_selected_dashboard_index(&mut self, index: usize) {
+        self.selected_dashboard_indices
+            .insert(self.dashboard_tab, index);
+    }
+
+    pub fn dashboard_list_state(&mut self) -> &mut ratatui::widgets::ListState {
+        self.dashboard_list_states
+            .entry(self.dashboard_tab)
+            .or_default()
+    }
+}
+
 impl Default for ViewState {
     fn default() -> Self {
         Self {
             focused_pane: FocusedPane::Dashboard,
             previous_focused_pane: FocusedPane::Dashboard,
-            selected_dashboard_index: 0,
-            dashboard_list_state: ratatui::widgets::ListState::default(),
+            selected_dashboard_indices: std::collections::HashMap::new(),
+            dashboard_list_states: std::collections::HashMap::new(),
             last_dashboard_height: 0,
             scroll_offset: 0,
             chat_total_lines: 0,

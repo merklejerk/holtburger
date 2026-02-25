@@ -51,6 +51,7 @@
 - [x] TUI client needs major refactors. (Done: Page-based architecture with isolated GameState)
 - [x] Auto-switch to trade tab when INITIATING a trade/vendor.
 - [x] Startup is slow. Slow DAT parsing?
+- [x] Weenie errors are just showing the first word or something in chat.
 - [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
@@ -62,7 +63,6 @@
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
 - [ ] Auto-follow.
-- [ ] Weenie errors are just showing the first word or something in chat.
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
@@ -108,6 +108,7 @@
 - [x] Don't show container sizes on creatures in nearby list.
 - [x] Reintroduce `[ENTER] Move into main pack` verb.
 - [x] Still showing conflicting verbs during move interaction.
+- [x] Tabs should manage their own current index. E.g., should not be passed into `get_verbs()`. (SCRAPPED)
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -128,7 +129,6 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Crafting.
 - [ ] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
-- [ ] Tabs should manage their own current index. E.g., should not be passed into `get_verbs()`.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

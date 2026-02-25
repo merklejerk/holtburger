@@ -206,8 +206,8 @@ impl GameState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    self.view.selected_dashboard_index =
-                        self.view.selected_dashboard_index.saturating_sub(1);
+                    let new_idx = self.view.selected_dashboard_index().saturating_sub(1);
+                    self.view.set_selected_dashboard_index(new_idx);
                     result.needs_redraw = true;
                 }
             }
@@ -237,8 +237,8 @@ impl GameState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    self.view.selected_dashboard_index =
-                        self.view.selected_dashboard_index.saturating_add(1);
+                    let new_idx = self.view.selected_dashboard_index().saturating_add(1);
+                    self.view.set_selected_dashboard_index(new_idx);
                     result.needs_redraw = true;
                 }
             }

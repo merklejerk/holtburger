@@ -154,11 +154,11 @@ impl AppState {
         let dashboard_count = self.dashboard_item_count();
         if let Some(game) = self.game_option_mut() {
             // Enforce dashboard index bounds
-            if game.view.selected_dashboard_index >= dashboard_count && dashboard_count > 0 {
-                game.view.selected_dashboard_index = dashboard_count - 1;
+            if game.view.selected_dashboard_index() >= dashboard_count && dashboard_count > 0 {
+                game.view.set_selected_dashboard_index(dashboard_count - 1);
                 result.needs_redraw = true;
-            } else if dashboard_count == 0 && game.view.selected_dashboard_index != 0 {
-                game.view.selected_dashboard_index = 0;
+            } else if dashboard_count == 0 && game.view.selected_dashboard_index() != 0 {
+                game.view.set_selected_dashboard_index(0);
                 result.needs_redraw = true;
             }
 

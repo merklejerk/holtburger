@@ -91,7 +91,10 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 }
 
 pub fn render_verb_bar(game: &GameState) -> Option<Paragraph<'static>> {
-    let (tab, index) = (game.view.dashboard_tab, game.view.selected_dashboard_index);
+    let (tab, index) = (
+        game.view.dashboard_tab,
+        game.view.selected_dashboard_index(),
+    );
 
     let mut verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(game, tab, index);
     if verbs.is_empty() {

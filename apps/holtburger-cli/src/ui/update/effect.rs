@@ -1,6 +1,6 @@
+use crate::ui::ContextView;
 use crate::ui::state::{AppState, ChatMessageKind};
 use crate::ui::widgets::dashboard::tabs::classification;
-use crate::ui::{ActiveInteraction, ContextView, InteractionMode};
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_protocol::messages::magic::Enchantment;
@@ -150,37 +150,29 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         }
         UIEffect::Heal(guid) => {
             if let Some(game) = state.game_option_mut() {
-                game.view.active_interaction = Some(ActiveInteraction {
-                    guid,
-                    mode: InteractionMode::Healing,
-                });
+                game.view.active_interaction =
+                    Some(crate::ui::Interaction::Healing { item_guid: guid });
             }
             vec![]
         }
         UIEffect::Move(guid) => {
             if let Some(game) = state.game_option_mut() {
-                game.view.active_interaction = Some(ActiveInteraction {
-                    guid,
-                    mode: InteractionMode::Moving,
-                });
+                game.view.active_interaction =
+                    Some(crate::ui::Interaction::Moving { item_guid: guid });
             }
             vec![]
         }
         UIEffect::Target(guid) => {
             if let Some(game) = state.game_option_mut() {
-                game.view.active_interaction = Some(ActiveInteraction {
-                    guid,
-                    mode: InteractionMode::Target,
-                });
+                game.view.active_interaction =
+                    Some(crate::ui::Interaction::Targeting { target_guid: guid });
             }
             vec![]
         }
         UIEffect::Give(target_guid) => {
             if let Some(game) = state.game_option_mut()
-                && let Some(ActiveInteraction {
-                    guid: item_guid,
-                    mode: InteractionMode::Moving,
-                }) = game.view.active_interaction
+                && let Some(crate::ui::Interaction::Moving { item_guid }) =
+                    game.view.active_interaction
             {
                 let cmd = ClientCommand::GiveObjectRequest {
                     target: target_guid,
@@ -194,10 +186,11 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         }
         UIEffect::ApplyHealing(guid) => {
             if let Some(game) = state.game_option_mut()
-                && let Some(interaction) = game.view.active_interaction
+                && let Some(crate::ui::Interaction::Healing { item_guid }) =
+                    game.view.active_interaction
             {
                 let cmd = ClientCommand::UseWithTarget {
-                    item: interaction.guid,
+                    item: item_guid,
                     target: guid,
                 };
                 game.view.active_interaction = None;
@@ -207,10 +200,11 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
         }
         UIEffect::ApplyMoving(container_guid) => {
             if let Some(game) = state.game_option_mut()
-                && let Some(interaction) = game.view.active_interaction
+                && let Some(crate::ui::Interaction::Moving { item_guid }) =
+                    game.view.active_interaction
             {
                 let cmd = ClientCommand::MoveItem {
-                    item: interaction.guid,
+                    item: item_guid,
                     container: container_guid,
                     placement: 0,
                 };

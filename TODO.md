@@ -106,6 +106,8 @@
 - [x] Stack not updating when consumed/spent (try Bunch of Nanners, pyreals).
 - [x] Show count for stacked items.
 - [x] Don't show container sizes on creatures in nearby list.
+- [x] Reintroduce `[ENTER] Move into main pack` verb.
+- [x] Still showing conflicting verbs during move interaction.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -121,12 +123,12 @@
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
 - [ ] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
 - [ ] Log in chat when items are bought and sold.
-- [ ] Still showing conflicting verbs during move interaction.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Crafting.
 - [ ] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
+- [ ] Tabs should manage their own current index. E.g., should not be passed into `get_verbs()`.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

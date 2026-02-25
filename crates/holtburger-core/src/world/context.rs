@@ -6,6 +6,7 @@ use holtburger_protocol::messages::combat::CombatMode;
 
 /// Provides access to the world state for common logic.
 pub trait WorldContext {
+    fn get_player_guid(&self) -> Option<Guid>;
     fn get_entity(&self, guid: Guid) -> Option<&Entity>;
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
@@ -35,6 +36,18 @@ pub trait WorldContextExt: WorldContext {
             }
         }
         counts
+    }
+
+    fn get_container_id(&self, guid: Guid) -> Option<Guid> {
+        self.get_entity(guid)?.container_id()
+    }
+
+    fn is_in_main_pack(&self, guid: Guid) -> bool {
+        if let Some(player_guid) = self.get_player_guid() {
+            self.get_container_id(guid) == Some(player_guid)
+        } else {
+            false
+        }
     }
 
     /// Recursively checks if an item or any of its contents are attuned or sticky.

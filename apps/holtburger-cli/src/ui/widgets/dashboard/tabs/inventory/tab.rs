@@ -4,12 +4,13 @@ use ratatui::layout::Rect;
 use super::super::classification::{self, EntityClass};
 use super::super::common::{Action, Verb};
 use super::render::render_inventory_tab;
+use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, InteractionMode};
+use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
-use holtburger_common::properties::{ObjectDescriptionFlag, PropertyInt};
+use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::world::context::WorldContextExt;
 use holtburger_core::world::entity::Entity;
@@ -38,27 +39,45 @@ impl TabController for InventoryTab {
         let active_interaction = game.view.active_interaction;
 
         if let CommandTarget::Entity(e, _) = target {
-            verbs.extend(vec![Verb::new(Action::Assess, 'a', "Assess")]);
+            let class = classification::classify_entity(e);
 
-            if let Some(interaction) = active_interaction
-                && interaction.mode == InteractionMode::Moving
-            {
-                let class = classification::classify_entity(e);
-                let is_self = Some(e.guid) == player_guid;
-                if !is_self {
-                    let is_container = matches!(class, EntityClass::Container | EntityClass::Chest);
-
-                    if is_container {
+            match active_interaction {
+                Some(Interaction::Healing { item_guid }) => {
+                    if e.guid == item_guid {
                         verbs.push(Verb::new(
-                            Action::Confirm(format!("Move to {}", e.name)),
+                            Action::ConfirmInteraction,
                             '\r',
-                            format!("Move to {}", e.name),
+                            "Heal yourself".to_string(),
                         ));
                     }
+                    return verbs;
                 }
+                Some(Interaction::Moving { item_guid }) => {
+                    let is_self = Some(e.guid) == player_guid;
+                    let is_same_item = e.guid == item_guid;
+                    let is_in_main_pack = game.data.is_in_main_pack(item_guid);
+                    let is_container = matches!(class, EntityClass::Container | EntityClass::Chest);
+                    let label = if is_self || is_same_item {
+                        if !is_in_main_pack {
+                            Some("Move to main pack".to_string())
+                        } else {
+                            // Already in main pack.
+                            None
+                        }
+                    } else if is_container {
+                        Some(format!("Move to {}", e.name))
+                    } else {
+                        None
+                    };
+                    if let Some(label) = label {
+                        verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
+                    }
+                    return verbs;
+                }
+                _ => {}
             }
 
-            let class = classification::classify_entity(e);
+            verbs.extend(vec![Verb::new(Action::Assess, 'a', "Assess")]);
 
             match class {
                 EntityClass::Tool
@@ -76,16 +95,11 @@ impl TabController for InventoryTab {
                 _ => {}
             }
 
-            // TODO
-            // if let Some(attuned) = e.get_bool_prop(crate::holtburger_common::properties::PropertyBool::Attuned) {
-            // if attuned {
-            verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
-            // }
-            // }
+            if !e.is_attuned_sticky() {
+                verbs.push(Verb::new(Action::Drop, 'd', "Drop"));
+            }
 
-            if let Some(stack_size) = e.get_int_prop(PropertyInt::StackSize)
-                && stack_size > 1
-            {
+            if e.stack_size() > 1 {
                 verbs.push(Verb::new(Action::Split, 'p', "Split"));
             }
 
@@ -142,6 +156,13 @@ impl TabController for InventoryTab {
                     placement: 0,
                 })
             }),
+            (Action::MoveToSlot(slot_guid), CommandTarget::Entity(e, _)) => {
+                Some(UIEffect::Command(ClientCommand::MoveItem {
+                    item: e.guid,
+                    container: *slot_guid,
+                    placement: 0,
+                }))
+            }
             _ => super::super::common::handle_base_action(action, &target, game),
         }
     }

@@ -16,10 +16,11 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
+    let selected_index = game.view.selected_dashboard_index();
     game.view
-        .dashboard_list_state
-        .select(Some(game.view.selected_dashboard_index));
-    f.render_stateful_widget(dashboard_list, area, &mut game.view.dashboard_list_state);
+        .dashboard_list_state()
+        .select(Some(selected_index));
+    f.render_stateful_widget(dashboard_list, area, game.view.dashboard_list_state());
 
     // Render Scrollbar
     let height = area.height as usize;
@@ -28,7 +29,7 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
             game.view
-                .selected_dashboard_index
+                .selected_dashboard_index()
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -62,7 +63,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
             e,
             display_dist,
             *depth,
-            i == game.view.selected_dashboard_index,
+            i == game.view.selected_dashboard_index(),
             container_count,
         ));
     }

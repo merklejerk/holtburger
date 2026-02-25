@@ -39,7 +39,7 @@ pub enum TradeFocus {
     Partner,
 }
 
-#[derive(PartialEq, Debug, Clone, Copy)]
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy)]
 pub enum DashboardTab {
     Nearby,
     Inventory,

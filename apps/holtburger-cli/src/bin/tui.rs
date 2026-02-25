@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -303,6 +303,10 @@ async fn main() -> Result<()> {
             while event::poll(std::time::Duration::from_millis(0))? {
                 match event::read()? {
                     Event::Key(key) => {
+                        if key.kind != KeyEventKind::Press {
+                            continue;
+                        }
+
                         let size = terminal.size()?;
                         let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
                         let res = app_state.handle_action(ui::AppAction::KeyPress(

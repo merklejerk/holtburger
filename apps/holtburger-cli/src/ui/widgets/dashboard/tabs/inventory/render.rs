@@ -6,11 +6,12 @@ use ratatui::widgets::{
     List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::super::classification::{EntityClass, classify_entity, get_entity_color};
+use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
+use holtburger_core::world::context::WorldContextExt;
 use holtburger_core::world::entity::Entity;
 use std::collections::HashMap;
 
@@ -48,13 +49,14 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
+    let selected_index = game.view.selected_dashboard_index();
     game.view
-        .dashboard_list_state
-        .select(Some(game.view.selected_dashboard_index));
+        .dashboard_list_state()
+        .select(Some(selected_index));
     f.render_stateful_widget(
         dashboard_list,
         bottom_area,
-        &mut game.view.dashboard_list_state,
+        game.view.dashboard_list_state(),
     );
 
     // Render Scrollbar
@@ -64,7 +66,7 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if total > height {
         let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
             game.view
-                .selected_dashboard_index
+                .selected_dashboard_index()
                 .min(total.saturating_sub(height)),
         );
         f.render_stateful_widget(
@@ -107,7 +109,7 @@ fn get_list_items(
         list_items.push(render_inventory_item(
             e,
             *depth,
-            i == game.view.selected_dashboard_index,
+            i == game.view.selected_dashboard_index(),
             is_equipped,
             is_offered,
             container_count,
@@ -139,15 +141,23 @@ fn render_inventory_item(
 
     let mut display_name = if e.name.trim().is_empty() {
         format!("<{:08X}>", e.guid)
-    } else if is_equipped {
-        format!("{} (EQUIPPED)", e.name)
-    } else if is_offered {
-        format!("{} (OFFERED)", e.name)
     } else {
-        e.name.clone()
+        let mut name = e.name.clone();
+        let stack_size = e.stack_size();
+        if stack_size > 1 {
+            name = format!("{} ({}x)", name, stack_size);
+        }
+
+        if is_equipped {
+            format!("{} (EQUIPPED)", name)
+        } else if is_offered {
+            format!("{} (OFFERED)", name)
+        } else {
+            name
+        }
     };
 
-    if class != EntityClass::Player {
+    if !class.is_creature() {
         if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);

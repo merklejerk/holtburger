@@ -39,6 +39,8 @@ impl Client {
 
             ClientCommand::Drop(_)
             | ClientCommand::Get(_)
+            | ClientCommand::Stack { .. }
+            | ClientCommand::Split { .. }
             | ClientCommand::MoveItem { .. }
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
@@ -165,35 +167,37 @@ impl Client {
         match cmd {
             ClientCommand::Identify(guid) => {
                 log::info!(">>> Identifying: 0x{:08X}", guid);
-                self.send_game_action(GameAction::IdentifyObject(Box::new(IdentifyObjectData {
-                    guid,
-                })))
+                self.send_game_action(GameAction::IdentifyObject(Box::new(
+                    IdentifyObjectActionData { guid },
+                )))
                 .await
             }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
-                self.send_game_action(GameAction::Use(Box::new(UseData { guid })))
+                self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
                     .await
             }
             ClientCommand::UseWithTarget { item, target } => {
                 log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
-                self.send_game_action(GameAction::UseWithTarget(Box::new(UseWithTargetData {
-                    item_guid: item,
-                    target_guid: target,
-                })))
+                self.send_game_action(GameAction::UseWithTarget(Box::new(
+                    UseWithTargetActionData {
+                        item_guid: item,
+                        target_guid: target,
+                    },
+                )))
                 .await
             }
             ClientCommand::CastTargetedSpell { target, spell_id } => {
                 log::info!(">>> Casting spell {} on 0x{:08X}", spell_id, target.0);
                 self.send_game_action(GameAction::CastTargetedSpell(Box::new(
-                    CastTargetedSpellData { target, spell_id },
+                    CastTargetedSpellActionData { target, spell_id },
                 )))
                 .await
             }
             ClientCommand::CastUntargetedSpell { spell_id } => {
                 log::info!(">>> Casting spell {}", spell_id);
                 self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
-                    CastUntargetedSpellData { spell_id },
+                    CastUntargetedSpellActionData { spell_id },
                 )))
                 .await
             }
@@ -209,7 +213,7 @@ impl Client {
                     amount
                 );
                 self.send_game_action(GameAction::GiveObjectRequest(Box::new(
-                    GiveObjectRequestData {
+                    GiveObjectRequestActionData {
                         target_guid: target,
                         item_guid: item,
                         amount,
@@ -286,7 +290,7 @@ impl Client {
         match cmd {
             ClientCommand::Drop(guid) => {
                 log::info!(">>> Dropping: 0x{:08X}", guid);
-                self.send_game_action(GameAction::DropItem(Box::new(DropItemData {
+                self.send_game_action(GameAction::DropItem(Box::new(DropItemActionData {
                     item_guid: guid,
                 })))
                 .await
@@ -294,10 +298,51 @@ impl Client {
             ClientCommand::Get(guid) => {
                 log::info!(">>> Getting: 0x{:08X}", guid);
                 self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                    PutItemInContainerData {
+                    PutItemInContainerActionData {
                         item_guid: guid,
                         container_guid: self.world.player.guid,
                         placement: 0,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::Stack {
+                source,
+                destination,
+                amount,
+            } => {
+                log::info!(
+                    ">>> Stacking 0x{:08X} ({}x) onto 0x{:08X}",
+                    source,
+                    amount,
+                    destination
+                );
+                self.send_game_action(GameAction::StackableMerge(Box::new(
+                    StackableMergeActionData {
+                        merge_from_guid: source,
+                        merge_to_guid: destination,
+                        amount,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::Split {
+                item,
+                container,
+                amount,
+            } => {
+                log::info!(
+                    ">>> Splitting 0x{:08X} ({}x) to container 0x{:08X}",
+                    item,
+                    amount,
+                    container
+                );
+                self.send_game_action(GameAction::StackableSplitToContainer(Box::new(
+                    StackableSplitToContainerActionData {
+                        stack_guid: item,
+                        container_guid: container,
+                        place: 0, // Auto-placement
+                        amount,
                     },
                 )))
                 .await
@@ -314,7 +359,7 @@ impl Client {
                     placement
                 );
                 self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                    PutItemInContainerData {
+                    PutItemInContainerActionData {
                         item_guid: item,
                         container_guid: container,
                         placement,
@@ -332,10 +377,12 @@ impl Client {
                 );
 
                 // Sequencing is handled automatically by the send_game_action helper.
-                self.send_game_action(GameAction::GetAndWieldItem(Box::new(GetAndWieldItemData {
-                    item_guid: item,
-                    equip_mask: target_mask,
-                })))
+                self.send_game_action(GameAction::GetAndWieldItem(Box::new(
+                    GetAndWieldItemActionData {
+                        item_guid: item,
+                        equip_mask: target_mask,
+                    },
+                )))
                 .await
             }
             ClientCommand::SplitToWield { item, slot, amount } => {
@@ -349,7 +396,7 @@ impl Client {
                 );
 
                 self.send_game_action(GameAction::StackableSplitToWield(Box::new(
-                    StackableSplitToWieldData {
+                    StackableSplitToWieldActionData {
                         stack_guid: item,
                         amount: amount as i32,
                         equip_mask: target_mask,
@@ -368,15 +415,17 @@ impl Client {
                 xp_spent,
             } => {
                 log::info!(">>> Raising Attribute: {:?} (XP: {})", attribute, xp_spent);
-                self.send_game_action(GameAction::RaiseAttribute(Box::new(RaiseAttributeData {
-                    attribute_type: attribute as u32,
-                    xp_spent,
-                })))
+                self.send_game_action(GameAction::RaiseAttribute(Box::new(
+                    RaiseAttributeActionData {
+                        attribute_type: attribute as u32,
+                        xp_spent,
+                    },
+                )))
                 .await
             }
             ClientCommand::RaiseVital { vital, xp_spent } => {
                 log::info!(">>> Raising Vital: {:?} (XP: {})", vital, xp_spent);
-                self.send_game_action(GameAction::RaiseVital(Box::new(RaiseVitalData {
+                self.send_game_action(GameAction::RaiseVital(Box::new(RaiseVitalActionData {
                     vital_type: vital as u32,
                     xp_spent,
                 })))
@@ -384,7 +433,7 @@ impl Client {
             }
             ClientCommand::RaiseSkill { skill, xp_spent } => {
                 log::info!(">>> Raising Skill: {:?} (XP: {})", skill, xp_spent);
-                self.send_game_action(GameAction::RaiseSkill(Box::new(RaiseSkillData {
+                self.send_game_action(GameAction::RaiseSkill(Box::new(RaiseSkillActionData {
                     skill_type: skill as u32,
                     xp_spent,
                 })))
@@ -392,7 +441,7 @@ impl Client {
             }
             ClientCommand::TrainSkill { skill, credits } => {
                 log::info!(">>> Training Skill: {:?} (Credits: {})", skill, credits);
-                self.send_game_action(GameAction::TrainSkill(Box::new(TrainSkillData {
+                self.send_game_action(GameAction::TrainSkill(Box::new(TrainSkillActionData {
                     skill_type: skill as u32,
                     credits_spent: credits as i32,
                 })))
@@ -414,7 +463,7 @@ impl Client {
                 let tele_seq = self.world.player.teleport_sequence;
                 let force_seq = self.world.player.force_position_sequence;
 
-                self.send_game_action(GameAction::Jump(Box::new(JumpData {
+                self.send_game_action(GameAction::Jump(Box::new(JumpActionData {
                     extent,
                     velocity: Default::default(),
                     instance_sequence: obj_inst,
@@ -433,7 +482,7 @@ impl Client {
                 let tele_seq = self.world.player.teleport_sequence;
                 let force_seq = self.world.player.force_position_sequence;
 
-                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateData {
+                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
                     raw_motion_state: RawMotionState {
                         flags: RawMotionFlags::CURRENT_STYLE,
                         current_style: Some(state_opcode),
@@ -464,7 +513,7 @@ impl Client {
                 let tele_seq = self.world.player.teleport_sequence;
                 let force_seq = self.world.player.force_position_sequence;
 
-                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateData {
+                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
                     raw_motion_state: RawMotionState::default(),
                     position: self.world.player.position,
                     instance_sequence: obj_inst,
@@ -504,13 +553,13 @@ impl Client {
         match cmd {
             ClientCommand::Ping => {
                 log::info!(">>> Sending Ping");
-                self.send_game_action(GameAction::PingRequest(Box::new(PingRequestData)))
+                self.send_game_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
                     .await
             }
             ClientCommand::SetCombatMode(mode) => {
                 log::info!(">>> Changing combat mode to: {:?}", mode);
                 self.send_game_action(GameAction::ChangeCombatMode(Box::new(
-                    ChangeCombatModeData { mode },
+                    ChangeCombatModeActionData { mode },
                 )))
                 .await
             }
@@ -522,8 +571,10 @@ impl Client {
             }
             ClientCommand::CancelAttack => {
                 log::info!(">>> Canceling attack");
-                self.send_game_action(GameAction::CancelAttack(Box::new(CancelAttackData {})))
-                    .await
+                self.send_game_action(GameAction::CancelAttack(Box::new(
+                    CancelAttackActionData {},
+                )))
+                .await
             }
             ClientCommand::Quit => {
                 log::info!("Disconnecting...");
@@ -544,14 +595,14 @@ impl Client {
     }
 
     pub(super) async fn send_talk(&mut self, text: &str) -> Result<()> {
-        self.send_game_action(GameAction::Talk(Box::new(TalkData {
+        self.send_game_action(GameAction::Talk(Box::new(TalkActionData {
             message: text.to_string(),
         })))
         .await
     }
 
     pub(super) async fn send_login_complete(&mut self) -> Result<()> {
-        self.send_game_action(GameAction::LoginComplete(Box::new(LoginCompleteData)))
+        self.send_game_action(GameAction::LoginComplete(Box::new(LoginCompleteActionData)))
             .await
     }
 
@@ -609,7 +660,7 @@ impl Client {
 
         for guid in to_unequip {
             self.send_game_action(GameAction::PutItemInContainer(Box::new(
-                PutItemInContainerData {
+                PutItemInContainerActionData {
                     item_guid: guid,
                     container_guid: self.world.player.guid,
                     placement: 0,

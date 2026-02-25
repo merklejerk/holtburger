@@ -3,7 +3,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct TellData {
+pub struct TellEventData {
     pub message: String,
     pub sender_name: String,
     pub sender_id: u32,
@@ -11,7 +11,7 @@ pub struct TellData {
     pub chat_type: u32,
 }
 
-impl ProtocolUnpack for TellData {
+impl ProtocolUnpack for TellEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
         let sender_name = read_string16(data, offset)?;
@@ -22,7 +22,7 @@ impl ProtocolUnpack for TellData {
         let target_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
         let chat_type = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
         *offset += 16;
-        Some(TellData {
+        Some(TellEventData {
             message,
             sender_name,
             sender_id,
@@ -32,7 +32,7 @@ impl ProtocolUnpack for TellData {
     }
 }
 
-impl ProtocolPack for TellData {
+impl ProtocolPack for TellEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         write_string16(buf, &self.message);
         write_string16(buf, &self.sender_name);
@@ -44,13 +44,13 @@ impl ProtocolPack for TellData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChannelBroadcastData {
+pub struct ChannelBroadcastEventData {
     pub channel_id: u32,
     pub sender_name: String,
     pub message: String,
 }
 
-impl ProtocolUnpack for ChannelBroadcastData {
+impl ProtocolUnpack for ChannelBroadcastEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         if *offset + 4 > data.len() {
             return None;
@@ -59,7 +59,7 @@ impl ProtocolUnpack for ChannelBroadcastData {
         *offset += 4;
         let sender_name = read_string16(data, offset)?;
         let message = read_string16(data, offset)?;
-        Some(ChannelBroadcastData {
+        Some(ChannelBroadcastEventData {
             channel_id,
             sender_name,
             message,
@@ -67,7 +67,7 @@ impl ProtocolUnpack for ChannelBroadcastData {
     }
 }
 
-impl ProtocolPack for ChannelBroadcastData {
+impl ProtocolPack for ChannelBroadcastEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.extend_from_slice(&self.channel_id.to_le_bytes());
         write_string16(buf, &self.sender_name);
@@ -76,36 +76,36 @@ impl ProtocolPack for ChannelBroadcastData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct CommunicationTransientStringData {
+pub struct CommunicationTransientStringEventData {
     pub message: String,
 }
 
-impl ProtocolUnpack for CommunicationTransientStringData {
+impl ProtocolUnpack for CommunicationTransientStringEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
-        Some(CommunicationTransientStringData { message })
+        Some(CommunicationTransientStringEventData { message })
     }
 }
 
-impl ProtocolPack for CommunicationTransientStringData {
+impl ProtocolPack for CommunicationTransientStringEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         write_string16(buf, &self.message);
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PopupStringData {
+pub struct PopupStringEventData {
     pub message: String,
 }
 
-impl ProtocolUnpack for PopupStringData {
+impl ProtocolUnpack for PopupStringEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let message = read_string16(data, offset)?;
-        Some(PopupStringData { message })
+        Some(PopupStringEventData { message })
     }
 }
 
-impl ProtocolPack for PopupStringData {
+impl ProtocolPack for PopupStringEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         write_string16(buf, &self.message);
     }
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_communication_transient_string_parity() {
-        let expected = CommunicationTransientStringData {
+        let expected = CommunicationTransientStringEventData {
             message: "Fixed casting state".to_string(),
         };
         // 13 00 46 69 78 65 64 20 63 61 73 74 69 6E 67 20 73 74 61 74 65 00 00 00
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_popup_string_parity() {
-        let expected = PopupStringData {
+        let expected = PopupStringEventData {
             message: "Welcome to Asheron's Call!".to_string(),
         };
         // 1A 00 57 65 6C 63 6F 6D 65 20 74 6F 20 41 73 68 65 72 6F 6E 27 73 20 43 61 6C 6C 21

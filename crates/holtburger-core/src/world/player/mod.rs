@@ -572,7 +572,7 @@ mod tests {
     fn test_magic_purge_bad_enchantments_preserves_vitae() {
         use crate::world::StateEvent;
         use holtburger_protocol::messages::{
-            GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsData,
+            GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsEventData,
         };
 
         let mut player = PlayerState::new();
@@ -619,10 +619,12 @@ mod tests {
         let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: player.guid,
             sequence: 1,
-            event: GameEvent::MagicPurgeBadEnchantments(Box::new(MagicPurgeBadEnchantmentsData {
-                target: player.guid,
-                sequence: 1,
-            })),
+            event: GameEvent::MagicPurgeBadEnchantments(Box::new(
+                MagicPurgeBadEnchantmentsEventData {
+                    target: player.guid,
+                    sequence: 1,
+                },
+            )),
         }));
 
         let mut events = Vec::new();
@@ -650,8 +652,8 @@ mod tests {
     fn test_magic_purge_enchantments_preserves_vitae_only() {
         use crate::world::StateEvent;
         use holtburger_protocol::messages::{
-            GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsData,
-            MagicUpdateEnchantmentData,
+            GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsEventData,
+            MagicUpdateEnchantmentEventData,
         };
 
         let mut player = PlayerState::new();
@@ -686,7 +688,7 @@ mod tests {
         let update_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: player.guid,
             sequence: 16,
-            event: GameEvent::MagicUpdateEnchantment(Box::new(MagicUpdateEnchantmentData {
+            event: GameEvent::MagicUpdateEnchantment(Box::new(MagicUpdateEnchantmentEventData {
                 target: player.guid,
                 sequence: 16,
                 enchantment: vitae_enchant,
@@ -696,7 +698,7 @@ mod tests {
         let purge_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: player.guid,
             sequence: 17,
-            event: GameEvent::MagicPurgeEnchantments(Box::new(MagicPurgeEnchantmentsData {
+            event: GameEvent::MagicPurgeEnchantments(Box::new(MagicPurgeEnchantmentsEventData {
                 target: player.guid,
                 sequence: 17,
             })),

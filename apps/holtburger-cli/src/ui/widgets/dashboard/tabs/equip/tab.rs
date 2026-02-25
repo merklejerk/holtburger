@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 
 use super::super::common::{Action, Verb};
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
-use super::verbs;
+use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
@@ -18,26 +18,40 @@ impl TabController for EquipTab {
     }
 
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
+        let mut verbs = vec![];
         let lines = get_lines(game);
         let target = match lines.get(index) {
             Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::Entity(e, *slot),
             _ => CommandTarget::None,
         };
 
-        let player_guid = game.data.player_guid;
-        let active_interaction = game.view.active_interaction;
-
-        if let Some(interaction_verbs) = super::super::common::get_interaction_verbs(
-            &target,
-            player_guid,
-            active_interaction,
-            game.view.dashboard_tab,
-        ) {
-            return interaction_verbs;
+        if let Some(interaction) = game.view.active_interaction
+            && let CommandTarget::Entity(_e, _) = &target
+        {
+            match interaction {
+                Interaction::Targeting { .. } => {}
+                _ => {
+                    return verbs;
+                }
+            }
         }
 
         match lines.get(index) {
-            Some(EquipTabLine::Item(e, is_here, _, slot)) => verbs::get_verbs(e, *is_here, *slot),
+            Some(EquipTabLine::Item(_e, is_here, _, slot)) => {
+                verbs.extend([
+                    Verb::new(Action::Assess, 'a', "Assess"),
+                    Verb::new(Action::Target, 't', "Target"),
+                ]);
+
+                if *is_here {
+                    verbs.push(Verb::new(Action::Unequip, 'q', "Unequip"));
+                } else if let Some(s) = slot {
+                    verbs.push(Verb::new(Action::Equip(*s), 'e', "Equip"));
+                }
+
+                verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
+                verbs
+            }
             _ => vec![],
         }
     }

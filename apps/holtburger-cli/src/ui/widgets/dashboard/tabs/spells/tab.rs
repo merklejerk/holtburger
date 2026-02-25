@@ -5,7 +5,7 @@ use super::super::common::{Action, Verb};
 use super::render::render_spells_tab;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, InteractionMode};
+use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::world::context::WorldContextExt;
@@ -17,7 +17,7 @@ impl TabController for SpellsTab {
         render_spells_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
+    fn get_verbs(&self, game: &GameState, _index: usize) -> Vec<Verb> {
         let active_interaction = game.view.active_interaction;
 
         let get_default_verbs = |is_targeted: bool| {
@@ -32,19 +32,10 @@ impl TabController for SpellsTab {
             ]
         };
 
-        if let Some(interaction) = active_interaction {
-            let is_targeted = interaction.mode == InteractionMode::Target
-                || interaction.mode == InteractionMode::Healing;
-
-            let target = self.get_target_at_index(game, index);
-            if let CommandTarget::Spell(_) = target {
-                return get_default_verbs(is_targeted);
-            } else if interaction.mode != InteractionMode::Target {
-                return vec![Verb::new(Action::Cancel, '\x1b', "Cancel")];
-            }
-        }
-
-        get_default_verbs(false)
+        get_default_verbs(matches!(
+            active_interaction,
+            Some(crate::ui::Interaction::Targeting { .. })
+        ))
     }
 
     fn handle_action(
@@ -57,7 +48,6 @@ impl TabController for SpellsTab {
         match (action, &target) {
             (Action::Cast(_), CommandTarget::Spell(spell_id)) => {
                 use crate::ui::state::ChatMessageKind;
-                use crate::ui::types::InteractionMode;
                 use holtburger_protocol::messages::combat::CombatMode;
 
                 if !game.data.is_wielding_caster() {
@@ -75,11 +65,14 @@ impl TabController for SpellsTab {
 
                 let active_interaction = game.view.active_interaction;
                 if let Some(interaction) = active_interaction
-                    && (interaction.mode == InteractionMode::Target
-                        || interaction.mode == InteractionMode::Healing)
+                    && let Some(target_guid) = match interaction {
+                        crate::ui::Interaction::Targeting { target_guid } => Some(target_guid),
+                        crate::ui::Interaction::Healing { item_guid } => Some(item_guid),
+                        _ => None,
+                    }
                 {
                     cmds.push(ClientCommand::CastTargetedSpell {
-                        target: interaction.guid,
+                        target: target_guid,
                         spell_id: *spell_id,
                     });
                 } else if let Some(player_guid) = game.data.player_guid {

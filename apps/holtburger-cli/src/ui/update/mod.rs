@@ -7,10 +7,10 @@ pub mod inventory;
 pub mod navigation;
 pub mod world;
 
-use crate::ui::action::AppAction;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 use crate::ui::state::AppState;
 use crate::ui::state::ChatMessageKind;
+use crate::ui::types::AppAction;
 use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 

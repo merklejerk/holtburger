@@ -5,7 +5,7 @@ use super::super::common::{Action, Verb};
 use super::render::render_trade_tab;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, InteractionMode, TradeFocus};
+use crate::ui::types::{CommandTarget, TradeFocus};
 use crate::ui::update::effect::UIEffect;
 
 pub struct TradeTab;
@@ -23,8 +23,8 @@ impl TabController for TradeTab {
 
         if let Some(interaction) = active_interaction {
             if let CommandTarget::Entity(e, _) = &target {
-                match interaction.mode {
-                    InteractionMode::Moving => {
+                match interaction {
+                    crate::ui::Interaction::Moving { item_guid } => {
                         let class = super::super::classification::classify_entity(e);
                         use super::super::classification::EntityClass;
                         let is_creature = matches!(
@@ -38,31 +38,31 @@ impl TabController for TradeTab {
                         if !is_self {
                             let is_container =
                                 matches!(class, EntityClass::Container | EntityClass::Chest);
-                            let is_subject = e.guid == interaction.guid;
+                            let is_subject = e.guid == item_guid;
                             let is_in_main_pack = e.container_id() == player_guid;
 
                             if is_subject && !is_in_main_pack {
                                 verbs.push(Verb::new(
-                                    Action::Confirm("Move to main pack".to_string()),
+                                    Action::ConfirmInteraction,
                                     '\r',
                                     "Move to main pack",
                                 ));
                             } else if is_container {
                                 verbs.push(Verb::new(
-                                    Action::Confirm(format!("Move to {}", e.name)),
+                                    Action::ConfirmInteraction,
                                     '\r',
                                     format!("Move to {}", e.name),
                                 ));
                             } else if is_creature {
                                 verbs.push(Verb::new(
-                                    Action::Confirm(format!("Give to {}", e.name)),
+                                    Action::ConfirmInteraction,
                                     '\r',
                                     format!("Give to {}", e.name),
                                 ));
                             }
                         }
                     }
-                    InteractionMode::Healing => {
+                    crate::ui::Interaction::Healing { item_guid } => {
                         let class = super::super::classification::classify_entity(e);
                         use super::super::classification::EntityClass;
                         let is_creature = matches!(
@@ -73,22 +73,21 @@ impl TabController for TradeTab {
                                 | EntityClass::Vendor
                         );
 
-                        if is_creature || e.guid == interaction.guid {
-                            let label = if Some(e.guid) == player_guid || e.guid == interaction.guid
-                            {
+                        if is_creature || e.guid == item_guid {
+                            let label = if Some(e.guid) == player_guid || e.guid == item_guid {
                                 "Heal yourself".to_string()
                             } else {
                                 format!("Heal {}", e.name)
                             };
-                            verbs.push(Verb::new(Action::Confirm(label.clone()), '\r', label));
+                            verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
                         }
                     }
-                    InteractionMode::Target => {}
+                    crate::ui::Interaction::Targeting { .. } => {}
                 }
             }
 
-            if interaction.mode != InteractionMode::Target {
-                verbs.push(Verb::new(Action::Cancel, '\x1b', "Cancel"));
+            if !matches!(interaction, crate::ui::Interaction::Targeting { .. }) {
+                verbs.push(Verb::new(Action::CancelInteraction, '\x1b', "Cancel"));
             }
         }
 

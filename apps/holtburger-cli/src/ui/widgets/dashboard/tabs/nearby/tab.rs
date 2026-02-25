@@ -1,12 +1,14 @@
+use holtburger_core::world::context::WorldContextExt;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::classification::{self, EntityClass};
 use super::super::common::{Action, Verb};
 use super::render::render_nearby_tab;
+use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, InteractionMode};
+use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
 use holtburger_common::properties::ObjectDescriptionFlag;
@@ -34,129 +36,93 @@ impl TabController for NearbyTab {
         let target = self.get_target_at_index(game, index);
         let player_guid = game.data.player_guid;
         let active_interaction = game.view.active_interaction;
+        let mut verbs = vec![];
 
-        if let Some(interaction) = active_interaction {
-            let mut interaction_verbs = Vec::new();
+        if let Some(interaction) = active_interaction
+            && let CommandTarget::Entity(e, _) = &target
+        {
+            let class = classification::classify_entity(e);
+            let is_self = Some(e.guid) == player_guid;
 
-            if let CommandTarget::Entity(e, _) = &target {
-                match interaction.mode {
-                    InteractionMode::Moving => {
-                        let class = classification::classify_entity(e);
-                        let is_creature = matches!(
-                            class,
-                            EntityClass::Player
-                                | EntityClass::Monster
-                                | EntityClass::Npc
-                                | EntityClass::Vendor
-                        );
-                        let is_self = Some(e.guid) == player_guid;
-                        if !is_self {
-                            let is_container =
-                                matches!(class, EntityClass::Container | EntityClass::Chest);
-                            let is_subject = e.guid == interaction.guid;
-                            let is_in_main_pack = e.container_id() == player_guid;
+            match interaction {
+                Interaction::Moving { item_guid } => {
+                    let is_givable_creature =
+                        matches!(class, EntityClass::Player | EntityClass::Npc);
+                    let is_container = matches!(class, EntityClass::Container | EntityClass::Chest);
+                    let is_same_item = e.guid == item_guid;
+                    let is_in_main_pack = game.data.is_in_main_pack(item_guid);
 
-                            if is_subject && !is_in_main_pack {
-                                interaction_verbs.push(Verb::new(
-                                    Action::Confirm("Move to main pack".to_string()),
-                                    '\r',
-                                    "Move to main pack",
-                                ));
-                            } else if is_container {
-                                interaction_verbs.push(Verb::new(
-                                    Action::Confirm(format!("Move to {}", e.name)),
-                                    '\r',
-                                    format!("Move to {}", e.name),
-                                ));
-                            } else if is_creature {
-                                interaction_verbs.push(Verb::new(
-                                    Action::Confirm(format!("Give to {}", e.name)),
-                                    '\r',
-                                    format!("Give to {}", e.name),
-                                ));
-                            }
+                    let label = if is_same_item || is_self {
+                        if !is_in_main_pack {
+                            Some("Move to pack".to_string())
+                        } else {
+                            None
                         }
-                    }
-                    InteractionMode::Healing => {
-                        let class = classification::classify_entity(e);
-                        let is_creature = matches!(
-                            class,
-                            EntityClass::Player
-                                | EntityClass::Monster
-                                | EntityClass::Npc
-                                | EntityClass::Vendor
-                        );
+                    } else if is_givable_creature {
+                        Some(format!("Give to {}", e.name))
+                    } else if is_container {
+                        Some(format!("Move to {}", e.name))
+                    } else {
+                        None
+                    };
 
-                        if is_creature || e.guid == interaction.guid {
-                            let label = if Some(e.guid) == player_guid || e.guid == interaction.guid
-                            {
-                                "Heal yourself".to_string()
-                            } else {
-                                format!("Heal {}", e.name)
-                            };
-                            interaction_verbs.push(Verb::new(
-                                Action::Confirm(label.clone()),
-                                '\r',
-                                label,
-                            ));
-                        }
+                    if let Some(label) = label {
+                        verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
                     }
-                    InteractionMode::Target => {}
+                    return verbs;
                 }
-            }
-
-            if interaction.mode != InteractionMode::Target {
-                interaction_verbs.push(Verb::new(Action::Cancel, '\x1b', "Cancel"));
-                return interaction_verbs;
+                Interaction::Healing { item_guid } => {
+                    let is_player = class == EntityClass::Player;
+                    let is_healing_kit = e.guid == item_guid;
+                    if is_player || is_healing_kit {
+                        let label = if is_self || is_healing_kit {
+                            "Heal yourself".to_string()
+                        } else {
+                            format!("Heal {}", e.name)
+                        };
+                        verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
+                    }
+                    return verbs;
+                }
+                _ => {}
             }
         }
 
         if let CommandTarget::Entity(e, _) = target {
-            let mut verbs = vec![
+            verbs.extend([
                 Verb::new(Action::Assess, 'a', "Assess"),
                 Verb::new(Action::Target, 't', "Target"),
-            ];
+            ]);
             if e.wielder_id().is_some() || e.physics_parent_id.is_some() {
                 return verbs;
             }
 
-            let is_player = game.data.player_guid == Some(e.guid);
+            let is_self = game.data.player_guid == Some(e.guid);
             let class = classification::classify_entity(e);
 
-            match class {
-                EntityClass::Vendor => {
-                    verbs.push(Verb::new(Action::Use, 's', "Shop"));
-                }
-                EntityClass::Npc => {
-                    verbs.push(Verb::new(Action::Use, 'k', "Talk"));
-                }
-                EntityClass::Portal
-                | EntityClass::Door
-                | EntityClass::LifeStone
-                | EntityClass::Chest => {
-                    verbs.push(Verb::new(Action::Use, 'u', "Use"));
-                }
-                EntityClass::Weapon
-                | EntityClass::Apparel
-                | EntityClass::Wand
-                | EntityClass::Tool
-                | EntityClass::Container
-                | EntityClass::Consumable
-                | EntityClass::Key
-                | EntityClass::Writable
-                | EntityClass::Money
-                | EntityClass::Item => {
-                    verbs.push(Verb::new(Action::Use, 'u', "Use"));
-                }
-                _ => {}
-            }
-
-            if !is_player {
+            if !is_self {
                 // Nearby entities allow Approach
                 verbs.push(Verb::new(Action::Approach, 'r', "Approach"));
 
-                if class == EntityClass::Player {
-                    verbs.push(Verb::new(Action::OpenTrade, 'd', "Trade"));
+                match class {
+                    EntityClass::Vendor => {
+                        verbs.push(Verb::new(Action::Use, 's', "Shop"));
+                    }
+                    EntityClass::Npc => {
+                        verbs.push(Verb::new(Action::Use, 'k', "Talk"));
+                    }
+                    EntityClass::Portal
+                    | EntityClass::Door
+                    | EntityClass::LifeStone
+                    | EntityClass::Container
+                    | EntityClass::Consumable
+                    | EntityClass::Chest => {
+                        verbs.push(Verb::new(Action::Use, 'u', "Use"));
+                    }
+                    EntityClass::Player => {
+                        verbs.push(Verb::new(Action::OpenTrade, 'd', "Trade"));
+                    }
+                    _ => {}
                 }
 
                 if !e.flags.intersects(ObjectDescriptionFlag::STUCK) {
@@ -212,13 +178,6 @@ impl TabController for NearbyTab {
             }
             (Action::Approach, CommandTarget::Entity(e, _)) => {
                 Some(UIEffect::Command(ClientCommand::MoveTo { target: e.guid }))
-            }
-            (Action::MoveToSlot(slot_guid), CommandTarget::Entity(e, _)) => {
-                Some(UIEffect::Command(ClientCommand::MoveItem {
-                    item: e.guid,
-                    container: *slot_guid,
-                    placement: 0,
-                }))
             }
             _ => super::super::common::handle_base_action(action, &target, game),
         }

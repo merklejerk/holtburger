@@ -5,7 +5,7 @@ use super::super::common::{Action, Verb};
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, InteractionMode, StatType};
+use crate::ui::types::{CommandTarget, StatType};
 use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 
@@ -21,9 +21,9 @@ impl TabController for CharacterTab {
         let target = self.get_target_at_index(game, index);
 
         if let Some(interaction) = active_interaction
-            && interaction.mode != InteractionMode::Target
+            && !matches!(interaction, crate::ui::Interaction::Targeting { .. })
         {
-            return vec![Verb::new(Action::Cancel, '\x1b', "Cancel")];
+            return vec![Verb::new(Action::CancelInteraction, '\x1b', "Cancel")];
         }
 
         match target {

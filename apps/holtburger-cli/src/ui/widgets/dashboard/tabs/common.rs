@@ -1,9 +1,8 @@
 use super::super::assess;
 use super::super::debug;
-use super::classification;
 use crate::ui::UIEffect;
 use crate::ui::state::GameState;
-use crate::ui::types::{CommandTarget, ContextView, InteractionMode};
+use crate::ui::types::{CommandTarget, ContextView};
 use holtburger_common::Guid;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::{ClientCommand, TargetSlot};
@@ -28,8 +27,8 @@ pub enum Action {
     Train,
     Move,
     Cast(bool),
-    Confirm(String),
-    Cancel,
+    ConfirmInteraction,
+    CancelInteraction,
     Buy,
     Sell,
     AddToTrade,
@@ -55,7 +54,6 @@ pub fn handle_base_action(
     target: &CommandTarget,
     game: &GameState,
 ) -> Option<UIEffect> {
-    let player_guid = game.data.player_guid;
     let active_interaction = game.view.active_interaction;
 
     match (action, target) {
@@ -149,52 +147,20 @@ pub fn handle_base_action(
             CommandTarget::VendorItem(v) => Some(UIEffect::Target(v.description.guid)),
             _ => None,
         },
-        (Action::Confirm(_), target) => {
+        (Action::ConfirmInteraction, target) => {
             if let Some(interaction) = active_interaction {
-                match interaction.mode {
-                    InteractionMode::Healing => match target {
-                        CommandTarget::Entity(e, _) => {
-                            if e.guid == interaction.guid {
-                                player_guid.map(UIEffect::ApplyHealing)
-                            } else {
-                                Some(UIEffect::ApplyHealing(e.guid))
-                            }
-                        }
-                        _ => player_guid.map(UIEffect::ApplyHealing),
-                    },
-                    InteractionMode::Moving => match target {
-                        CommandTarget::Entity(e, _) if e.guid != interaction.guid => {
-                            let class = classification::classify_entity(e);
-                            match class {
-                                classification::EntityClass::Container
-                                | classification::EntityClass::Chest => {
-                                    Some(UIEffect::ApplyMoving(e.guid))
-                                }
-                                _ => Some(UIEffect::Give(e.guid)),
-                            }
-                        }
-                        _ => {
-                            if game.view.dashboard_tab == crate::ui::DashboardTab::Trade {
-                                Some(UIEffect::Command(
-                                    holtburger_core::client::types::ClientCommand::AddToTrade {
-                                        item: interaction.guid,
-                                    },
-                                ))
-                            } else {
-                                player_guid.map(UIEffect::ApplyMoving)
-                            }
-                        }
-                    },
-                    InteractionMode::Target => match target {
-                        CommandTarget::Entity(e, _) => Some(UIEffect::Target(e.guid)),
-                        _ => None,
-                    },
-                }
+                interaction.handle_action(action, target, game)
             } else {
                 None
             }
         }
-        (Action::Cancel, _) => Some(UIEffect::CancelInteraction),
+        (Action::CancelInteraction, target) => {
+            if let Some(interaction) = active_interaction {
+                interaction.handle_action(action, target, game)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }

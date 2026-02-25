@@ -140,6 +140,10 @@ impl GameData {
 }
 
 impl WorldContext for GameData {
+    fn get_player_guid(&self) -> Option<Guid> {
+        self.player_guid
+    }
+
     fn get_entity(&self, guid: Guid) -> Option<&Entity> {
         self.entities.get(&guid)
     }

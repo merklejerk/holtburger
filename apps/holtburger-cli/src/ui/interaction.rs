@@ -1,10 +1,9 @@
 use holtburger_common::Guid;
 
 use crate::ui::state::GameState;
-use crate::ui::types::CommandTarget;
+use crate::ui::types::{Action, CommandTarget};
 use crate::ui::update::effect::UIEffect;
 use crate::ui::widgets::dashboard::tabs::classification;
-use crate::ui::widgets::dashboard::tabs::common::Action;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interaction {

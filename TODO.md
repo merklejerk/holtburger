@@ -56,11 +56,14 @@
 - [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [x] Show item emojis in trade window.
 - [x] `PlayerState` is duplicating state. The property maps should be the one source of truth.
+- [x] [C]ombine verb (crafting).
+- [x] [U]se for Mana charges.
+- [x] Actions and `handle_base_action()` don't belong in `common.rs`.
+- [x] Just get rid of verbs.rs and move the fn into the tab controller.
+- [x] Active panel needs to be much more obvious.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
-- [ ] [C]ombine verb (crafting).
-- [ ] [U]se for Mana charges.
 - [ ] Search/filter on list tabs.
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 - [ ] Implement actual collisions.
@@ -69,17 +72,16 @@
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
-- [ ] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
-- [ ] Active panel needs to be much more obvious.
-- [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
-- [ ] Actions and `handle_base_action()` don't belong in `common.rs`.
+- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] HATE `world/state.rs`
 - [ ] Resolve Spellbook entries in debug info.
 - [ ] Exit combat mode when trying to trade.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
+- [ ] Label unlocked chests in nearby tab.
+- [ ] Server messages being printed twice in chat, colored as errors, even though they aren't all errors.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -123,6 +125,8 @@
 - [x] Manage in-world containers.
 - [x] SetState message shold also update properties.
 - [x] Crafting.
+- [x] Show charges/uses/etc for items.
+- [x] Useful errors also appear in ServerMessage.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -141,10 +145,8 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Should split into the same container.
 - [ ] Precise splitting.
-- [ ] Show charges/uses/etc for items.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
-- [ ] Useful errors also appear in ServerMessage.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -163,3 +165,4 @@
     - When they are explicitly deleted.
     - When a trade is closed.
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
+- [ ] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?

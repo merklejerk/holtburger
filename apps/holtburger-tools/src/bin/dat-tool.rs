@@ -408,10 +408,10 @@ fn main() -> Result<()> {
                 if let Some(icon) = weenie.icon_id() {
                     println!("Icon ID:         {:08X}", icon);
                 }
-                println!("Properties (Int):    {}", weenie.properties_int.len());
-                println!("Properties (Float):  {}", weenie.properties_float.len());
-                println!("Properties (String): {}", weenie.properties_string.len());
-                println!("Properties (DID):    {}", weenie.properties_did.len());
+                println!("Properties (Int):    {}", weenie.properties.ints.0.len());
+                println!("Properties (Float):  {}", weenie.properties.floats.0.len());
+                println!("Properties (String): {}", weenie.properties.strings.0.len());
+                println!("Properties (DID):    {}", weenie.properties.dids.0.len());
             } else {
                 println!("Could not decode a Weenie record from ID {:08X}.", parsed);
             }

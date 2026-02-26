@@ -1,12 +1,14 @@
 use crate::Guid;
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use strum_macros::{Display, FromRepr};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
+)]
 #[repr(u32)]
 pub enum PropertyBool {
-    Undef = 0,
     Stuck = 1,
     Open = 2,
     Locked = 3,
@@ -157,10 +159,11 @@ pub enum AttunedStatus {
     Sticky = 2,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
+)]
 #[repr(u32)]
 pub enum PropertyInt {
-    Undef = 0,
     ItemType = 1,
     CreatureType = 2,
     PaletteTemplate = 3,
@@ -566,10 +569,11 @@ pub enum PropertyInt {
     InventoryOrder = 9015,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
+)]
 #[repr(u32)]
 pub enum PropertyInt64 {
-    Undef = 0,
     TotalExperience = 1,
     AvailableExperience = 2,
     AugmentationCost = 3,
@@ -580,10 +584,11 @@ pub enum PropertyInt64 {
     InteractionReqs = 8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
+)]
 #[repr(u32)]
 pub enum PropertyFloat {
-    Undef = 0,
     HeartbeatInterval = 1,
     HeartbeatTimestamp = 2,
     HealthRate = 3,
@@ -766,10 +771,11 @@ pub enum PropertyFloat {
     PcapRecordeOmegaZ = 8018,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
+)]
 #[repr(u32)]
 pub enum PropertyString {
-    Undef = 0,
     Name = 1,
     Title = 2,
     Sex = 3,
@@ -834,10 +840,11 @@ pub enum PropertyString {
     TinkerLog = 9007,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
+)]
 #[repr(u32)]
 pub enum PropertyDataId {
-    Undef = 0,
     Setup = 1,
     MotionTable = 2,
     SoundTable = 3,
@@ -919,10 +926,11 @@ pub enum PropertyDataId {
     PcapPhysicsDidDataTemplatedFrom = 8044,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
+)]
 #[repr(u32)]
 pub enum PropertyInstanceId {
-    Undef = 0,
     Owner = 1,
     Container = 2,
     Wielder = 3,
@@ -1230,7 +1238,6 @@ bitflags! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WeenieType {
-    Undef = 0,
     Generic = 1,
     Clothing = 2,
     MissileLauncher = 3,
@@ -1425,4 +1432,317 @@ pub enum PropertyValue {
     String(String),
     DID(Guid),
     IID(Guid),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum PropertyUpdate {
+    Int(PropertyInt, i32),
+    Int64(PropertyInt64, i64),
+    Bool(PropertyBool, bool),
+    Float(PropertyFloat, f64),
+    String(PropertyString, String),
+    DataId(PropertyDataId, Guid),
+    InstanceId(PropertyInstanceId, Guid),
+
+    UnknownInt(u32, i32),
+    UnknownInt64(u32, i64),
+    UnknownBool(u32, bool),
+    UnknownFloat(u32, f64),
+    UnknownString(u32, String),
+    UnknownDataId(u32, Guid),
+    UnknownInstanceId(u32, Guid),
+}
+
+impl PropertyUpdate {
+    pub fn try_from_raw_int(id: u32, value: i32) -> Self {
+        match PropertyInt::from_repr(id) {
+            Some(p) => Self::Int(p, value),
+            None => Self::UnknownInt(id, value),
+        }
+    }
+    pub fn try_from_raw_int64(id: u32, value: i64) -> Self {
+        match PropertyInt64::from_repr(id) {
+            Some(p) => Self::Int64(p, value),
+            None => Self::UnknownInt64(id, value),
+        }
+    }
+    pub fn try_from_raw_bool(id: u32, value: bool) -> Self {
+        match PropertyBool::from_repr(id) {
+            Some(p) => Self::Bool(p, value),
+            None => Self::UnknownBool(id, value),
+        }
+    }
+    pub fn try_from_raw_float(id: u32, value: f64) -> Self {
+        match PropertyFloat::from_repr(id) {
+            Some(p) => Self::Float(p, value),
+            None => Self::UnknownFloat(id, value),
+        }
+    }
+    pub fn try_from_raw_string(id: u32, value: String) -> Self {
+        match PropertyString::from_repr(id) {
+            Some(p) => Self::String(p, value),
+            None => Self::UnknownString(id, value),
+        }
+    }
+    pub fn try_from_raw_did(id: u32, value: Guid) -> Self {
+        match PropertyDataId::from_repr(id) {
+            Some(p) => Self::DataId(p, value),
+            None => Self::UnknownDataId(id, value),
+        }
+    }
+    pub fn try_from_raw_iid(id: u32, value: Guid) -> Self {
+        match PropertyInstanceId::from_repr(id) {
+            Some(p) => Self::InstanceId(p, value),
+            None => Self::UnknownInstanceId(id, value),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PropertyMap<K, V>(pub BTreeMap<K, V>)
+where
+    K: Ord;
+
+impl<K: Ord, V> Default for PropertyMap<K, V> {
+    fn default() -> Self {
+        Self(BTreeMap::new())
+    }
+}
+
+impl<K: Ord, V> PropertyMap<K, V> {
+    pub fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        self.0.insert(key, value);
+    }
+
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.0.get(key)
+    }
+
+    pub fn iter(&self) -> std::collections::btree_map::Iter<'_, K, V> {
+        self.0.iter()
+    }
+
+    pub fn raw(&self) -> &BTreeMap<K, V> {
+        &self.0
+    }
+
+    pub fn extend(&mut self, other: BTreeMap<K, V>) {
+        self.0.extend(other);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WorldObjectProperties {
+    pub ints: PropertyMap<PropertyInt, i32>,
+    pub floats: PropertyMap<PropertyFloat, f64>,
+    pub strings: PropertyMap<PropertyString, String>,
+    pub dids: PropertyMap<PropertyDataId, Guid>,
+    pub iids: PropertyMap<PropertyInstanceId, Guid>,
+    pub bools: PropertyMap<PropertyBool, bool>,
+    pub int64s: PropertyMap<PropertyInt64, i64>,
+}
+
+impl WorldObjectProperties {
+    pub fn apply(&mut self, update: PropertyUpdate) {
+        match update {
+            PropertyUpdate::Int(p, v) => self.ints.insert(p, v),
+            PropertyUpdate::Int64(p, v) => self.int64s.insert(p, v),
+            PropertyUpdate::Bool(p, v) => self.bools.insert(p, v),
+            PropertyUpdate::Float(p, v) => self.floats.insert(p, v),
+            PropertyUpdate::String(p, v) => {
+                if v.is_empty() {
+                    self.strings.0.remove(&p);
+                } else {
+                    self.strings.insert(p, v);
+                }
+            }
+            PropertyUpdate::DataId(p, v) => {
+                if v.is_null() {
+                    self.dids.0.remove(&p);
+                } else {
+                    self.dids.insert(p, v);
+                }
+            }
+            PropertyUpdate::InstanceId(p, v) => {
+                if v.is_null() {
+                    self.iids.0.remove(&p);
+                } else {
+                    self.iids.insert(p, v);
+                }
+            }
+            PropertyUpdate::UnknownInt(p, v) => {
+                if let Some(p) = PropertyInt::from_repr(p) {
+                    self.ints.insert(p, v);
+                }
+            }
+            PropertyUpdate::UnknownInt64(p, v) => {
+                if let Some(p) = PropertyInt64::from_repr(p) {
+                    self.int64s.insert(p, v);
+                }
+            }
+            PropertyUpdate::UnknownBool(p, v) => {
+                if let Some(p) = PropertyBool::from_repr(p) {
+                    self.bools.insert(p, v);
+                }
+            }
+            PropertyUpdate::UnknownFloat(p, v) => {
+                if let Some(p) = PropertyFloat::from_repr(p) {
+                    self.floats.insert(p, v);
+                }
+            }
+            PropertyUpdate::UnknownString(p, v) => {
+                if let Some(p) = PropertyString::from_repr(p) {
+                    self.apply(PropertyUpdate::String(p, v));
+                }
+            }
+            PropertyUpdate::UnknownDataId(p, v) => {
+                if let Some(p) = PropertyDataId::from_repr(p) {
+                    self.apply(PropertyUpdate::DataId(p, v));
+                }
+            }
+            PropertyUpdate::UnknownInstanceId(p, v) => {
+                if let Some(p) = PropertyInstanceId::from_repr(p) {
+                    self.apply(PropertyUpdate::InstanceId(p, v));
+                }
+            }
+        }
+    }
+
+    pub fn merge(&mut self, other: WorldObjectProperties) {
+        self.ints.0.extend(other.ints.0);
+        self.int64s.0.extend(other.int64s.0);
+        self.bools.0.extend(other.bools.0);
+        self.floats.0.extend(other.floats.0);
+        self.strings.0.extend(other.strings.0);
+        self.dids.0.extend(other.dids.0);
+        self.iids.0.extend(other.iids.0);
+    }
+
+    pub fn apply_raw_int(&mut self, id: u32, value: i32) {
+        self.apply(PropertyUpdate::try_from_raw_int(id, value));
+    }
+
+    pub fn apply_raw_int64(&mut self, id: u32, value: i64) {
+        self.apply(PropertyUpdate::try_from_raw_int64(id, value));
+    }
+
+    pub fn apply_raw_bool(&mut self, id: u32, value: bool) {
+        self.apply(PropertyUpdate::try_from_raw_bool(id, value));
+    }
+
+    pub fn apply_raw_float(&mut self, id: u32, value: f64) {
+        self.apply(PropertyUpdate::try_from_raw_float(id, value));
+    }
+
+    pub fn apply_raw_string(&mut self, id: u32, value: String) {
+        self.apply(PropertyUpdate::try_from_raw_string(id, value));
+    }
+
+    pub fn apply_raw_did(&mut self, id: u32, value: Guid) {
+        self.apply(PropertyUpdate::try_from_raw_did(id, value));
+    }
+
+    pub fn apply_raw_iid(&mut self, id: u32, value: Guid) {
+        self.apply(PropertyUpdate::try_from_raw_iid(id, value));
+    }
+}
+
+pub trait HasProperties {
+    fn properties(&self) -> &WorldObjectProperties;
+}
+
+pub trait HasPropertiesMut: HasProperties {
+    fn properties_mut(&mut self) -> &mut WorldObjectProperties;
+}
+
+pub trait WorldObjectPropertyAccessors: HasProperties {
+    fn get_bool_prop(&self, prop: PropertyBool) -> bool {
+        self.properties().bools.get(&prop).copied().unwrap_or(false)
+    }
+
+    fn get_int_prop(&self, prop: PropertyInt) -> Option<i32> {
+        self.properties().ints.get(&prop).copied()
+    }
+
+    fn get_instance_prop(&self, prop: PropertyInstanceId) -> Option<Guid> {
+        self.properties()
+            .iids
+            .get(&prop)
+            .copied()
+            .filter(|g| !g.is_null())
+    }
+
+    fn get_data_prop(&self, prop: PropertyDataId) -> Option<Guid> {
+        self.properties()
+            .dids
+            .get(&prop)
+            .copied()
+            .filter(|g| !g.is_null())
+    }
+
+    fn get_float_prop(&self, prop: PropertyFloat) -> Option<f64> {
+        self.properties().floats.get(&prop).copied()
+    }
+
+    fn get_string_prop(&self, prop: PropertyString) -> Option<&str> {
+        self.properties().strings.get(&prop).map(|s| s.as_str())
+    }
+
+    fn get_int64_prop(&self, prop: PropertyInt64) -> Option<i64> {
+        self.properties().int64s.get(&prop).copied()
+    }
+}
+
+pub trait WorldObjectPropertyAccessorsMut: HasPropertiesMut {
+    fn set_int_prop(&mut self, prop: PropertyInt, val: i32) {
+        self.properties_mut().apply(PropertyUpdate::Int(prop, val));
+    }
+
+    fn set_bool_prop(&mut self, prop: PropertyBool, val: bool) {
+        self.properties_mut().apply(PropertyUpdate::Bool(prop, val));
+    }
+
+    fn set_iid_prop(&mut self, prop: PropertyInstanceId, val: Guid) {
+        self.properties_mut()
+            .apply(PropertyUpdate::InstanceId(prop, val));
+    }
+
+    fn set_did_prop(&mut self, prop: PropertyDataId, val: Guid) {
+        self.properties_mut()
+            .apply(PropertyUpdate::DataId(prop, val));
+    }
+
+    fn set_float_prop(&mut self, prop: PropertyFloat, val: f64) {
+        self.properties_mut()
+            .apply(PropertyUpdate::Float(prop, val));
+    }
+
+    fn set_string_prop(&mut self, prop: PropertyString, val: String) {
+        self.properties_mut()
+            .apply(PropertyUpdate::String(prop, val));
+    }
+
+    fn set_int64_prop(&mut self, prop: PropertyInt64, val: i64) {
+        self.properties_mut()
+            .apply(PropertyUpdate::Int64(prop, val));
+    }
+}
+
+impl<T: HasProperties> WorldObjectPropertyAccessors for T {}
+impl<T: HasPropertiesMut> WorldObjectPropertyAccessorsMut for T {}
+
+impl HasProperties for WorldObjectProperties {
+    fn properties(&self) -> &WorldObjectProperties {
+        self
+    }
+}
+
+impl HasPropertiesMut for WorldObjectProperties {
+    fn properties_mut(&mut self) -> &mut WorldObjectProperties {
+        self
+    }
 }

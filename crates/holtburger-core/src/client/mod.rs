@@ -147,9 +147,9 @@ impl Client {
                     .send(ClientViewEvent::PlayerStatsSkillsUpdated {
                         attributes: self.world.player.attributes.clone(),
                         skills: self.world.player.skills.clone(),
-                        resistances: self.world.player.resistances.clone(),
-                        armor: self.world.player.armor,
-                        vitae: self.world.player.vitae,
+                        resistances: self.world.player.resistances(),
+                        armor: self.world.player.armor(),
+                        vitae: self.world.player.vitae(),
                         level_info: level_info.clone(),
                     });
                 let _ = self

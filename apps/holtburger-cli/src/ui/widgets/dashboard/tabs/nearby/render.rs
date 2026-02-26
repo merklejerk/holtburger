@@ -88,10 +88,10 @@ fn render_nearby_item(
 
     let type_marker = class.emoji();
 
-    let mut display_name = if e.name.trim().is_empty() {
+    let mut display_name = if e.name().trim().is_empty() {
         format!("<{:08X}>", e.guid)
     } else {
-        e.name.clone()
+        e.name().to_string()
     };
 
     let stack_size = e.stack_size();

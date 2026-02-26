@@ -23,6 +23,7 @@ pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
         &game.data.inventory,
         &game.data.equipment,
         game.data.player_pos.as_ref(),
+        None, // Inventory doesn't care about open containers
         EntityFilter::Inventory,
     )
 }

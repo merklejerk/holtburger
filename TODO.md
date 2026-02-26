@@ -116,13 +116,13 @@
 - [x] Merging by ItemType is wrong! Lots of things share ItemTypes. WeenieIDs maybe?
 - [x] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
 - [x] No debug verb on wielded weapons in nearby tab.
+- [x] Manage in-world containers.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
     - [ ] Auto-attack on target.
-- [ ] Manage in-world containers.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -137,12 +137,14 @@
 - [ ] Should split into the same container.
 - [ ] Precise splitting.
 - [ ] Exit combat mode when trying to trade.
+- [ ] Show charges/uses/etc for items.
+- [ ] Show health of creatures in nearby list and dynamic panel.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
 - [x] Server only takes IP?
 - [x] flags and weenie flags should also be converted to properties!
-- [x] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows Defender by attempting to run it once, hit "Learn More" and then select "Run anyway".
+- [x] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows D>efender by attempting to run it once, hit "Learn More" and then select "Run anyway".
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.

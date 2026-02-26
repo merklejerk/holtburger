@@ -59,6 +59,7 @@ pub struct WorldState {
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
     pub trade: Option<TradeState>,
+    pub open_containers: std::collections::HashSet<Guid>,
 }
 
 impl WorldState {
@@ -202,6 +203,7 @@ impl WorldState {
             scene: SpatialScene::new(),
             vendor: None,
             trade: None,
+            open_containers: std::collections::HashSet::new(),
         }
     }
 
@@ -717,6 +719,54 @@ impl WorldState {
                     GameEvent::CloseTrade(_) => {
                         self.trade = None;
                         events.push(StateEvent::TradeStateUpdated(None));
+                    }
+                    GameEvent::ViewContents(data) => {
+                        self.open_containers.insert(data.container);
+                        events.push(StateEvent::ContainerOpened(data.container));
+
+                        for item in &data.items {
+                            let guid = item.guid;
+                            // If we don't know the entity, create a placeholder
+                            if self.entities.get(guid).is_none() {
+                                let mut entity = Entity::new(
+                                    guid,
+                                    "Unknown Item".to_string(),
+                                    Default::default(),
+                                );
+                                entity.set_iid_prop(PropertyInstanceId::Container, data.container);
+
+                                self.add_entity(entity.clone());
+                                events.push(StateEvent::EntitySpawned(Box::new(entity)));
+                            } else if let Some(entity) = self.entities.get_mut(guid) {
+                                // If existing entity, ensure container property is set and it is removed from world space
+                                let old_lb = entity.position.landblock_id;
+                                if old_lb != Guid::NULL
+                                    || entity.container_id() != Some(data.container)
+                                {
+                                    entity.set_iid_prop(
+                                        PropertyInstanceId::Container,
+                                        data.container,
+                                    );
+                                    entity.position.landblock_id = Guid::NULL;
+
+                                    if old_lb != Guid::NULL {
+                                        self.scene.remove_entity(guid, old_lb);
+                                    }
+
+                                    events.push(StateEvent::PropertyUpdated {
+                                        guid,
+                                        update: PropertyUpdate::InstanceId(
+                                            PropertyInstanceId::Container,
+                                            data.container,
+                                        ),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    GameEvent::CloseGroundContainer(data) => {
+                        self.open_containers.remove(&data.container_guid);
+                        events.push(StateEvent::ContainerClosed(data.container_guid));
                     }
                     GameEvent::IdentifyObjectResponse(data) => {
                         let guid = data.object_guid;

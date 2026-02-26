@@ -142,7 +142,7 @@
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
 - [x] Server only takes IP?
 - [x] flags and weenie flags should also be converted to properties!
-- [ ] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows Defender by attempting to run it once, hit "Learn More" and then select "Run anyway".
+- [x] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows Defender by attempting to run it once, hit "Learn More" and then select "Run anyway".
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.

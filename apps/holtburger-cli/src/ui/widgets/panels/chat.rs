@@ -1,15 +1,14 @@
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 
 use crate::ui::state::{ChatMessageKind, ChatState, GameState};
+use crate::ui::theme::{pane_block, pane_title_style};
 use crate::ui::utils::wrap_text;
 use crate::ui::{ContextView, FocusedPane};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState,
-};
+use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatState, area: Rect) {
     let width = area.width.saturating_sub(2) as usize;
@@ -38,7 +37,7 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatStat
                 ChatMessageKind::Tell => Color::Magenta,
                 ChatMessageKind::Emote => Color::Green,
                 ChatMessageKind::Info => Color::Cyan,
-                ChatMessageKind::System => Color::DarkGray,
+                ChatMessageKind::System => Color::Gray,
                 ChatMessageKind::Error => Color::Red,
                 ChatMessageKind::Warning => Color::Yellow,
                 ChatMessageKind::Debug => Color::Indexed(242), // Greyish
@@ -89,30 +88,14 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatStat
         messages = padding;
     }
 
-    let chat_style = if game.view.focused_pane == FocusedPane::Chat {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
+    let is_focused = game.view.focused_pane == FocusedPane::Chat;
 
-    let chat_title = if game.view.focused_pane == FocusedPane::Chat {
-        ">> World Chat <<"
-    } else {
-        " World Chat "
-    };
+    let chat_title = " World Chat ";
 
     let chat_list = List::new(messages).block(
-        Block::default()
-            .borders(Borders::ALL)
+        pane_block(is_focused)
             .title(chat_title)
-            .border_style(chat_style)
-            .title_style(if game.view.focused_pane == FocusedPane::Chat {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            }),
+            .title_style(pane_title_style(is_focused)),
     );
     f.render_widget(chat_list, area);
 
@@ -161,11 +144,7 @@ pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _chat: &mut Chat
         ctx_items = padding;
     }
 
-    let ctx_style = if game.view.focused_pane == FocusedPane::Context {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
+    let is_focused = game.view.focused_pane == FocusedPane::Context;
 
     let base_title = match game.view.context_view {
         ContextView::Default => "Context Information",
@@ -175,24 +154,12 @@ pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _chat: &mut Chat
         ContextView::Enchantment(_) => "Enchantment Details",
     };
 
-    let ctx_title = if game.view.focused_pane == FocusedPane::Context {
-        format!(">> {} <<", base_title)
-    } else {
-        format!(" {} ", base_title)
-    };
+    let ctx_title = format!(" {} ", base_title);
 
     let ctx_list = List::new(ctx_items).block(
-        Block::default()
-            .borders(Borders::ALL)
+        pane_block(is_focused)
             .title(ctx_title)
-            .border_style(ctx_style)
-            .title_style(if game.view.focused_pane == FocusedPane::Context {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            }),
+            .title_style(pane_title_style(is_focused)),
     );
     f.render_widget(ctx_list, area);
 

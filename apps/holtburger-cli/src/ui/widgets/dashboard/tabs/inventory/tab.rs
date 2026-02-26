@@ -2,7 +2,6 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::classification::{self, EntityClass};
-use super::super::common::{Action, Verb};
 use super::render::render_inventory_tab;
 use crate::ui::Interaction;
 use crate::ui::state::GameState;
@@ -10,6 +9,7 @@ use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
+use crate::ui::{Action, Verb};
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::world::context::WorldContextExt;
@@ -62,7 +62,7 @@ impl TabController for InventoryTab {
                         verbs.push(Verb::new(
                             Action::ConfirmInteraction,
                             '\r',
-                            format!("Apply to {}", e.name()),
+                            "Apply to target".to_string(),
                         ));
                     }
                     return verbs;
@@ -94,7 +94,7 @@ impl TabController for InventoryTab {
                     } else if let Some(merge) = merge_label {
                         Some(merge)
                     } else if is_container {
-                        Some(format!("Move to {}", e.name()))
+                        Some("Move to container".to_string())
                     } else {
                         None
                     };
@@ -117,7 +117,7 @@ impl TabController for InventoryTab {
                 | EntityClass::Money
                 | EntityClass::Item => {
                     if e.target_item_type().is_some() {
-                        verbs.push(Verb::new(Action::Combine, 'n', "Combine"));
+                        verbs.push(Verb::new(Action::Combine, 'c', "Combine"));
                     } else {
                         verbs.push(Verb::new(Action::Use, 'u', "Use"));
                     }
@@ -196,7 +196,7 @@ impl TabController for InventoryTab {
                     placement: 0,
                 }))
             }
-            _ => super::super::common::handle_base_action(action, &target, game),
+            _ => None,
         }
     }
 

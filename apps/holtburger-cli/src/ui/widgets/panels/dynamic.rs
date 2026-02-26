@@ -1,10 +1,11 @@
 use crate::ui::FocusedPane;
 use crate::ui::state::GameState;
+use crate::ui::theme::{pane_block, pane_title_style};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 
 pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, area: Rect) {
     let (combat_color, combat_title) = match game.data.combat_mode {
@@ -20,22 +21,23 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
         _ => (None, None),
     };
 
-    let style = if let Some(color) = combat_color {
-        Style::default().fg(color).add_modifier(Modifier::BOLD)
-    } else if game.view.focused_pane == FocusedPane::Dynamic {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
+    let is_focused = game.view.focused_pane == FocusedPane::Dynamic;
+    let mut block = pane_block(is_focused);
 
-    let mut block = Block::default().borders(Borders::ALL).style(style);
+    if let Some(color) = combat_color {
+        block = block.border_style(Style::default().fg(color).add_modifier(Modifier::BOLD));
+    }
 
     // Left title: Interaction Info / World Name (if needed)
     if let Some(interaction) = game.view.active_interaction {
-        let title_text = interaction.status_text();
+        let title_text = format!(" {} ", interaction.status_text());
+
         block = block.title(
-            ratatui::widgets::block::Title::from(Span::raw(title_text))
-                .alignment(ratatui::layout::Alignment::Left),
+            ratatui::widgets::block::Title::from(Span::styled(
+                title_text,
+                pane_title_style(is_focused),
+            ))
+            .alignment(ratatui::layout::Alignment::Left),
         );
     }
 

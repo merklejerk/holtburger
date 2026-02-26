@@ -1,13 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use super::super::common::{Action, Verb};
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, StatType};
 use crate::ui::update::effect::UIEffect;
+use crate::ui::{Action, Verb};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;
@@ -85,7 +85,7 @@ impl TabController for CharacterTab {
                     None
                 }
             }
-            _ => super::super::common::handle_base_action(action, &target, game),
+            _ => None,
         }
     }
 

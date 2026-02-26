@@ -11,8 +11,9 @@ use super::super::classification::{classify_entity, classify_vendor_item, get_en
 use crate::ui::state::GameState;
 use crate::ui::theme;
 use crate::ui::types::TradeFocus;
+use crate::ui::utils::format_item_name;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
-use holtburger_common::properties::{ItemType, PropertyInt, PropertyString};
+use holtburger_common::properties::{ItemType, PropertyInt};
 use holtburger_core::world::context::WorldContextExt;
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
@@ -46,11 +47,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 let mut emoji = "❓";
                 let mut color = Color::White;
                 if let Some(e) = game.data.entities.get(guid) {
-                    display_name = e.name().to_string();
-                    let stack_size = e.stack_size();
-                    if stack_size > 1 {
-                        display_name = format!("{} ({}x)", display_name, stack_size);
-                    }
+                    display_name = format_item_name(e, e.guid);
 
                     let class = classify_entity(e);
                     emoji = class.emoji();
@@ -143,11 +140,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 let mut emoji = "❓";
                 let mut color = Color::White;
                 if let Some(e) = game.data.entities.get(guid) {
-                    display_name = e.name().to_string();
-                    let stack_size = e.stack_size();
-                    if stack_size > 1 {
-                        display_name = format!("{} ({}x)", display_name, stack_size);
-                    }
+                    display_name = format_item_name(e, e.guid);
 
                     let class = classify_entity(e);
                     emoji = class.emoji();
@@ -264,24 +257,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, m)| {
-                let mut display_name = m
-                    .properties
-                    .strings
-                    .get(&PropertyString::Name)
-                    .map(|s| s.as_str())
-                    .unwrap_or("Unknown Item")
-                    .to_string();
-
-                let stack_size = m
-                    .properties
-                    .ints
-                    .get(&PropertyInt::StackSize)
-                    .copied()
-                    .unwrap_or(1);
-
-                if stack_size > 1 {
-                    display_name = format!("{} ({}x)", display_name, stack_size);
-                }
+                let display_name = format_item_name(m, m.guid);
 
                 let class = classify_vendor_item(m);
                 let emoji = class.emoji();

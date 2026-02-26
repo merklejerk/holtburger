@@ -1,7 +1,35 @@
 use crate::ui::state::GameState;
+use holtburger_common::Guid;
+use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
+
+/// Formats an item's display name, including stack size and structure/durability if present.
+pub fn format_item_name<T: WorldObjectPropertyAccessors>(item: &T, guid: Guid) -> String {
+    let name = item
+        .get_string_prop(PropertyString::Name)
+        .unwrap_or("Unknown");
+    let mut display_name = if name.trim().is_empty() {
+        format!("<{}>", guid)
+    } else {
+        name.to_string()
+    };
+
+    let stack_size = item.get_int_prop(PropertyInt::StackSize).unwrap_or(1);
+    if stack_size > 1 {
+        display_name = format!("{} ({}x)", display_name, stack_size);
+    }
+
+    let structure = item.get_int_prop(PropertyInt::Structure);
+    let max_structure = item.get_int_prop(PropertyInt::MaxStructure);
+
+    if let (Some(s), Some(ms)) = (structure, max_structure) {
+        display_name = format!("{} ({}/{})", display_name, s, ms);
+    }
+
+    display_name
+}
 
 pub fn format_cost(n: u64) -> String {
     if n >= 1_000_000_000 {

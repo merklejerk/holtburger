@@ -1,13 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use super::super::common::{Action, Verb};
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
+use crate::ui::{Action, Verb};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct EquipTab;
@@ -80,7 +80,7 @@ impl TabController for EquipTab {
                     placement: 0,
                 })
             }),
-            _ => super::super::common::handle_base_action(action, &target, game),
+            _ => None,
         }
     }
 

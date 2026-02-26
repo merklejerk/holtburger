@@ -11,6 +11,7 @@ pub enum Interaction {
     Moving { item_guid: Guid },
     Healing { item_guid: Guid },
     Targeting { target_guid: Guid },
+    Combining { item_guid: Guid },
 }
 
 impl Interaction {
@@ -65,6 +66,10 @@ impl Interaction {
                         }
                     }
                 },
+                Self::Combining { .. } => match target {
+                    CommandTarget::Entity(e, _) => Some(UIEffect::ApplyCombining(e.guid)),
+                    _ => None,
+                },
                 Self::Targeting { .. } => match target {
                     CommandTarget::Entity(e, _) => Some(UIEffect::Target(e.guid)),
                     _ => None,
@@ -80,6 +85,7 @@ impl Interaction {
             Self::Moving { .. } => " Moving Item | [ESC] to cancel ",
             Self::Healing { .. } => " Healing | [ESC] to cancel ",
             Self::Targeting { .. } => " Targeting | [ESC] to cancel ",
+            Self::Combining { .. } => " Combining Items | [ESC] to cancel ",
         }
     }
 }

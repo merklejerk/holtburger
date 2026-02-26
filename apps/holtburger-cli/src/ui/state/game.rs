@@ -62,6 +62,8 @@ pub struct GameData {
     pub vendor: Option<holtburger_core::world::vendor::VendorState>,
     /// Current active trade with another player.
     pub trade: Option<holtburger_core::world::state::TradeState>,
+    /// Currently open containers in the world.
+    pub open_containers: HashSet<Guid>,
 }
 
 impl Default for GameData {
@@ -91,6 +93,7 @@ impl Default for GameData {
             equipment: HashMap::new(),
             vendor: None,
             trade: None,
+            open_containers: HashSet::new(),
         }
     }
 }

@@ -23,6 +23,7 @@ pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
         &game.data.inventory,
         &game.data.equipment,
         game.data.player_pos.as_ref(),
+        None, // Inventory doesn't care about open containers
         EntityFilter::Inventory,
     )
 }
@@ -48,6 +49,20 @@ impl TabController for InventoryTab {
                             Action::ConfirmInteraction,
                             '\r',
                             "Heal yourself".to_string(),
+                        ));
+                    }
+                    return verbs;
+                }
+                Some(Interaction::Combining { item_guid }) => {
+                    if let Some(source_e) = game.data.entities.get(&item_guid)
+                        && let Some(target_type) = source_e.target_item_type()
+                        && let Some(dest_item_type) = e.item_type()
+                        && target_type.intersects(dest_item_type)
+                    {
+                        verbs.push(Verb::new(
+                            Action::ConfirmInteraction,
+                            '\r',
+                            format!("Apply to {}", e.name()),
                         ));
                     }
                     return verbs;
@@ -101,7 +116,11 @@ impl TabController for InventoryTab {
                 | EntityClass::Writable
                 | EntityClass::Money
                 | EntityClass::Item => {
-                    verbs.push(Verb::new(Action::Use, 'u', "Use"));
+                    if e.target_item_type().is_some() {
+                        verbs.push(Verb::new(Action::Combine, 'n', "Combine"));
+                    } else {
+                        verbs.push(Verb::new(Action::Use, 'u', "Use"));
+                    }
                 }
                 EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {
                     verbs.push(Verb::new(Action::Target, 't', "Target"));

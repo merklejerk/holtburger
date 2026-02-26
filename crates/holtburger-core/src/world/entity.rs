@@ -167,6 +167,10 @@ impl Entity {
         self.get_int_prop(PropertyInt::TargetType).map(|v| v as u32)
     }
 
+    pub fn target_item_type(&self) -> Option<ItemType> {
+        self.target_type().and_then(ItemType::from_bits)
+    }
+
     pub fn ui_effects(&self) -> Option<u32> {
         self.get_int_prop(PropertyInt::UiEffects).map(|v| v as u32)
     }

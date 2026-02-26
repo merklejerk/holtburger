@@ -87,7 +87,7 @@ impl TabController for SpellsTab {
 
                 Some(UIEffect::Commands(cmds))
             }
-            _ => super::super::common::handle_base_action(action, &target, game),
+            _ => None,
         }
     }
 

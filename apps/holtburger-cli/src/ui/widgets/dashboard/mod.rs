@@ -11,8 +11,8 @@ use ratatui::widgets::{Block, Borders};
 pub mod input;
 pub mod tabs;
 
-pub use self::tabs::common::{Action, Verb};
 pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
+pub use crate::ui::types::{Action, Verb};
 
 pub mod assess;
 pub mod debug;

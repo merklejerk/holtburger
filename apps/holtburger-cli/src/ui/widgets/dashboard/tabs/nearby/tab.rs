@@ -3,7 +3,6 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::classification::{self, EntityClass};
-use super::super::common::{Action, Verb};
 use super::render::render_nearby_tab;
 use crate::ui::Interaction;
 use crate::ui::state::GameState;
@@ -11,6 +10,7 @@ use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
 use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
+use crate::ui::{Action, Verb};
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::world::entity::Entity;
@@ -60,9 +60,9 @@ impl TabController for NearbyTab {
                             None
                         }
                     } else if is_givable_creature {
-                        Some(format!("Give to {}", e.name()))
+                        Some("Give to target".to_string())
                     } else if is_open_container {
-                        Some(format!("Move to {}", e.name()))
+                        Some("Move to container".to_string())
                     } else {
                         None
                     };
@@ -79,7 +79,7 @@ impl TabController for NearbyTab {
                         let label = if is_self || is_healing_kit {
                             "Heal yourself".to_string()
                         } else {
-                            format!("Heal {}", e.name())
+                            "Heal target".to_string()
                         };
                         verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
                     }
@@ -94,7 +94,7 @@ impl TabController for NearbyTab {
                         verbs.push(Verb::new(
                             Action::ConfirmInteraction,
                             '\r',
-                            format!("Apply to {}", e.name()),
+                            "Apply to target",
                         ));
                     }
                     return verbs;

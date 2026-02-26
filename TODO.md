@@ -163,3 +163,4 @@
     - When they are explicitly deleted.
     - When a trade is closed.
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
+- [ ] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?

@@ -80,7 +80,7 @@ impl TabController for EquipTab {
                     placement: 0,
                 })
             }),
-            _ => super::super::common::handle_base_action(action, &target, game),
+            _ => None,
         }
     }
 

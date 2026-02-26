@@ -239,7 +239,7 @@ impl TabController for NearbyTab {
             (Action::CloseContainer, CommandTarget::Entity(e, _)) => {
                 Some(UIEffect::Command(ClientCommand::CloseContainer(e.guid)))
             }
-            _ => super::super::common::handle_base_action(action, &target, game),
+            _ => None,
         }
     }
 }

@@ -59,6 +59,7 @@
 - [x] [C]ombine verb (crafting).
 - [x] [U]se for Mana charges.
 - [x] Actions and `handle_base_action()` don't belong in `common.rs`.
+- [x] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -70,7 +71,6 @@
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
-- [ ] Just get rid of verbs.rs and move the fn into the tab controller.
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.

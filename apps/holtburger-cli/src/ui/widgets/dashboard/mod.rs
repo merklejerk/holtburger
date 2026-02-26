@@ -1,12 +1,12 @@
 use crate::ui::CommandTarget;
 use crate::ui::state::GameState;
+use crate::ui::theme::pane_block;
 use crate::ui::traits::TabController;
 use crate::ui::{DashboardTab, FocusedPane};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders};
 
 pub mod input;
 pub mod tabs;
@@ -43,12 +43,7 @@ pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
 
 pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     let (focused_pane, dashboard_tab) = (game.view.focused_pane, game.view.dashboard_tab);
-
-    let dashboard_style = if focused_pane == FocusedPane::Dashboard {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
+    let is_focused = focused_pane == FocusedPane::Dashboard;
 
     let top_tabs = [
         (DashboardTab::Nearby, "1", "Near"),
@@ -65,16 +60,8 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], game: &GameState| {
         let mut spans = Vec::new();
 
-        let (focused, active_tab) = (game.view.focused_pane, game.view.dashboard_tab);
+        let (_focused, active_tab) = (game.view.focused_pane, game.view.dashboard_tab);
 
-        if focused == FocusedPane::Dashboard {
-            spans.push(Span::styled(
-                ">> ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
         for (i, (tab, key, label)) in tabs.iter().enumerate() {
             if i > 0 {
                 spans.push(Span::raw("|"));
@@ -95,22 +82,12 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
             spans.push(Span::styled(format!(" [{}] {} ", key, label), style));
         }
 
-        if focused == FocusedPane::Dashboard {
-            spans.push(Span::styled(
-                " <<",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
         Line::from(spans)
     };
 
-    let dashboard_block = Block::default()
-        .borders(Borders::ALL)
+    let dashboard_block = pane_block(is_focused)
         .title(create_tab_line(&top_tabs, game))
-        .title_bottom(create_tab_line(&bottom_tabs, game))
-        .border_style(dashboard_style);
+        .title_bottom(create_tab_line(&bottom_tabs, game));
 
     let inner_area = dashboard_block.inner(area);
 

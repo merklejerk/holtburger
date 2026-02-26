@@ -81,6 +81,7 @@
 - [ ] Exit combat mode when trying to trade.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Label unlocked chests in nearby tab.
+- [ ] Server messages being printed twice in chat, colored as errors, even though they aren't all errors.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

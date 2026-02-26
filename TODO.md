@@ -56,11 +56,11 @@
 - [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [x] Show item emojis in trade window.
 - [x] `PlayerState` is duplicating state. The property maps should be the one source of truth.
+- [x] [C]ombine verb (crafting).
+- [x] [U]se for Mana charges.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
-- [ ] [C]ombine verb (crafting).
-- [ ] [U]se for Mana charges.
 - [ ] Search/filter on list tabs.
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 - [ ] Implement actual collisions.
@@ -123,6 +123,7 @@
 - [x] Manage in-world containers.
 - [x] SetState message shold also update properties.
 - [x] Crafting.
+- [x] Show charges/uses/etc for items.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -141,7 +142,6 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Should split into the same container.
 - [ ] Precise splitting.
-- [ ] Show charges/uses/etc for items.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Useful errors also appear in ServerMessage.

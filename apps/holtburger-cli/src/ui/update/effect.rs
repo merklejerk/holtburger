@@ -19,11 +19,13 @@ pub enum UIEffect {
     ApplyHealing(Guid),
     ApplyMoving(Guid),
     ApplyStacking(Guid),
+    ApplyCombining(Guid),
     Target(Guid),
     CancelInteraction,
     ClearVendor,
     Log(ChatMessageKind, String),
     DisplayClientInfo,
+    Combine(Guid),
 }
 
 #[derive(Debug, Default)]
@@ -163,6 +165,13 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
             }
             vec![]
         }
+        UIEffect::Combine(guid) => {
+            if let Some(game) = state.game_option_mut() {
+                game.view.active_interaction =
+                    Some(crate::ui::Interaction::Combining { item_guid: guid });
+            }
+            vec![]
+        }
         UIEffect::Target(guid) => {
             if let Some(game) = state.game_option_mut() {
                 game.view.active_interaction =
@@ -236,6 +245,20 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
                     source: item_guid,
                     destination: destination_guid,
                     amount,
+                };
+                game.view.active_interaction = None;
+                return vec![cmd];
+            }
+            vec![]
+        }
+        UIEffect::ApplyCombining(destination_guid) => {
+            if let Some(game) = state.game_option_mut()
+                && let Some(crate::ui::Interaction::Combining { item_guid }) =
+                    game.view.active_interaction
+            {
+                let cmd = ClientCommand::UseWithTarget {
+                    item: item_guid,
+                    target: destination_guid,
                 };
                 game.view.active_interaction = None;
                 return vec![cmd];

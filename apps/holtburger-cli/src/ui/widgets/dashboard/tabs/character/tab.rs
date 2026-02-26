@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 
 use super::super::common::{Action, Verb};
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
+use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, StatType};
@@ -19,17 +20,19 @@ impl TabController for CharacterTab {
     fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
         let active_interaction = game.view.active_interaction;
         let target = self.get_target_at_index(game, index);
+        let mut verbs = Vec::new();
 
-        if let Some(interaction) = active_interaction
-            && !matches!(interaction, crate::ui::Interaction::Targeting { .. })
-        {
-            return vec![Verb::new(Action::CancelInteraction, '\x1b', "Cancel")];
+        if let Some(interaction) = active_interaction {
+            match interaction {
+                Interaction::Targeting { .. } => {}
+                _ => {
+                    return verbs;
+                }
+            }
         }
 
         match target {
             CommandTarget::Stat(_, xp_cost, sp_cost) => {
-                let mut verbs = Vec::new();
-
                 if xp_cost.is_some() {
                     verbs.push(Verb::new(Action::LevelUp, 'l', "Level Up"));
                 }

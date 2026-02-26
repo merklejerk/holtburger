@@ -87,6 +87,16 @@ impl AppState {
             ClientViewEvent::ServerTimeUpdated { .. } | ClientViewEvent::NoClipUpdated { .. } => {
                 self.handle_navigation_event(event);
             }
+            ClientViewEvent::ContainerOpened { guid } => {
+                if let Some(game) = self.game_option_mut() {
+                    game.data.open_containers.insert(guid);
+                }
+            }
+            ClientViewEvent::ContainerClosed { guid } => {
+                if let Some(game) = self.game_option_mut() {
+                    game.data.open_containers.remove(&guid);
+                }
+            }
         }
     }
 }

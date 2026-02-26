@@ -24,6 +24,7 @@ impl Client {
 
             ClientCommand::Identify(_)
             | ClientCommand::Use(_)
+            | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
             | ClientCommand::CastTargetedSpell { .. }
             | ClientCommand::CastUntargetedSpell { .. }
@@ -280,6 +281,16 @@ impl Client {
                     item_guid: item,
                     trade_slot: 0,
                 })))
+                .await
+            }
+            ClientCommand::CloseContainer(guid) => {
+                log::info!(">>> Closing container: 0x{:08X}", guid);
+
+                self.send_game_action(GameAction::NoLongerViewingContents(Box::new(
+                    NoLongerViewingContentsActionData {
+                        container_guid: guid,
+                    },
+                )))
                 .await
             }
             _ => unreachable!(),

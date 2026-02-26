@@ -35,7 +35,7 @@ pub fn filter_entities<'a>(
             }
             EntityFilter::Inventory => {
                 (inventory.contains(&e.guid) || equipment.contains_key(&e.guid))
-                    && !e.name.is_empty()
+                    && !e.name().is_empty()
             }
         })
         .collect();
@@ -90,7 +90,7 @@ pub fn filter_entities<'a>(
                 };
                 da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
             }
-            EntityFilter::Inventory => ea.name.cmp(&eb.name),
+            EntityFilter::Inventory => ea.name().cmp(eb.name()),
         }
     });
 
@@ -108,7 +108,7 @@ pub fn filter_entities<'a>(
         result.push((e, dist, depth));
 
         if let Some(mut children) = children_map.remove(&guid) {
-            children.sort_by(|&a, &b| entities[&a].name.cmp(&entities[&b].name));
+            children.sort_by(|&a, &b| entities[&a].name().cmp(entities[&b].name()));
             for child_guid in children.into_iter().rev() {
                 stack.push((child_guid, depth + 1));
             }

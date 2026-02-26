@@ -1,5 +1,8 @@
-use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, WeenieType};
+use holtburger_common::properties::{
+    ItemType, ObjectDescriptionFlag, PropertyBool, PropertyInt, WorldObjectProperties,
+};
 use holtburger_core::world::entity::Entity;
+use holtburger_core::world::vendor::CoreVendorItem;
 use holtburger_protocol::messages::object::messages::PublicWeenieDescription;
 use ratatui::style::Color;
 
@@ -102,22 +105,60 @@ pub fn get_entity_color(class: EntityClass) -> Color {
 }
 
 pub fn classify_entity(entity: &Entity) -> EntityClass {
-    classify_raw(entity.flags, entity.item_type, entity.wcid)
+    classify_raw(entity.flags, entity.item_type())
+}
+
+pub fn classify_vendor_item(item: &CoreVendorItem) -> EntityClass {
+    classify_properties(&item.properties)
+}
+
+pub fn classify_properties(props: &WorldObjectProperties) -> EntityClass {
+    let item_type = props
+        .ints
+        .get(&PropertyInt::ItemType)
+        .map(|v| ItemType::from_bits_truncate(*v as u32));
+
+    let physics_state = props
+        .ints
+        .get(&PropertyInt::PhysicsState)
+        .map(|v| holtburger_common::properties::PhysicsState::from_bits_truncate(*v as u32))
+        .unwrap_or(holtburger_common::properties::PhysicsState::empty());
+
+    // Let's create dummy flags for classify_raw based on what we know.
+    let mut flags = ObjectDescriptionFlag::empty();
+    if physics_state.contains(holtburger_common::properties::PhysicsState::STATIC) {
+        flags |= ObjectDescriptionFlag::STUCK;
+    }
+    if props
+        .bools
+        .get(&PropertyBool::Stuck)
+        .copied()
+        .unwrap_or(false)
+    {
+        flags |= ObjectDescriptionFlag::STUCK;
+    }
+    if props
+        .bools
+        .get(&PropertyBool::Attackable)
+        .copied()
+        .unwrap_or(false)
+    {
+        flags |= ObjectDescriptionFlag::ATTACKABLE;
+    }
+    // Note: ItemType does not have a PLAYER flag, it's in ObjectDescriptionFlag.
+    // We can't easily deduce it from properties alone unless we have a specific property.
+
+    classify_raw(flags, item_type)
 }
 
 pub fn classify_description(desc: &PublicWeenieDescription) -> EntityClass {
     classify_raw(
         desc.obj_desc_flags,
         Some(ItemType::from_bits_truncate(desc.item_type)),
-        Some(desc.wcid),
     )
 }
 
-fn classify_raw(
-    flags: ObjectDescriptionFlag,
-    item_type: Option<ItemType>,
-    wcid: Option<u32>,
-) -> EntityClass {
+fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> EntityClass {
     if flags.intersects(ObjectDescriptionFlag::PLAYER) {
         return EntityClass::Player;
     }
@@ -127,10 +168,6 @@ fn classify_raw(
         it.intersects(ItemType::CONTAINER)
     } else {
         false
-    } || if let Some(id) = wcid {
-        id == WeenieType::Container as u32 || id == WeenieType::Chest as u32
-    } else {
-        false
     };
 
     // If something is Stuck and Attackable and a Container then it's a chest.
@@ -138,13 +175,9 @@ fn classify_raw(
         return EntityClass::Chest;
     }
 
-    // Creatures - Check WeenieType or ItemType or GUID range
+    // Creatures - Check ItemType or GUID range
     let is_creature = if let Some(it) = item_type {
         it.intersects(ItemType::CREATURE)
-    } else {
-        false
-    } || if let Some(id) = wcid {
-        id == WeenieType::Creature as u32 || id == WeenieType::Vendor as u32
     } else {
         false
     };
@@ -194,18 +227,6 @@ fn classify_raw(
             refined_class = Some(EntityClass::Writable);
         } else if it.intersects(ItemType::TINKERING_TOOL) {
             refined_class = Some(EntityClass::Tool);
-        }
-    }
-
-    // Specific WeenieType overrides
-    if let Some(id) = wcid {
-        match id {
-            w if w == WeenieType::LifeStone as u32 => return EntityClass::LifeStone,
-            w if w == WeenieType::Door as u32 => return EntityClass::Door,
-            w if w == WeenieType::Portal as u32 => return EntityClass::Portal,
-            w if w == WeenieType::Vendor as u32 => return EntityClass::Vendor,
-            w if w == WeenieType::Chest as u32 => return EntityClass::Chest,
-            _ => {}
         }
     }
 
@@ -267,7 +288,7 @@ pub fn is_targetable(entity: &Entity) -> bool {
         | EntityClass::Chest
         | EntityClass::Wand
         | EntityClass::Tool
-        | EntityClass::StaticObject => !entity.name.trim().is_empty(),
+        | EntityClass::StaticObject => !entity.name().trim().is_empty(),
         EntityClass::Unknown => false,
     }
 }

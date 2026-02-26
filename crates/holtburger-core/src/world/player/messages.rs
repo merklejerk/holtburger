@@ -4,10 +4,10 @@ use super::types::VitalBase;
 use crate::world::StateEvent;
 use crate::world::stats;
 use holtburger_common::Guid;
+use holtburger_common::properties::PropertyString;
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::*;
 
-use holtburger_common::properties::{PropertyInt, PropertyInt64};
 use holtburger_protocol::messages::EquipMask;
 
 impl PlayerState {
@@ -349,41 +349,18 @@ impl PlayerState {
                 return match &ev.event {
                     GameEvent::PlayerDescription(data) => {
                         self.guid = data.guid;
-                        self.name = data.name.clone();
                         self.enchantments = data.enchantments.clone();
-                        self.int_properties = data.properties_int.clone();
-                        self.int64_properties = data.properties_int64.clone();
-                        self.bool_properties = data.properties_bool.clone();
-                        self.float_properties = data.properties_float.clone();
-                        self.string_properties = data.properties_string.clone();
-                        self.did_properties = data.properties_did.clone();
-                        self.iid_properties = data.properties_iid.clone();
+                        self.properties = data.properties.clone();
+
+                        // Ensure name is in properties if it was sent as a field
+                        self.properties
+                            .strings
+                            .0
+                            .entry(PropertyString::Name)
+                            .or_insert_with(|| data.name.clone());
+
                         self.spells = data.spells.clone();
                         self.hotbar_spells = data.hotbar_spells.clone();
-
-                        // Update Experience and Level from properties
-                        if let Some(&xp) = data
-                            .properties_int64
-                            .get(&(PropertyInt64::TotalExperience as u32))
-                        {
-                            self.total_experience = xp as u64;
-                        }
-                        if let Some(&axp) = data
-                            .properties_int64
-                            .get(&(PropertyInt64::AvailableExperience as u32))
-                        {
-                            self.available_experience = axp as u64;
-                        }
-                        if let Some(&sp) = data
-                            .properties_int
-                            .get(&(PropertyInt::AvailableSkillCredits as u32))
-                        {
-                            self.unspent_skill_points = sp as u32;
-                        }
-                        if let Some(&level) = data.properties_int.get(&(PropertyInt::Level as u32))
-                        {
-                            self.level = level as u32;
-                        }
 
                         // Attributes & Vitals
                         self.attributes.clear();

@@ -59,9 +59,9 @@ impl TabController for NearbyTab {
                             None
                         }
                     } else if is_givable_creature {
-                        Some(format!("Give to {}", e.name))
+                        Some(format!("Give to {}", e.name()))
                     } else if is_container {
-                        Some(format!("Move to {}", e.name))
+                        Some(format!("Move to {}", e.name()))
                     } else {
                         None
                     };
@@ -78,7 +78,7 @@ impl TabController for NearbyTab {
                         let label = if is_self || is_healing_kit {
                             "Heal yourself".to_string()
                         } else {
-                            format!("Heal {}", e.name)
+                            format!("Heal {}", e.name())
                         };
                         verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
                     }
@@ -92,6 +92,7 @@ impl TabController for NearbyTab {
             verbs.extend([
                 Verb::new(Action::Assess, 'a', "Assess"),
                 Verb::new(Action::Target, 't', "Target"),
+                Verb::new(Action::Debug, 'g', "Debug"),
             ]);
             if e.wielder_id().is_some() || e.physics_parent_id.is_some() {
                 return verbs;
@@ -129,8 +130,6 @@ impl TabController for NearbyTab {
                     verbs.push(Verb::new(Action::PickUp, 'p', "Pick up"));
                 }
             }
-
-            verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
 
             return verbs;
         }

@@ -79,7 +79,7 @@ impl TabController for InventoryTab {
                     } else if let Some(merge) = merge_label {
                         Some(merge)
                     } else if is_container {
-                        Some(format!("Move to {}", e.name))
+                        Some(format!("Move to {}", e.name()))
                     } else {
                         None
                     };

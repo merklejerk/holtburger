@@ -7,9 +7,10 @@ use crate::messages::utils::{
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectProperties;
 use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+// Note: BTreeMap removed because we now use WorldObjectProperties which uses HashMap internally for efficiency
 
 // --- Identify Response ---
 
@@ -40,12 +41,7 @@ pub struct IdentifyObjectResponseEventData {
     pub object_guid: Guid,
     pub flags: IdentifyResponseFlags,
     pub success: bool,
-    pub int_stats: BTreeMap<u32, i32>,
-    pub int64_stats: BTreeMap<u32, i64>,
-    pub bool_stats: BTreeMap<u32, bool>,
-    pub float_stats: BTreeMap<u32, f64>,
-    pub string_stats: BTreeMap<u32, String>,
-    pub did_stats: BTreeMap<u32, Guid>,
+    pub properties: WorldObjectProperties,
     pub spell_book: Vec<u32>,
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
@@ -72,69 +68,65 @@ impl ProtocolUnpack for IdentifyObjectResponseEventData {
         let success = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) != 0;
         *offset += 8;
 
-        let mut int_stats = BTreeMap::new();
+        let mut properties = WorldObjectProperties::default();
+
         if flags.contains(IdentifyResponseFlags::INT_STATS_TABLE) {
             let (count, _) = read_hashtable_header(data, offset)?;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let value = LittleEndian::read_i32(&data[*offset + 4..*offset + 8]);
                 *offset += 8;
-                int_stats.insert(key, value);
+                properties.apply_raw_int(key, value);
             }
         }
 
-        let mut int64_stats = BTreeMap::new();
         if flags.contains(IdentifyResponseFlags::INT64_STATS_TABLE) {
             let (count, _) = read_hashtable_header(data, offset)?;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let value = LittleEndian::read_i64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
-                int64_stats.insert(key, value);
+                properties.apply_raw_int64(key, value);
             }
         }
 
-        let mut bool_stats = BTreeMap::new();
         if flags.contains(IdentifyResponseFlags::BOOL_STATS_TABLE) {
             let (count, _) = read_hashtable_header(data, offset)?;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let value = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]) != 0;
                 *offset += 8;
-                bool_stats.insert(key, value);
+                properties.apply_raw_bool(key, value);
             }
         }
 
-        let mut float_stats = BTreeMap::new();
         if flags.contains(IdentifyResponseFlags::FLOAT_STATS_TABLE) {
             let (count, _) = read_hashtable_header(data, offset)?;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let value = LittleEndian::read_f64(&data[*offset + 4..*offset + 12]);
                 *offset += 12;
-                float_stats.insert(key, value);
+                properties.apply_raw_float(key, value);
             }
         }
 
-        let mut string_stats = BTreeMap::new();
         if flags.contains(IdentifyResponseFlags::STRING_STATS_TABLE) {
             let (count, _) = read_hashtable_header(data, offset)?;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let value = read_string16(data, offset)?;
-                string_stats.insert(key, value);
+                properties.apply_raw_string(key, value);
             }
         }
 
-        let mut did_stats = BTreeMap::new();
         if flags.contains(IdentifyResponseFlags::DID_STATS_TABLE) {
             let (count, _) = read_hashtable_header(data, offset)?;
             for _ in 0..count {
                 let key = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 *offset += 4;
                 let value = Guid::unpack(data, offset)?;
-                did_stats.insert(key, value);
+                properties.apply_raw_did(key, value);
             }
         }
 
@@ -213,12 +205,7 @@ impl ProtocolUnpack for IdentifyObjectResponseEventData {
             object_guid,
             flags,
             success,
-            int_stats,
-            int64_stats,
-            bool_stats,
-            float_stats,
-            string_stats,
-            did_stats,
+            properties,
             spell_book,
             armor_profile,
             creature_profile,
@@ -243,30 +230,32 @@ impl ProtocolPack for IdentifyObjectResponseEventData {
             .unwrap();
 
         if self.flags.contains(IdentifyResponseFlags::INT_STATS_TABLE) {
-            let buckets = 16;
-            write_hashtable_header(buf, self.int_stats.len(), buckets);
-            // Sorting omitted for brevity, but needed for deterministic pack
-            // (I'll keep the logic if it's there but the subagent result had a custom sort_hashtable helper)
-            for (key, value) in &self.int_stats {
-                buf.write_u32::<LittleEndian>(*key).unwrap();
+            write_hashtable_header(buf, self.properties.ints.0.len(), 16);
+            let mut items: Vec<_> = self.properties.ints.iter().collect();
+            crate::messages::utils::ac_hash_sort(&mut items, 16, |k| *k as u32);
+            for (key, value) in items {
+                buf.write_u32::<LittleEndian>(*key as u32).unwrap();
                 buf.write_i32::<LittleEndian>(*value).unwrap();
             }
         }
-        // ... (truncated for brevity in comment, but I'll use the full version)
         if self
             .flags
             .contains(IdentifyResponseFlags::INT64_STATS_TABLE)
         {
-            write_hashtable_header(buf, self.int64_stats.len(), 8);
-            for (key, value) in &self.int64_stats {
-                buf.write_u32::<LittleEndian>(*key).unwrap();
+            write_hashtable_header(buf, self.properties.int64s.0.len(), 8);
+            let mut items: Vec<_> = self.properties.int64s.iter().collect();
+            crate::messages::utils::ac_hash_sort(&mut items, 8, |k| *k as u32);
+            for (key, value) in items {
+                buf.write_u32::<LittleEndian>(*key as u32).unwrap();
                 buf.write_i64::<LittleEndian>(*value).unwrap();
             }
         }
         if self.flags.contains(IdentifyResponseFlags::BOOL_STATS_TABLE) {
-            write_hashtable_header(buf, self.bool_stats.len(), 8);
-            for (key, value) in &self.bool_stats {
-                buf.write_u32::<LittleEndian>(*key).unwrap();
+            write_hashtable_header(buf, self.properties.bools.0.len(), 8);
+            let mut items: Vec<_> = self.properties.bools.iter().collect();
+            crate::messages::utils::ac_hash_sort(&mut items, 8, |k| *k as u32);
+            for (key, value) in items {
+                buf.write_u32::<LittleEndian>(*key as u32).unwrap();
                 buf.write_u32::<LittleEndian>(if *value { 1 } else { 0 })
                     .unwrap();
             }
@@ -275,9 +264,11 @@ impl ProtocolPack for IdentifyObjectResponseEventData {
             .flags
             .contains(IdentifyResponseFlags::FLOAT_STATS_TABLE)
         {
-            write_hashtable_header(buf, self.float_stats.len(), 8);
-            for (key, value) in &self.float_stats {
-                buf.write_u32::<LittleEndian>(*key).unwrap();
+            write_hashtable_header(buf, self.properties.floats.0.len(), 8);
+            let mut items: Vec<_> = self.properties.floats.iter().collect();
+            crate::messages::utils::ac_hash_sort(&mut items, 8, |k| *k as u32);
+            for (key, value) in items {
+                buf.write_u32::<LittleEndian>(*key as u32).unwrap();
                 buf.write_f64::<LittleEndian>(*value).unwrap();
             }
         }
@@ -285,16 +276,20 @@ impl ProtocolPack for IdentifyObjectResponseEventData {
             .flags
             .contains(IdentifyResponseFlags::STRING_STATS_TABLE)
         {
-            write_hashtable_header(buf, self.string_stats.len(), 8);
-            for (key, value) in &self.string_stats {
-                buf.write_u32::<LittleEndian>(*key).unwrap();
+            write_hashtable_header(buf, self.properties.strings.0.len(), 8);
+            let mut items: Vec<_> = self.properties.strings.iter().collect();
+            crate::messages::utils::ac_hash_sort(&mut items, 8, |k| *k as u32);
+            for (key, value) in items {
+                buf.write_u32::<LittleEndian>(*key as u32).unwrap();
                 write_string16(buf, value);
             }
         }
         if self.flags.contains(IdentifyResponseFlags::DID_STATS_TABLE) {
-            write_hashtable_header(buf, self.did_stats.len(), 8);
-            for (key, value) in &self.did_stats {
-                buf.write_u32::<LittleEndian>(*key).unwrap();
+            write_hashtable_header(buf, self.properties.dids.0.len(), 8);
+            let mut items: Vec<_> = self.properties.dids.iter().collect();
+            crate::messages::utils::ac_hash_sort(&mut items, 8, |k| *k as u32);
+            for (key, value) in items {
+                buf.write_u32::<LittleEndian>(*key as u32).unwrap();
                 value.pack(buf);
             }
         }
@@ -422,17 +417,14 @@ mod tests {
     #[test]
     fn test_identify_object_response_parity() {
         use crate::messages::game_event::GameEvent;
-        use std::collections::BTreeMap;
         // Hex generated via ACE for a simple "Sword of Awesome"
         let hex_str = "B0F70000010000507B000000C900000002000050090000000100000002001000010000000100000019000000320000000100080001000000100053776F7264206F6620417765736F6D650000";
         let data = hex::decode(hex_str).expect("Hex decode failed");
 
-        let mut int_stats = BTreeMap::new();
-        int_stats.insert(1, 1);
-        int_stats.insert(25, 50);
-
-        let mut string_stats = BTreeMap::new();
-        string_stats.insert(1, "Sword of Awesome".to_string());
+        let mut properties = WorldObjectProperties::default();
+        properties.apply_raw_int(1, 1);
+        properties.apply_raw_int(25, 50);
+        properties.apply_raw_string(1, "Sword of Awesome".to_string());
 
         let expected =
             GameMessage::GameEvent(Box::new(crate::messages::game_event::GameEventMessage {
@@ -444,12 +436,7 @@ mod tests {
                         flags: IdentifyResponseFlags::INT_STATS_TABLE
                             | IdentifyResponseFlags::STRING_STATS_TABLE,
                         success: true,
-                        int_stats,
-                        int64_stats: BTreeMap::new(),
-                        bool_stats: BTreeMap::new(),
-                        float_stats: BTreeMap::new(),
-                        string_stats,
-                        did_stats: BTreeMap::new(),
+                        properties,
                         spell_book: Vec::new(),
                         armor_profile: None,
                         creature_profile: None,

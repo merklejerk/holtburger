@@ -69,7 +69,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
         };
 
         let (name, guid) = if let Some(entity) = game.data.entities.get(&target_guid) {
-            (entity.name.as_str(), entity.guid.0)
+            (entity.name(), entity.guid.0)
         } else {
             ("Unknown Entity", target_guid.0)
         };

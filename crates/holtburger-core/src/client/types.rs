@@ -1,8 +1,9 @@
 use crate::world::entity::Entity;
-use crate::world::state::{TradeState, VendorState};
+use crate::world::state::TradeState;
 use crate::world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
+use crate::world::vendor::VendorState;
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::file_type::spell_table::SpellBase;
 use holtburger_protocol::errors::{CharacterError, WeenieError};

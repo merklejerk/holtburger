@@ -87,7 +87,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     spans.push(Span::raw("    "));
                 }
 
-                let mut name = item.name.clone();
+                let mut name = item.name().to_string();
                 let stack_size = item.stack_size();
                 if stack_size > 1 {
                     name = format!("{} ({}x)", name, stack_size);
@@ -166,7 +166,7 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
         .collect();
 
     // Sort all equippable items by name once to keep consistent ordering within buckets
-    equippable_items.sort_by(|a, b| a.name.cmp(&b.name));
+    equippable_items.sort_by(|a, b| a.name().cmp(b.name()));
 
     for (mask, name, target_slot) in categories {
         let mut items_in_slot: Vec<(&Entity, bool, bool)> = Vec::new();

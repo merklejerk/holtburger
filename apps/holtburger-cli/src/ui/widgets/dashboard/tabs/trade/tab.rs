@@ -51,13 +51,13 @@ impl TabController for TradeTab {
                                 verbs.push(Verb::new(
                                     Action::ConfirmInteraction,
                                     '\r',
-                                    format!("Move to {}", e.name),
+                                    format!("Move to {}", e.name()),
                                 ));
                             } else if is_creature {
                                 verbs.push(Verb::new(
                                     Action::ConfirmInteraction,
                                     '\r',
-                                    format!("Give to {}", e.name),
+                                    format!("Give to {}", e.name()),
                                 ));
                             }
                         }
@@ -77,7 +77,7 @@ impl TabController for TradeTab {
                             let label = if Some(e.guid) == player_guid || e.guid == item_guid {
                                 "Heal yourself".to_string()
                             } else {
-                                format!("Heal {}", e.name)
+                                format!("Heal {}", e.name())
                             };
                             verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
                         }

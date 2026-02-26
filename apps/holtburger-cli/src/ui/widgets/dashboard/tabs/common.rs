@@ -74,7 +74,7 @@ pub fn handle_base_action(
                     vendor: vendor.vendor_guid,
                     items: vec![
                         holtburger_protocol::messages::trade::actions::ItemProfileActionData {
-                            object_guid: v.description.guid,
+                            object_guid: v.guid,
                             amount: 1, // Default to 1 for now
                         },
                     ],
@@ -134,17 +134,17 @@ pub fn handle_base_action(
             CommandTarget::Spell(sid) => Some(UIEffect::ActivateDebugSpell(*sid)),
             CommandTarget::Enchantment(e) => Some(UIEffect::ActivateDebugEnchantment(*e)),
             CommandTarget::Entity(e, _) => Some(UIEffect::ActivateDebugEntity(e.guid)),
-            CommandTarget::VendorItem(v) => Some(UIEffect::ActivateDebugEntity(v.description.guid)),
+            CommandTarget::VendorItem(v) => Some(UIEffect::ActivateDebugEntity(v.guid)),
             _ => None,
         },
         (Action::Move, target) => match target {
             CommandTarget::Entity(e, _) => Some(UIEffect::Move(e.guid)),
-            CommandTarget::VendorItem(v) => Some(UIEffect::Move(v.description.guid)),
+            CommandTarget::VendorItem(v) => Some(UIEffect::Move(v.guid)),
             _ => None,
         },
         (Action::Target, target) => match target {
             CommandTarget::Entity(e, _) => Some(UIEffect::Target(e.guid)),
-            CommandTarget::VendorItem(v) => Some(UIEffect::Target(v.description.guid)),
+            CommandTarget::VendorItem(v) => Some(UIEffect::Target(v.guid)),
             _ => None,
         },
         (Action::ConfirmInteraction, target) => {
@@ -234,7 +234,7 @@ pub fn get_context_content_for_view(game: &GameState) -> Vec<Line<'static>> {
                         game.data
                             .entities
                             .get(&id)
-                            .map(|e| e.name.clone())
+                            .map(|e| e.name().to_string())
                             .or_else(|| {
                                 if Some(id) == player_guid {
                                     Some("You".to_string())

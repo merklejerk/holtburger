@@ -1,5 +1,6 @@
 use super::{Client, types::*};
 use crate::world::StateEvent;
+use crate::world::entity::Entity;
 use anyhow::Result;
 use holtburger_common::ProtocolUnpack;
 use holtburger_common::sequence::is_newer_u16;
@@ -210,7 +211,7 @@ impl Client {
                         .world
                         .entities
                         .get(partner_guid)
-                        .map(|e| e.name.clone())
+                        .map(|e: &Entity| e.name().to_string())
                         .unwrap_or_else(|| format!("0x{:08X}", partner_guid.0));
                     self.emit_wire_event(WireEvent::ServerMessage(format!(
                         "Trade started with {}.",

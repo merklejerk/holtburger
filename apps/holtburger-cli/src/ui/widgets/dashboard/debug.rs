@@ -2,8 +2,7 @@ use super::tabs::classification;
 use crate::ui::CommandTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId,
-    PropertyInt, PropertyInt64, PropertyString,
+    EnchantmentTypeFlags, PropertyFloat, PropertyInt, PropertyString,
 };
 use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
@@ -30,16 +29,26 @@ pub fn get_debug_info(
 
     match target {
         CommandTarget::VendorItem(v) => {
-            lines.push(Line::from(format!(
-                "DEBUG VENDOR ITEM: {}",
-                v.description.name.as_deref().unwrap_or("Unknown")
-            )));
-            lines.push(Line::from(format!("GUID:   {:08X}", v.description.guid)));
-            lines.push(Line::from(format!("Value:  {}", v.description.value())));
-            lines.push(Line::from(format!("WCID:   {}", v.description.wcid)));
+            let name = v
+                .properties
+                .strings
+                .get(&PropertyString::Name)
+                .cloned()
+                .unwrap_or_else(|| "Unknown".to_string());
+            let value = v
+                .properties
+                .ints
+                .get(&PropertyInt::Value)
+                .copied()
+                .unwrap_or(0);
+
+            lines.push(Line::from(format!("DEBUG VENDOR ITEM: {}", name)));
+            lines.push(Line::from(format!("GUID:   {:08X}", v.guid)));
+            lines.push(Line::from(format!("Value:  {}", value)));
+            lines.push(Line::from(format!("WCID:   {}", v.wcid)));
         }
         CommandTarget::Entity(e, _) => {
-            lines.push(Line::from(format!("DEBUG INFO: {}", e.name)));
+            lines.push(Line::from(format!("DEBUG INFO: {}", e.name())));
             lines.push(Line::from(format!("GUID:   {:08X}", e.guid)));
             let class = classification::classify_entity(e);
             lines.push(Line::from(format!(
@@ -105,7 +114,7 @@ pub fn get_debug_info(
                 lines.push(Line::from(format!("  [X] {}", name)));
             }
 
-            if let Some(it) = e.item_type {
+            if let Some(it) = e.item_type() {
                 lines.push(Line::from(format!("IType:  {:08X}", it.bits())));
                 for (name, _) in it.iter_names() {
                     lines.push(Line::from(format!("  [X] {}", name)));
@@ -442,96 +451,46 @@ pub fn get_debug_info(
                 )));
             }
 
-            if !e.int_properties.is_empty() {
+            if !e.properties.ints.0.is_empty() {
                 lines.push(Line::from("-- Int Properties --"));
-                let mut sorted_keys: Vec<_> = e.int_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyInt::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(Line::from(format!("  {}: {}", name, e.int_properties[&k])));
+                for (k, v) in e.properties.ints.iter() {
+                    lines.push(Line::from(format!("  {:?}: {}", k, v)));
                 }
             }
-            if !e.int64_properties.is_empty() {
+            if !e.properties.int64s.0.is_empty() {
                 lines.push(Line::from("-- Int64 Properties --"));
-                let mut sorted_keys: Vec<_> = e.int64_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyInt64::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(Line::from(format!(
-                        "  {}: {}",
-                        name, e.int64_properties[&k]
-                    )));
+                for (k, v) in e.properties.int64s.iter() {
+                    lines.push(Line::from(format!("  {:?}: {}", k, v)));
                 }
             }
-            if !e.bool_properties.is_empty() {
+            if !e.properties.bools.0.is_empty() {
                 lines.push(Line::from("-- Bool Properties --"));
-                let mut sorted_keys: Vec<_> = e.bool_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyBool::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(Line::from(format!("  {}: {}", name, e.bool_properties[&k])));
+                for (k, v) in e.properties.bools.iter() {
+                    lines.push(Line::from(format!("  {:?}: {}", k, v)));
                 }
             }
-            if !e.float_properties.is_empty() {
+            if !e.properties.floats.0.is_empty() {
                 lines.push(Line::from("-- Float Properties --"));
-                let mut sorted_keys: Vec<_> = e.float_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyFloat::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(Line::from(format!(
-                        "  {}: {:.4}",
-                        name, e.float_properties[&k]
-                    )));
+                for (k, v) in e.properties.floats.iter() {
+                    lines.push(Line::from(format!("  {:?}: {:.4}", k, v)));
                 }
             }
-            if !e.string_properties.is_empty() {
+            if !e.properties.strings.0.is_empty() {
                 lines.push(Line::from("-- String Properties --"));
-                let mut sorted_keys: Vec<_> = e.string_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyString::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(Line::from(format!(
-                        "  {}: {}",
-                        name, e.string_properties[&k]
-                    )));
+                for (k, v) in e.properties.strings.iter() {
+                    lines.push(Line::from(format!("  {:?}: {}", k, v)));
                 }
             }
-            if !e.did_properties.is_empty() {
+            if !e.properties.dids.0.is_empty() {
                 lines.push(Line::from("-- DataID Properties --"));
-                let mut sorted_keys: Vec<_> = e.did_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyDataId::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(Line::from(format!(
-                        "  {}: {:08X}",
-                        name, e.did_properties[&k]
-                    )));
+                for (k, v) in e.properties.dids.iter() {
+                    lines.push(Line::from(format!("  {:?}: {}", k, v)));
                 }
             }
-            if !e.iid_properties.is_empty() {
+            if !e.properties.iids.0.is_empty() {
                 lines.push(Line::from("-- InstanceID Properties --"));
-                let mut sorted_keys: Vec<_> = e.iid_properties.keys().collect();
-                sorted_keys.sort();
-                for &k in sorted_keys {
-                    let name = PropertyInstanceId::from_repr(k)
-                        .map(|p| p.to_string())
-                        .unwrap_or_else(|| k.to_string());
-                    lines.push(Line::from(format!(
-                        "  {}: {:08X}",
-                        name, e.iid_properties[&k]
-                    )));
+                for (k, v) in e.properties.iids.iter() {
+                    lines.push(Line::from(format!("  {:?}: {}", k, v)));
                 }
             }
 

@@ -5,8 +5,8 @@ use holtburger_common::position::WorldPosition;
 #[cfg(test)]
 use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
 use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, PropertyInt, PropertyUpdate, WorldObjectProperties,
-    WorldObjectPropertyAccessors,
+    HasProperties, HasPropertiesMut, PropertyFloat, PropertyInt, PropertyInt64, PropertyString,
+    PropertyUpdate, WorldObjectProperties, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
@@ -32,16 +32,6 @@ pub use types::{SkillBase, VitalBase};
 pub struct PlayerState {
     /// Unique identifier for the player's character.
     pub guid: Guid,
-    /// The character's display name.
-    pub name: String,
-    /// Current character level.
-    pub level: u32,
-    /// Total experience points earned over the character's lifetime.
-    pub total_experience: u64,
-    /// Experience points currently available for spending on attributes/skills/vitals.
-    pub available_experience: u64,
-    /// Current pool of unspent skill points.
-    pub unspent_skill_points: u32,
     /// Computed attribute values (Strength, Endurance, etc.) including buffs.
     pub attributes: HashMap<stats::AttributeType, stats::Attribute>,
     /// Computed vital values (Health, Stamina, Mana) including current/max/buffed states.
@@ -52,12 +42,6 @@ pub struct PlayerState {
     pub skills: HashMap<stats::SkillType, stats::Skill>,
     /// Stores the raw ranks and init for skills so they can be recalculated during stat updates.
     pub skill_bases: HashMap<stats::SkillType, SkillBase>,
-    /// Elemental and physical damage resistances computed from properties and enchantments.
-    pub resistances: stats::Resistances,
-    /// Total armor level (AL) computed from equipped items and buffs.
-    pub armor: i32,
-    /// Current "Vitae" penalty/bonus multiplier (0.0 to 1.0+).
-    pub vitae: f32,
     /// Current position in the world (Landcell + local coordinates).
     pub position: WorldPosition,
     /// Sequence for object instantiation/removal.
@@ -80,8 +64,6 @@ pub struct PlayerState {
     pub hotbar_spells: Vec<Vec<u32>>,
     /// All server-sent properties for the player.
     pub properties: WorldObjectProperties,
-    /// Current stance (Peace, Melee, Missile, Magic).
-    pub combat_mode: CombatMode,
 
     /// Whether collision detection is disabled for movement.
     pub noclip: bool,
@@ -105,19 +87,11 @@ impl PlayerState {
     pub fn new() -> Self {
         Self {
             guid: Guid::NULL,
-            name: "Unknown".to_string(),
-            level: 0,
-            total_experience: 0,
-            available_experience: 0,
-            unspent_skill_points: 0,
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             vital_bases: HashMap::new(),
             skills: HashMap::new(),
             skill_bases: HashMap::new(),
-            resistances: stats::Resistances::default(),
-            armor: 0,
-            vitae: 1.0,
             position: WorldPosition::default(),
             instance_sequence: 0,
             server_control_sequence: 0,
@@ -129,11 +103,71 @@ impl PlayerState {
             spells: BTreeMap::new(),
             hotbar_spells: vec![Vec::new(); 8],
             properties: WorldObjectProperties::default(),
-            combat_mode: CombatMode::NonCombat,
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
             last_sent_stats: None,
+        }
+    }
+
+    pub fn level(&self) -> u32 {
+        self.get_int_prop_default(PropertyInt::Level) as u32
+    }
+
+    pub fn total_experience(&self) -> u64 {
+        self.get_int64_prop(PropertyInt64::TotalExperience)
+            .unwrap_or(0) as u64
+    }
+
+    pub fn available_experience(&self) -> u64 {
+        self.get_int64_prop(PropertyInt64::AvailableExperience)
+            .unwrap_or(0) as u64
+    }
+
+    pub fn unspent_skill_points(&self) -> u32 {
+        self.get_int_prop_default(PropertyInt::AvailableSkillCredits) as u32
+    }
+
+    pub fn combat_mode(&self) -> CombatMode {
+        let val = self.get_int_prop_default(PropertyInt::CombatMode);
+        CombatMode::from_repr(val as u32).unwrap_or(CombatMode::NonCombat)
+    }
+
+    pub fn name(&self) -> &str {
+        self.get_string_prop(PropertyString::Name)
+            .unwrap_or("Unknown")
+    }
+
+    pub fn armor(&self) -> i32 {
+        let base_armor = self.get_int_prop_default(PropertyInt::ArmorLevel);
+        i32::max(
+            -400,
+            crate::world::magic::get_enchanted_armor(base_armor, &self.enchantments),
+        )
+    }
+
+    pub fn vitae(&self) -> f32 {
+        crate::world::magic::get_total_vitae(&self.enchantments)
+    }
+
+    pub fn resistances(&self) -> stats::Resistances {
+        let get_r = |prop: PropertyFloat| {
+            let base = self.get_float_prop(prop).unwrap_or(1.0);
+            crate::world::magic::get_enchanted_resistance(
+                base as f32,
+                &self.enchantments,
+                prop as u32,
+            )
+        };
+        stats::Resistances {
+            slash: get_r(PropertyFloat::ResistSlash),
+            pierce: get_r(PropertyFloat::ResistPierce),
+            bludgeon: get_r(PropertyFloat::ResistBludgeon),
+            fire: get_r(PropertyFloat::ResistFire),
+            cold: get_r(PropertyFloat::ResistCold),
+            acid: get_r(PropertyFloat::ResistAcid),
+            electric: get_r(PropertyFloat::ResistElectric),
+            nether: get_r(PropertyFloat::ResistNether),
         }
     }
 }
@@ -412,7 +446,7 @@ mod tests {
         });
         player.emit_derived_stats(&mut Vec::new());
         // 10 - 20 = -10.
-        assert_eq!(player.armor, -10);
+        assert_eq!(player.armor(), -10);
     }
 
     #[test]
@@ -642,7 +676,7 @@ mod tests {
         assert!(player.enchantments.iter().any(|e| e.spell_id == 100));
         assert!(!player.enchantments.iter().any(|e| e.spell_id == 200));
         assert!(player.enchantments.iter().any(|e| e.spell_id == 300));
-        assert_eq!(player.vitae, 0.95);
+        assert_eq!(player.vitae(), 0.95);
 
         assert!(
             events
@@ -718,7 +752,7 @@ mod tests {
 
         assert!(!player.enchantments.iter().any(|e| e.spell_id == 100));
         assert!(player.enchantments.iter().any(|e| e.spell_id == 666));
-        assert_eq!(player.vitae, 0.88);
+        assert_eq!(player.vitae(), 0.88);
 
         let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
             StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),

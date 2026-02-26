@@ -139,10 +139,10 @@ fn render_inventory_item(
 
     let type_marker = class.emoji();
 
-    let mut display_name = if e.name.trim().is_empty() {
-        format!("<{:08X}>", e.guid)
+    let mut display_name = if e.name().trim().is_empty() {
+        format!("0x{:08X}", e.guid.0)
     } else {
-        let mut name = e.name.clone();
+        let mut name = e.name().to_string();
         let stack_size = e.stack_size();
         if stack_size > 1 {
             name = format!("{} ({}x)", name, stack_size);

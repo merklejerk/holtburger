@@ -21,8 +21,8 @@ pub trait WorldContextExt: WorldContext {
             .filter_map(|guid| self.get_entity(guid))
             .filter(|entity| {
                 entity
-                    .item_type
-                    .is_some_and(|it| it.intersects(ItemType::MONEY))
+                    .item_type()
+                    .is_some_and(|it: ItemType| it.intersects(ItemType::MONEY))
             })
             .map(|entity| entity.stack_size())
             .sum()
@@ -81,7 +81,7 @@ pub trait WorldContextExt: WorldContext {
             None => return true,
         };
         if !e
-            .item_type
+            .item_type()
             .unwrap_or_default()
             .intersects(ItemType::CONTAINER)
         {
@@ -103,7 +103,7 @@ pub trait WorldContextExt: WorldContext {
             None => return false,
         };
 
-        let itype = e.item_type.unwrap_or_default();
+        let itype = e.item_type().unwrap_or_default();
 
         if itype.is_empty() || !e.is_sellable() || e.item_value() == 0 {
             return false;
@@ -152,7 +152,7 @@ pub trait WorldContextExt: WorldContext {
         let mut best = CombatMode::Melee;
         for guid in self.iter_equipment() {
             if let Some(entity) = self.get_entity(guid)
-                && let Some(it) = entity.item_type
+                && let Some(it) = entity.item_type()
             {
                 if it.intersects(ItemType::CASTER) {
                     return CombatMode::Magic;

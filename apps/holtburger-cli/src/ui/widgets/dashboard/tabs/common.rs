@@ -234,7 +234,7 @@ pub fn get_context_content_for_view(game: &GameState) -> Vec<Line<'static>> {
                         game.data
                             .entities
                             .get(&id)
-                            .map(|e| e.name.clone())
+                            .map(|e| e.name().to_string())
                             .or_else(|| {
                                 if Some(id) == player_guid {
                                     Some("You".to_string())

@@ -22,7 +22,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .data
             .entities
             .get(&trade.partner_guid)
-            .map(|e| e.name.as_str())
+            .map(|e| e.name())
             .unwrap_or("Partner");
 
         let chunks = Layout::default()
@@ -46,7 +46,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 let mut emoji = "❓";
                 let mut color = Color::White;
                 if let Some(e) = game.data.entities.get(guid) {
-                    display_name = e.name.clone();
+                    display_name = e.name().to_string();
                     let stack_size = e.stack_size();
                     if stack_size > 1 {
                         display_name = format!("{} ({}x)", display_name, stack_size);
@@ -143,7 +143,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 let mut emoji = "❓";
                 let mut color = Color::White;
                 if let Some(e) = game.data.entities.get(guid) {
-                    display_name = e.name.clone();
+                    display_name = e.name().to_string();
                     let stack_size = e.stack_size();
                     if stack_size > 1 {
                         display_name = format!("{} ({}x)", display_name, stack_size);
@@ -224,7 +224,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .data
             .entities
             .get(&vendor.vendor_guid)
-            .map(|e| e.name.as_str())
+            .map(|e| e.name())
             .unwrap_or("Vendor");
 
         let block = Block::default().borders(Borders::ALL).title(vendor_name);

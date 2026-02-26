@@ -1,13 +1,13 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
-use super::super::common::{Action, Verb};
 use super::render::render_trade_tab;
 use crate::ui::interaction::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, TradeFocus};
 use crate::ui::update::effect::UIEffect;
+use crate::ui::{Action, Verb};
 
 pub struct TradeTab;
 

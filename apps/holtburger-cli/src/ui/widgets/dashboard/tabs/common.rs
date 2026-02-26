@@ -2,53 +2,10 @@ use super::super::assess;
 use super::super::debug;
 use crate::ui::UIEffect;
 use crate::ui::state::GameState;
-use crate::ui::types::{CommandTarget, ContextView};
-use holtburger_common::Guid;
+use crate::ui::types::{Action, CommandTarget, ContextView};
 use holtburger_common::properties::ObjectDescriptionFlag;
-use holtburger_core::client::types::{ClientCommand, TargetSlot};
+use holtburger_core::client::types::ClientCommand;
 use ratatui::text::Line;
-use std::borrow::Cow;
-
-pub type VerbSet = Vec<Verb>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Action {
-    Assess,
-    Use,
-    Equip(TargetSlot),
-    Unequip,
-    Drop,
-    PickUp,
-    MoveToSlot(Guid),
-    Debug,
-    Approach,
-    CloseContainer,
-    Target,
-    LevelUp,
-    Train,
-    Move,
-    Cast,
-    ConfirmInteraction,
-    CancelInteraction,
-    Buy,
-    Sell,
-    AddToTrade,
-    AcceptTrade,
-    DeclineTrade,
-    ResetTrade,
-    Exit,
-    OpenTrade,
-    Stack(Guid),
-    Split,
-    Combine,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Verb {
-    pub action: Action,
-    pub shortcut: char,
-    pub label: Cow<'static, str>,
-}
 
 /// Handles standard actions that are universally applicable.
 pub fn handle_base_action(
@@ -165,42 +122,6 @@ pub fn handle_base_action(
             }
         }
         _ => None,
-    }
-}
-
-impl Verb {
-    pub fn new(action: Action, shortcut: char, label: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            action,
-            shortcut,
-            label: label.into(),
-        }
-    }
-
-    pub fn display_label(&self) -> String {
-        let label = &self.label;
-        let shortcut = self.shortcut;
-
-        if shortcut == '\x1b' {
-            return format!("[ESC] {}", label);
-        }
-
-        if shortcut == '\r' {
-            return format!("[ENTER] {}", label);
-        }
-
-        let shortcut_lower = shortcut.to_ascii_lowercase();
-        let shortcut_upper = shortcut.to_ascii_uppercase();
-
-        if let Some(pos) = label.find([shortcut_lower, shortcut_upper]) {
-            let (before, rest) = label.split_at(pos);
-            let mut iter = rest.chars();
-            let actual_char = iter.next().unwrap();
-            let after = iter.as_str();
-            format!("{}[{}]{}", before, actual_char, after)
-        } else {
-            format!("[{}] {}", shortcut_upper, label)
-        }
     }
 }
 

@@ -59,9 +59,12 @@ Simply run the executable from your terminal. If you are in the folder where you
 ```
 
 ### Windows
-The TUI/CLI client requires a modern terminal emulator to render correctly. The built in Command Prompt or PowerShell on Windows are not adequate. Fortunately, there are a number of options available, even directly from Microsoft, such as the [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) app.
+The TUI/CLI client requires a modern terminal emulator to render correctly. The built-in Command Prompt or PowerShell on Windows are not adequate. Fortunately, there are a number of options available, even directly from Microsoft, such as the [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) app (preinstalled on Windows 11).
 
-After you have extracted the windows zip file to a folder, open up your terminal emulator of choice, navigate to said folder, and run `holtburger-cli.exe --help` to get started.
+> [!TIP]
+> If you get an error about missing `VCRuntime140.dll`, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe). Additionally, you might have to whitelist the `.exe` with Windows Defender by attempting to run it once, hitting "More info", and then selecting "Run anyway".
+
+After you have extracted the Windows zip file to a folder, open up your terminal emulator of choice, navigate to said folder, and run `holtburger-cli.exe --help` to get started.
 
 ### Using Flatpak (Linux)
 ```bash

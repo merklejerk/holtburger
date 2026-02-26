@@ -48,7 +48,7 @@ pub fn get_debug_info(
             lines.push(Line::from(format!("WCID:   {}", v.wcid)));
         }
         CommandTarget::Entity(e, _) => {
-            lines.push(Line::from(format!("DEBUG INFO: {}", e.name)));
+            lines.push(Line::from(format!("DEBUG INFO: {}", e.name())));
             lines.push(Line::from(format!("GUID:   {:08X}", e.guid)));
             let class = classification::classify_entity(e);
             lines.push(Line::from(format!(
@@ -114,7 +114,7 @@ pub fn get_debug_info(
                 lines.push(Line::from(format!("  [X] {}", name)));
             }
 
-            if let Some(it) = e.item_type {
+            if let Some(it) = e.item_type() {
                 lines.push(Line::from(format!("IType:  {:08X}", it.bits())));
                 for (name, _) in it.iter_names() {
                     lines.push(Line::from(format!("  [X] {}", name)));

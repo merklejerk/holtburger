@@ -54,6 +54,7 @@
 - [x] Weenie errors are just showing the first word or something in chat.
 - [~] Suffix the protocol data types with "ActionData" or "EventData" so it's clear which message class they belong to?
 - [x] Show item emojis in trade window.
+- [x] `PlayerState` is duplicating state. The property maps should be the one source of truth.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -75,7 +76,6 @@
 - [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
 - [ ] Actions and `handle_base_action()` don't belong in `common.rs`.
 - [ ] HATE `world/state.rs`
-- [ ] `PlayerState` is duplicating state. The property maps should be the one source of truth.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -115,6 +115,7 @@
 - [x] Stacking/Splitting.
 - [x] Merging by ItemType is wrong! Lots of things share ItemTypes. WeenieIDs maybe?
 - [x] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
+- [x] No debug verb on wielded weapons in nearby tab.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -135,11 +136,12 @@
 - [ ] Crafting.
 - [ ] Should split into the same container.
 - [ ] Precise splitting.
+- [ ] Exit combat mode when trying to trade.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
 - [x] Server only takes IP?
-- [ ] flags and weenie flags should also be converted to properties!
+- [x] flags and weenie flags should also be converted to properties!
 - [ ] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows Defender by attempting to run it once, hit "Learn More" and then select "Run anyway".
 
 ### Stretch

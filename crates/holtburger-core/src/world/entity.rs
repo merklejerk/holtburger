@@ -17,7 +17,6 @@ use std::collections::HashMap;
 pub struct Entity {
     pub guid: Guid,
     pub wcid: Option<u32>,
-    pub name: String,
     pub position: WorldPosition,
 
     pub velocity: Vector3,
@@ -28,7 +27,6 @@ pub struct Entity {
     pub flags: ObjectDescriptionFlag,
     pub weenie_flags: WeenieHeaderFlag,
     pub weenie_flags2: WeenieHeaderFlag2,
-    pub item_type: Option<ItemType>,
     pub physics_state: PhysicsState,
     pub physics_parent_id: Option<Guid>,
     pub autonomous_movement: bool,
@@ -50,6 +48,13 @@ pub struct Entity {
     pub weapon_color: Option<u16>,
     pub resist_highlight: Option<u16>,
     pub resist_color: Option<u16>,
+}
+
+impl Entity {
+    pub fn item_type(&self) -> Option<ItemType> {
+        self.get_int_prop(PropertyInt::ItemType)
+            .and_then(|val| ItemType::from_bits(val as u32))
+    }
 }
 
 impl HasProperties for Entity {
@@ -309,9 +314,12 @@ impl Entity {
         self.flags = data.public_weenie_desc.obj_desc_flags;
         self.weenie_flags = data.public_weenie_desc.weenie_flags;
         self.weenie_flags2 = data.public_weenie_desc.weenie_flags2;
-        self.item_type = Some(ItemType::from_bits_truncate(
-            data.public_weenie_desc.item_type,
-        ));
+
+        self.properties.ints.0.insert(
+            PropertyInt::ItemType,
+            data.public_weenie_desc.item_type as i32,
+        );
+
         self.physics_state = data.physics_state;
         self.physics_parent_id = data.parent_id;
 
@@ -363,10 +371,12 @@ impl Entity {
     }
 
     pub fn new(guid: Guid, name: String, position: WorldPosition) -> Self {
+        let mut properties = WorldObjectProperties::default();
+        properties.strings.insert(PropertyString::Name, name);
+
         Self {
             guid,
             wcid: None,
-            name,
             position,
             velocity: Vector3 {
                 x: 0.0,
@@ -388,12 +398,12 @@ impl Entity {
             flags: ObjectDescriptionFlag::empty(),
             weenie_flags: WeenieHeaderFlag::empty(),
             weenie_flags2: WeenieHeaderFlag2::empty(),
-            item_type: None,
+
             physics_state: PhysicsState::NONE,
             physics_parent_id: None,
             autonomous_movement: false,
             sequences: [0; 9],
-            properties: WorldObjectProperties::default(),
+            properties,
             armor_profile: None,
             creature_profile: None,
             weapon_profile: None,
@@ -407,6 +417,11 @@ impl Entity {
             resist_highlight: None,
             resist_color: None,
         }
+    }
+
+    pub fn name(&self) -> &str {
+        self.get_string_prop(PropertyString::Name)
+            .unwrap_or("Unknown")
     }
 }
 

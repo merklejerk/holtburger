@@ -12,7 +12,7 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     lines.push(Line::from(vec![
         Span::styled("─── ", Style::default().fg(Color::Yellow)),
         Span::styled(
-            entity.name.to_uppercase(),
+            entity.name().to_uppercase(),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)

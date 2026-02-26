@@ -7,7 +7,7 @@ use super::vendor::{CoreVendorItem, VendorState};
 use binrw::BinRead;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
-    PropertyUpdate, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
+    PropertyString, PropertyUpdate, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::ResourceProvider;
@@ -64,9 +64,9 @@ pub struct WorldState {
 impl WorldState {
     pub fn get_level_info(&self) -> Option<stats::CharacterLevelInfo> {
         let table = self.xp_table.as_ref()?;
-        let level = self.player.level;
-        let total_xp = self.player.total_experience;
-        let unspent_xp = self.player.available_experience;
+        let level = self.player.level();
+        let total_xp = self.player.total_experience();
+        let unspent_xp = self.player.available_experience();
 
         let level_idx = level as usize;
         let next_level_idx = level_idx + 1;
@@ -78,7 +78,7 @@ impl WorldState {
                 level,
                 current_xp: total_xp,
                 unspent_xp,
-                unspent_skill_points: self.player.unspent_skill_points,
+                unspent_skill_points: self.player.unspent_skill_points(),
                 next_level_xp: level_xp,
                 xp_into_level: total_xp.saturating_sub(level_xp),
                 xp_for_next_level: 0,
@@ -92,7 +92,7 @@ impl WorldState {
             level,
             current_xp: total_xp,
             unspent_xp,
-            unspent_skill_points: self.player.unspent_skill_points,
+            unspent_skill_points: self.player.unspent_skill_points(),
             next_level_xp,
             xp_into_level: total_xp.saturating_sub(level_xp),
             xp_for_next_level: next_level_xp.saturating_sub(level_xp),
@@ -492,7 +492,7 @@ impl WorldState {
 
                     // Ensure entity in our map has the correct name
                     if let Some(entity) = self.entities.get_mut(guid) {
-                        entity.name = name.clone();
+                        entity.set_string_prop(PropertyString::Name, name.clone());
                     }
 
                     if let Some(p) = pos {
@@ -509,7 +509,7 @@ impl WorldState {
                             skills: self.player.get_skills(),
                             enchantments: self.player.enchantments.clone(),
                             spells: self.player.spells.keys().cloned().collect(),
-                            vitae: self.player.vitae,
+                            vitae: self.player.vitae(),
                             skill_table: self.skill_table.clone(),
                             spell_names: self.get_player_spell_names(),
                             inventory: self.player.inventory.clone(),
@@ -803,12 +803,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                     match data.property {
-                        p if p == PropertyInt::Level as u32 => {
-                            self.player.level = data.value as u32;
-                            self.emit_level_info(&mut events);
-                        }
-                        p if p == PropertyInt::AvailableSkillCredits as u32 => {
-                            self.player.unspent_skill_points = data.value as u32;
+                        p if p == PropertyInt::Level as u32
+                            || p == PropertyInt::AvailableSkillCredits as u32 =>
+                        {
                             self.emit_level_info(&mut events);
                         }
                         p if p == PropertyInt::CombatMode as u32 => {
@@ -817,7 +814,6 @@ impl WorldState {
                                     data.value as u32,
                                 )
                             {
-                                self.player.combat_mode = mode;
                                 events.push(StateEvent::CombatModeUpdated(mode));
                             }
                         }
@@ -859,7 +855,6 @@ impl WorldState {
                             );
 
                         if let Some(mode) = maybe_mode {
-                            self.player.combat_mode = mode;
                             events.push(StateEvent::CombatModeUpdated(mode));
                         }
                     }
@@ -887,12 +882,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                     match data.property {
-                        p if p == PropertyInt64::TotalExperience as u32 => {
-                            self.player.total_experience = data.value as u64;
-                            self.emit_level_info(&mut events);
-                        }
-                        p if p == PropertyInt64::AvailableExperience as u32 => {
-                            self.player.available_experience = data.value as u64;
+                        p if p == PropertyInt64::TotalExperience as u32
+                            || p == PropertyInt64::AvailableExperience as u32 =>
+                        {
                             self.emit_level_info(&mut events);
                         }
                         _ => {}
@@ -1708,7 +1700,7 @@ mod tests {
         state.handle_message(&msg);
 
         assert_eq!(state.player.guid, player_guid);
-        assert_eq!(state.player.name, player_name);
+        assert_eq!(state.player.name(), player_name);
     }
 
     #[test]

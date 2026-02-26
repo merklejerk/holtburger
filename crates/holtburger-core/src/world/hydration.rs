@@ -1,6 +1,6 @@
 use holtburger_common::properties::{
-    PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString,
-    WorldObjectProperties,
+    ObjectDescriptionFlag, PhysicsState, PropertyBool, PropertyDataId, PropertyFloat,
+    PropertyInstanceId, PropertyInt, PropertyString, WorldObjectProperties,
 };
 use holtburger_protocol::messages::object::messages::description::{
     ObjectDescriptionData, PublicWeenieDescription,
@@ -21,6 +21,41 @@ pub trait WorldObjectPropertiesHydrationExt {
 
 impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
     fn hydrate_from_pwd(&mut self, pwd: &PublicWeenieDescription) {
+        let flags = pwd.obj_desc_flags;
+        if flags.contains(ObjectDescriptionFlag::STUCK) {
+            self.bools.insert(PropertyBool::Stuck, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::ATTACKABLE) {
+            self.bools.insert(PropertyBool::Attackable, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::PLAYER_KILLER) {
+            self.bools.insert(PropertyBool::PkKiller, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::HIDDEN_ADMIN) {
+            self.bools.insert(PropertyBool::HiddenAdmin, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::UI_HIDDEN) {
+            self.bools.insert(PropertyBool::UiHidden, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::VENDOR) {
+            self.bools.insert(PropertyBool::VendorService, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::ADMIN) {
+            self.bools.insert(PropertyBool::IsAdmin, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
+            self.bools.insert(PropertyBool::RequiresBackpackSlot, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::RETAINED) {
+            self.bools.insert(PropertyBool::Retained, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::WIELD_ON_USE) {
+            self.bools.insert(PropertyBool::WieldOnUse, true);
+        }
+        if flags.contains(ObjectDescriptionFlag::INSCRIBABLE) {
+            self.bools.insert(PropertyBool::Inscribable, true);
+        }
+
         if let Some(ref v) = pwd.name {
             self.strings.insert(PropertyString::Name, v.clone());
         }
@@ -137,8 +172,37 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         self.hydrate_from_pwd(&odd.public_weenie_desc);
 
         // Add physics fields from ObjectDescriptionData
+        let pstate = odd.physics_state;
         self.ints
-            .insert(PropertyInt::PhysicsState, odd.physics_state.bits() as i32);
+            .insert(PropertyInt::PhysicsState, pstate.bits() as i32);
+
+        if pstate.contains(PhysicsState::ETHEREAL) {
+            self.bools.insert(PropertyBool::Ethereal, true);
+        }
+        if pstate.contains(PhysicsState::REPORT_COLLISIONS) {
+            self.bools.insert(PropertyBool::ReportCollisions, true);
+        }
+        if pstate.contains(PhysicsState::IGNORE_COLLISIONS) {
+            self.bools.insert(PropertyBool::IgnoreCollisions, true);
+        }
+        if pstate.contains(PhysicsState::NO_DRAW) {
+            self.bools.insert(PropertyBool::NoDraw, true);
+        }
+        if pstate.contains(PhysicsState::GRAVITY) {
+            self.bools.insert(PropertyBool::GravityStatus, true);
+        }
+        if pstate.contains(PhysicsState::LIGHTING_ON) {
+            self.bools.insert(PropertyBool::LightsStatus, true);
+        }
+        if pstate.contains(PhysicsState::SCRIPTED_COLLISION) {
+            self.bools.insert(PropertyBool::ScriptedCollision, true);
+        }
+        if pstate.contains(PhysicsState::INELASTIC) {
+            self.bools.insert(PropertyBool::Inelastic, true);
+        }
+        if pstate.contains(PhysicsState::CLOAKED) {
+            self.ints.insert(PropertyInt::CloakStatus, 1); // 1 = On, 0 = Off
+        }
 
         if let Some(v) = odd.mtable_id {
             self.dids

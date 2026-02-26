@@ -105,7 +105,7 @@ pub fn get_entity_color(class: EntityClass) -> Color {
 }
 
 pub fn classify_entity(entity: &Entity) -> EntityClass {
-    classify_raw(entity.flags, entity.item_type)
+    classify_raw(entity.flags, entity.item_type())
 }
 
 pub fn classify_vendor_item(item: &CoreVendorItem) -> EntityClass {
@@ -288,7 +288,7 @@ pub fn is_targetable(entity: &Entity) -> bool {
         | EntityClass::Chest
         | EntityClass::Wand
         | EntityClass::Tool
-        | EntityClass::StaticObject => !entity.name.trim().is_empty(),
+        | EntityClass::StaticObject => !entity.name().trim().is_empty(),
         EntityClass::Unknown => false,
     }
 }

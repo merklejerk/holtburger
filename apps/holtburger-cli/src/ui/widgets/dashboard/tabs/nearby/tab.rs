@@ -85,6 +85,20 @@ impl TabController for NearbyTab {
                     }
                     return verbs;
                 }
+                Interaction::Combining { item_guid } => {
+                    if let Some(source_e) = game.data.entities.get(&item_guid)
+                        && let Some(target_type) = source_e.target_item_type()
+                        && let Some(dest_item_type) = e.item_type()
+                        && target_type.intersects(dest_item_type)
+                    {
+                        verbs.push(Verb::new(
+                            Action::ConfirmInteraction,
+                            '\r',
+                            format!("Apply to {}", e.name()),
+                        ));
+                    }
+                    return verbs;
+                }
                 _ => {}
             }
         }
@@ -121,8 +135,17 @@ impl TabController for NearbyTab {
                         EntityClass::Portal
                         | EntityClass::Door
                         | EntityClass::LifeStone
-                        | EntityClass::Consumable => {
-                            verbs.push(Verb::new(Action::Use, 'u', "Use"));
+                        | EntityClass::Consumable
+                        | EntityClass::Tool
+                        | EntityClass::Key
+                        | EntityClass::Writable
+                        | EntityClass::Money
+                        | EntityClass::Item => {
+                            if e.target_item_type().is_some() {
+                                verbs.push(Verb::new(Action::Combine, 'n', "Combine"));
+                            } else {
+                                verbs.push(Verb::new(Action::Use, 'u', "Use"));
+                            }
                         }
                         EntityClass::Chest | EntityClass::Container => {
                             if game.data.open_containers.contains(&e.guid) {

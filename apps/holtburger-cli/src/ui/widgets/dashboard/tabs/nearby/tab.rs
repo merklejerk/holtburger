@@ -23,6 +23,7 @@ pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
         &game.data.inventory,
         &game.data.equipment,
         game.data.player_pos.as_ref(),
+        Some(&game.data.open_containers),
         EntityFilter::World,
     )
 }
@@ -48,7 +49,7 @@ impl TabController for NearbyTab {
                 Interaction::Moving { item_guid } => {
                     let is_givable_creature =
                         matches!(class, EntityClass::Player | EntityClass::Npc);
-                    let is_container = matches!(class, EntityClass::Container | EntityClass::Chest);
+                    let is_open_container = game.data.open_containers.contains(&e.guid);
                     let is_same_item = e.guid == item_guid;
                     let is_in_main_pack = game.data.is_in_main_pack(item_guid);
 
@@ -60,7 +61,7 @@ impl TabController for NearbyTab {
                         }
                     } else if is_givable_creature {
                         Some(format!("Give to {}", e.name()))
-                    } else if is_container {
+                    } else if is_open_container {
                         Some(format!("Move to {}", e.name()))
                     } else {
                         None
@@ -84,6 +85,20 @@ impl TabController for NearbyTab {
                     }
                     return verbs;
                 }
+                Interaction::Combining { item_guid } => {
+                    if let Some(source_e) = game.data.entities.get(&item_guid)
+                        && let Some(target_type) = source_e.target_item_type()
+                        && let Some(dest_item_type) = e.item_type()
+                        && target_type.intersects(dest_item_type)
+                    {
+                        verbs.push(Verb::new(
+                            Action::ConfirmInteraction,
+                            '\r',
+                            format!("Apply to {}", e.name()),
+                        ));
+                    }
+                    return verbs;
+                }
                 _ => {}
             }
         }
@@ -101,29 +116,49 @@ impl TabController for NearbyTab {
             let is_self = game.data.player_guid == Some(e.guid);
             let class = classification::classify_entity(e);
 
-            if !is_self {
-                // Nearby entities allow Approach
-                verbs.push(Verb::new(Action::Approach, 'r', "Approach"));
+            let in_container = e
+                .container_id()
+                .is_some_and(|id| game.data.open_containers.contains(&id));
 
-                match class {
-                    EntityClass::Vendor => {
-                        verbs.push(Verb::new(Action::Use, 's', "Shop"));
+            if !is_self {
+                if !in_container {
+                    // Nearby entities allow Approach
+                    verbs.push(Verb::new(Action::Approach, 'r', "Approach"));
+
+                    match class {
+                        EntityClass::Vendor => {
+                            verbs.push(Verb::new(Action::Use, 's', "Shop"));
+                        }
+                        EntityClass::Npc => {
+                            verbs.push(Verb::new(Action::Use, 'k', "Talk"));
+                        }
+                        EntityClass::Portal
+                        | EntityClass::Door
+                        | EntityClass::LifeStone
+                        | EntityClass::Consumable
+                        | EntityClass::Tool
+                        | EntityClass::Key
+                        | EntityClass::Writable
+                        | EntityClass::Money
+                        | EntityClass::Item => {
+                            if e.target_item_type().is_some() {
+                                verbs.push(Verb::new(Action::Combine, 'n', "Combine"));
+                            } else {
+                                verbs.push(Verb::new(Action::Use, 'u', "Use"));
+                            }
+                        }
+                        EntityClass::Chest | EntityClass::Container => {
+                            if game.data.open_containers.contains(&e.guid) {
+                                verbs.push(Verb::new(Action::CloseContainer, 'o', "Close"));
+                            } else {
+                                verbs.push(Verb::new(Action::Use, 'o', "Open"));
+                            }
+                        }
+                        EntityClass::Player => {
+                            verbs.push(Verb::new(Action::OpenTrade, 'd', "Trade"));
+                        }
+                        _ => {}
                     }
-                    EntityClass::Npc => {
-                        verbs.push(Verb::new(Action::Use, 'k', "Talk"));
-                    }
-                    EntityClass::Portal
-                    | EntityClass::Door
-                    | EntityClass::LifeStone
-                    | EntityClass::Container
-                    | EntityClass::Consumable
-                    | EntityClass::Chest => {
-                        verbs.push(Verb::new(Action::Use, 'u', "Use"));
-                    }
-                    EntityClass::Player => {
-                        verbs.push(Verb::new(Action::OpenTrade, 'd', "Trade"));
-                    }
-                    _ => {}
                 }
 
                 if !e.flags.intersects(ObjectDescriptionFlag::STUCK) {
@@ -200,6 +235,9 @@ impl TabController for NearbyTab {
             }
             (Action::Approach, CommandTarget::Entity(e, _)) => {
                 Some(UIEffect::Command(ClientCommand::MoveTo { target: e.guid }))
+            }
+            (Action::CloseContainer, CommandTarget::Entity(e, _)) => {
+                Some(UIEffect::Command(ClientCommand::CloseContainer(e.guid)))
             }
             _ => super::super::common::handle_base_action(action, &target, game),
         }

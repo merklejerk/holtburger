@@ -66,6 +66,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
             crate::ui::Interaction::Moving { item_guid } => item_guid,
             crate::ui::Interaction::Healing { item_guid } => item_guid,
             crate::ui::Interaction::Targeting { target_guid } => target_guid,
+            crate::ui::Interaction::Combining { item_guid } => item_guid,
         };
 
         let (name, guid) = if let Some(entity) = game.data.entities.get(&target_guid) {

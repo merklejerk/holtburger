@@ -255,6 +255,16 @@ impl Client {
                         trade: trade.clone(),
                     });
             }
+            StateEvent::ContainerOpened(guid) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ContainerOpened { guid: *guid });
+            }
+            StateEvent::ContainerClosed(guid) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ContainerClosed { guid: *guid });
+            }
             _ => {}
         }
     }

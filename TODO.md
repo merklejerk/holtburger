@@ -58,6 +58,7 @@
 - [x] `PlayerState` is duplicating state. The property maps should be the one source of truth.
 - [x] [C]ombine verb (crafting).
 - [x] [U]se for Mana charges.
+- [x] Actions and `handle_base_action()` don't belong in `common.rs`.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -75,7 +76,6 @@
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Active panel needs to be much more obvious.
 - [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
-- [ ] Actions and `handle_base_action()` don't belong in `common.rs`.
 - [ ] HATE `world/state.rs`
 - [ ] Resolve Spellbook entries in debug info.
 - [ ] Exit combat mode when trying to trade.

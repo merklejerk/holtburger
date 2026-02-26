@@ -1,5 +1,6 @@
 use super::StateEvent;
 use super::entity::{Entity, EntityManager};
+use super::hydration::WorldObjectPropertiesHydrationExt;
 use super::player::PlayerState;
 use super::spatial::SpatialScene;
 use super::stats;
@@ -837,6 +838,7 @@ impl WorldState {
             GameMessage::SetState(data) => {
                 if let Some(entity) = self.entities.get_mut(data.guid) {
                     entity.physics_state = data.physics_state;
+                    entity.properties.hydrate_from_set_state(data);
                     events.push(StateEvent::EntityStateUpdated {
                         guid: data.guid,
                         physics_state: data.physics_state,

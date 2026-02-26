@@ -141,11 +141,7 @@ impl TabController for NearbyTab {
                         | EntityClass::Writable
                         | EntityClass::Money
                         | EntityClass::Item => {
-                            if e.target_item_type().is_some() {
-                                verbs.push(Verb::new(Action::Combine, 'n', "Combine"));
-                            } else {
-                                verbs.push(Verb::new(Action::Use, 'u', "Use"));
-                            }
+                            verbs.push(Verb::new(Action::Use, 'u', "Use"));
                         }
                         EntityClass::Chest | EntityClass::Container => {
                             if game.data.open_containers.contains(&e.guid) {

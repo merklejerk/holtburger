@@ -2,7 +2,7 @@ name: Nightly Build
 
 on:
   schedule:
-    - cron: '0 2 * * *' # 2 AM daily
+    - cron: '0 */8 * * *' # Every 8 hours
   workflow_dispatch: # Manual trigger for the rizz
 
 permissions:

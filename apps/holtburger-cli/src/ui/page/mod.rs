@@ -1,13 +1,12 @@
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders};
 use unicode_width::UnicodeWidthStr;
 
 use crate::ui::get_layout;
 use crate::ui::layout::PULSE_PANEL_WIDTH;
 use crate::ui::state::{ChatState, GameState, Page, SelectionState};
+use crate::ui::theme::{pane_block, pane_title_style};
 use crate::ui::update::UpdateResult;
 use crate::ui::widgets::dashboard::render_dashboard_pane;
 use crate::ui::widgets::hud::pulse::render_pulse_panel;
@@ -138,27 +137,13 @@ impl GameState {
 
         let focused_pane = self.view.focused_pane;
 
-        let input_style = if focused_pane == FocusedPane::Input {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-        };
-        let input_title = if focused_pane == FocusedPane::Input {
-            ">> Input ([ENTER] to focus) <<"
-        } else {
-            "Input ([ENTER] to focus)"
-        };
-        let input_block = Block::default()
-            .borders(Borders::ALL)
+        let is_focused = focused_pane == FocusedPane::Input;
+
+        let input_title = " Input ([ENTER] to focus) ";
+
+        let input_block = pane_block(is_focused)
             .title(input_title)
-            .border_style(input_style)
-            .title_style(if focused_pane == FocusedPane::Input {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            });
+            .title_style(pane_title_style(is_focused));
         let input_width = input.width() as u16;
         let max_visible_width = input_chunks[0].width.saturating_sub(2);
 

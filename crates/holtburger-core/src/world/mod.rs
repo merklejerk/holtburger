@@ -2,7 +2,6 @@ pub mod context;
 pub mod entity;
 pub mod hydration;
 pub mod magic;
-pub mod physics_types;
 pub mod player;
 pub mod spatial;
 pub mod state;

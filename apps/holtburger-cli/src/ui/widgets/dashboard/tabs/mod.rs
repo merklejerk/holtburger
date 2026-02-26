@@ -1,6 +1,5 @@
 pub mod character;
 pub mod classification;
-pub mod common;
 pub mod equip;
 pub mod inventory;
 pub mod nearby;

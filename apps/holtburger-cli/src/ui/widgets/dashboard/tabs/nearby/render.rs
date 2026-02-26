@@ -6,6 +6,7 @@ use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, Scrollba
 use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
+use crate::ui::utils::format_item_name;
 use holtburger_core::world::context::WorldContextExt;
 use holtburger_core::world::entity::Entity;
 
@@ -89,16 +90,7 @@ fn render_nearby_item(
 
     let type_marker = class.emoji();
 
-    let mut display_name = if e.name().trim().is_empty() {
-        format!("<{:08X}>", e.guid)
-    } else {
-        e.name().to_string()
-    };
-
-    let stack_size = e.stack_size();
-    if stack_size > 1 {
-        display_name = format!("{} ({}x)", display_name, stack_size);
-    }
+    let mut display_name = format_item_name(e, e.guid);
 
     if !class.is_creature() && is_open {
         if let Some(capacity) = e.items_capacity() {

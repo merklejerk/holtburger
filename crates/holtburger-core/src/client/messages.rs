@@ -169,11 +169,17 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::PopupString(data) => {
-                    self.emit_wire_event(WireEvent::ServerMessage(data.message.clone()));
+                    self.emit_wire_event(WireEvent::ServerMessage {
+                        message: data.message.clone(),
+                        chat_type: ChatMessageType::System as u32,
+                    });
                     Ok(())
                 }
                 GameEvent::CommunicationTransientString(data) => {
-                    self.emit_wire_event(WireEvent::ServerMessage(data.message.clone()));
+                    self.emit_wire_event(WireEvent::ServerMessage {
+                        message: data.message.clone(),
+                        chat_type: ChatMessageType::System as u32,
+                    });
                     Ok(())
                 }
                 GameEvent::WeenieError(data) => {
@@ -213,10 +219,10 @@ impl Client {
                         .get(partner_guid)
                         .map(|e: &Entity| e.name().to_string())
                         .unwrap_or_else(|| format!("0x{:08X}", partner_guid.0));
-                    self.emit_wire_event(WireEvent::ServerMessage(format!(
-                        "Trade started with {}.",
-                        partner_name
-                    )));
+                    self.emit_wire_event(WireEvent::ServerMessage {
+                        message: format!("Trade started with {}.", partner_name),
+                        chat_type: ChatMessageType::System as u32,
+                    });
                     Ok(())
                 }
                 _ => Ok(()),
@@ -268,7 +274,10 @@ impl Client {
             }
             GameMessage::GameAction(data) => self.handle_game_action(&data.action).await,
             GameMessage::ServerMessage(data) => {
-                self.emit_wire_event(WireEvent::ServerMessage(data.message.clone()));
+                self.emit_wire_event(WireEvent::ServerMessage {
+                    message: data.message.clone(),
+                    chat_type: data.chat_type,
+                });
                 Ok(())
             }
             GameMessage::CharacterError(data) => {

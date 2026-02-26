@@ -5,12 +5,12 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
 
 use super::super::classification::{classify_entity, get_entity_color};
+use crate::ui::state::GameState;
+use crate::ui::theme;
+use crate::ui::utils::format_item_name;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::world::entity::Entity;
-
-use crate::ui::state::GameState;
-use crate::ui::theme;
 
 pub enum EquipTabLine<'a> {
     Header(String, bool),
@@ -87,11 +87,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
                     spans.push(Span::raw("    "));
                 }
 
-                let mut name = item.name().to_string();
-                let stack_size = item.stack_size();
-                if stack_size > 1 {
-                    name = format!("{} ({}x)", name, stack_size);
-                }
+                let name = format_item_name(item, item.guid);
 
                 spans.push(Span::styled(
                     name,

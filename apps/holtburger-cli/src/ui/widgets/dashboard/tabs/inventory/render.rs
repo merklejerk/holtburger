@@ -9,6 +9,7 @@ use ratatui::widgets::{
 use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
 use crate::ui::theme;
+use crate::ui::utils::format_item_name;
 use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
 use holtburger_core::world::context::WorldContextExt;
@@ -139,23 +140,13 @@ fn render_inventory_item(
 
     let type_marker = class.emoji();
 
-    let mut display_name = if e.name().trim().is_empty() {
-        format!("0x{:08X}", e.guid.0)
-    } else {
-        let mut name = e.name().to_string();
-        let stack_size = e.stack_size();
-        if stack_size > 1 {
-            name = format!("{} ({}x)", name, stack_size);
-        }
+    let mut display_name = format_item_name(e, e.guid);
 
-        if is_equipped {
-            format!("{} (EQUIPPED)", name)
-        } else if is_offered {
-            format!("{} (OFFERED)", name)
-        } else {
-            name
-        }
-    };
+    if is_equipped {
+        display_name = format!("{} (EQUIPPED)", display_name);
+    } else if is_offered {
+        display_name = format!("{} (OFFERED)", display_name);
+    }
 
     if !class.is_creature() {
         if let Some(capacity) = e.items_capacity() {

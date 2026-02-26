@@ -117,7 +117,7 @@ impl TabController for InventoryTab {
                 | EntityClass::Money
                 | EntityClass::Item => {
                     if e.target_item_type().is_some() {
-                        verbs.push(Verb::new(Action::Combine, 'n', "Combine"));
+                        verbs.push(Verb::new(Action::Combine, 'c', "Combine"));
                     } else {
                         verbs.push(Verb::new(Action::Use, 'u', "Use"));
                     }

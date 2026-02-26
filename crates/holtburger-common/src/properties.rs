@@ -5,23 +5,10 @@ use std::collections::BTreeMap;
 use strum_macros::{Display, FromRepr};
 
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Default,
-    FromRepr,
-    Display,
-    Serialize,
-    Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
 )]
 #[repr(u32)]
 pub enum PropertyBool {
-    #[default]
-    Undef = 0,
     Stuck = 1,
     Open = 2,
     Locked = 3,
@@ -177,7 +164,6 @@ pub enum AttunedStatus {
 )]
 #[repr(u32)]
 pub enum PropertyInt {
-    Undef = 0,
     ItemType = 1,
     CreatureType = 2,
     PaletteTemplate = 3,
@@ -588,7 +574,6 @@ pub enum PropertyInt {
 )]
 #[repr(u32)]
 pub enum PropertyInt64 {
-    Undef = 0,
     TotalExperience = 1,
     AvailableExperience = 2,
     AugmentationCost = 3,
@@ -604,7 +589,6 @@ pub enum PropertyInt64 {
 )]
 #[repr(u32)]
 pub enum PropertyFloat {
-    Undef = 0,
     HeartbeatInterval = 1,
     HeartbeatTimestamp = 2,
     HealthRate = 3,
@@ -792,7 +776,6 @@ pub enum PropertyFloat {
 )]
 #[repr(u32)]
 pub enum PropertyString {
-    Undef = 0,
     Name = 1,
     Title = 2,
     Sex = 3,
@@ -862,7 +845,6 @@ pub enum PropertyString {
 )]
 #[repr(u32)]
 pub enum PropertyDataId {
-    Undef = 0,
     Setup = 1,
     MotionTable = 2,
     SoundTable = 3,
@@ -949,7 +931,6 @@ pub enum PropertyDataId {
 )]
 #[repr(u32)]
 pub enum PropertyInstanceId {
-    Undef = 0,
     Owner = 1,
     Container = 2,
     Wielder = 3,
@@ -1257,7 +1238,6 @@ bitflags! {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WeenieType {
-    Undef = 0,
     Generic = 1,
     Clothing = 2,
     MissileLauncher = 3,

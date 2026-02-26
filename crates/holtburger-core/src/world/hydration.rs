@@ -5,6 +5,7 @@ use holtburger_common::properties::{
 use holtburger_protocol::messages::object::messages::description::{
     ObjectDescriptionData, PublicWeenieDescription,
 };
+use holtburger_protocol::messages::object::messages::properties::SetStateData;
 use holtburger_protocol::messages::trade::events::VendorItemEventData;
 
 /// Extension trait for [WorldObjectProperties] to support hydration from protocol structures.
@@ -14,6 +15,12 @@ pub trait WorldObjectPropertiesHydrationExt {
 
     /// Hydrates properties from an [ObjectDescriptionData].
     fn hydrate_from_odd(&mut self, odd: &ObjectDescriptionData);
+
+    /// Hydrates properties from a [PhysicsState].
+    fn hydrate_from_physics_state(&mut self, pstate: PhysicsState);
+
+    /// Hydrates properties from a [SetStateData].
+    fn hydrate_from_set_state(&mut self, data: &SetStateData);
 
     /// Hydrates properties from a [VendorItemEventData].
     fn hydrate_from_vendor_item(&mut self, data: &VendorItemEventData);
@@ -172,37 +179,7 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         self.hydrate_from_pwd(&odd.public_weenie_desc);
 
         // Add physics fields from ObjectDescriptionData
-        let pstate = odd.physics_state;
-        self.ints
-            .insert(PropertyInt::PhysicsState, pstate.bits() as i32);
-
-        if pstate.contains(PhysicsState::ETHEREAL) {
-            self.bools.insert(PropertyBool::Ethereal, true);
-        }
-        if pstate.contains(PhysicsState::REPORT_COLLISIONS) {
-            self.bools.insert(PropertyBool::ReportCollisions, true);
-        }
-        if pstate.contains(PhysicsState::IGNORE_COLLISIONS) {
-            self.bools.insert(PropertyBool::IgnoreCollisions, true);
-        }
-        if pstate.contains(PhysicsState::NO_DRAW) {
-            self.bools.insert(PropertyBool::NoDraw, true);
-        }
-        if pstate.contains(PhysicsState::GRAVITY) {
-            self.bools.insert(PropertyBool::GravityStatus, true);
-        }
-        if pstate.contains(PhysicsState::LIGHTING_ON) {
-            self.bools.insert(PropertyBool::LightsStatus, true);
-        }
-        if pstate.contains(PhysicsState::SCRIPTED_COLLISION) {
-            self.bools.insert(PropertyBool::ScriptedCollision, true);
-        }
-        if pstate.contains(PhysicsState::INELASTIC) {
-            self.bools.insert(PropertyBool::Inelastic, true);
-        }
-        if pstate.contains(PhysicsState::CLOAKED) {
-            self.ints.insert(PropertyInt::CloakStatus, 1); // 1 = On, 0 = Off
-        }
+        self.hydrate_from_physics_state(odd.physics_state);
 
         if let Some(v) = odd.mtable_id {
             self.dids
@@ -259,5 +236,70 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         // We shift left by 8 and arithmetic shift right by 8 to sign-extend the 24-bit value.
         let stack_size = ((data.packed_stack_size << 8) as i32) >> 8;
         self.ints.insert(PropertyInt::StackSize, stack_size);
+    }
+
+    fn hydrate_from_physics_state(&mut self, pstate: PhysicsState) {
+        self.ints
+            .insert(PropertyInt::PhysicsState, pstate.bits() as i32);
+
+        self.bools.insert(
+            PropertyBool::Ethereal,
+            pstate.contains(PhysicsState::ETHEREAL),
+        );
+        self.bools.insert(
+            PropertyBool::ReportCollisions,
+            pstate.contains(PhysicsState::REPORT_COLLISIONS),
+        );
+        self.bools.insert(
+            PropertyBool::IgnoreCollisions,
+            pstate.contains(PhysicsState::IGNORE_COLLISIONS),
+        );
+        self.bools
+            .insert(PropertyBool::NoDraw, pstate.contains(PhysicsState::NO_DRAW));
+        self.bools.insert(
+            PropertyBool::GravityStatus,
+            pstate.contains(PhysicsState::GRAVITY),
+        );
+        self.bools.insert(
+            PropertyBool::LightsStatus,
+            pstate.contains(PhysicsState::LIGHTING_ON),
+        );
+        self.bools.insert(
+            PropertyBool::ScriptedCollision,
+            pstate.contains(PhysicsState::SCRIPTED_COLLISION),
+        );
+        self.bools.insert(
+            PropertyBool::Inelastic,
+            pstate.contains(PhysicsState::INELASTIC),
+        );
+        self.bools.insert(
+            PropertyBool::ReportCollisionsAsEnvironment,
+            pstate.contains(PhysicsState::REPORT_COLLISIONS_AS_ENVIRONMENT),
+        );
+        self.bools.insert(
+            PropertyBool::AllowEdgeSlide,
+            pstate.contains(PhysicsState::EDGE_SLIDE),
+        );
+        self.bools.insert(
+            PropertyBool::IsFrozen,
+            pstate.contains(PhysicsState::FROZEN),
+        );
+        self.bools.insert(
+            PropertyBool::Visibility,
+            pstate.contains(PhysicsState::HIDDEN),
+        );
+
+        self.ints.insert(
+            PropertyInt::CloakStatus,
+            if pstate.contains(PhysicsState::CLOAKED) {
+                1
+            } else {
+                0
+            },
+        );
+    }
+
+    fn hydrate_from_set_state(&mut self, data: &SetStateData) {
+        self.hydrate_from_physics_state(data.physics_state);
     }
 }

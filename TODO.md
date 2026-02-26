@@ -117,6 +117,7 @@
 - [x] Keypresses are doubled under windows. According to google: "The issue of doubled keypresses in a Ratatui application on Windows is a known behavior of the underlying crossterm library, which fires both KeyPress and KeyRelease events (and sometimes KeyRepeat events) on Windows, whereas Mac/Linux only get KeyPress events. To fix this, you must explicitly filter your application's event loop to only process KeyEventKind::Press events."
 - [x] No debug verb on wielded weapons in nearby tab.
 - [x] Manage in-world containers.
+- [x] SetState message shold also update properties.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -139,6 +140,7 @@
 - [ ] Exit combat mode when trying to trade.
 - [ ] Show charges/uses/etc for items.
 - [ ] Show health of creatures in nearby list and dynamic panel.
+- [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

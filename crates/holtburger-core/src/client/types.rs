@@ -149,6 +149,12 @@ pub enum ClientViewEvent {
     TradeStateUpdated {
         trade: Option<TradeState>,
     },
+    ContainerOpened {
+        guid: Guid,
+    },
+    ContainerClosed {
+        guid: Guid,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -239,6 +245,7 @@ pub enum ClientCommand {
     AddToTrade {
         item: Guid,
     },
+    CloseContainer(Guid),
     UseWithTarget {
         item: Guid,
         target: Guid,

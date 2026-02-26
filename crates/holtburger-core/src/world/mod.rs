@@ -99,6 +99,8 @@ pub enum StateEvent {
     UseDone {
         error: WeenieError,
     },
+    ContainerOpened(Guid),
+    ContainerClosed(Guid),
     VendorStateUpdated(Option<vendor::VendorState>),
     TradeStateUpdated(Option<state::TradeState>),
 }

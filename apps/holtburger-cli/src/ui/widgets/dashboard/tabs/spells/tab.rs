@@ -3,12 +3,15 @@ use ratatui::layout::Rect;
 
 use super::super::common::{Action, Verb};
 use super::render::render_spells_tab;
+use crate::ui::Interaction;
+use crate::ui::state::ChatMessageKind;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::world::context::WorldContextExt;
+use holtburger_protocol::messages::combat::CombatMode;
 
 pub struct SpellsTab;
 
@@ -19,23 +22,22 @@ impl TabController for SpellsTab {
 
     fn get_verbs(&self, game: &GameState, _index: usize) -> Vec<Verb> {
         let active_interaction = game.view.active_interaction;
+        let mut verbs = vec![];
 
-        let get_default_verbs = |is_targeted: bool| {
-            let label = if is_targeted {
-                "Cast on target"
-            } else {
-                "Cast on self"
-            };
-            vec![
-                Verb::new(Action::Cast(is_targeted), 'c', label),
-                Verb::new(Action::Debug, 'g', "Debug"),
-            ]
-        };
+        if let Some(interaction) = active_interaction {
+            match interaction {
+                Interaction::Targeting { .. } => {
+                    verbs.push(Verb::new(Action::Cast, 'c', "Cast on target"));
+                    return verbs;
+                }
+                _ => {
+                    return verbs;
+                }
+            }
+        }
 
-        get_default_verbs(matches!(
-            active_interaction,
-            Some(crate::ui::Interaction::Targeting { .. })
-        ))
+        verbs.push(Verb::new(Action::Cast, 'c', "Cast on self"));
+        verbs
     }
 
     fn handle_action(
@@ -46,10 +48,7 @@ impl TabController for SpellsTab {
     ) -> Option<UIEffect> {
         let target = self.get_target_at_index(game, index);
         match (action, &target) {
-            (Action::Cast(_), CommandTarget::Spell(spell_id)) => {
-                use crate::ui::state::ChatMessageKind;
-                use holtburger_protocol::messages::combat::CombatMode;
-
+            (Action::Cast, CommandTarget::Spell(spell_id)) => {
                 if !game.data.is_wielding_caster() {
                     return Some(UIEffect::Log(
                         ChatMessageKind::Error,
@@ -66,8 +65,8 @@ impl TabController for SpellsTab {
                 let active_interaction = game.view.active_interaction;
                 if let Some(interaction) = active_interaction
                     && let Some(target_guid) = match interaction {
-                        crate::ui::Interaction::Targeting { target_guid } => Some(target_guid),
-                        crate::ui::Interaction::Healing { item_guid } => Some(item_guid),
+                        Interaction::Targeting { target_guid } => Some(target_guid),
+                        Interaction::Healing { item_guid } => Some(item_guid),
                         _ => None,
                     }
                 {

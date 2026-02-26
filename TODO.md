@@ -80,6 +80,7 @@
 - [ ] Resolve Spellbook entries in debug info.
 - [ ] Exit combat mode when trying to trade.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
+- [ ] Label unlocked chests in nearby tab.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -124,6 +125,7 @@
 - [x] SetState message shold also update properties.
 - [x] Crafting.
 - [x] Show charges/uses/etc for items.
+- [x] Useful errors also appear in ServerMessage.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -144,7 +146,6 @@
 - [ ] Precise splitting.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
-- [ ] Useful errors also appear in ServerMessage.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

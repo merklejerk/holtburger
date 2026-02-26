@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use holtburger_core::errors::format_weenie_error;
 use holtburger_core::{Client, ClientCommand, WireEvent};
 use tokio::sync::mpsc;
 
@@ -169,9 +170,18 @@ async fn main() -> Result<()> {
                     Some(event) = event_rx.recv() => {
                         match event {
                             WireEvent::LogMessage(msg) => { println!("{}", msg); }
-                            WireEvent::ServerMessage(msg) => { println!("{}", msg); }
+                            WireEvent::ServerMessage { message, .. } => { println!("{}", message); }
                             WireEvent::Chat { sender, message } => { println!("{}: {}", sender, message); }
                             WireEvent::Emote { sender, text } => { println!("{} {}", sender, text); }
+                            WireEvent::WeenieError { error, parameter } => {
+                                println!("Server Error: {}", format_weenie_error(error, parameter.as_deref()));
+                            }
+                            WireEvent::CharacterError(err) => {
+                                println!("Character Error: {:?}", err);
+                            }
+                            WireEvent::BootAccount(reason) => {
+                                println!("Booted: {}", reason);
+                            }
                             WireEvent::CharacterList(chars) => {
                                 println!("Available characters: {:?}", chars.iter().map(|c| &c.name).collect::<Vec<_>>());
                                 if character_pref.is_none() {

@@ -11,10 +11,15 @@ impl AppState {
                 self.handle_setup_event(event);
             }
             WireEvent::LogMessage(_)
-            | WireEvent::ServerMessage(_)
+            | WireEvent::ServerMessage { .. }
             | WireEvent::Chat { .. }
             | WireEvent::Emote { .. }
-            | WireEvent::PingResponse => {
+            | WireEvent::PingResponse
+            | WireEvent::CharacterError(_)
+            | WireEvent::ClientError(_)
+            | WireEvent::WeenieError { .. }
+            | WireEvent::InventoryServerSaveFailed { .. }
+            | WireEvent::BootAccount(_) => {
                 self.handle_chat_event(event);
             }
             WireEvent::RawMessage(data) => {

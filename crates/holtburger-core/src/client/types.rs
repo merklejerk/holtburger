@@ -66,7 +66,10 @@ pub enum WireEvent {
     StatusUpdate {
         state: ClientState,
     },
-    ServerMessage(String),
+    ServerMessage {
+        message: String,
+        chat_type: u32,
+    },
     CharacterError(CharacterError),
     ClientError(String),
     WeenieError {

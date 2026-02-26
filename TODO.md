@@ -60,6 +60,7 @@
 - [x] [U]se for Mana charges.
 - [x] Actions and `handle_base_action()` don't belong in `common.rs`.
 - [x] Just get rid of verbs.rs and move the fn into the tab controller.
+- [x] Active panel needs to be much more obvious.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -74,8 +75,7 @@
 - [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
-- [ ] Active panel needs to be much more obvious.
-- [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
+- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] HATE `world/state.rs`
 - [ ] Resolve Spellbook entries in debug info.
 - [ ] Exit combat mode when trying to trade.

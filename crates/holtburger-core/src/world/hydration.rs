@@ -284,6 +284,9 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
             PropertyBool::IsFrozen,
             pstate.contains(PhysicsState::FROZEN),
         );
+        // Mapping HIDDEN to Visibility is correct, even if it feels inverted.
+        // In the protocol (and ACE server), Visibility == true means the object
+        // is "Admin-only visible", thus hidden from normal players.
         self.bools.insert(
             PropertyBool::Visibility,
             pstate.contains(PhysicsState::HIDDEN),

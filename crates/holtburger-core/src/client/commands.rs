@@ -285,8 +285,6 @@ impl Client {
             }
             ClientCommand::CloseContainer(guid) => {
                 log::info!(">>> Closing container: 0x{:08X}", guid);
-                self.world.open_containers.remove(&guid);
-                self.emit_state_event(StateEvent::ContainerClosed(guid));
 
                 self.send_game_action(GameAction::NoLongerViewingContents(Box::new(
                     NoLongerViewingContentsActionData {

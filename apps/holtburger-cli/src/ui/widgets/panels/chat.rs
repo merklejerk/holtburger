@@ -38,7 +38,7 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatStat
                 ChatMessageKind::Tell => Color::Magenta,
                 ChatMessageKind::Emote => Color::Green,
                 ChatMessageKind::Info => Color::Cyan,
-                ChatMessageKind::System => Color::DarkGray,
+                ChatMessageKind::System => Color::Gray,
                 ChatMessageKind::Error => Color::Red,
                 ChatMessageKind::Warning => Color::Yellow,
                 ChatMessageKind::Debug => Color::Indexed(242), // Greyish

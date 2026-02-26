@@ -27,7 +27,7 @@ pub enum Action {
     LevelUp,
     Train,
     Move,
-    Cast(bool),
+    Cast,
     ConfirmInteraction,
     CancelInteraction,
     Buy,
@@ -40,6 +40,7 @@ pub enum Action {
     OpenTrade,
     Stack(Guid),
     Split,
+    Combine,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +67,7 @@ pub fn handle_base_action(
                 Some(UIEffect::Command(ClientCommand::Use(e.guid)))
             }
         }
+        (Action::Combine, CommandTarget::Entity(e, _)) => Some(UIEffect::Combine(e.guid)),
         (Action::Drop, CommandTarget::Entity(e, _)) => {
             Some(UIEffect::Command(ClientCommand::Drop(e.guid)))
         }

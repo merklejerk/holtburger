@@ -24,6 +24,7 @@
 - [ ] Shift+backspace to clear chat input buffer.
 - [ ] Show enchantment source (caster) in enchantment debug.
 - [ ] Don't show Give verb on items that are attuned/sticky.
+- [ ] Replace context panel header with entity name.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -76,6 +77,9 @@
 - [ ] items with REQUIRES_PACK_SLOT flag/prop should not count towards main pack item count.
 - [ ] Actions and `handle_base_action()` don't belong in `common.rs`.
 - [ ] HATE `world/state.rs`
+- [ ] Resolve Spellbook entries in debug info.
+- [ ] Exit combat mode when trying to trade.
+- [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -118,6 +122,7 @@
 - [x] No debug verb on wielded weapons in nearby tab.
 - [x] Manage in-world containers.
 - [x] SetState message shold also update properties.
+- [x] Crafting.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -128,19 +133,18 @@
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
-- [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them.
+- [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them. The client says that item cannot be used though!
 - [ ] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
 - [ ] Log in chat when items are bought and sold.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
-- [ ] Crafting.
 - [ ] Should split into the same container.
 - [ ] Precise splitting.
-- [ ] Exit combat mode when trying to trade.
 - [ ] Show charges/uses/etc for items.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
+- [ ] Useful errors also appear in ServerMessage.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

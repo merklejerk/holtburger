@@ -22,6 +22,7 @@ pub enum Action {
     MoveToSlot(Guid),
     Debug,
     Approach,
+    CloseContainer,
     Target,
     LevelUp,
     Train,

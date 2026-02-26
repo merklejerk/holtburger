@@ -65,6 +65,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
             *depth,
             i == game.view.selected_dashboard_index(),
             container_count,
+            game.data.open_containers.contains(&e.guid),
         ));
     }
 
@@ -77,8 +78,8 @@ fn render_nearby_item(
     dist: Option<f32>,
     depth: usize,
     highlight: bool,
-
     container_count: Option<usize>,
+    is_open: bool,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
     let color = get_entity_color(class);
@@ -99,7 +100,7 @@ fn render_nearby_item(
         display_name = format!("{} ({}x)", display_name, stack_size);
     }
 
-    if !class.is_creature() {
+    if !class.is_creature() && is_open {
         if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);

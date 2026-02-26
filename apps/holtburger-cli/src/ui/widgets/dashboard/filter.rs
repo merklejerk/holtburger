@@ -18,6 +18,7 @@ pub fn filter_entities<'a>(
     inventory: &HashSet<Guid>,
     equipment: &HashMap<Guid, holtburger_common::properties::EquipMask>,
     player_pos: Option<&'a WorldPosition>,
+    open_containers: Option<&HashSet<Guid>>,
     filter: EntityFilter,
 ) -> Vec<(&'a Entity, f32, usize)> {
     let candidates: Vec<_> = entities
@@ -28,10 +29,19 @@ pub fn filter_entities<'a>(
                 let is_combat_implement =
                     (loc.bits() & PseudoEquipMask::COMBAT_IMPLEMENTS.bits()) != 0;
 
-                classification::is_targetable(e)
+                let in_open_container = if let Some(open) = open_containers
+                    && let Some(cid) = e.container_id()
+                {
+                    open.contains(&cid)
+                } else {
+                    false
+                };
+
+                (classification::is_targetable(e)
                     && (e.position.landblock_id != Guid::NULL
                         || (e.wielder_id().is_some() && is_combat_implement)
-                        || e.physics_parent_id.is_some())
+                        || e.physics_parent_id.is_some()))
+                    || in_open_container
             }
             EntityFilter::Inventory => {
                 (inventory.contains(&e.guid) || equipment.contains_key(&e.guid))

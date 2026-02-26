@@ -1,4 +1,4 @@
-use holtburger_common::properties::{PropertyInt, PropertyString};
+use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
 use holtburger_core::world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -12,7 +12,7 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     lines.push(Line::from(vec![
         Span::styled("─── ", Style::default().fg(Color::Yellow)),
         Span::styled(
-            entity.name.to_uppercase(),
+            entity.name().to_uppercase(),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
@@ -23,18 +23,12 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     lines.push(Line::from(""));
 
     // Description
-    if let Some(desc) = entity
-        .string_properties
-        .get(&(PropertyString::LongDesc as u32))
-    {
+    if let Some(desc) = entity.get_string_prop(PropertyString::LongDesc) {
         for line in wrap_text(desc, 40) {
             lines.push(Line::from(line));
         }
         lines.push(Line::from(""));
-    } else if let Some(short_desc) = entity
-        .string_properties
-        .get(&(PropertyString::ShortDesc as u32))
-    {
+    } else if let Some(short_desc) = entity.get_string_prop(PropertyString::ShortDesc) {
         for line in wrap_text(short_desc, 40) {
             lines.push(Line::from(line));
         }
@@ -42,16 +36,13 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     }
 
     // Basic Stats
-    if let Some(value) = entity.int_properties.get(&(PropertyInt::Value as u32)) {
+    if let Some(value) = entity.get_int_prop(PropertyInt::Value) {
         lines.push(Line::from(vec![
             Span::styled("Value:  ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{}", value), Style::default().fg(Color::White)),
         ]));
     }
-    if let Some(burden) = entity
-        .int_properties
-        .get(&(PropertyInt::EncumbranceVal as u32))
-    {
+    if let Some(burden) = entity.get_int_prop(PropertyInt::EncumbranceVal) {
         lines.push(Line::from(vec![
             Span::styled("Burden: ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{}bu", burden), Style::default().fg(Color::White)),
@@ -59,7 +50,7 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     }
 
     // Armor
-    if let Some(armor) = entity.int_properties.get(&(PropertyInt::ArmorLevel as u32)) {
+    if let Some(armor) = entity.get_int_prop(PropertyInt::ArmorLevel) {
         lines.push(Line::from(vec![
             Span::styled("Armor:  ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{}", armor), Style::default().fg(Color::Green)),
@@ -67,7 +58,7 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     }
 
     // Weapon
-    if let Some(damage) = entity.int_properties.get(&(PropertyInt::Damage as u32)) {
+    if let Some(damage) = entity.get_int_prop(PropertyInt::Damage) {
         lines.push(Line::from(vec![
             Span::styled("Damage: ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{}", damage), Style::default().fg(Color::Red)),
@@ -191,10 +182,10 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     }
 
     // Use info
-    if let Some(use_msg) = entity.string_properties.get(&(PropertyString::Use as u32)) {
+    if let Some(use_msg) = entity.get_string_prop(PropertyString::Use) {
         lines.push(Line::from(vec![
             Span::styled("Use:    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(use_msg.clone(), Style::default().fg(Color::White)),
+            Span::styled(use_msg.to_owned(), Style::default().fg(Color::White)),
         ]));
     }
 

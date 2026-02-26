@@ -1,16 +1,18 @@
 pub mod context;
 pub mod entity;
+pub mod hydration;
 pub mod magic;
 pub mod physics_types;
 pub mod player;
 pub mod spatial;
 pub mod state;
 pub mod stats;
+pub mod vendor;
 
 use crate::world::entity::Entity;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::PropertyValue;
+use holtburger_common::properties::PropertyUpdate;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::magic::Enchantment;
 
@@ -61,8 +63,7 @@ pub enum StateEvent {
     LevelInfoUpdated(stats::CharacterLevelInfo),
     PropertyUpdated {
         guid: Guid,
-        property_id: u32,
-        value: PropertyValue,
+        update: PropertyUpdate,
     },
     PlayerInfo(Box<PlayerInfoData>),
     PlayerEnchantmentsUpdated {
@@ -98,7 +99,7 @@ pub enum StateEvent {
     UseDone {
         error: WeenieError,
     },
-    VendorStateUpdated(Option<state::VendorState>),
+    VendorStateUpdated(Option<vendor::VendorState>),
     TradeStateUpdated(Option<state::TradeState>),
 }
 

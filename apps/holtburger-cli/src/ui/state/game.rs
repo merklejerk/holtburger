@@ -59,7 +59,7 @@ pub struct GameData {
     /// Map of GUIDs currently equipped on the character.
     pub equipment: HashMap<Guid, EquipMask>,
     /// Current vendor state (inventory and multipliers).
-    pub vendor: Option<holtburger_core::world::state::VendorState>,
+    pub vendor: Option<holtburger_core::world::vendor::VendorState>,
     /// Current active trade with another player.
     pub trade: Option<holtburger_core::world::state::TradeState>,
 }
@@ -160,7 +160,7 @@ impl WorldContext for GameData {
         self.entities.values()
     }
 
-    fn get_vendor(&self) -> Option<&holtburger_core::world::state::VendorState> {
+    fn get_vendor(&self) -> Option<&holtburger_core::world::vendor::VendorState> {
         self.vendor.as_ref()
     }
 }

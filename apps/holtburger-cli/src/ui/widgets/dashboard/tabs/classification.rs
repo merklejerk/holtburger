@@ -1,9 +1,9 @@
 use holtburger_common::properties::{
     ItemType, ObjectDescriptionFlag, PropertyBool, PropertyInt, WorldObjectProperties,
 };
-use holtburger_core::world::entity::Entity;
-use holtburger_core::world::vendor::CoreVendorItem;
 use holtburger_protocol::messages::object::messages::PublicWeenieDescription;
+use holtburger_world::entity::Entity;
+use holtburger_world::vendor::CoreVendorItem;
 use ratatui::style::Color;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

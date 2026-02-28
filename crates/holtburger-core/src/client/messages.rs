@@ -1,10 +1,10 @@
 use super::{Client, types::*};
-use crate::world::StateEvent;
-use crate::world::entity::Entity;
 use anyhow::Result;
-use holtburger_common::ProtocolUnpack;
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::*;
+use holtburger_protocol::traits::ProtocolUnpack;
+use holtburger_world::StateEvent;
+use holtburger_world::entity::Entity;
 
 impl Client {
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<StateEvent>> {
@@ -43,7 +43,7 @@ impl Client {
         let world_events = self.world.handle_message(&message);
 
         // Deduplicate events that are snapshots/derived
-        let world_events = crate::world::dedupe_state_events(world_events);
+        let world_events = holtburger_world::dedupe_state_events(world_events);
 
         for event in world_events.iter() {
             self.emit_state_event(event.clone());

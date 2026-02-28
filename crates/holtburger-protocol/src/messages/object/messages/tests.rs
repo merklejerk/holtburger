@@ -3,13 +3,13 @@ use crate::messages::object::messages::*;
 use crate::messages::object::types::{ModelChange, ModelData, SubPalette, TextureChange};
 use crate::test_fixtures;
 use crate::test_helpers::assert_pack_unpack_parity;
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
     WeenieHeaderFlag2,
 };
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::{Guid, Vector3};
 
 #[test]

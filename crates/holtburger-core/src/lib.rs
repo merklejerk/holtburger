@@ -1,8 +1,8 @@
 pub mod client;
 pub mod errors;
-pub mod session;
-pub mod world;
 
+// Flatten the events for compatibility
 pub use client::Client;
-pub use client::types::*;
-pub use errors::*;
+pub use client::types::{
+    ClientCommand, ClientState, ClientViewEvent, ErrorReason, RetryState, WireEvent,
+};

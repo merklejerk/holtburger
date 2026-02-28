@@ -3,14 +3,14 @@ use std::time::Instant;
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_core::world::context::WorldContext;
-use holtburger_core::world::entity::Entity;
-use holtburger_core::world::stats::{
-    Attribute, AttributeType, CharacterLevelInfo, Skill, SkillType, Vital, VitalType,
-};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::context::WorldContext;
+use holtburger_world::entity::Entity;
+use holtburger_world::stats::{
+    Attribute, AttributeType, CharacterLevelInfo, Skill, SkillType, Vital, VitalType,
+};
 
 #[derive(Debug, Clone)]
 pub struct GameData {
@@ -27,7 +27,7 @@ pub struct GameData {
     /// Skills like Sword, Mace, Magic Defense.
     pub skills: HashMap<SkillType, Skill>,
     /// Calculated damage resistance values.
-    pub resistances: holtburger_core::world::stats::Resistances,
+    pub resistances: holtburger_world::stats::Resistances,
     /// Total armor value.
     pub armor: i32,
     /// Current vitae penalty (0.0 to 1.0, where 1.0 is no penalty).
@@ -59,9 +59,9 @@ pub struct GameData {
     /// Map of GUIDs currently equipped on the character.
     pub equipment: HashMap<Guid, EquipMask>,
     /// Current vendor state (inventory and multipliers).
-    pub vendor: Option<holtburger_core::world::vendor::VendorState>,
+    pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// Current active trade with another player.
-    pub trade: Option<holtburger_core::world::state::TradeState>,
+    pub trade: Option<holtburger_world::state::TradeState>,
     /// Currently open containers in the world.
     pub open_containers: HashSet<Guid>,
 }
@@ -75,7 +75,7 @@ impl Default for GameData {
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             skills: HashMap::new(),
-            resistances: holtburger_core::world::stats::Resistances::default(),
+            resistances: holtburger_world::stats::Resistances::default(),
             armor: 0,
             vitae: 1.0,
             player_pos: None,
@@ -163,7 +163,7 @@ impl WorldContext for GameData {
         self.entities.values()
     }
 
-    fn get_vendor(&self) -> Option<&holtburger_core::world::vendor::VendorState> {
+    fn get_vendor(&self) -> Option<&holtburger_world::vendor::VendorState> {
         self.vendor.as_ref()
     }
 }

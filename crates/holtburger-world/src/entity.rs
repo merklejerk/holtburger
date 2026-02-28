@@ -1,4 +1,4 @@
-use crate::world::hydration::WorldObjectPropertiesHydrationExt;
+use crate::hydration::WorldObjectPropertiesHydrationExt;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     AttunedStatus, EquipMask, HasProperties, HasPropertiesMut, ItemType, ObjectDescriptionFlag,

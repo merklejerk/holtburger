@@ -9,7 +9,7 @@ use directories::ProjectDirs;
 use holtburger_cli::ui::{
     self, AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState,
 };
-use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WireEvent};
+use holtburger_core::{Client, ClientCommand, ClientState, ClientViewEvent, RetryState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -18,7 +18,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 struct TuiLogger {
-    tx: mpsc::UnboundedSender<WireEvent>,
+    tx: mpsc::UnboundedSender<holtburger_core::ClientViewEvent>,
     file: Option<Mutex<File>>,
     verbosity: u8,
 }
@@ -57,7 +57,7 @@ impl log::Log for TuiLogger {
             };
 
             if should_send {
-                let _ = self.tx.send(WireEvent::LogMessage(log_msg));
+                let _ = self.tx.send(ClientViewEvent::LogMessage(log_msg));
             }
         }
     }
@@ -209,8 +209,6 @@ async fn main() -> Result<()> {
     }
 
     client.set_command_rx(command_rx);
-    let mut wire_view_rx = client.subscribe_wire_events();
-    let mut state_view_rx = client.subscribe_state_events();
     let mut view_event_rx = client.subscribe_client_view_events();
 
     enable_raw_mode()?;
@@ -259,24 +257,8 @@ async fn main() -> Result<()> {
 
     loop {
         // 1. Process Network Events (Drain batch)
-        while let Ok(event) = wire_view_rx.try_recv() {
-            let res = app_state.handle_action(ui::AppAction::ReceivedEvent(event));
-            needs_redraw |= res.needs_redraw;
-            for cmd in res.commands {
-                let _ = command_tx.send(cmd);
-            }
-        }
-
-        while let Ok(event) = state_view_rx.try_recv() {
-            let res = app_state.handle_action(ui::AppAction::ReceivedStateEvent(event));
-            needs_redraw |= res.needs_redraw;
-            for cmd in res.commands {
-                let _ = command_tx.send(cmd);
-            }
-        }
-
         while let Ok(event) = event_rx.try_recv() {
-            let res = app_state.handle_action(ui::AppAction::ReceivedEvent(event));
+            let res = app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
             needs_redraw |= res.needs_redraw;
             for cmd in res.commands {
                 let _ = command_tx.send(cmd);

@@ -3,12 +3,12 @@ use crate::messages::player::shortcuts::Shortcut;
 use crate::messages::player::skills::CreatureSkill;
 use crate::messages::utils::ac_hash_sort;
 use crate::messages::utils::{read_string16, write_string16};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{PropertyString, WorldObjectProperties};
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use std::collections::BTreeMap;
 
 bitflags! {

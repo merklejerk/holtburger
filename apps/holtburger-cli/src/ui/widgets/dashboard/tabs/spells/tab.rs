@@ -10,8 +10,8 @@ use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
 use crate::ui::{Action, Verb};
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::world::context::WorldContextExt;
 use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_world::context::WorldContextExt;
 
 pub struct SpellsTab;
 

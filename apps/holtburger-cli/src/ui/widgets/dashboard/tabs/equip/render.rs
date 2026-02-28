@@ -10,7 +10,7 @@ use crate::ui::theme;
 use crate::ui::utils::format_item_name;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_core::client::types::TargetSlot;
-use holtburger_core::world::entity::Entity;
+use holtburger_world::entity::Entity;
 
 pub enum EquipTabLine<'a> {
     Header(String, bool),

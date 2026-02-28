@@ -14,7 +14,7 @@ use crate::ui::types::TradeFocus;
 use crate::ui::utils::format_item_name;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
 use holtburger_common::properties::{ItemType, PropertyInt};
-use holtburger_core::world::context::WorldContextExt;
+use holtburger_world::context::WorldContextExt;
 
 pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     if let Some(trade) = &game.data.trade {

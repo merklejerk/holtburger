@@ -1,44 +1,42 @@
 use crate::ui::DashboardTab;
 use crate::ui::state::AppState;
-use holtburger_core::{ClientViewEvent, StateEvent, WireEvent};
+use holtburger_core::ClientViewEvent;
 
 impl AppState {
-    pub(super) fn handle_received_event(&mut self, event: WireEvent) {
-        match event {
-            WireEvent::CharacterList(_)
-            | WireEvent::PlayerEntered { .. }
-            | WireEvent::GameMessage(_) => {
-                self.handle_setup_event(event);
+    pub(super) fn handle_client_view_event(&mut self, event: ClientViewEvent) {
+        // Handle setup and chat events regardless of being locally in-game
+        match &event {
+            ClientViewEvent::CharacterList(_)
+            | ClientViewEvent::PlayerEntered { .. }
+            | ClientViewEvent::WorldNameUpdated(_) => {
+                self.handle_setup_event(&event);
             }
-            WireEvent::LogMessage(_)
-            | WireEvent::ServerMessage { .. }
-            | WireEvent::Chat { .. }
-            | WireEvent::Emote { .. }
-            | WireEvent::PingResponse
-            | WireEvent::CharacterError(_)
-            | WireEvent::ClientError(_)
-            | WireEvent::WeenieError { .. }
-            | WireEvent::InventoryServerSaveFailed { .. }
-            | WireEvent::BootAccount(_) => {
-                self.handle_chat_event(event);
-            }
-            WireEvent::RawMessage(data) => {
-                self.net_stats.bytes_in += data.len() as u64;
+            ClientViewEvent::LogMessage(_)
+            | ClientViewEvent::ServerMessage { .. }
+            | ClientViewEvent::Chat { .. }
+            | ClientViewEvent::Emote { .. }
+            | ClientViewEvent::PingResponse
+            | ClientViewEvent::BootAccount(_) => {
+                self.handle_chat_event(&event);
             }
             _ => {}
         }
-    }
 
-    pub(super) fn handle_received_state_event(&mut self, event: StateEvent) {
-        self.handle_state_event(event);
-    }
-
-    pub(super) fn handle_client_view_event(&mut self, event: ClientViewEvent) {
-        // Skip events if not in-game, unless it's a StatusUpdate or ErrorRaised
+        // Skip other events if not in-game, unless it's a StatusUpdate or ErrorRaised
         // that handles transitions.
         if !matches!(
             event,
-            ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. }
+            ClientViewEvent::CharacterList(_)
+                | ClientViewEvent::PlayerEntered { .. }
+                | ClientViewEvent::WorldNameUpdated(_)
+                | ClientViewEvent::StatusUpdate { .. }
+                | ClientViewEvent::ErrorRaised { .. }
+                | ClientViewEvent::LogMessage(_)
+                | ClientViewEvent::ServerMessage { .. }
+                | ClientViewEvent::Chat { .. }
+                | ClientViewEvent::Emote { .. }
+                | ClientViewEvent::PingResponse
+                | ClientViewEvent::BootAccount(_)
         ) && self.game_option().is_none()
         {
             return;
@@ -55,10 +53,53 @@ impl AppState {
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_combat_event(event);
             }
-            ClientViewEvent::EntityUpserted { ref entity } => {
-                self.update_inventory_and_equipment(entity);
+            ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
+                let entity_ref = entity.as_ref();
+                if let Some(game) = self.game_option_mut() {
+                    // Update our local cache with the high-fidelity snapshot
+                    game.data
+                        .entities
+                        .insert(entity_ref.guid, entity_ref.clone());
+                }
             }
-            ClientViewEvent::EntityRemoved { guid } => {
+            ClientViewEvent::EntitySpawned { entity } => {
+                let entity_ref = entity.as_ref();
+                if let Some(game) = self.game_option_mut() {
+                    game.data
+                        .entities
+                        .insert(entity_ref.guid, entity_ref.clone());
+                }
+                self.update_inventory_and_equipment(entity_ref);
+            }
+            ClientViewEvent::EntityPropertyUpdated { guid, update } => {
+                let mut needs_update = false;
+                if let Some(game) = self.game_option_mut()
+                    && let Some(entity) = game.data.entities.get_mut(&guid)
+                {
+                    entity.properties.apply(update);
+                    needs_update = true;
+                }
+                if needs_update
+                    && let Some(game) = self.game_option()
+                    && let Some(entity) = game.data.entities.get(&guid).cloned()
+                {
+                    self.update_inventory_and_equipment(&entity);
+                }
+            }
+            ClientViewEvent::EntityMoved { guid, pos } => {
+                if let Some(game) = self.game_option_mut()
+                    && let Some(entity) = game.data.entities.get_mut(&guid)
+                {
+                    entity.position = pos;
+                    if Some(guid) == game.data.player_guid {
+                        game.data.player_pos = Some(pos);
+                    }
+                }
+            }
+            ClientViewEvent::EntityDespawned { guid } => {
+                if let Some(game) = self.game_option_mut() {
+                    game.data.entities.remove(&guid);
+                }
                 self.handle_entity_removed(guid);
             }
             ClientViewEvent::VendorStateUpdated { vendor } => {
@@ -89,6 +130,16 @@ impl AppState {
                     }
                 }
             }
+            ClientViewEvent::EntityIdentified { entity } => {
+                let entity_ref = entity.as_ref();
+                if let Some(game) = self.game_option_mut() {
+                    game.data
+                        .entities
+                        .insert(entity_ref.guid, entity_ref.clone());
+                }
+                self.update_inventory_and_equipment(entity_ref);
+                self.handle_entity_identified(entity_ref);
+            }
             ClientViewEvent::ServerTimeUpdated { .. } | ClientViewEvent::NoClipUpdated { .. } => {
                 self.handle_navigation_event(event);
             }
@@ -102,6 +153,7 @@ impl AppState {
                     game.data.open_containers.remove(&guid);
                 }
             }
+            _ => {}
         }
     }
 }

@@ -8,6 +8,7 @@ use crate::ui::Verb;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use holtburger_core::client::types::ClientCommand;
+use holtburger_world::context::WorldContextExt;
 
 pub struct SpellsTab;
 
@@ -26,40 +27,58 @@ impl TabController for SpellsTab {
         let target = self.get_target_at_index(game, index);
 
         if let CommandTarget::Spell(spell_id) = target {
-            if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
+            if !game.data.is_wielding_caster() {
                 verbs.push(Verb::new(
-                    vec![
-                        crate::ui::UiMessage::SendCommands(vec![
-                            ClientCommand::CastTargetedSpell {
-                                spell_id: spell_id,
-                                target: target_guid,
-                            },
-                        ]),
-                        crate::ui::UiMessage::CancelInteraction,
-                    ],
+                    vec![crate::ui::UiMessage::AddLog(
+                        crate::ui::state::ChatMessageKind::Error,
+                        "You must be wielding a caster to cast spells!".to_string(),
+                    )],
                     'c',
-                    "Cast on target",
+                    "Cast (Need Caster)",
                 ));
             } else {
-                if let Some(player_guid) = game.data.player_guid {
+                let mut base_cmds = Vec::new();
+                if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic {
+                    base_cmds.push(ClientCommand::SetCombatMode(
+                        holtburger_protocol::messages::combat::CombatMode::Magic,
+                    ));
+                }
+
+                if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
+                    let mut cmds = base_cmds.clone();
+                    cmds.push(ClientCommand::CastTargetedSpell {
+                        spell_id: spell_id,
+                        target: target_guid,
+                    });
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![
-                            ClientCommand::CastTargetedSpell {
-                                spell_id,
-                                target: player_guid,
-                            },
-                        ])],
+                        vec![
+                            crate::ui::UiMessage::SendCommands(cmds),
+                            crate::ui::UiMessage::CancelInteraction,
+                        ],
                         'c',
-                        "Cast on self",
+                        "Cast on target",
                     ));
                 } else {
-                    verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![
-                            ClientCommand::CastUntargetedSpell { spell_id },
-                        ])],
-                        'c',
-                        "Cast",
-                    ));
+                    if let Some(player_guid) = game.data.player_guid {
+                        let mut cmds = base_cmds.clone();
+                        cmds.push(ClientCommand::CastTargetedSpell {
+                            spell_id,
+                            target: player_guid,
+                        });
+                        verbs.push(Verb::new(
+                            vec![crate::ui::UiMessage::SendCommands(cmds)],
+                            'c',
+                            "Cast on self",
+                        ));
+                    } else {
+                        let mut cmds = base_cmds.clone();
+                        cmds.push(ClientCommand::CastUntargetedSpell { spell_id });
+                        verbs.push(Verb::new(
+                            vec![crate::ui::UiMessage::SendCommands(cmds)],
+                            'c',
+                            "Cast",
+                        ));
+                    }
                 }
             }
 

@@ -158,14 +158,6 @@ impl TabController for NearbyTab {
                 ));
             }
 
-            verbs.push(Verb::new(
-                vec![crate::ui::UiMessage::SendCommands(vec![
-                    ClientCommand::MoveTo { target: e.guid },
-                ])],
-                'r',
-                "Run To",
-            ));
-
             // Pick up logic: checks stackability.
             if let Some(pguid) = player_guid {
                 let mut pick_up_cmd = ClientCommand::Get(e.guid);

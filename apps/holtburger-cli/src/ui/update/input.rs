@@ -56,8 +56,12 @@ impl AppState {
             width,
             &main_chunks,
         );
-        for message in result.ui_messages.drain(..) {
-            self.handle_ui_message(message.clone());
+        while !result.ui_messages.is_empty() {
+            let messages: Vec<_> = result.ui_messages.drain(..).collect();
+            for message in messages {
+                let msg_result = self.handle_ui_message(message);
+                result.merge(msg_result);
+            }
         }
         self.refresh_context_buffer();
         // Eagerly transition to GameState when a character is selected
@@ -96,8 +100,12 @@ impl AppState {
 
         // --- Delegation to Active Page ---
         result = self.page.handle_mouse(mouse, &mut self.chat, &main_chunks);
-        for message in result.ui_messages.drain(..) {
-            self.handle_ui_message(message.clone());
+        while !result.ui_messages.is_empty() {
+            let messages: Vec<_> = result.ui_messages.drain(..).collect();
+            for message in messages {
+                let msg_result = self.handle_ui_message(message);
+                result.merge(msg_result);
+            }
         }
         self.refresh_context_buffer();
         result

@@ -93,11 +93,7 @@ impl AppState {
         }
     }
 
-    pub fn maintain_scroll(&mut self, is_context: bool, current_total: usize, height: usize) {
-        if let Some(game) = self.game_option_mut() {
-            game.view.maintain_scroll(is_context, current_total, height);
-        }
-    }
+    
 
     pub fn refresh_context_buffer(&mut self) {
         let (tab, view_is_default) = if let Some(game) = self.game_option() {

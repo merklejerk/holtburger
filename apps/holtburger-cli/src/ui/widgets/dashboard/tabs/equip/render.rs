@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{List, ListItem};
 
 use super::super::classification::{classify_entity, get_entity_color};
 use crate::ui::state::GameState;
@@ -19,7 +19,7 @@ pub enum EquipTabLine<'a> {
 
 pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game);
-    let total = items.len();
+    
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
@@ -30,30 +30,8 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .select(Some(selected_index));
     f.render_stateful_widget(dashboard_list, area, game.view.dashboard_list_state());
 
-    // Render Scrollbar
     let height = area.height as usize;
     game.view.last_dashboard_height = height;
-
-    if total > height {
-        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(height)).position(
-            game.view
-                .selected_dashboard_index()
-                .min(total.saturating_sub(height)),
-        );
-        f.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("▲"))
-                .track_symbol(Some(" "))
-                .thumb_symbol("█")
-                .end_symbol(Some("▼"))
-                .style(theme::scrollbar_style())
-                .track_style(theme::scrollbar_track_style())
-                .thumb_style(theme::scrollbar_thumb_style()),
-            area,
-            &mut scrollbar_state,
-        );
-    }
 }
 
 fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {

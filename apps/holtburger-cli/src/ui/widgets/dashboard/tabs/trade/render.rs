@@ -3,8 +3,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
-    ScrollbarState,
+    Block, Borders, List, ListItem, ListState, Paragraph, 
 };
 
 use super::super::classification::{classify_entity, classify_vendor_item, get_entity_color};
@@ -94,7 +93,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             ),
         };
 
-        let self_item_count = self_items.len();
+        
         let mut self_list = List::new(self_items).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -115,18 +114,6 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         f.render_stateful_widget(self_list, self_area, self_state);
 
         let selected_index = game.view.selected_dashboard_index();
-
-        render_scrollbar(
-            f,
-            self_area,
-            self_item_count,
-            if trade_focus == TradeFocus::Local {
-                selected_index
-            } else {
-                0
-            },
-            self_area.height.saturating_sub(2) as usize,
-        );
 
         // Partner side
         let partner_area = chunks[1];
@@ -181,7 +168,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             ),
         };
 
-        let partner_item_count = partner_items.len();
+        
         let mut partner_list = List::new(partner_items).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -200,18 +187,6 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         }
 
         f.render_stateful_widget(partner_list, partner_area, partner_state);
-
-        render_scrollbar(
-            f,
-            partner_area,
-            partner_item_count,
-            if trade_focus == TradeFocus::Partner {
-                selected_index
-            } else {
-                0
-            },
-            partner_area.height.saturating_sub(2) as usize,
-        );
     } else if let Some(vendor) = &game.data.vendor {
         let vendor_name = game
             .data
@@ -309,7 +284,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             })
             .collect();
 
-        let total = items.len();
+        
         let list = List::new(items)
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
@@ -321,8 +296,6 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         game.view.last_dashboard_height = list_area.height as usize;
 
         f.render_stateful_widget(list, list_area, game.view.dashboard_list_state());
-
-        render_scrollbar(f, area, total, selected_index, list_area.height as usize);
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let horizontal_margin = 2;
@@ -360,28 +333,3 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     }
 }
 
-fn render_scrollbar(
-    f: &mut Frame,
-    area: Rect,
-    item_count: usize,
-    selected_index: usize,
-    view_height: usize,
-) {
-    if item_count > view_height {
-        let mut scrollbar_state = ScrollbarState::new(item_count.saturating_sub(view_height))
-            .position(selected_index.min(item_count.saturating_sub(view_height)));
-        f.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("▲"))
-                .track_symbol(Some(" "))
-                .thumb_symbol("█")
-                .end_symbol(Some("▼"))
-                .style(theme::scrollbar_style())
-                .track_style(theme::scrollbar_track_style())
-                .thumb_style(theme::scrollbar_thumb_style()),
-            area,
-            &mut scrollbar_state,
-        );
-    }
-}

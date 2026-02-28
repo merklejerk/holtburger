@@ -1,6 +1,6 @@
 use crate::ui::ContextView;
 use crate::ui::state::{AppState, ChatMessageKind};
-use crate::ui::widgets::dashboard::tabs::classification;
+use crate::pages::game::dashboard::tabs::classification;
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_protocol::messages::magic::Enchantment;

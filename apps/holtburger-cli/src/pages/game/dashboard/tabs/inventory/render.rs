@@ -50,18 +50,17 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
-    let selected_index = game.view.selected_dashboard_index();
-    game.view
-        .dashboard_list_state()
+    let selected_index = game.dashboard.selected_index();
+    game.dashboard.list_state()
         .select(Some(selected_index));
     f.render_stateful_widget(
         dashboard_list,
         bottom_area,
-        game.view.dashboard_list_state(),
+        game.dashboard.list_state(),
     );
 
     let height = bottom_area.height as usize;
-    game.view.last_dashboard_height = height;
+    game.dashboard.last_height = height;
 }
 
 fn get_list_items(
@@ -88,7 +87,7 @@ fn get_list_items(
         list_items.push(render_inventory_item(
             e,
             *depth,
-            i == game.view.selected_dashboard_index(),
+            i == game.dashboard.selected_index(),
             is_equipped,
             is_offered,
             container_count,

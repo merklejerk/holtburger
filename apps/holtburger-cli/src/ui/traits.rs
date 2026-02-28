@@ -3,7 +3,7 @@ use crate::ui::CommandTarget;
 use crate::ui::state::GameState;
 use crate::ui::types::{Action, ContextView, Verb};
 use crate::ui::update::{UpdateResult, effect::UIEffect};
-use crate::ui::widgets::dashboard::{assess, debug, input::handle_common_dashboard_input};
+use crate::pages::game::dashboard::{assess, debug, input::handle_common_dashboard_input};
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;

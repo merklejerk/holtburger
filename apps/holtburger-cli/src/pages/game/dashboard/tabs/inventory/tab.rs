@@ -8,7 +8,7 @@ use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
 use crate::ui::update::effect::UIEffect;
-use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
+use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
 use crate::ui::{Action, Verb};
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;

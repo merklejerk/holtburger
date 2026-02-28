@@ -3,7 +3,7 @@ use holtburger_common::Guid;
 use crate::ui::state::GameState;
 use crate::ui::types::{Action, CommandTarget};
 use crate::ui::update::effect::UIEffect;
-use crate::ui::widgets::dashboard::tabs::classification;
+use crate::pages::game::dashboard::tabs::classification;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interaction {
@@ -54,7 +54,7 @@ impl Interaction {
                         }
                     }
                     _ => {
-                        if game.view.dashboard_tab == crate::ui::DashboardTab::Trade {
+                        if game.dashboard.active_tab == crate::ui::DashboardTab::Trade {
                             Some(UIEffect::Command(
                                 holtburger_core::client::types::ClientCommand::AddToTrade {
                                     item: *item_guid,

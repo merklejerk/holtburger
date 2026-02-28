@@ -120,11 +120,11 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 pub fn render_verb_bar(game: &GameState) -> Paragraph<'static> {
     let (tab, index) = (
-        game.view.dashboard_tab,
-        game.view.selected_dashboard_index(),
+        game.dashboard.active_tab,
+        game.dashboard.selected_index(),
     );
 
-    let mut verbs = crate::ui::widgets::dashboard::get_verbs_for_tab(game, tab, index);
+    let mut verbs = crate::pages::game::dashboard::get_verbs_for_tab(game, tab, index);
 
     verbs.sort_by(|a, b| a.label.cmp(&b.label));
 

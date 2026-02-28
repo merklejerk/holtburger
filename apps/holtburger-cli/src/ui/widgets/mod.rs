@@ -7,7 +7,7 @@ pub use dashboard::render_dashboard_pane;
 pub use hud::pulse::render_pulse_panel;
 pub use hud::status::render_status_bar;
 pub use hud::vitals::render_vitals;
-pub use panels::chat::{render_chat_pane, render_context_pane};
+
 pub use panels::dynamic::render_dynamic_pane;
 pub use panels::modal::{Modal, render_modal};
 pub use selection::render_character_selection;

@@ -11,7 +11,8 @@ use crate::ui::update::UpdateResult;
 use crate::ui::widgets::dashboard::render_dashboard_pane;
 use crate::ui::widgets::hud::pulse::render_pulse_panel;
 use crate::ui::widgets::hud::status::render_status_bar;
-use crate::ui::widgets::panels::chat::{render_chat_pane, render_context_pane};
+use crate::pages::game::panels::chat::render_chat_pane;
+use crate::pages::game::panels::context::render_context_pane;
 use crate::ui::widgets::panels::dynamic::render_dynamic_pane;
 use crate::ui::widgets::selection::render_character_selection;
 use crate::ui::{FocusedPane, NetStats};
@@ -121,10 +122,10 @@ impl GameState {
         render_dashboard_pane(f, self, main_chunks[0]);
 
         // Chat Pane
-        render_chat_pane(f, self, chat, main_chunks[1]);
+        render_chat_pane(f, chat, self.view.focused_pane == FocusedPane::Chat, main_chunks[1]);
 
         // Context Pane
-        render_context_pane(f, self, chat, main_chunks[2]);
+        render_context_pane(f, &self.view.context_buffer, &self.view.context_view, self.view.context_scroll_offset, self.view.focused_pane == FocusedPane::Context, main_chunks[2]);
 
         // Dynamic Pane
         render_dynamic_pane(f, self, account_name, dynamic_chunk);

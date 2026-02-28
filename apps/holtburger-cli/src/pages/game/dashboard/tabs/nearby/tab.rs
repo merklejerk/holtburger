@@ -200,6 +200,10 @@ impl TabController for NearbyTab {
                 ),
             ]);
 
+
+            // Nearby entities allow Approach
+            verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::MoveTo { target: e.guid }])], 'r', "Approach"));
+
             if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
                 verbs.push(Verb::new(
                     vec![crate::ui::UiMessage::BeginInteraction(Interaction::Healing { item_guid: e.guid })],
@@ -207,11 +211,36 @@ impl TabController for NearbyTab {
                     "Use"
                 ));
             } else {
-                verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
-                    'u',
-                    "Use"
-                ));
+                match class {
+                    EntityClass::Vendor => {
+                        verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])], 's', "Shop"));
+                    }
+                    EntityClass::Npc => {
+                        verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])], 'k', "Talk"));
+                    }
+                    EntityClass::Portal
+                    | EntityClass::Door
+                    | EntityClass::LifeStone
+                    | EntityClass::Consumable
+                    | EntityClass::Tool
+                    | EntityClass::Key
+                    | EntityClass::Writable
+                    | EntityClass::Money
+                    | EntityClass::Item => {
+                        verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])], 'u', "Use"));
+                    }
+                    EntityClass::Chest | EntityClass::Container => {
+                        if game.data.open_containers.contains(&e.guid) {
+                            verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CloseContainer(e.guid)])], 'o', "Close"));
+                        } else {
+                            verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])], 'o', "Open"));
+                        }
+                    }
+                    EntityClass::Player => {
+                        verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::OpenTrade(e.guid)])], 'd', "Trade"));
+                    }
+                    _ => {}
+                }
             }
         }
 

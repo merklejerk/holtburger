@@ -223,6 +223,32 @@ impl TabController for InventoryTab {
             ) {
                 verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::GetAndWield { item: e.guid, slot: None }])], 'e', "Equip"));
             }
+            
+            if let Some(trade) = &game.data.trade
+                && !is_equipped
+                && !trade.self_side.items.contains(&e.guid)
+                && game.data.can_add_to_trade(e.guid)
+            {
+                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::AddToTrade { item: e.guid }])], 'o', "Offer"));
+            } else if game.data.vendor.is_some() && game.data.can_sell_to_vendor(e.guid) {
+                verbs.push(Verb::new(
+                    vec![
+                        crate::ui::UiMessage::SendCommands(vec![
+                            ClientCommand::Sell {
+                                vendor: game.data.vendor.as_ref().unwrap().vendor_guid,
+                                items: vec![
+                                    holtburger_protocol::messages::trade::actions::ItemProfileActionData {
+                                        object_guid: e.guid,
+                                        amount: 1, 
+                                    },
+                                ],
+                            }
+                        ])
+                    ],
+                    's', 
+                    "Sell"
+                ));
+            }
 
         }
         verbs

@@ -34,11 +34,19 @@ impl TabController for SpellsTab {
                     "Cast on target",
                 ));
             } else {
-                verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastUntargetedSpell { spell_id }])],
-                    'c',
-                    "Cast on self",
-                ));
+                if let Some(player_guid) = game.data.player_guid {
+                    verbs.push(Verb::new(
+                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastTargetedSpell { spell_id, target: player_guid }])],
+                        'c',
+                        "Cast on self",
+                    ));
+                } else {
+                    verbs.push(Verb::new(
+                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastUntargetedSpell { spell_id }])],
+                        'c',
+                        "Cast",
+                    ));
+                }
             }
 
             verbs.push(Verb::new(

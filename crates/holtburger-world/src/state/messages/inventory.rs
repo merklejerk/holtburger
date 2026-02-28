@@ -153,6 +153,20 @@ impl WorldState {
                             data.container_guid,
                         ),
                     });
+                    events.push(StateEvent::PropertyUpdated {
+                        guid: data.item_guid,
+                        update: PropertyUpdate::InstanceId(
+                            PropertyInstanceId::Wielder,
+                            Guid::NULL,
+                        ),
+                    });
+                    events.push(StateEvent::PropertyUpdated {
+                        guid: data.item_guid,
+                        update: PropertyUpdate::Int(
+                            PropertyInt::CurrentWieldedLocation,
+                            EquipMask::NONE.bits() as i32,
+                        ),
+                    });
                 }
             }
             GameEvent::InventoryPutObjectIn3D(data) => {
@@ -175,6 +189,20 @@ impl WorldState {
                         update: PropertyUpdate::InstanceId(
                             PropertyInstanceId::Container,
                             Guid::NULL,
+                        ),
+                    });
+                    events.push(StateEvent::PropertyUpdated {
+                        guid: data.object_guid,
+                        update: PropertyUpdate::InstanceId(
+                            PropertyInstanceId::Wielder,
+                            Guid::NULL,
+                        ),
+                    });
+                    events.push(StateEvent::PropertyUpdated {
+                        guid: data.object_guid,
+                        update: PropertyUpdate::Int(
+                            PropertyInt::CurrentWieldedLocation,
+                            EquipMask::NONE.bits() as i32,
                         ),
                     });
                 }
@@ -272,6 +300,14 @@ impl WorldState {
                     events.push(StateEvent::PropertyUpdated {
                         guid: data.object_guid,
                         update: PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, ev.target),
+                    });
+                    events.push(StateEvent::PropertyUpdated {
+                        guid: data.object_guid,
+                        update: PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
+                    });
+                    events.push(StateEvent::PropertyUpdated {
+                        guid: data.object_guid,
+                        update: PropertyUpdate::Int(PropertyInt::CurrentWieldedLocation, data.equip_mask.bits() as i32),
                     });
                 }
             }

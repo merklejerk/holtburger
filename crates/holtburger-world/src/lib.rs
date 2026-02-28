@@ -60,9 +60,9 @@ pub enum StateEvent {
     AttributeUpdated(stats::Attribute),
     SkillUpdated(stats::Skill),
     LevelInfoUpdated(stats::CharacterLevelInfo),
-    PropertyUpdated {
+    PropertiesUpdated {
         guid: Guid,
-        update: PropertyUpdate,
+        updates: Vec<PropertyUpdate>,
     },
     PlayerInfo(Box<PlayerInfoData>),
     PlayerEnchantmentsUpdated {

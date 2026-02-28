@@ -1,6 +1,5 @@
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
-use crate::world::StateEvent;
 use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
 use holtburger_common::{Guid, Quaternion};
@@ -8,6 +7,7 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
+use holtburger_world::StateEvent;
 use std::time::Instant;
 
 impl Client {
@@ -61,6 +61,7 @@ impl Client {
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
             | ClientCommand::SetNoClip(_)
+            | ClientCommand::QueryEntityDebugInfo(_)
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
     }
@@ -586,6 +587,17 @@ impl Client {
                     CancelAttackActionData {},
                 )))
                 .await
+            }
+            ClientCommand::QueryEntityDebugInfo(guid) => {
+                log::info!(">>> Client requested Debug Snapshot for {}", guid);
+                if let Some(entity) = self.world.entities.get(guid) {
+                    let snapshot_event =
+                        crate::client::types::ClientViewEvent::EntityDebugInfoSnapshot {
+                            entity: Box::new(entity.clone()),
+                        };
+                    let _ = self.client_view_event_tx.send(snapshot_event);
+                }
+                Ok(())
             }
             ClientCommand::Quit => {
                 log::info!("Disconnecting...");

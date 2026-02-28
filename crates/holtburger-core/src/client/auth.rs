@@ -1,4 +1,3 @@
-use crate::session::Session;
 use anyhow::Result;
 use holtburger_common::Guid;
 use holtburger_common::sequence::is_newer_u32;
@@ -6,6 +5,7 @@ use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
+use holtburger_session::Session;
 use std::time::Duration;
 
 /// Finds a character Guid based on a preference string (either 1-based index or case-insensitive name).

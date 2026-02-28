@@ -1,5 +1,5 @@
 use crate::ui::state::{AppState, Page};
-use holtburger_core::world::entity::Entity;
+use holtburger_world::entity::Entity;
 
 impl AppState {
     pub(super) fn update_inventory_and_equipment(&mut self, entity: &Entity) {

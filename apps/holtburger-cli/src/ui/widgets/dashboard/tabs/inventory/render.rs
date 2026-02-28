@@ -12,8 +12,8 @@ use crate::ui::theme;
 use crate::ui::utils::format_item_name;
 use holtburger_common::Guid;
 use holtburger_common::properties::EquipMask;
-use holtburger_core::world::context::WorldContextExt;
-use holtburger_core::world::entity::Entity;
+use holtburger_world::context::WorldContextExt;
+use holtburger_world::entity::Entity;
 use std::collections::HashMap;
 
 pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {

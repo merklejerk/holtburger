@@ -1,6 +1,7 @@
 use crate::ui::ContextView;
 use crate::ui::state::AppState;
-use holtburger_core::{ClientViewEvent, StateEvent};
+use holtburger_core::ClientViewEvent;
+use holtburger_world::entity::Entity;
 
 impl AppState {
     pub(super) fn handle_combat_event(&mut self, event: ClientViewEvent) {
@@ -58,12 +59,10 @@ impl AppState {
         }
     }
 
-    pub(super) fn handle_state_event(&mut self, event: StateEvent) {
-        if let StateEvent::EntityIdentified(entity) = event
-            && let Some(game) = self.game_option_mut()
-        {
+    pub(super) fn handle_entity_identified(&mut self, entity: &Entity) {
+        if let Some(game) = self.game_option_mut() {
             let guid = entity.guid;
-            game.data.entities.insert(guid, *entity);
+            game.data.entities.insert(guid, entity.clone());
             game.view.context_view = ContextView::Assess(guid);
         }
     }

@@ -1,9 +1,3 @@
-use crate::world::entity::Entity;
-use crate::world::state::TradeState;
-use crate::world::stats::{
-    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
-};
-use crate::world::vendor::VendorState;
 use holtburger_common::{Guid, Vector3};
 use holtburger_dat::file_type::spell_table::SpellBase;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
@@ -12,10 +6,16 @@ use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsEventItem};
+use holtburger_world::entity::Entity;
+use holtburger_world::state::TradeState;
+use holtburger_world::stats::{
+    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
+};
+use holtburger_world::vendor::VendorState;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-pub use crate::world::StateEvent;
+pub use holtburger_world::StateEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetSlot {
@@ -131,10 +131,21 @@ pub enum ClientViewEvent {
         reason: ErrorReason,
         message: String,
     },
-    EntityUpserted {
+    EntitySpawned {
         entity: Box<Entity>,
     },
-    EntityRemoved {
+    EntityIdentified {
+        entity: Box<Entity>,
+    },
+    EntityPropertyUpdated {
+        guid: Guid,
+        update: holtburger_common::properties::PropertyUpdate,
+    },
+    EntityMoved {
+        guid: Guid,
+        pos: holtburger_common::position::WorldPosition,
+    },
+    EntityDespawned {
         guid: Guid,
     },
     ServerTimeUpdated {
@@ -157,6 +168,34 @@ pub enum ClientViewEvent {
     },
     ContainerClosed {
         guid: Guid,
+    },
+    ServerMessage {
+        message: String,
+        chat_type: u32,
+    },
+    Chat {
+        sender: String,
+        message: String,
+    },
+    WeenieError {
+        error: WeenieError,
+        parameter: Option<String>,
+    },
+    CharacterList(Vec<CharacterEntry>),
+    PlayerEntered {
+        guid: Guid,
+        name: String,
+    },
+    WorldNameUpdated(String),
+    Emote {
+        sender: String,
+        text: String,
+    },
+    PingResponse,
+    LogMessage(String),
+    BootAccount(String),
+    EntityDebugInfoSnapshot {
+        entity: Box<Entity>,
     },
 }
 
@@ -264,6 +303,7 @@ pub enum ClientCommand {
     SetNoClip(bool),
     CancelAttack,
     SyncPosition,
+    QueryEntityDebugInfo(Guid),
     Quit,
 }
 

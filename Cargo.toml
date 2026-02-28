@@ -5,6 +5,8 @@ members = [
     "crates/holtburger-common",
     "crates/holtburger-dat",
     "crates/holtburger-protocol",
+    "crates/holtburger-session",
+    "crates/holtburger-world",
     "apps/holtburger-cli",
     "apps/holtburger-tools",
 ]
@@ -19,6 +21,8 @@ repository = "https://github.com/merklejerk/holtburger"
 
 [workspace.dependencies]
 holtburger-core = { path = "crates/holtburger-core" }
+holtburger-world = { path = "crates/holtburger-world" }
+holtburger-session = { path = "crates/holtburger-session" }
 holtburger-common = { path = "crates/holtburger-common" }
 holtburger-dat = { path = "crates/holtburger-dat" }
 holtburger-protocol = { path = "crates/holtburger-protocol" }

@@ -1,12 +1,12 @@
 use super::PlayerState;
-use crate::world::StateEvent;
-use crate::world::player::types::LastSentStats;
-use crate::world::stats;
+use crate::StateEvent;
+use crate::player::types::LastSentStats;
+use crate::stats;
 use holtburger_common::properties::EnchantmentTypeFlags;
 
 impl PlayerState {
     pub fn get_attribute_multiplier(&self, attr: stats::AttributeType) -> f32 {
-        crate::world::magic::get_enchantment_multiplier(
+        crate::magic::get_enchantment_multiplier(
             &self.enchantments,
             EnchantmentTypeFlags::ATTRIBUTE.bits(),
             attr as u32,
@@ -14,7 +14,7 @@ impl PlayerState {
     }
 
     pub fn get_attribute_additive(&self, attr: stats::AttributeType) -> f32 {
-        crate::world::magic::get_enchantment_additive(
+        crate::magic::get_enchantment_additive(
             &self.enchantments,
             EnchantmentTypeFlags::ATTRIBUTE.bits(),
             attr as u32,
@@ -62,7 +62,7 @@ impl PlayerState {
     }
 
     pub fn get_vital_multiplier(&self, vital: stats::VitalType) -> f32 {
-        crate::world::magic::get_enchantment_multiplier(
+        crate::magic::get_enchantment_multiplier(
             &self.enchantments,
             EnchantmentTypeFlags::SECOND_ATT.bits(),
             vital as u32,
@@ -70,7 +70,7 @@ impl PlayerState {
     }
 
     pub fn get_vital_additive(&self, vital: stats::VitalType) -> f32 {
-        crate::world::magic::get_enchantment_additive(
+        crate::magic::get_enchantment_additive(
             &self.enchantments,
             EnchantmentTypeFlags::SECOND_ATT.bits(),
             vital as u32,
@@ -111,7 +111,7 @@ impl PlayerState {
     }
 
     pub fn get_skill_multiplier(&self, skill: stats::SkillType) -> f32 {
-        crate::world::magic::get_enchantment_multiplier(
+        crate::magic::get_enchantment_multiplier(
             &self.enchantments,
             EnchantmentTypeFlags::SKILL.bits(),
             skill as u32,
@@ -119,7 +119,7 @@ impl PlayerState {
     }
 
     pub fn get_skill_additive(&self, skill: stats::SkillType) -> f32 {
-        crate::world::magic::get_enchantment_additive(
+        crate::magic::get_enchantment_additive(
             &self.enchantments,
             EnchantmentTypeFlags::SKILL.bits(),
             skill as u32,
@@ -259,7 +259,7 @@ impl PlayerState {
         self.last_sent_stats = Some(current.clone());
 
         events.push(StateEvent::DerivedStatsUpdated(Box::new(
-            crate::world::DerivedStatsData {
+            crate::DerivedStatsData {
                 attributes: current.attributes,
                 vitals: current.vitals,
                 skills: current.skills,

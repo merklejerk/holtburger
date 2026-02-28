@@ -1,4 +1,4 @@
-use crate::world::stats;
+use crate::stats;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]

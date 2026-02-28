@@ -1,7 +1,7 @@
 use super::GameMessage;
 use crate::opcodes::*;
+use crate::traits::ProtocolPack;
 use byteorder::{LittleEndian, WriteBytesExt};
-use holtburger_common::traits::ProtocolPack;
 
 impl ProtocolPack for GameMessage {
     fn pack(&self, buf: &mut Vec<u8>) {

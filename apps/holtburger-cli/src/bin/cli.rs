@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use holtburger_core::errors::format_weenie_error;
-use holtburger_core::{Client, ClientCommand, WireEvent};
+use holtburger_core::{Client, ClientCommand};
 use tokio::sync::mpsc;
 
 #[derive(clap::Subcommand, Debug, Clone)]
@@ -119,13 +119,12 @@ async fn main() -> Result<()> {
         client.session.set_capture(&capture_path)?;
     }
     client.set_command_rx(command_rx);
-    let mut wire_rx = client.subscribe_wire_events();
-    let _state_rx = client.subscribe_state_events();
+    let mut rx = client.subscribe_client_view_events();
     let loop_tx = event_tx.clone();
 
     // Bridge broadcast to legacy MPSC channel
     tokio::spawn(async move {
-        while let Ok(msg) = wire_rx.recv().await {
+        while let Ok(msg) = rx.recv().await {
             let _ = loop_tx.send(msg);
         }
     });
@@ -147,7 +146,7 @@ async fn main() -> Result<()> {
         Commands::ListCharacters => loop {
             tokio::select! {
                 Some(event) = event_rx.recv() => {
-                    if let WireEvent::CharacterList(chars) = event {
+                    if let holtburger_core::ClientViewEvent::CharacterList(chars) = event {
                         println!("Characters for account {}:", args.account);
                         for character in chars { println!("  - {} (ID: {:08X})", character.name, character.guid); }
                         let _ = command_tx.send(ClientCommand::Quit);
@@ -169,20 +168,20 @@ async fn main() -> Result<()> {
                 tokio::select! {
                     Some(event) = event_rx.recv() => {
                         match event {
-                            WireEvent::LogMessage(msg) => { println!("{}", msg); }
-                            WireEvent::ServerMessage { message, .. } => { println!("{}", message); }
-                            WireEvent::Chat { sender, message } => { println!("{}: {}", sender, message); }
-                            WireEvent::Emote { sender, text } => { println!("{} {}", sender, text); }
-                            WireEvent::WeenieError { error, parameter } => {
+                            holtburger_core::ClientViewEvent::LogMessage(msg) => { println!("{}", msg); }
+                            holtburger_core::ClientViewEvent::ServerMessage { message, .. } => { println!("{}", message); }
+                            holtburger_core::ClientViewEvent::Chat { sender, message } => { println!("{}: {}", sender, message); }
+                            holtburger_core::ClientViewEvent::Emote { sender, text } => { println!("{} {}", sender, text); }
+                            holtburger_core::ClientViewEvent::WeenieError { error, parameter } => {
                                 println!("Server Error: {}", format_weenie_error(error, parameter.as_deref()));
                             }
-                            WireEvent::CharacterError(err) => {
-                                println!("Character Error: {:?}", err);
+                            holtburger_core::ClientViewEvent::ErrorRaised { reason, .. } => {
+                                println!("Error: {:?}", reason);
                             }
-                            WireEvent::BootAccount(reason) => {
+                            holtburger_core::ClientViewEvent::BootAccount(reason) => {
                                 println!("Booted: {}", reason);
                             }
-                            WireEvent::CharacterList(chars) => {
+                            holtburger_core::ClientViewEvent::CharacterList(chars) => {
                                 println!("Available characters: {:?}", chars.iter().map(|c| &c.name).collect::<Vec<_>>());
                                 if character_pref.is_none() {
                                     println!("Selecting first character...");

@@ -1,8 +1,8 @@
 use crate::messages::utils::{align_offset, pad_to_4};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
 use holtburger_common::Guid;
 pub use holtburger_common::position::WorldPosition;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

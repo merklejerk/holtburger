@@ -1,12 +1,12 @@
 use crate::client::WireEvent;
-use crate::session::Session;
-use crate::world::{StateEvent, WorldState};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionFlags;
 use holtburger_protocol::messages::*;
+use holtburger_session::Session;
+use holtburger_world::{StateEvent, WorldState};
 use std::time::{Duration, Instant};
 
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.

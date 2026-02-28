@@ -93,7 +93,7 @@ impl WorldState {
                     self.player.emit_derived_stats(events);
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -123,7 +123,7 @@ impl WorldState {
                     }
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -142,7 +142,7 @@ impl WorldState {
                     item.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -164,7 +164,7 @@ impl WorldState {
                     self.player.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -186,7 +186,7 @@ impl WorldState {
                     self.player.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -205,7 +205,7 @@ impl WorldState {
                     self.player.emit_derived_stats(events);
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -224,7 +224,7 @@ impl WorldState {
                     self.player.emit_derived_stats(events);
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -242,7 +242,7 @@ impl WorldState {
                     self.player.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -264,7 +264,7 @@ impl WorldState {
                     self.player.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -282,7 +282,7 @@ impl WorldState {
                     self.player.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -300,7 +300,7 @@ impl WorldState {
                     self.player.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -346,7 +346,7 @@ impl WorldState {
                     }
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }
@@ -392,7 +392,7 @@ impl WorldState {
                     }
                 }
                 events.push(StateEvent::PropertyUpdated {
-                    guid: data.guid,
+                    guid: target_guid,
                     update,
                 });
             }

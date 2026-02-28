@@ -52,7 +52,7 @@ impl AppState {
         }
     }
 
-    pub(super) fn handle_setup_event(&mut self, event: ClientViewEvent) {
+    pub(super) fn handle_setup_event(&mut self, event: &ClientViewEvent) {
         match event {
             ClientViewEvent::WorldNameUpdated(name) => {
                 self.world_name = name.clone();
@@ -60,7 +60,8 @@ impl AppState {
                     game.data.world_name = name.clone();
                 }
             }
-            ClientViewEvent::CharacterList(mut chars) => {
+            ClientViewEvent::CharacterList(chars) => {
+                let mut chars = chars.clone();
                 chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                 self.page = Page::Selection(SelectionState {
                     characters: chars,
@@ -70,13 +71,13 @@ impl AppState {
             }
             ClientViewEvent::PlayerEntered { guid, name } => {
                 if let Page::Game(game) = &mut self.page {
-                    game.data.player_guid = Some(guid);
+                    game.data.player_guid = Some(*guid);
                     game.data.character_name = Some(name.clone());
                     game.data.world_name = self.world_name.clone();
                 } else {
                     self.page = Page::Game(Box::new(GameState::new(
-                        guid,
-                        name,
+                        *guid,
+                        name.clone(),
                         self.world_name.clone(),
                     )));
                 }

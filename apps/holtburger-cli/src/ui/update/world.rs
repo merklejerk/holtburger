@@ -5,12 +5,11 @@ use holtburger_core::ClientViewEvent;
 impl AppState {
     pub(super) fn handle_client_view_event(&mut self, event: ClientViewEvent) {
         // Handle setup and chat events regardless of being locally in-game
-        match event.clone() {
-            // Clone for routing to sub-handlers, might be optimized later
+        match &event {
             ClientViewEvent::CharacterList(_)
             | ClientViewEvent::PlayerEntered { .. }
             | ClientViewEvent::WorldNameUpdated(_) => {
-                self.handle_setup_event(event.clone());
+                self.handle_setup_event(&event);
             }
             ClientViewEvent::LogMessage(_)
             | ClientViewEvent::ServerMessage { .. }
@@ -18,7 +17,7 @@ impl AppState {
             | ClientViewEvent::Emote { .. }
             | ClientViewEvent::PingResponse
             | ClientViewEvent::BootAccount(_) => {
-                self.handle_chat_event(event.clone());
+                self.handle_chat_event(&event);
             }
             _ => {}
         }

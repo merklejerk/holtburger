@@ -4,7 +4,7 @@ use holtburger_core::ClientViewEvent;
 use holtburger_protocol::messages::ChatMessageType;
 
 impl AppState {
-    pub(super) fn handle_chat_event(&mut self, event: ClientViewEvent) {
+    pub(super) fn handle_chat_event(&mut self, event: &ClientViewEvent) {
         match event {
             ClientViewEvent::LogMessage(msg) => {
                 let kind = if msg.contains("[ERROR]") {
@@ -18,10 +18,10 @@ impl AppState {
                 } else {
                     ChatMessageKind::System
                 };
-                self.chat.log(kind, msg);
+                self.chat.log(kind, msg.clone());
             }
             ClientViewEvent::ServerMessage { message, chat_type } => {
-                let kind = match ChatMessageType::from_repr(chat_type) {
+                let kind = match ChatMessageType::from_repr(*chat_type) {
                     Some(ChatMessageType::Error) => ChatMessageKind::Error,
                     Some(ChatMessageType::Warning) => ChatMessageKind::Warning,
                     Some(ChatMessageType::Broadcast)
@@ -31,7 +31,7 @@ impl AppState {
                     | Some(ChatMessageType::DirectSpeech) => ChatMessageKind::Info,
                     _ => ChatMessageKind::System,
                 };
-                self.chat.log(kind, message);
+                self.chat.log(kind, message.clone());
             }
             ClientViewEvent::Chat { sender, message } => {
                 self.chat

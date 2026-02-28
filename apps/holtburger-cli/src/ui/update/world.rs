@@ -71,12 +71,14 @@ impl AppState {
                 }
                 self.update_inventory_and_equipment(entity_ref);
             }
-            ClientViewEvent::EntityPropertyUpdated { guid, update } => {
+            ClientViewEvent::EntityPropertiesUpdated { guid, updates } => {
                 let mut needs_update = false;
                 if let Some(game) = self.game_option_mut()
                     && let Some(entity) = game.data.entities.get_mut(&guid)
                 {
-                    entity.properties.apply(update);
+                    for update in updates {
+                        entity.properties.apply(update);
+                    }
                     needs_update = true;
                 }
                 if needs_update

@@ -276,12 +276,12 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityDespawned { guid: *guid });
             }
-            StateEvent::PropertyUpdated { guid, update } => {
+            StateEvent::PropertiesUpdated { guid, updates } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::EntityPropertyUpdated {
+                    .send(ClientViewEvent::EntityPropertiesUpdated {
                         guid: *guid,
-                        update: update.clone(),
+                        updates: updates.clone(),
                     });
             }
             StateEvent::EntityMoved { guid, pos } => {

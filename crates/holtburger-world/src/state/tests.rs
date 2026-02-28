@@ -211,14 +211,17 @@ fn test_inventory_put_obj_in_container() {
     assert_eq!(entity.container_id(), Some(container_guid));
     assert_eq!(entity.position.landblock_id, Guid::NULL);
 
-    // Check for StateEvent::PropertyUpdated
-    assert!(events.iter().any(|e| matches!(
-        e,
-        StateEvent::PropertyUpdated {
-            guid,
-            update: PropertyUpdate::InstanceId(prop, val),
-        } if *guid == item_guid && *prop == PropertyInstanceId::Container && *val == container_guid
-    )));
+    // Check for StateEvent::PropertiesUpdated
+    assert!(events.iter().any(|e| {
+        if let StateEvent::PropertiesUpdated { guid, updates } = e {
+            *guid == item_guid
+                && updates.iter().any(|u| {
+                    matches!(u, PropertyUpdate::InstanceId(PropertyInstanceId::Container, val) if *val == container_guid)
+                })
+        } else {
+            false
+        }
+    }));
 }
 
 #[test]
@@ -247,13 +250,16 @@ fn test_inventory_put_object_in_3d() {
     assert_eq!(entity.container_id(), None);
     assert_eq!(entity.wielder_id(), None);
 
-    assert!(events.iter().any(|e| matches!(
-        e,
-        StateEvent::PropertyUpdated {
-            guid,
-            update: PropertyUpdate::InstanceId(prop, val),
-        } if *guid == obj_guid && *prop == PropertyInstanceId::Container && *val == Guid::NULL
-    )));
+    assert!(events.iter().any(|e| {
+        if let StateEvent::PropertiesUpdated { guid, updates } = e {
+            *guid == obj_guid
+                && updates.iter().any(|u| {
+                    matches!(u, PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL))
+                })
+        } else {
+            false
+        }
+    }));
 }
 
 #[test]
@@ -285,13 +291,16 @@ fn test_wield_object() {
     assert_eq!(entity.wielder_id(), Some(wielder_guid));
     assert_eq!(entity.container_id(), None);
 
-    assert!(events.iter().any(|e| matches!(
-        e,
-        StateEvent::PropertyUpdated {
-            guid,
-            update: PropertyUpdate::InstanceId(prop, val),
-        } if *guid == obj_guid && *prop == PropertyInstanceId::Wielder && *val == wielder_guid
-    )));
+    assert!(events.iter().any(|e| {
+        if let StateEvent::PropertiesUpdated { guid, updates } = e {
+            *guid == obj_guid
+                && updates.iter().any(|u| {
+                    matches!(u, PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, val) if *val == wielder_guid)
+                })
+        } else {
+            false
+        }
+    }));
 }
 
 #[test]

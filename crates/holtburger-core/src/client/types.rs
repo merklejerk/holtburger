@@ -137,9 +137,9 @@ pub enum ClientViewEvent {
     EntityIdentified {
         entity: Box<Entity>,
     },
-    EntityPropertyUpdated {
+    EntityPropertiesUpdated {
         guid: Guid,
-        update: holtburger_common::properties::PropertyUpdate,
+        updates: Vec<holtburger_common::properties::PropertyUpdate>,
     },
     EntityMoved {
         guid: Guid,

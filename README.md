@@ -19,6 +19,26 @@ Holtburger is comprised of several specialized crates:
 - **[`holtburger-cli`](apps/holtburger-cli)**: A Terminal User Interface (TUI) client built on the Holtburger stack, designed for interaction, automation, and power users.
 - **[`holtburger-tools`](apps/holtburger-tools)**: A collection of auxiliary command-line utilities for data extraction and protocol analysis.
 
+## Current Capabilities vs Retail Client
+
+Because Holtburger is a lightweight terminal-based client, its feature set focuses on automation, protocol accuracy, and functional gameplay rather than graphical rendering. Here is a high-level matrix of what is currently implemented compared to the classic retail 3D experience:
+
+| Feature | Retail Client | Holtburger TUI | Notes |
+| :--- | :---: | :---: | :--- |
+| **3D Graphics & Sound** | 🟢 | 🔴 | Intentional limitation. TUI relies on text and data projection. |
+| **Login & Auth** | 🟢 | 🟢 | Full multi-stage GLS and world server handshake. |
+| **Character Selection** | 🟢 | 🟢 | Login via terminal UI or CLI arguments. |
+| **Character Creation** | 🟢 | 🔴 | Planned for a future update. |
+| **Spatial Radar** | 🟢 | 🟢 | Live positional tracking of nearby entities. |
+| **Movement & Physics** | 🟢 | 🟡 | Basic cell navigation works. Complex collisions and jumping are WIP. |
+| **Chat & Messaging** | 🟢 | 🟢 | Full parsing of chat channels, server messages, and emotes. |
+| **Inventory & Equipping** | 🟢 | 🟢 | Move, stack, split, drop, and equip items. |
+| **Vendors & Trade** | 🟢 | 🟢 | Full merchant interaction including alternate currencies. |
+| **Crafting** | 🟢 | 🟡 | Item combining works, but pre-craft success rate prediction is pending. |
+| **Magic System** | 🟢 | 🟡 | Spellbook parsing, enchantments, and basic casting work. |
+| **Melee & Missile Combat** | 🟢 | 🔴 | Core auto-attack routines and target looping are WIP. |
+| **Scripting / Automation** | 🔴 | 🔴 | Planned via embedded `deno-core` JavaScript integration. |
+
 ## Disclaimers
 
 Holtburger is **highly experimental**. APIs are unstable and subject to frequent breaking changes. Much of this code is heavily developed with the assistance of AI coding agents, so don't treat its implementation as authoritative.

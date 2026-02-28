@@ -1,6 +1,5 @@
 use holtburger_core::client::types::ClientCommand;
 
-
 #[derive(Debug, Default)]
 pub struct UpdateResult {
     pub commands: Vec<ClientCommand>,
@@ -45,4 +44,3 @@ impl UpdateResult {
         self.needs_redraw |= other.needs_redraw;
     }
 }
-

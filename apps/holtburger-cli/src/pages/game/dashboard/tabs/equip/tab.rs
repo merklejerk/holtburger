@@ -3,11 +3,11 @@ use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::ui::Interaction;
+use crate::ui::Verb;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::Verb;
-use holtburger_core::client::types::ClientCommand;
 use crate::ui::types::CommandTarget;
+use holtburger_core::client::types::ClientCommand;
 
 pub struct EquipTab;
 
@@ -16,7 +16,12 @@ impl TabController for EquipTab {
         render_equip_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
+    fn get_verbs(
+        &self,
+        game: &GameState,
+        _interaction: &Option<Interaction>,
+        index: usize,
+    ) -> Vec<Verb> {
         let mut verbs = vec![];
         let lines = get_lines(game);
         let target = self.get_target_at_index(game, index);
@@ -37,19 +42,27 @@ impl TabController for EquipTab {
                 verbs.extend([
                     Verb::new(
                         vec![
-                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(e.guid)]),
-                            crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Assess(e.guid))
+                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(
+                                e.guid,
+                            )]),
+                            crate::ui::UiMessage::ChangeContextView(
+                                crate::ui::ContextView::Assess(e.guid),
+                            ),
                         ],
                         'a',
-                        "Assess"
+                        "Assess",
                     ),
                     Verb::new(
-                        vec![crate::ui::UiMessage::BeginInteraction(Interaction::Targeting { target_guid: e.guid })],
+                        vec![crate::ui::UiMessage::BeginInteraction(
+                            Interaction::Targeting {
+                                target_guid: e.guid,
+                            },
+                        )],
                         't',
-                        "Target"
+                        "Target",
                     ),
                 ]);
-                
+
                 let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) = lines.get(index) {
                     *here
                 } else {
@@ -59,21 +72,25 @@ impl TabController for EquipTab {
                 if is_here {
                     if let Some(pguid) = game.data.player_guid {
                         verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::MoveItem {
-                                item: e.guid,
-                                container: pguid,
-                                placement: 0,
-                            }])],
+                            vec![crate::ui::UiMessage::SendCommands(vec![
+                                ClientCommand::MoveItem {
+                                    item: e.guid,
+                                    container: pguid,
+                                    placement: 0,
+                                },
+                            ])],
                             'q',
                             "Unequip",
                         ));
                     }
                 } else if let Some(s) = slot {
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::GetAndWield {
-                            item: e.guid,
-                            slot: Some(s),
-                        }])],
+                        vec![crate::ui::UiMessage::SendCommands(vec![
+                            ClientCommand::GetAndWield {
+                                item: e.guid,
+                                slot: Some(s),
+                            },
+                        ])],
                         'e',
                         "Equip",
                     ));
@@ -81,11 +98,13 @@ impl TabController for EquipTab {
 
                 verbs.push(Verb::new(
                     vec![
-                        crate::ui::UiMessage::SendCommands(vec![ClientCommand::QueryEntityDebugInfo(e.guid)]),
-                        crate::ui::UiMessage::RequestDebugContext(Some(e.guid))
+                        crate::ui::UiMessage::SendCommands(vec![
+                            ClientCommand::QueryEntityDebugInfo(e.guid),
+                        ]),
+                        crate::ui::UiMessage::RequestDebugContext(Some(e.guid)),
                     ],
                     'g',
-                    "Debug"
+                    "Debug",
                 ));
                 verbs
             }
@@ -104,5 +123,4 @@ impl TabController for EquipTab {
     fn get_item_count(&self, game: &GameState) -> usize {
         get_lines(game).len()
     }
-
 }

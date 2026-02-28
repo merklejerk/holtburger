@@ -2,9 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    List, ListItem, Paragraph,
-};
+use ratatui::widgets::{List, ListItem, Paragraph};
 use std::collections::HashMap;
 
 use holtburger_common::properties::EnchantmentTypeFlags;
@@ -70,19 +68,14 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     }
 
     let items = get_stats_list_items(game);
-    
+
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
     let selected_index = game.dashboard.selected_index();
-    game.dashboard.list_state()
-        .select(Some(selected_index));
-    f.render_stateful_widget(
-        dashboard_list,
-        bottom_area,
-        game.dashboard.list_state(),
-    );
+    game.dashboard.list_state().select(Some(selected_index));
+    f.render_stateful_widget(dashboard_list, bottom_area, game.dashboard.list_state());
 
     let height = bottom_area.height as usize;
     game.dashboard.last_height = height;

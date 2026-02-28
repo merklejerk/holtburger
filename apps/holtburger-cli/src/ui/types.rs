@@ -13,7 +13,6 @@ pub const SCROLL_STEP: usize = 3;
 
 pub type VerbSet = Vec<Verb>;
 
-
 #[derive(Debug, Clone)]
 pub struct Verb {
     pub messages: Vec<crate::ui::UiMessage>,
@@ -22,7 +21,11 @@ pub struct Verb {
 }
 
 impl Verb {
-    pub fn new(messages: Vec<crate::ui::UiMessage>, shortcut: char, label: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new(
+        messages: Vec<crate::ui::UiMessage>,
+        shortcut: char,
+        label: impl Into<Cow<'static, str>>,
+    ) -> Self {
         Self {
             messages,
             shortcut,

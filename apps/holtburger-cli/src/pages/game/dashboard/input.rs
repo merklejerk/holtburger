@@ -2,8 +2,8 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::update::{UpdateResult};
-use crate::ui::{ DashboardTab, TradeFocus};
+use crate::ui::update::UpdateResult;
+use crate::ui::{DashboardTab, TradeFocus};
 
 /// Standard dashboard input handling (navigation, verbs).
 pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
@@ -83,8 +83,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             let total = tab.get_item_count(game);
             let h = game.dashboard.last_height;
             let step = (h / 2) + 1;
-            let new_idx =
-                (game.dashboard.selected_index() + step).min(total.saturating_sub(1));
+            let new_idx = (game.dashboard.selected_index() + step).min(total.saturating_sub(1));
             game.dashboard.set_selected_index(new_idx);
             Some(UpdateResult::new())
         }
@@ -105,4 +104,3 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
         _ => None,
     }
 }
-

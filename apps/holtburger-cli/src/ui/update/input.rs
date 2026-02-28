@@ -57,10 +57,10 @@ impl AppState {
             &main_chunks,
         );
         for message in result.ui_messages.drain(..) {
-             self.handle_ui_message(message.clone());
+            self.handle_ui_message(message.clone());
         }
         self.refresh_context_buffer();
-// Eagerly transition to GameState when a character is selected
+        // Eagerly transition to GameState when a character is selected
         // This ensures we are listening for character data (vitals, skills)
         // that the server sends *before* the final PlayerEntered event.
         for cmd in &result.commands {
@@ -97,10 +97,10 @@ impl AppState {
         // --- Delegation to Active Page ---
         result = self.page.handle_mouse(mouse, &mut self.chat, &main_chunks);
         for message in result.ui_messages.drain(..) {
-             self.handle_ui_message(message.clone());
+            self.handle_ui_message(message.clone());
         }
         self.refresh_context_buffer();
-result
+        result
     }
 }
 
@@ -159,7 +159,12 @@ impl SelectionState {
 }
 
 impl GameState {
-    pub fn handle_mouse(&mut self, mouse: MouseEvent, chat: &mut ChatState, main_chunks: &[Rect]) -> UpdateResult {
+    pub fn handle_mouse(
+        &mut self,
+        mouse: MouseEvent,
+        chat: &mut ChatState,
+        main_chunks: &[Rect],
+    ) -> UpdateResult {
         let mut result = UpdateResult::new();
         match mouse.kind {
             crossterm::event::MouseEventKind::ScrollUp => {
@@ -168,10 +173,8 @@ impl GameState {
                     && mouse.column >= main_chunks[1].x
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
-                    chat.scroll_offset = chat
-                        .scroll_offset
-                        .saturating_add(crate::ui::SCROLL_STEP);
-                    
+                    chat.scroll_offset = chat.scroll_offset.saturating_add(crate::ui::SCROLL_STEP);
+
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
                     && mouse.row < main_chunks[2].y + main_chunks[2].height
@@ -182,7 +185,7 @@ impl GameState {
                         .view
                         .context_scroll_offset
                         .saturating_add(crate::ui::SCROLL_STEP);
-                    
+
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[0].y
                     && mouse.row < main_chunks[0].y + main_chunks[0].height
@@ -200,9 +203,7 @@ impl GameState {
                     && mouse.column >= main_chunks[1].x
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
-                    chat.scroll_offset = chat
-                        .scroll_offset
-                        .saturating_sub(crate::ui::SCROLL_STEP);
+                    chat.scroll_offset = chat.scroll_offset.saturating_sub(crate::ui::SCROLL_STEP);
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
                     && mouse.row < main_chunks[2].y + main_chunks[2].height
@@ -435,8 +436,10 @@ impl GameState {
                         return result.with_redraw(true);
                     }
                     if command == "/info" {
-                        result.ui_messages.push(crate::ui::UiMessage::DisplayClientInfo); //
-                            
+                        result
+                            .ui_messages
+                            .push(crate::ui::UiMessage::DisplayClientInfo); //
+
                         input_history.push(command.clone());
                         *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
@@ -508,13 +511,13 @@ impl GameState {
                 }
                 FocusedPane::Chat => {
                     chat.scroll_offset = chat.scroll_offset.saturating_add(1);
-                    
+
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
                     self.view.context_scroll_offset =
                         self.view.context_scroll_offset.saturating_add(1);
-                    
+
                     result.needs_redraw = true;
                 }
                 _ => {}

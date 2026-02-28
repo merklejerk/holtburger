@@ -113,11 +113,11 @@ impl ChatState {
     }
 
     pub fn log(&mut self, kind: ChatMessageKind, text: String) {
-        if let Some(log_mutex) = &self.chat_log {
-            if let Ok(mut file) = log_mutex.lock() {
-                let _ = writeln!(file, "{}", text);
-                let _ = file.flush();
-            }
+        if let Some(log_mutex) = &self.chat_log
+            && let Ok(mut file) = log_mutex.lock()
+        {
+            let _ = writeln!(file, "{}", text);
+            let _ = file.flush();
         }
         self.messages.push(ChatMessage { kind, text });
 

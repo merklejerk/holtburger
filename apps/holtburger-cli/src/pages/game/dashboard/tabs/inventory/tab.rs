@@ -141,14 +141,14 @@ impl TabController for InventoryTab {
                         None
                     };
 
-                    if let Some(label) = label {
-                        if let Some(cmd) = cmd {
-                            let msgs = vec![
-                                crate::ui::UiMessage::SendCommands(vec![cmd]),
-                                crate::ui::UiMessage::CancelInteraction,
-                            ];
-                            verbs.push(Verb::new(msgs, '\r', label));
-                        }
+                    if let Some(label) = label
+                        && let Some(cmd) = cmd
+                    {
+                        let msgs = vec![
+                            crate::ui::UiMessage::SendCommands(vec![cmd]),
+                            crate::ui::UiMessage::CancelInteraction,
+                        ];
+                        verbs.push(Verb::new(msgs, '\r', label));
                     }
                     return verbs;
                 }
@@ -181,24 +181,22 @@ impl TabController for InventoryTab {
                             'c',
                             "Combine",
                         ));
+                    } else if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
+                        verbs.push(Verb::new(
+                            vec![crate::ui::UiMessage::BeginInteraction(
+                                Interaction::Healing { item_guid: e.guid },
+                            )],
+                            'u',
+                            "Use",
+                        ));
                     } else {
-                        if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
-                            verbs.push(Verb::new(
-                                vec![crate::ui::UiMessage::BeginInteraction(
-                                    Interaction::Healing { item_guid: e.guid },
-                                )],
-                                'u',
-                                "Use",
-                            ));
-                        } else {
-                            verbs.push(Verb::new(
-                                vec![crate::ui::UiMessage::SendCommands(vec![
-                                    ClientCommand::Use(e.guid),
-                                ])],
-                                'u',
-                                "Use",
-                            ));
-                        }
+                        verbs.push(Verb::new(
+                            vec![crate::ui::UiMessage::SendCommands(vec![
+                                ClientCommand::Use(e.guid),
+                            ])],
+                            'u',
+                            "Use",
+                        ));
                     }
                 }
                 EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {

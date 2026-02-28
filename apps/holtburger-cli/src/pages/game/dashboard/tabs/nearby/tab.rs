@@ -88,14 +88,14 @@ impl TabController for NearbyTab {
                         None
                     };
 
-                    if let Some(label) = label {
-                        if let Some(cmd) = cmd {
-                            let msgs = vec![
-                                crate::ui::UiMessage::SendCommands(vec![cmd]),
-                                crate::ui::UiMessage::CancelInteraction,
-                            ];
-                            verbs.push(Verb::new(msgs, '\r', label));
-                        }
+                    if let Some(label) = label
+                        && let Some(cmd) = cmd
+                    {
+                        let msgs = vec![
+                            crate::ui::UiMessage::SendCommands(vec![cmd]),
+                            crate::ui::UiMessage::CancelInteraction,
+                        ];
+                        verbs.push(Verb::new(msgs, '\r', label));
                     }
                     return verbs;
                 }

@@ -254,7 +254,10 @@ fn test_inventory_put_object_in_3d() {
         if let StateEvent::PropertiesUpdated { guid, updates } = e {
             *guid == obj_guid
                 && updates.iter().any(|u| {
-                    matches!(u, PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL))
+                    matches!(
+                        u,
+                        PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL)
+                    )
                 })
         } else {
             false

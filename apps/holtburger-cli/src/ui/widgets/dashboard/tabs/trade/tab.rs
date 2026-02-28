@@ -15,7 +15,7 @@ impl TabController for TradeTab {
         render_trade_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
+    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
         let mut verbs = Vec::new();
         let active_interaction = game.view.active_interaction;
         let target = self.get_target_at_index(game, index);

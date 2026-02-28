@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatMessageKind {
     Info,
     System,

@@ -144,6 +144,7 @@ async fn main() -> Result<()> {
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
+    let (ui_message_tx, mut ui_message_rx) = mpsc::unbounded_channel::<ui::UiMessage>();
 
     let chat_log = if let Some(path) = &args.log {
         match File::create(path) {
@@ -232,6 +233,7 @@ async fn main() -> Result<()> {
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),
+        ui_message_tx,
     };
 
     app_state.refresh_context_buffer();
@@ -267,6 +269,14 @@ async fn main() -> Result<()> {
 
         while let Ok(event) = view_event_rx.try_recv() {
             let res = app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
+            needs_redraw |= res.needs_redraw;
+            for cmd in res.commands {
+                let _ = command_tx.send(cmd);
+            }
+        }
+
+        while let Ok(msg) = ui_message_rx.try_recv() {
+            let res = app_state.handle_ui_message(msg);
             needs_redraw |= res.needs_redraw;
             for cmd in res.commands {
                 let _ = command_tx.send(cmd);

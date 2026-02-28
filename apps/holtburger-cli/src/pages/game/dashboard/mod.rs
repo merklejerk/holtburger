@@ -1,7 +1,7 @@
-use crate::ui::types::CommandTarget;
 use crate::ui::state::GameState;
 use crate::ui::theme::pane_block;
 use crate::ui::traits::TabController;
+use crate::ui::types::CommandTarget;
 use crate::ui::{DashboardTab, FocusedPane};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -12,7 +12,7 @@ pub mod input;
 pub mod tabs;
 
 pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
-pub use crate::ui::types::{Verb};
+pub use crate::ui::types::Verb;
 
 pub mod assess;
 pub mod debug;
@@ -41,9 +41,12 @@ impl DashboardState {
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     pub fn selected_index(&self) -> usize {
-        self.selected_indices.get(&self.active_tab).copied().unwrap_or(0)
+        self.selected_indices
+            .get(&self.active_tab)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn set_selected_index(&mut self, index: usize) {
@@ -54,7 +57,6 @@ impl DashboardState {
         self.list_states.entry(self.active_tab).or_default()
     }
 }
-
 
 pub fn get_verbs_for_tab(game: &GameState, tab: DashboardTab, index: usize) -> Vec<Verb> {
     let interaction = game.view.active_interaction;

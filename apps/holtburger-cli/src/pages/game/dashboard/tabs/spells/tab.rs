@@ -4,9 +4,9 @@ use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
 use crate::ui::Interaction;
+use crate::ui::Verb;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::Verb;
 use holtburger_core::client::types::ClientCommand;
 
 pub struct SpellsTab;
@@ -16,7 +16,12 @@ impl TabController for SpellsTab {
         render_spells_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
+    fn get_verbs(
+        &self,
+        game: &GameState,
+        _interaction: &Option<Interaction>,
+        index: usize,
+    ) -> Vec<Verb> {
         let mut verbs = Vec::new();
         let target = self.get_target_at_index(game, index);
 
@@ -24,10 +29,12 @@ impl TabController for SpellsTab {
             if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
                 verbs.push(Verb::new(
                     vec![
-                        crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastTargetedSpell {
-                            spell_id: spell_id,
-                            target: target_guid,
-                        }]),
+                        crate::ui::UiMessage::SendCommands(vec![
+                            ClientCommand::CastTargetedSpell {
+                                spell_id: spell_id,
+                                target: target_guid,
+                            },
+                        ]),
                         crate::ui::UiMessage::CancelInteraction,
                     ],
                     'c',
@@ -36,13 +43,20 @@ impl TabController for SpellsTab {
             } else {
                 if let Some(player_guid) = game.data.player_guid {
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastTargetedSpell { spell_id, target: player_guid }])],
+                        vec![crate::ui::UiMessage::SendCommands(vec![
+                            ClientCommand::CastTargetedSpell {
+                                spell_id,
+                                target: player_guid,
+                            },
+                        ])],
                         'c',
                         "Cast on self",
                     ));
                 } else {
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastUntargetedSpell { spell_id }])],
+                        vec![crate::ui::UiMessage::SendCommands(vec![
+                            ClientCommand::CastUntargetedSpell { spell_id },
+                        ])],
                         'c',
                         "Cast",
                     ));
@@ -50,7 +64,9 @@ impl TabController for SpellsTab {
             }
 
             verbs.push(Verb::new(
-                vec![crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Spell(spell_id))],
+                vec![crate::ui::UiMessage::ChangeContextView(
+                    crate::ui::ContextView::Spell(spell_id),
+                )],
                 'd',
                 "Details",
             ));

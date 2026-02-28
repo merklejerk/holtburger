@@ -2,9 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, List, ListItem, ListState, Paragraph, 
-};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use super::super::classification::{classify_entity, classify_vendor_item, get_entity_color};
 use crate::ui::state::GameState;
@@ -31,8 +29,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .split(area);
 
         let selected_index = game.dashboard.selected_index();
-        game.dashboard.list_state()
-            .select(Some(selected_index));
+        game.dashboard.list_state().select(Some(selected_index));
 
         // Self side
         let self_items: Vec<ListItem> = trade
@@ -92,7 +89,6 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             ),
         };
 
-        
         let mut self_list = List::new(self_items).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -167,7 +163,6 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             ),
         };
 
-        
         let mut partner_list = List::new(partner_items).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -283,14 +278,12 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             })
             .collect();
 
-        
         let list = List::new(items)
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
 
         let selected_index = game.dashboard.selected_index();
-        game.dashboard.list_state()
-            .select(Some(selected_index));
+        game.dashboard.list_state().select(Some(selected_index));
         game.dashboard.last_height = list_area.height as usize;
 
         f.render_stateful_widget(list, list_area, game.dashboard.list_state());
@@ -330,4 +323,3 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         }
     }
 }
-

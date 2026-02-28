@@ -2,8 +2,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{List, ListItem};
 
-use crate::ui::theme::{pane_block, pane_title_style};
 use crate::ui::ContextView;
+use crate::ui::theme::{pane_block, pane_title_style};
 
 // In a fully dismantled view state, Context State should be passed directly here.
 pub fn render_context_pane(
@@ -42,7 +42,12 @@ pub fn render_context_pane(
     };
 
     let ctx_title = if total_ctx > height {
-        format!(" {} [{}/{}] ", base_title, total_ctx.saturating_sub(effective_ctx_scroll), total_ctx)
+        format!(
+            " {} [{}/{}] ",
+            base_title,
+            total_ctx.saturating_sub(effective_ctx_scroll),
+            total_ctx
+        )
     } else {
         format!(" {} ", base_title)
     };

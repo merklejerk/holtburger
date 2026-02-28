@@ -3,12 +3,12 @@ use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::ui::Interaction;
+use crate::ui::UiMessage;
+use crate::ui::Verb;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, StatType};
-use crate::ui::Verb;
 use holtburger_core::client::types::ClientCommand;
-use crate::ui::UiMessage;
 
 pub struct CharacterTab;
 
@@ -17,7 +17,12 @@ impl TabController for CharacterTab {
         render_character_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
+    fn get_verbs(
+        &self,
+        game: &GameState,
+        _interaction: &Option<Interaction>,
+        index: usize,
+    ) -> Vec<Verb> {
         let active_interaction = game.view.active_interaction;
         let target = self.get_target_at_index(game, index);
         let mut verbs = Vec::new();
@@ -34,7 +39,13 @@ impl TabController for CharacterTab {
         match target {
             CommandTarget::Stat(st, Some(xp_cost), sp_cost) => {
                 let xp_spent = xp_cost as u32;
-                let is_unassigned_xp_enough = game.data.level_info.as_ref().map(|info| info.unspent_xp).unwrap_or(0) >= xp_cost;
+                let is_unassigned_xp_enough = game
+                    .data
+                    .level_info
+                    .as_ref()
+                    .map(|info| info.unspent_xp)
+                    .unwrap_or(0)
+                    >= xp_cost;
 
                 if is_unassigned_xp_enough {
                     let cmd = match st.clone() {
@@ -51,25 +62,55 @@ impl TabController for CharacterTab {
                             xp_spent,
                         },
                     };
-                    verbs.push(Verb::new(vec![UiMessage::SendCommands(vec![cmd])], 'l', "Level Up"));
+                    verbs.push(Verb::new(
+                        vec![UiMessage::SendCommands(vec![cmd])],
+                        'l',
+                        "Level Up",
+                    ));
                 }
-                
+
                 if let (Some(credits_cost), StatType::Skill(skill)) = (sp_cost, st) {
-                    let is_skill_credits_enough = game.data.level_info.as_ref().map(|info| info.unspent_skill_points).unwrap_or(0) >= credits_cost;
+                    let is_skill_credits_enough = game
+                        .data
+                        .level_info
+                        .as_ref()
+                        .map(|info| info.unspent_skill_points)
+                        .unwrap_or(0)
+                        >= credits_cost;
                     if is_skill_credits_enough {
-                        verbs.push(Verb::new(vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill { skill, credits: credits_cost }])], 'n', "Train"));
+                        verbs.push(Verb::new(
+                            vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
+                                skill,
+                                credits: credits_cost,
+                            }])],
+                            'n',
+                            "Train",
+                        ));
                     }
                 }
             }
             CommandTarget::Stat(st, None, Some(credits_cost)) => {
-                 if let StatType::Skill(skill) = st {
-                    let is_skill_credits_enough = game.data.level_info.as_ref().map(|info| info.unspent_skill_points).unwrap_or(0) >= credits_cost;
+                if let StatType::Skill(skill) = st {
+                    let is_skill_credits_enough = game
+                        .data
+                        .level_info
+                        .as_ref()
+                        .map(|info| info.unspent_skill_points)
+                        .unwrap_or(0)
+                        >= credits_cost;
                     if is_skill_credits_enough {
-                        verbs.push(Verb::new(vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill { skill, credits: credits_cost }])], 'n', "Train"));
+                        verbs.push(Verb::new(
+                            vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
+                                skill,
+                                credits: credits_cost,
+                            }])],
+                            'n',
+                            "Train",
+                        ));
                     }
                 }
             }
-            _ => {},
+            _ => {}
         }
         verbs
     }

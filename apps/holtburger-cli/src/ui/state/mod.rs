@@ -11,12 +11,12 @@ mod page;
 mod selection;
 pub mod view;
 
-pub use crate::pages::game::panels::chat::{ChatMessage, ChatMessageKind, ChatState};
 pub use self::game::GameData;
 pub use self::net::NetStats;
 pub use self::page::Page;
 pub use self::selection::SelectionState;
 pub use self::view::ViewState;
+pub use crate::pages::game::panels::chat::{ChatMessage, ChatMessageKind, ChatState};
 
 #[derive(Debug, Clone, Default)]
 pub struct GameState {
@@ -93,8 +93,6 @@ impl AppState {
             _ => None,
         }
     }
-
-    
 
     pub fn refresh_context_buffer(&mut self) {
         let (tab, view_is_default) = if let Some(game) = self.game_option() {

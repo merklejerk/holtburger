@@ -13,7 +13,7 @@ use crate::ui::types::AppAction;
 use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 
-pub use effect::{UpdateResult};
+pub use effect::UpdateResult;
 
 impl AppState {
     pub fn handle_action(&mut self, action: AppAction) -> UpdateResult {

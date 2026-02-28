@@ -30,13 +30,16 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
 
     // Left title: Interaction Info / World Name (if needed)
     if let Some(interaction) = game.view.active_interaction {
-        let title_text = format!(" {} ", match interaction {
-        crate::ui::Interaction::Targeting { .. } => "Targeting",
-        crate::ui::Interaction::Healing { .. } => "Healing",
-        crate::ui::Interaction::Moving { .. } => "Moving",
-        crate::ui::Interaction::Combining { .. } => "Combining",
-            crate::ui::Interaction::Splitting { .. } => "Splitting",
-    });
+        let title_text = format!(
+            " {} ",
+            match interaction {
+                crate::ui::Interaction::Targeting { .. } => "Targeting",
+                crate::ui::Interaction::Healing { .. } => "Healing",
+                crate::ui::Interaction::Moving { .. } => "Moving",
+                crate::ui::Interaction::Combining { .. } => "Combining",
+                crate::ui::Interaction::Splitting { .. } => "Splitting",
+            }
+        );
 
         block = block.title(
             ratatui::widgets::block::Title::from(Span::styled(

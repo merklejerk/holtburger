@@ -4,10 +4,10 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
+use crossterm::event::{KeyCode, KeyEvent};
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
-use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::ui::theme::{pane_block, pane_title_style};
 use crate::ui::utils::wrap_text;
@@ -213,7 +213,7 @@ pub fn render_chat_pane(f: &mut Frame, chat: &mut ChatState, is_focused: bool, a
         .map(|v| v.len())
         .sum();
     chat.total_lines = total_lines;
-    
+
     // Bounds check scroll_offset
     let max_scroll = total_lines.saturating_sub(height);
     chat.scroll_offset = chat.scroll_offset.min(max_scroll);
@@ -246,7 +246,11 @@ pub fn render_chat_pane(f: &mut Frame, chat: &mut ChatState, is_focused: bool, a
     }
 
     let chat_title = if total_lines > height {
-        format!(" World Chat [{}/{}] ", total_lines.saturating_sub(effective_scroll), total_lines)
+        format!(
+            " World Chat [{}/{}] ",
+            total_lines.saturating_sub(effective_scroll),
+            total_lines
+        )
     } else {
         " World Chat ".to_string()
     };

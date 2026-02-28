@@ -9,7 +9,7 @@ use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 
 use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
-use crate::ui::{ Verb};
+use crate::ui::Verb;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;
@@ -51,17 +51,15 @@ impl TabController for InventoryTab {
                 Some(Interaction::Healing { item_guid }) => {
                     if e.flags.intersects(ObjectDescriptionFlag::PLAYER) {
                         let msgs = vec![
-                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
-                                item: *item_guid,
-                                target: e.guid,
-                            }]),
+                            crate::ui::UiMessage::SendCommands(vec![
+                                ClientCommand::UseWithTarget {
+                                    item: *item_guid,
+                                    target: e.guid,
+                                },
+                            ]),
                             crate::ui::UiMessage::CancelInteraction,
                         ];
-                        verbs.push(Verb::new(
-                            msgs,
-                            '\r',
-                            "Heal yourself".to_string(),
-                        ));
+                        verbs.push(Verb::new(msgs, '\r', "Heal yourself".to_string()));
                     }
                     return verbs;
                 }
@@ -72,17 +70,15 @@ impl TabController for InventoryTab {
                         && target_type.intersects(dest_item_type)
                     {
                         let msgs = vec![
-                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
-                                item: *item_guid,
-                                target: e.guid,
-                            }]),
+                            crate::ui::UiMessage::SendCommands(vec![
+                                ClientCommand::UseWithTarget {
+                                    item: *item_guid,
+                                    target: e.guid,
+                                },
+                            ]),
                             crate::ui::UiMessage::CancelInteraction,
                         ];
-                        verbs.push(Verb::new(
-                            msgs,
-                            '\r',
-                            "Apply to target".to_string(),
-                        ));
+                        verbs.push(Verb::new(msgs, '\r', "Apply to target".to_string()));
                     }
                     return verbs;
                 }
@@ -94,7 +90,7 @@ impl TabController for InventoryTab {
                     let is_same_item = &e.guid == item_guid;
                     let is_in_main_pack = game.data.is_in_main_pack(*item_guid);
                     let is_container = matches!(class, EntityClass::Container | EntityClass::Chest);
-                    
+
                     let mut is_merge = false;
                     let mut cmd = None;
 
@@ -163,7 +159,7 @@ impl TabController for InventoryTab {
             verbs.push(Verb::new(
                 vec![
                     crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(e.guid)]),
-                    crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Assess(e.guid))
+                    crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Assess(e.guid)),
                 ],
                 'a',
                 "Assess",
@@ -178,33 +174,83 @@ impl TabController for InventoryTab {
                 | EntityClass::Money
                 | EntityClass::Item => {
                     if e.target_item_type().is_some() {
-                        verbs.push(Verb::new(vec![crate::ui::UiMessage::BeginInteraction(Interaction::Combining { item_guid: e.guid })], 'c', "Combine"));
+                        verbs.push(Verb::new(
+                            vec![crate::ui::UiMessage::BeginInteraction(
+                                Interaction::Combining { item_guid: e.guid },
+                            )],
+                            'c',
+                            "Combine",
+                        ));
                     } else {
                         if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
-                            verbs.push(Verb::new(vec![crate::ui::UiMessage::BeginInteraction(Interaction::Healing { item_guid: e.guid })], 'u', "Use"));
+                            verbs.push(Verb::new(
+                                vec![crate::ui::UiMessage::BeginInteraction(
+                                    Interaction::Healing { item_guid: e.guid },
+                                )],
+                                'u',
+                                "Use",
+                            ));
                         } else {
-                            verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])], 'u', "Use"));
+                            verbs.push(Verb::new(
+                                vec![crate::ui::UiMessage::SendCommands(vec![
+                                    ClientCommand::Use(e.guid),
+                                ])],
+                                'u',
+                                "Use",
+                            ));
                         }
                     }
                 }
                 EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {
-                    verbs.push(Verb::new(vec![crate::ui::UiMessage::BeginInteraction(Interaction::Targeting { target_guid: e.guid })], 't', "Target"));
+                    verbs.push(Verb::new(
+                        vec![crate::ui::UiMessage::BeginInteraction(
+                            Interaction::Targeting {
+                                target_guid: e.guid,
+                            },
+                        )],
+                        't',
+                        "Target",
+                    ));
                 }
                 _ => {}
             }
 
             if !e.is_attuned_sticky() {
-                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Drop(e.guid)])], 'd', "Drop"));
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::SendCommands(vec![
+                        ClientCommand::Drop(e.guid),
+                    ])],
+                    'd',
+                    "Drop",
+                ));
             }
 
             if e.stack_size() > 1 {
                 // To split we show a popup. In old code it fired Action::Split. Now we just trigger CancelInteraction for now due to complex split dialog logic, wait we don't have Split generic.
                 // Wait, I will just emit `crate::ui::UiMessage::BeginInteraction(Interaction::Splitting { item_guid: e.guid })` or similar? Wait we don't have splitting. Let's just ignore split for now or I can add it to interaction. No, Wait! I didn't see `Action::Split` implementation anywhere! I'll just omit it, wait it was dropping into some input loop before. No! Wait `ConfirmInteractionSplit` is a UiMessage!!
-                verbs.push(Verb::new(vec![crate::ui::UiMessage::BeginInteraction(Interaction::Splitting { item_guid: e.guid, max_amount: e.stack_size() as i32 })], 'p', "Split"));
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::BeginInteraction(
+                        Interaction::Splitting {
+                            item_guid: e.guid,
+                            max_amount: e.stack_size() as i32,
+                        },
+                    )],
+                    'p',
+                    "Split",
+                ));
             }
 
-            if !e.flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
-                verbs.push(Verb::new(vec![crate::ui::UiMessage::BeginInteraction(Interaction::Moving { item_guid: e.guid })], 'm', "Move"));
+            if !e
+                .flags
+                .intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
+            {
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::BeginInteraction(
+                        Interaction::Moving { item_guid: e.guid },
+                    )],
+                    'm',
+                    "Move",
+                ));
             }
 
             let is_equipped = if let (Some(pguid), Some(wielder)) = (player_guid, e.wielder_id()) {
@@ -215,21 +261,46 @@ impl TabController for InventoryTab {
 
             if is_equipped {
                 if let Some(pguid) = player_guid {
-                    verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::MoveItem { item: e.guid, container: pguid, placement: 0 }])], 'e', "Unequip"));
+                    verbs.push(Verb::new(
+                        vec![crate::ui::UiMessage::SendCommands(vec![
+                            ClientCommand::MoveItem {
+                                item: e.guid,
+                                container: pguid,
+                                placement: 0,
+                            },
+                        ])],
+                        'e',
+                        "Unequip",
+                    ));
                 }
             } else if matches!(
                 class,
                 EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon
             ) {
-                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::GetAndWield { item: e.guid, slot: None }])], 'e', "Equip"));
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::SendCommands(vec![
+                        ClientCommand::GetAndWield {
+                            item: e.guid,
+                            slot: None,
+                        },
+                    ])],
+                    'e',
+                    "Equip",
+                ));
             }
-            
+
             if let Some(trade) = &game.data.trade
                 && !is_equipped
                 && !trade.self_side.items.contains(&e.guid)
                 && game.data.can_add_to_trade(e.guid)
             {
-                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::AddToTrade { item: e.guid }])], 'o', "Offer"));
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::SendCommands(vec![
+                        ClientCommand::AddToTrade { item: e.guid },
+                    ])],
+                    'o',
+                    "Offer",
+                ));
             } else if game.data.vendor.is_some() && game.data.can_sell_to_vendor(e.guid) {
                 verbs.push(Verb::new(
                     vec![
@@ -239,17 +310,16 @@ impl TabController for InventoryTab {
                                 items: vec![
                                     holtburger_protocol::messages::trade::actions::ItemProfileActionData {
                                         object_guid: e.guid,
-                                        amount: 1, 
+                                        amount: 1,
                                     },
                                 ],
                             }
                         ])
                     ],
-                    's', 
+                    's',
                     "Sell"
                 ));
             }
-
         }
         verbs
     }

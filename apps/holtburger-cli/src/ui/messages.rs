@@ -1,6 +1,6 @@
-use holtburger_common::Guid;
 use crate::ui::Interaction;
 use crate::ui::state::ChatMessageKind;
+use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 
 #[derive(Debug, Clone)]

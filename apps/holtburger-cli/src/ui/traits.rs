@@ -1,9 +1,9 @@
-use crate::ui::types::CommandTarget;
+use crate::pages::game::dashboard::{assess, debug, input::handle_common_dashboard_input};
 use crate::ui::Interaction;
 use crate::ui::state::GameState;
-use crate::ui::types::{ ContextView, Verb};
-use crate::ui::update::{UpdateResult};
-use crate::pages::game::dashboard::{assess, debug, input::handle_common_dashboard_input};
+use crate::ui::types::CommandTarget;
+use crate::ui::types::{ContextView, Verb};
+use crate::ui::update::UpdateResult;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -14,15 +14,18 @@ pub trait TabController {
     fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect);
 
     /// Returns the list of available verbs for the item at the specified index.
-    fn get_verbs(&self, game: &GameState, interaction: &Option<Interaction>, index: usize) -> Vec<Verb>;
+    fn get_verbs(
+        &self,
+        game: &GameState,
+        interaction: &Option<Interaction>,
+        index: usize,
+    ) -> Vec<Verb>;
 
     /// Returns the command target (e.g. Entity, Spell) at the specified index.
     fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a>;
 
     /// Returns the total number of items in the tab.
     fn get_item_count(&self, game: &GameState) -> usize;
-
-
 
     /// Optional: Handles tab-specific input. Returns a list of commands to execute.
     fn handle_input(&self, key: KeyEvent, game: &mut GameState) -> Option<UpdateResult> {

@@ -65,7 +65,7 @@ impl TabController for TradeTab {
                         "Buy",
                     ));
                 }
-                CommandTarget::Entity(e, Some(_)) => {
+                CommandTarget::Entity(e, _) => {
                     verbs.push(Verb::new(
                         vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Sell {
                             vendor: vendor.vendor_guid,

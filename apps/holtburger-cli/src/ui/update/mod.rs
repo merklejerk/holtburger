@@ -13,7 +13,7 @@ use crate::ui::types::AppAction;
 use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 
-pub use effect::{UIEffect, UpdateResult};
+pub use effect::{UpdateResult};
 
 impl AppState {
     pub fn handle_action(&mut self, action: AppAction) -> UpdateResult {
@@ -78,6 +78,34 @@ impl AppState {
             crate::ui::UiMessage::AddLog(kind, text) => {
                 self.chat.log(kind, text);
                 result.needs_redraw = true;
+            }
+            crate::ui::UiMessage::SendCommands(cmds) => {
+                result.commands.extend(cmds);
+            }
+            crate::ui::UiMessage::ChangeContextView(view) => {
+                if let Some(game) = self.game_option_mut() {
+                    game.view.context_view = view;
+                    game.view.focused_pane = crate::ui::FocusedPane::Context;
+                    result.needs_redraw = true;
+                    self.refresh_context_buffer();
+                }
+            }
+            crate::ui::UiMessage::RequestDebugContext(guid) => {
+                if let Some(game) = self.game_option_mut() {
+                    game.view.current_debug_guid = guid;
+                    game.view.context_view = crate::ui::ContextView::Custom;
+                    game.view.focused_pane = crate::ui::FocusedPane::Context;
+                    result.needs_redraw = true;
+                    self.refresh_context_buffer();
+                }
+            }
+            crate::ui::UiMessage::ClearVendor => {
+                if let Some(game) = self.game_option_mut() {
+                    game.data.vendor = None;
+                }
+            }
+            crate::ui::UiMessage::DisplayClientInfo => {
+                self.display_client_info();
             }
         }
         result

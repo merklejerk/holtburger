@@ -13,49 +13,18 @@ pub const SCROLL_STEP: usize = 3;
 
 pub type VerbSet = Vec<Verb>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Action {
-    Assess,
-    Use,
-    Equip(TargetSlot),
-    Unequip,
-    Drop,
-    PickUp,
-    MoveToSlot(Guid),
-    Debug,
-    Approach,
-    CloseContainer,
-    Target,
-    LevelUp,
-    Train,
-    Move,
-    Cast,
-    ConfirmInteraction,
-    CancelInteraction,
-    Buy,
-    Sell,
-    AddToTrade,
-    AcceptTrade,
-    DeclineTrade,
-    ResetTrade,
-    Exit,
-    OpenTrade,
-    Stack(Guid),
-    Split,
-    Combine,
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Verb {
-    pub action: Action,
+    pub messages: Vec<crate::ui::UiMessage>,
     pub shortcut: char,
     pub label: Cow<'static, str>,
 }
 
 impl Verb {
-    pub fn new(action: Action, shortcut: char, label: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new(messages: Vec<crate::ui::UiMessage>, shortcut: char, label: impl Into<Cow<'static, str>>) -> Self {
         Self {
-            action,
+            messages,
             shortcut,
             label: label.into(),
         }
@@ -105,7 +74,7 @@ pub enum CommandTarget<'a> {
     None,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Modal {
     Retry { message: String, end_time: Instant },
 }

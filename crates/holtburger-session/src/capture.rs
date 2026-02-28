@@ -62,8 +62,8 @@ pub struct ReplayTransport {
     pub reader: std::sync::Arc<std::sync::Mutex<CaptureReader>>,
 }
 
-#[crate::session::async_trait]
-impl crate::session::Transport for ReplayTransport {
+#[crate::async_trait]
+impl crate::Transport for ReplayTransport {
     async fn send_to(&self, _buf: &[u8], _addr: SocketAddr) -> anyhow::Result<usize> {
         Ok(_buf.len())
     }

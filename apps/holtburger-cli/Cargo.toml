@@ -22,3 +22,5 @@ crossterm.workspace = true
 futures.workspace = true
 directories.workspace = true
 unicode-width = "0.1.13"
+holtburger-world.workspace = true
+holtburger-session.workspace = true

@@ -1,5 +1,5 @@
-use crate::world::entity::Entity;
-use crate::world::vendor::VendorState;
+use crate::entity::Entity;
+use crate::vendor::VendorState;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, PropertyInstanceId, WorldObjectPropertyAccessors};
 use holtburger_protocol::messages::combat::CombatMode;

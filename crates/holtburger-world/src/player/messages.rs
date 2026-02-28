@@ -1,8 +1,8 @@
 use super::PlayerState;
 use super::types::SkillBase;
 use super::types::VitalBase;
-use crate::world::StateEvent;
-use crate::world::stats;
+use crate::StateEvent;
+use crate::stats;
 use holtburger_common::Guid;
 use holtburger_common::properties::PropertyString;
 use holtburger_common::sequence::is_newer_u16;

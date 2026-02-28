@@ -3,9 +3,9 @@ use crate::messages::movement::messages::*;
 use crate::messages::movement::types::PositionType;
 use crate::test_fixtures;
 use crate::test_helpers::assert_pack_unpack_parity;
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[test]
 fn test_player_movement_pack_unpack() {

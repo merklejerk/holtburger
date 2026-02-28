@@ -8,5 +8,5 @@ pub mod traits;
 
 pub use guid::Guid;
 pub use math::{Plane, Quaternion, Sphere, Vector3};
-pub use traits::{ProtocolPack, ProtocolUnpack};
+
 pub mod position;

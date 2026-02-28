@@ -1,5 +1,5 @@
 use crate::ui::state::GameState;
-use holtburger_core::world::stats::VitalType;
+use holtburger_world::stats::VitalType;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style};

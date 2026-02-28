@@ -4,8 +4,8 @@ use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, PropertyString,
 };
-use holtburger_core::world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use ratatui::text::Line;
 use std::collections::HashMap;
 

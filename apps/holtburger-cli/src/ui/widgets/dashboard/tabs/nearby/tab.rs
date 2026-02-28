@@ -1,4 +1,4 @@
-use holtburger_core::world::context::WorldContextExt;
+use holtburger_world::context::WorldContextExt;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -13,7 +13,7 @@ use crate::ui::widgets::dashboard::filter::{EntityFilter, filter_entities};
 use crate::ui::{Action, Verb};
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::world::entity::Entity;
+use holtburger_world::entity::Entity;
 
 pub struct NearbyTab;
 

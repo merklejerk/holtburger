@@ -1,4 +1,4 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use std::fmt::Debug;
 
 pub fn assert_pack_unpack_parity<T: ProtocolPack + ProtocolUnpack + Debug + PartialEq>(

@@ -1,4 +1,4 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]

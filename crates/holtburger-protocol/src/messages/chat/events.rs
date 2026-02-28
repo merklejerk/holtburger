@@ -1,6 +1,6 @@
 use crate::messages::utils::{read_string16, write_string16};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TellEventData {
@@ -120,7 +120,7 @@ mod tests {
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures as fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
-    use holtburger_common::traits::ProtocolUnpack;
+    use crate::traits::ProtocolUnpack;
 
     #[test]
     fn test_server_message_parity() {

@@ -1,0 +1,21 @@
+[package]
+name = "holtburger-session"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+holtburger-common = { workspace = true }
+holtburger-protocol = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+byteorder = { workspace = true }
+
+[dev-dependencies]
+hex = "0.4"
+tokio = { workspace = true, features = ["full", "macros"] }

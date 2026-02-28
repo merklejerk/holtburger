@@ -1,8 +1,8 @@
+use crate::ui::types::CommandTarget;
 use crate::ui::Interaction;
-use crate::ui::CommandTarget;
 use crate::ui::state::GameState;
-use crate::ui::types::{Action, ContextView, Verb};
-use crate::ui::update::{UpdateResult, effect::UIEffect};
+use crate::ui::types::{ ContextView, Verb};
+use crate::ui::update::{UpdateResult};
 use crate::pages::game::dashboard::{assess, debug, input::handle_common_dashboard_input};
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
@@ -22,15 +22,7 @@ pub trait TabController {
     /// Returns the total number of items in the tab.
     fn get_item_count(&self, game: &GameState) -> usize;
 
-    /// Dispatches an action for the tab.
-    fn handle_action(
-        &self,
-        _action: &Action,
-        _index: usize,
-        _game: &mut GameState,
-    ) -> Option<UIEffect> {
-        None
-    }
+
 
     /// Optional: Handles tab-specific input. Returns a list of commands to execute.
     fn handle_input(&self, key: KeyEvent, game: &mut GameState) -> Option<UpdateResult> {

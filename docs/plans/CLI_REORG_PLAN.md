@@ -138,9 +138,9 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
   - [x] Refactor `chat` feature (State, View, Update).
   - [x] Refactor `dashboard` tabs.
   - [x] Dismantle `ViewState` God Object.
-- [ ] **Phase 4: Eradicate `Action` and `UIEffect`**
-  - [ ] Purge `UIEffect` handling block and struct.
-  - [ ] Handle interactions natively returning `ClientCommand`s.
+- [x] **Phase 4: Eradicate `Action` and `UIEffect`**
+  - [x] Purge `UIEffect` handling block and struct.
+  - [x] Handle interactions natively returning `ClientCommand`s.
 - [ ] **Phase 5: Cleanup & Polish**
   - [ ] Execute `cargo clippy`.
   - [ ] Validate cross-component edge cases (Trade/Targetting/Movement).

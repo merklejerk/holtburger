@@ -1,3 +1,4 @@
+use crate::ui::types::CommandTarget;
 use holtburger_world::context::WorldContextExt;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -7,10 +8,9 @@ use super::render::render_nearby_tab;
 use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
-use crate::ui::update::effect::UIEffect;
+
 use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
-use crate::ui::{Action, Verb};
+use crate::ui::{ Verb};
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::entity::Entity;
@@ -33,42 +33,59 @@ impl TabController for NearbyTab {
         render_nearby_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
+    fn get_verbs(
+        &self,
+        game: &GameState,
+        interaction: &Option<Interaction>,
+        index: usize,
+    ) -> Vec<Verb> {
+        let mut verbs = Vec::new();
         let target = self.get_target_at_index(game, index);
         let player_guid = game.data.player_guid;
-        let active_interaction = *interaction;
-        let mut verbs = vec![];
 
-        if let Some(interaction) = active_interaction
-            && let CommandTarget::Entity(e, _) = &target
-        {
+        if let (Some(interaction), CommandTarget::Entity(e, _)) = (interaction, &target) {
             let class = classification::classify_entity(e);
             let is_self = Some(e.guid) == player_guid;
 
-            match interaction {
+            match *interaction {
                 Interaction::Moving { item_guid } => {
                     let is_givable_creature =
-                        matches!(class, EntityClass::Player | EntityClass::Npc);
+                        matches!(class, EntityClass::Player | EntityClass::Npc | EntityClass::Vendor);
                     let is_open_container = game.data.open_containers.contains(&e.guid);
                     let is_same_item = e.guid == item_guid;
                     let is_in_main_pack = game.data.is_in_main_pack(item_guid);
 
+                    let mut cmd = None;
+
                     let label = if is_same_item || is_self {
                         if !is_in_main_pack {
+                            cmd = player_guid.map(|p| ClientCommand::MoveItem { item: item_guid, container: p, placement: 0 });
                             Some("Move to pack".to_string())
                         } else {
                             None
                         }
                     } else if is_givable_creature {
+                        cmd = Some(ClientCommand::GiveObjectRequest {
+                            target: e.guid,
+                            item: item_guid,
+                            amount: 1,
+                        });
                         Some("Give to target".to_string())
                     } else if is_open_container {
+                        cmd = Some(ClientCommand::MoveItem { item: item_guid, container: e.guid, placement: 0 });
                         Some("Move to container".to_string())
                     } else {
                         None
                     };
 
                     if let Some(label) = label {
-                        verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
+                        if let Some(cmd) = cmd {
+                            let msgs = vec![
+                                crate::ui::UiMessage::SendCommands(vec![cmd]),
+                                crate::ui::UiMessage::CancelInteraction,
+                            ];
+                            verbs.push(Verb::new(msgs, '\r', label));
+                        }
                     }
                     return verbs;
                 }
@@ -81,7 +98,14 @@ impl TabController for NearbyTab {
                         } else {
                             "Heal target".to_string()
                         };
-                        verbs.push(Verb::new(Action::ConfirmInteraction, '\r', label));
+                        let msgs = vec![
+                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
+                                item: item_guid,
+                                target: e.guid,
+                            }]),
+                            crate::ui::UiMessage::CancelInteraction,
+                        ];
+                        verbs.push(Verb::new(msgs, '\r', label));
                     }
                     return verbs;
                 }
@@ -91,11 +115,14 @@ impl TabController for NearbyTab {
                         && let Some(dest_item_type) = e.item_type()
                         && target_type.intersects(dest_item_type)
                     {
-                        verbs.push(Verb::new(
-                            Action::ConfirmInteraction,
-                            '\r',
-                            "Apply to target",
-                        ));
+                        let msgs = vec![
+                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
+                                item: item_guid,
+                                target: e.guid,
+                            }]),
+                            crate::ui::UiMessage::CancelInteraction,
+                        ];
+                        verbs.push(Verb::new(msgs, '\r', "Apply to target"));
                     }
                     return verbs;
                 }
@@ -103,69 +130,92 @@ impl TabController for NearbyTab {
             }
         }
 
+
         if let CommandTarget::Entity(e, _) = target {
-            verbs.extend([
-                Verb::new(Action::Assess, 'a', "Assess"),
-                Verb::new(Action::Target, 't', "Target"),
-                Verb::new(Action::Debug, 'g', "Debug"),
-            ]);
-            if e.wielder_id().is_some() || e.physics_parent_id.is_some() {
-                return verbs;
-            }
-
-            let is_self = game.data.player_guid == Some(e.guid);
             let class = classification::classify_entity(e);
+            let is_open_container = game.data.open_containers.contains(&e.guid);
 
-            let in_container = e
-                .container_id()
-                .is_some_and(|id| game.data.open_containers.contains(&id));
-
-            if !is_self {
-                if !in_container {
-                    // Nearby entities allow Approach
-                    verbs.push(Verb::new(Action::Approach, 'r', "Approach"));
-
-                    match class {
-                        EntityClass::Vendor => {
-                            verbs.push(Verb::new(Action::Use, 's', "Shop"));
-                        }
-                        EntityClass::Npc => {
-                            verbs.push(Verb::new(Action::Use, 'k', "Talk"));
-                        }
-                        EntityClass::Portal
-                        | EntityClass::Door
-                        | EntityClass::LifeStone
-                        | EntityClass::Consumable
-                        | EntityClass::Tool
-                        | EntityClass::Key
-                        | EntityClass::Writable
-                        | EntityClass::Money
-                        | EntityClass::Item => {
-                            verbs.push(Verb::new(Action::Use, 'u', "Use"));
-                        }
-                        EntityClass::Chest | EntityClass::Container => {
-                            if game.data.open_containers.contains(&e.guid) {
-                                verbs.push(Verb::new(Action::CloseContainer, 'o', "Close"));
-                            } else {
-                                verbs.push(Verb::new(Action::Use, 'o', "Open"));
-                            }
-                        }
-                        EntityClass::Player => {
-                            verbs.push(Verb::new(Action::OpenTrade, 'd', "Trade"));
-                        }
-                        _ => {}
-                    }
-                }
-
-                if !e.flags.intersects(ObjectDescriptionFlag::STUCK) {
-                    verbs.push(Verb::new(Action::PickUp, 'p', "Pick up"));
-                }
+            if is_open_container {
+                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CloseContainer(e.guid)])], 'x', "Close"));
             }
 
-            return verbs;
+            verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::MoveTo { target: e.guid }])], 'r', "Run To"));
+
+            // Pick up logic: checks stackability.
+            if let Some(pguid) = player_guid {
+                let mut pick_up_cmd = ClientCommand::Get(e.guid);
+
+                if e.is_stackable() {
+                    let inventory_item = game.data.inventory.iter().find(|&&guid| {
+                        if let Some(other) = game.data.entities.get(&guid) {
+                            other.wcid == e.wcid && other.stack_size() < other.max_stack_size()
+                        } else {
+                            false
+                        }
+                    });
+
+                    if let Some(&destination) = inventory_item {
+                        let dest_e = game.data.entities.get(&destination).unwrap();
+                        let space = dest_e.max_stack_size().saturating_sub(dest_e.stack_size());
+                        let amount = e.stack_size().min(space) as i32;
+
+                        pick_up_cmd = ClientCommand::Stack {
+                            source: e.guid,
+                            destination,
+                            amount,
+                        };
+                    }
+                } else if let EntityClass::Container = class {
+                    pick_up_cmd = ClientCommand::MoveItem {
+                        item: e.guid,
+                        container: pguid,
+                        placement: 0,
+                    };
+                }
+
+                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![pick_up_cmd])], 'p', "Pick Up"));
+            }
+
+            verbs.extend([
+                Verb::new(
+                    vec![
+                        crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(e.guid)]),
+                        crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Assess(e.guid))
+                    ],
+                    'a',
+                    "Assess"
+                ),
+                Verb::new(
+                    vec![crate::ui::UiMessage::BeginInteraction(Interaction::Targeting { target_guid: e.guid })],
+                    't',
+                    "Target"
+                ),
+                Verb::new(
+                    vec![
+                        crate::ui::UiMessage::SendCommands(vec![ClientCommand::QueryEntityDebugInfo(e.guid)]),
+                        crate::ui::UiMessage::RequestDebugContext(Some(e.guid))
+                    ],
+                    'g',
+                    "Debug"
+                ),
+            ]);
+
+            if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::BeginInteraction(Interaction::Healing { item_guid: e.guid })],
+                    'u',
+                    "Use"
+                ));
+            } else {
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
+                    'u',
+                    "Use"
+                ));
+            }
         }
 
-        vec![]
+        verbs
     }
 
     fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
@@ -181,61 +231,4 @@ impl TabController for NearbyTab {
         get_entities(game).len()
     }
 
-    fn handle_action(
-        &self,
-        action: &Action,
-        index: usize,
-        game: &mut GameState,
-    ) -> Option<UIEffect> {
-        let player_guid = game.data.player_guid;
-
-        let target = self.get_target_at_index(game, index);
-
-        match (action, &target) {
-            (Action::PickUp, CommandTarget::Entity(e, _)) => {
-                if let Some(pguid) = player_guid {
-                    // Check if it's stackable and we have a matching stack in our inventory
-                    if e.is_stackable() {
-                        let inventory_item = game.data.inventory.iter().find(|&&guid| {
-                            if let Some(other) = game.data.entities.get(&guid) {
-                                other.wcid == e.wcid && other.stack_size() < other.max_stack_size()
-                            } else {
-                                false
-                            }
-                        });
-
-                        if let Some(&destination) = inventory_item {
-                            let dest_e = game.data.entities.get(&destination).unwrap();
-                            let space = dest_e.max_stack_size().saturating_sub(dest_e.stack_size());
-                            let amount = e.stack_size().min(space) as i32;
-
-                            return Some(UIEffect::Command(ClientCommand::Stack {
-                                source: e.guid,
-                                destination,
-                                amount,
-                            }));
-                        }
-                    }
-
-                    if let EntityClass::Container = classification::classify_entity(e) {
-                        // Force the "MoveItem" variant for containers explicitly
-                        return Some(UIEffect::Command(ClientCommand::MoveItem {
-                            item: e.guid,
-                            container: pguid,
-                            placement: 0,
-                        }));
-                    }
-                }
-
-                Some(UIEffect::Command(ClientCommand::Get(e.guid)))
-            }
-            (Action::Approach, CommandTarget::Entity(e, _)) => {
-                Some(UIEffect::Command(ClientCommand::MoveTo { target: e.guid }))
-            }
-            (Action::CloseContainer, CommandTarget::Entity(e, _)) => {
-                Some(UIEffect::Command(ClientCommand::CloseContainer(e.guid)))
-            }
-            _ => None,
-        }
-    }
 }

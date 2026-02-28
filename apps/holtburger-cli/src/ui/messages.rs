@@ -1,8 +1,9 @@
 use holtburger_common::Guid;
 use crate::ui::Interaction;
 use crate::ui::state::ChatMessageKind;
+use holtburger_core::client::types::ClientCommand;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum UiMessage {
     BeginInteraction(Interaction),
     ConfirmInteractionTarget(Guid),
@@ -10,5 +11,9 @@ pub enum UiMessage {
     ConfirmInteractionText(String),
     CancelInteraction,
     AddLog(ChatMessageKind, String),
-    // Other messages will be added as we phase out UIEffect...
+    SendCommands(Vec<ClientCommand>),
+    ChangeContextView(crate::ui::ContextView),
+    RequestDebugContext(Option<Guid>),
+    ClearVendor,
+    DisplayClientInfo,
 }

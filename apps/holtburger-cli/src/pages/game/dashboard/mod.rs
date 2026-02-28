@@ -1,4 +1,4 @@
-use crate::ui::CommandTarget;
+use crate::ui::types::CommandTarget;
 use crate::ui::state::GameState;
 use crate::ui::theme::pane_block;
 use crate::ui::traits::TabController;
@@ -12,7 +12,7 @@ pub mod input;
 pub mod tabs;
 
 pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
-pub use crate::ui::types::{Action, Verb};
+pub use crate::ui::types::{Verb};
 
 pub mod assess;
 pub mod debug;

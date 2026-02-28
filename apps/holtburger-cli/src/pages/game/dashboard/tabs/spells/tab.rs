@@ -1,17 +1,13 @@
+use crate::ui::types::CommandTarget;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
 use crate::ui::Interaction;
-use crate::ui::state::ChatMessageKind;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
-use crate::ui::update::effect::UIEffect;
-use crate::ui::{Action, Verb};
+use crate::ui::Verb;
 use holtburger_core::client::types::ClientCommand;
-use holtburger_protocol::messages::combat::CombatMode;
-use holtburger_world::context::WorldContextExt;
 
 pub struct SpellsTab;
 
@@ -20,75 +16,39 @@ impl TabController for SpellsTab {
         render_spells_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, _index: usize) -> Vec<Verb> {
-        let active_interaction = game.view.active_interaction;
-        let mut verbs = vec![];
-
-        if let Some(interaction) = active_interaction {
-            match interaction {
-                Interaction::Targeting { .. } => {
-                    verbs.push(Verb::new(Action::Cast, 'c', "Cast on target"));
-                    return verbs;
-                }
-                _ => {
-                    return verbs;
-                }
-            }
-        }
-
-        verbs.push(Verb::new(Action::Cast, 'c', "Cast on self"));
-        verbs
-    }
-
-    fn handle_action(
-        &self,
-        action: &Action,
-        index: usize,
-        game: &mut GameState,
-    ) -> Option<UIEffect> {
+    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
+        let mut verbs = Vec::new();
         let target = self.get_target_at_index(game, index);
-        match (action, &target) {
-            (Action::Cast, CommandTarget::Spell(spell_id)) => {
-                if !game.data.is_wielding_caster() {
-                    return Some(UIEffect::Log(
-                        ChatMessageKind::Error,
-                        "You must be wielding a caster to cast spells!".to_string(),
-                    ));
-                }
 
-                let mut cmds = Vec::new();
-                let combat_mode = game.data.combat_mode;
-                if combat_mode != CombatMode::Magic {
-                    cmds.push(ClientCommand::SetCombatMode(CombatMode::Magic));
-                }
-
-                let active_interaction = game.view.active_interaction;
-                if let Some(interaction) = active_interaction
-                    && let Some(target_guid) = match interaction {
-                        Interaction::Targeting { target_guid } => Some(target_guid),
-                        Interaction::Healing { item_guid } => Some(item_guid),
-                        _ => None,
-                    }
-                {
-                    cmds.push(ClientCommand::CastTargetedSpell {
-                        target: target_guid,
-                        spell_id: *spell_id,
-                    });
-                } else if let Some(player_guid) = game.data.player_guid {
-                    cmds.push(ClientCommand::CastTargetedSpell {
-                        target: player_guid,
-                        spell_id: *spell_id,
-                    });
-                } else {
-                    cmds.push(ClientCommand::CastUntargetedSpell {
-                        spell_id: *spell_id,
-                    });
-                }
-
-                Some(UIEffect::Commands(cmds))
+        if let CommandTarget::Spell(spell_id) = target {
+            if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
+                verbs.push(Verb::new(
+                    vec![
+                        crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastTargetedSpell {
+                            spell_id: spell_id,
+                            target: target_guid,
+                        }]),
+                        crate::ui::UiMessage::CancelInteraction,
+                    ],
+                    'c',
+                    "Cast on target",
+                ));
+            } else {
+                verbs.push(Verb::new(
+                    vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CastUntargetedSpell { spell_id }])],
+                    'c',
+                    "Cast on self",
+                ));
             }
-            _ => None,
+
+            verbs.push(Verb::new(
+                vec![crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Spell(spell_id))],
+                'd',
+                "Details",
+            ));
         }
+
+        verbs
     }
 
     fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {

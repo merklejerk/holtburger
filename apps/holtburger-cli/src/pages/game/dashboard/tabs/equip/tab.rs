@@ -5,10 +5,9 @@ use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::ui::Interaction;
 use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
-use crate::ui::update::effect::UIEffect;
-use crate::ui::{Action, Verb};
+use crate::ui::Verb;
 use holtburger_core::client::types::ClientCommand;
+use crate::ui::types::CommandTarget;
 
 pub struct EquipTab;
 
@@ -20,12 +19,9 @@ impl TabController for EquipTab {
     fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
         let mut verbs = vec![];
         let lines = get_lines(game);
-        let target = match lines.get(index) {
-            Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::Entity(e, *slot),
-            _ => CommandTarget::None,
-        };
+        let target = self.get_target_at_index(game, index);
 
-        if let Some(interaction) = game.view.active_interaction
+        if let Some(interaction) = &game.view.active_interaction
             && let CommandTarget::Entity(_e, _) = &target
         {
             match interaction {
@@ -36,51 +32,64 @@ impl TabController for EquipTab {
             }
         }
 
-        match lines.get(index) {
-            Some(EquipTabLine::Item(_e, is_here, _, slot)) => {
+        match target {
+            CommandTarget::Entity(e, slot) => {
                 verbs.extend([
-                    Verb::new(Action::Assess, 'a', "Assess"),
-                    Verb::new(Action::Target, 't', "Target"),
+                    Verb::new(
+                        vec![
+                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(e.guid)]),
+                            crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Assess(e.guid))
+                        ],
+                        'a',
+                        "Assess"
+                    ),
+                    Verb::new(
+                        vec![crate::ui::UiMessage::BeginInteraction(Interaction::Targeting { target_guid: e.guid })],
+                        't',
+                        "Target"
+                    ),
                 ]);
+                
+                let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) = lines.get(index) {
+                    *here
+                } else {
+                    false
+                };
 
-                if *is_here {
-                    verbs.push(Verb::new(Action::Unequip, 'q', "Unequip"));
+                if is_here {
+                    if let Some(pguid) = game.data.player_guid {
+                        verbs.push(Verb::new(
+                            vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::MoveItem {
+                                item: e.guid,
+                                container: pguid,
+                                placement: 0,
+                            }])],
+                            'q',
+                            "Unequip",
+                        ));
+                    }
                 } else if let Some(s) = slot {
-                    verbs.push(Verb::new(Action::Equip(*s), 'e', "Equip"));
+                    verbs.push(Verb::new(
+                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::GetAndWield {
+                            item: e.guid,
+                            slot: Some(s),
+                        }])],
+                        'e',
+                        "Equip",
+                    ));
                 }
 
-                verbs.push(Verb::new(Action::Debug, 'g', "Debug"));
+                verbs.push(Verb::new(
+                    vec![
+                        crate::ui::UiMessage::SendCommands(vec![ClientCommand::QueryEntityDebugInfo(e.guid)]),
+                        crate::ui::UiMessage::RequestDebugContext(Some(e.guid))
+                    ],
+                    'g',
+                    "Debug"
+                ));
                 verbs
             }
             _ => vec![],
-        }
-    }
-
-    fn handle_action(
-        &self,
-        action: &Action,
-        index: usize,
-        game: &mut GameState,
-    ) -> Option<UIEffect> {
-        let player_guid = game.data.player_guid;
-
-        let target = self.get_target_at_index(game, index);
-
-        match (action, &target) {
-            (Action::Equip(slot), CommandTarget::Entity(e, _)) => {
-                Some(UIEffect::Command(ClientCommand::GetAndWield {
-                    item: e.guid,
-                    slot: Some(*slot),
-                }))
-            }
-            (Action::Unequip, CommandTarget::Entity(e, _)) => player_guid.map(|pguid| {
-                UIEffect::Command(ClientCommand::MoveItem {
-                    item: e.guid,
-                    container: pguid,
-                    placement: 0,
-                })
-            }),
-            _ => None,
         }
     }
 
@@ -95,4 +104,5 @@ impl TabController for EquipTab {
     fn get_item_count(&self, game: &GameState) -> usize {
         get_lines(game).len()
     }
+
 }

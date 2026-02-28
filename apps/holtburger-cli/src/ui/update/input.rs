@@ -56,15 +56,11 @@ impl AppState {
             width,
             &main_chunks,
         );
-
-        // Apply UIEffect while we have ownership of self back
-        if let Some(effect) = result.effect.take() {
-            let effect_cmds = crate::ui::update::effect::apply_ui_effect(self, effect);
-            result.commands.extend(effect_cmds);
-            self.refresh_context_buffer();
+        for message in result.ui_messages.drain(..) {
+             self.handle_ui_message(message.clone());
         }
-
-        // Eagerly transition to GameState when a character is selected
+        self.refresh_context_buffer();
+// Eagerly transition to GameState when a character is selected
         // This ensures we are listening for character data (vitals, skills)
         // that the server sends *before* the final PlayerEntered event.
         for cmd in &result.commands {
@@ -100,15 +96,11 @@ impl AppState {
 
         // --- Delegation to Active Page ---
         result = self.page.handle_mouse(mouse, &mut self.chat, &main_chunks);
-
-        // Apply UIEffect while we have ownership of self back
-        if let Some(effect) = result.effect.take() {
-            let effect_cmds = crate::ui::update::effect::apply_ui_effect(self, effect);
-            result.commands.extend(effect_cmds);
-            self.refresh_context_buffer();
+        for message in result.ui_messages.drain(..) {
+             self.handle_ui_message(message.clone());
         }
-
-        result
+        self.refresh_context_buffer();
+result
     }
 }
 
@@ -443,8 +435,8 @@ impl GameState {
                         return result.with_redraw(true);
                     }
                     if command == "/info" {
-                        result.effect =
-                            Some(crate::ui::update::effect::UIEffect::DisplayClientInfo);
+                        result.ui_messages.push(crate::ui::UiMessage::DisplayClientInfo); //
+                            
                         input_history.push(command.clone());
                         *history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;

@@ -259,36 +259,6 @@ impl TabController for InventoryTab {
                 false
             };
 
-            if is_equipped {
-                if let Some(pguid) = player_guid {
-                    verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![
-                            ClientCommand::MoveItem {
-                                item: e.guid,
-                                container: pguid,
-                                placement: 0,
-                            },
-                        ])],
-                        'e',
-                        "Unequip",
-                    ));
-                }
-            } else if matches!(
-                class,
-                EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon
-            ) {
-                verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::SendCommands(vec![
-                        ClientCommand::GetAndWield {
-                            item: e.guid,
-                            slot: None,
-                        },
-                    ])],
-                    'e',
-                    "Equip",
-                ));
-            }
-
             if let Some(trade) = &game.data.trade
                 && !is_equipped
                 && !trade.self_side.items.contains(&e.guid)

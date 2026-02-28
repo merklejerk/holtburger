@@ -6,13 +6,17 @@ Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosys
 
 ## The Ecosystem
 
+For a detailed breakdown of how these components interact, check out the [Architecture Overview](ARCHITECTURE.md).
+
 Holtburger is comprised of several specialized crates:
 
-- **[`holtburger-protocol`](crates/holtburger-protocol)**: The core networking layer. Handles the serialization and deserialization of Asheron's Call packets, opcodes, and complex game messages.
-- **[`holtburger-dat`](crates/holtburger-dat)**: A specialized library for parsing Asheron's Call `.dat`, `.hba`, and other binary asset formats.
-- **[`holtburger-core`](crates/holtburger-core)**: The primary game orchestration library. Manages client state, cryptography, and higher-level game logic.
-- **[`holtburger-cli`](apps/holtburger-cli)**: A Terminal User Interface (TUI) client built on the Holtburger stack, designed for automation and power users.
-- **[`holtburger-common`](crates/holtburger-common)**: Shared types, utilities, and constants used across the entire workspace.
+- **[`holtburger-common`](crates/holtburger-common)**: The bedrock layer. Shared types, utilities, and constants used across the entire workspace.
+- **[`holtburger-protocol`](crates/holtburger-protocol)**: The language of the world. Handles the deterministic serialization and deserialization of Asheron's Call packets, opcodes, and complex game messages.
+- **[`holtburger-dat`](crates/holtburger-dat)**: A specialized library for parsing and querying Asheron's Call `.dat`, `.hba`, and other binary asset formats.
+- **[`holtburger-session`](crates/holtburger-session)**: The pure networking layer. Handles UDP fragment reassembly, packet sequencing, and stream encryption.
+- **[`holtburger-world`](crates/holtburger-world)**: The state authority. Tracks the live data graph of the 3D world, entity locations, and physics in memory.
+- **[`holtburger-core`](crates/holtburger-core)**: The primary engine orchestrator. Manages client state, translates network messages into authoritative states, and broadcasts UI-safe delta streams.
+- **[`holtburger-cli`](apps/holtburger-cli)**: A Terminal User Interface (TUI) client built on the Holtburger stack, designed for interaction, automation, and power users.
 - **[`holtburger-tools`](apps/holtburger-tools)**: A collection of auxiliary command-line utilities for data extraction and protocol analysis.
 
 ## Disclaimers

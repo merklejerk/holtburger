@@ -8,7 +8,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{List, ListItem};
 
 pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatState, area: Rect) {
     let width = area.width.saturating_sub(2) as usize;
@@ -59,7 +59,8 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatStat
         .iter()
         .map(|v| v.len())
         .sum();
-    game.view.maintain_scroll(false, total_lines, height);
+    // Cache total lines for bounds checking in inputs
+    game.view.chat_total_lines = total_lines;
 
     let all_lines: Vec<&(String, Color)> = chat.wrapped_chat_cache[window_start..]
         .iter()
@@ -99,34 +100,12 @@ pub fn render_chat_pane(f: &mut Frame, game: &mut GameState, chat: &mut ChatStat
     );
     f.render_widget(chat_list, area);
 
-    // Render Scrollbar
-    if total_lines > height {
-        let mut scrollbar_state =
-            ScrollbarState::new(total_lines.saturating_sub(height)).position(start);
-        f.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("▲"))
-                .track_symbol(Some(" "))
-                .thumb_symbol("█")
-                .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
-            area.inner(&ratatui::layout::Margin {
-                vertical: 1,
-                horizontal: 0,
-            }),
-            &mut scrollbar_state,
-        );
-    }
 }
 
 pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _chat: &mut ChatState, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
     let total_ctx = game.view.context_buffer.len();
-
-    game.view.maintain_scroll(true, total_ctx, height);
+    game.view.context_total_lines = total_ctx;
 
     let effective_ctx_scroll = game.view.context_scroll_offset;
     let ctx_end = total_ctx.saturating_sub(effective_ctx_scroll);
@@ -163,25 +142,4 @@ pub fn render_context_pane(f: &mut Frame, game: &mut GameState, _chat: &mut Chat
     );
     f.render_widget(ctx_list, area);
 
-    // Render Scrollbar
-    if total_ctx > height {
-        let mut scrollbar_state =
-            ScrollbarState::new(total_ctx.saturating_sub(height)).position(ctx_start);
-        f.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("▲"))
-                .track_symbol(Some(" "))
-                .thumb_symbol("█")
-                .end_symbol(Some("▼"))
-                .style(Style::default().fg(Color::Gray).bg(Color::Black))
-                .track_style(Style::default().fg(Color::DarkGray).bg(Color::Black))
-                .thumb_style(Style::default().fg(Color::White).bg(Color::Black)),
-            area.inner(&ratatui::layout::Margin {
-                vertical: 1,
-                horizontal: 0,
-            }),
-            &mut scrollbar_state,
-        );
-    }
 }

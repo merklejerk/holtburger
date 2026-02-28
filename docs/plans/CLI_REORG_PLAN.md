@@ -130,9 +130,9 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
   - [x] Create `messages.rs` with `UiMessage` enum.
   - [x] Set up the internal message bus channel in `app.rs`.
   - [x] Change `Interaction` to pass as read-only.
-- [ ] **Phase 2: Remove Visual Scrollbars**
-  - [ ] Remove `Scrollbar` logic from lists and text panels.
-  - [ ] Strip `maintain_scroll()` mechanics.
+- [x] **Phase 2: Remove Visual Scrollbars**
+  - [x] Remove `Scrollbar` logic from lists and text panels.
+  - [x] Strip `maintain_scroll()` mechanics.
 - [ ] **Phase 3: Component-Centric Restructure**
   - [ ] Scaffold `pages/` directory.
   - [ ] Refactor `chat` feature (State, View, Update).
@@ -151,6 +151,8 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
 - *Decision*: Stateful Caching (`wrapped_chat_cache`) will use Ratatui `StatefulWidget` trait for isolated mutable caching.
 
 ### Verification Log
+- **Phase 2**: Slayed the `ScrollbarState` UI component from all lists and text panels (`chat.rs`, `trade/render.rs`, `nearby/render.rs`, etc). Hard-deleted the hacky `maintain_scroll()` and replaced it with direct cached variable lookups. Everything compiles clean!
+- **Phase 2**: Slayed the `ScrollbarState` UI component from all lists and text panels (`chat.rs`, `trade/render.rs`, `nearby/render.rs`, etc). Hard-deleted the hacky `maintain_scroll()` and replaced it with direct cached variable lookups. Everything compiles clean!
 - **Phase 1**: Initialized `mpsc::unbounded_channel` in `tui.rs`. Updated `TabController::get_verbs` signature across all 6 tabs to accept `&Option<Interaction>` to rely on read-only passing instead of grabbing `game.view.active_interaction`. Verified `cargo check` runs clean.
 - *(Empty - to be filled during execution)*
 

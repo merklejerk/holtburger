@@ -26,6 +26,21 @@ impl TabController for TradeTab {
         let mut verbs = Vec::new();
         let target = self.get_target_at_index(game, index);
 
+        if let Some(interaction) = _interaction {
+            if let CommandTarget::Entity(_e, _) = &target {
+                match interaction {
+                    Interaction::Targeting { .. } => {}
+                    _ => {
+                        return verbs;
+                    }
+                }
+            }
+
+            if !matches!(interaction, Interaction::Targeting { .. }) {
+                verbs.push(Verb::new(vec![crate::ui::UiMessage::CancelInteraction], '', "Cancel"));
+            }
+        }
+        
         if let Some(target_item) = match &target {
             CommandTarget::VendorItem(v) => Some(v.guid),
             CommandTarget::Entity(e, _) => Some(e.guid),

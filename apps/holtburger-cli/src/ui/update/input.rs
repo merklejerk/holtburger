@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::ClientCommand;
-use holtburger_core::world::context::WorldContextExt;
+use holtburger_world::context::WorldContextExt;
 use ratatui::layout::Rect;
 
 use crate::ui::FocusedPane;

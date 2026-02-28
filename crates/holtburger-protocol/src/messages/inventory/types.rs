@@ -1,6 +1,6 @@
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::Guid;
 pub use holtburger_common::properties::EquipMask;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

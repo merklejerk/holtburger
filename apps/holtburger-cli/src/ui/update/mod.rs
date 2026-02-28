@@ -31,27 +31,14 @@ impl AppState {
                 result = self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
                 result.needs_redraw = true;
             }
-            AppAction::ReceivedEvent(event) => {
-                let should_redraw = !matches!(
-                    event,
-                    holtburger_core::WireEvent::LogMessage(_)
-                        | holtburger_core::WireEvent::RawMessage(_)
-                );
-                self.handle_received_event(event);
+            AppAction::ReceivedViewEvent(event) => {
+                let should_redraw =
+                    !matches!(event, holtburger_core::ClientViewEvent::LogMessage(_));
+                self.handle_client_view_event(event);
                 if should_redraw {
                     self.refresh_context_buffer();
                 }
                 result.needs_redraw = should_redraw;
-            }
-            AppAction::ReceivedStateEvent(event) => {
-                self.handle_received_state_event(event);
-                self.refresh_context_buffer();
-                result.needs_redraw = true;
-            }
-            AppAction::ReceivedViewEvent(event) => {
-                self.handle_client_view_event(event);
-                self.refresh_context_buffer();
-                result.needs_redraw = true;
             }
         }
 

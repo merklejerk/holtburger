@@ -1,4 +1,4 @@
-use crate::world::hydration::WorldObjectPropertiesHydrationExt;
+use crate::hydration::WorldObjectPropertiesHydrationExt;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     HasProperties, HasPropertiesMut, PropertyUpdate, WorldObjectProperties,

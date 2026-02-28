@@ -502,23 +502,21 @@ impl WorldState {
                         events.extend(self.set_player_position(*p));
                     }
 
-                    events.push(StateEvent::PlayerInfo(Box::new(
-                        crate::world::PlayerInfoData {
-                            guid,
-                            name: name.clone(),
-                            pos: *pos,
-                            attributes: self.player.get_attributes(),
-                            vitals: self.player.get_vitals(),
-                            skills: self.player.get_skills(),
-                            enchantments: self.player.enchantments.clone(),
-                            spells: self.player.spells.keys().cloned().collect(),
-                            vitae: self.player.vitae(),
-                            skill_table: self.skill_table.clone(),
-                            spell_names: self.get_player_spell_names(),
-                            inventory: self.player.inventory.clone(),
-                            equipment: self.player.equipment.clone(),
-                        },
-                    )));
+                    events.push(StateEvent::PlayerInfo(Box::new(crate::PlayerInfoData {
+                        guid,
+                        name: name.clone(),
+                        pos: *pos,
+                        attributes: self.player.get_attributes(),
+                        vitals: self.player.get_vitals(),
+                        skills: self.player.get_skills(),
+                        enchantments: self.player.enchantments.clone(),
+                        spells: self.player.spells.keys().cloned().collect(),
+                        vitae: self.player.vitae(),
+                        skill_table: self.skill_table.clone(),
+                        spell_names: self.get_player_spell_names(),
+                        inventory: self.player.inventory.clone(),
+                        equipment: self.player.equipment.clone(),
+                    })));
 
                     self.emit_level_info(&mut events);
                 }

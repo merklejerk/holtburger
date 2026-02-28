@@ -8,7 +8,7 @@ pub mod state;
 pub mod stats;
 pub mod vendor;
 
-use crate::world::entity::Entity;
+use crate::entity::Entity;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyUpdate;

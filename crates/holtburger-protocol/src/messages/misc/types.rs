@@ -1,6 +1,6 @@
 use crate::messages::utils::{read_string16, write_string16};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrderingResetData;

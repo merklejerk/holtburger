@@ -651,6 +651,8 @@ dependencies = [
  "holtburger-core",
  "holtburger-dat",
  "holtburger-protocol",
+ "holtburger-session",
+ "holtburger-world",
  "log",
  "ratatui",
  "tokio",
@@ -684,6 +686,8 @@ dependencies = [
  "holtburger-common",
  "holtburger-dat",
  "holtburger-protocol",
+ "holtburger-session",
+ "holtburger-world",
  "log",
  "rand",
  "serde",
@@ -743,6 +747,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "holtburger-session"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "byteorder",
+ "hex",
+ "holtburger-common",
+ "holtburger-protocol",
+ "log",
+ "serde",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "holtburger-tools"
 version = "0.1.0"
 dependencies = [
@@ -754,6 +774,26 @@ dependencies = [
  "log",
  "rayon",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "holtburger-world"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "binrw",
+ "bitflags",
+ "glam",
+ "holtburger-common",
+ "holtburger-dat",
+ "holtburger-protocol",
+ "log",
+ "serde",
+ "strum",
+ "strum_macros",
+ "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

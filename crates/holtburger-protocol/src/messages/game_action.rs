@@ -9,8 +9,8 @@ pub use crate::messages::player::actions::*;
 pub use crate::messages::trade::actions::*;
 
 use crate::opcodes::GameActionOpcode;
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GameActionMessage {

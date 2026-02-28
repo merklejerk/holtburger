@@ -1,7 +1,7 @@
-use crate::session::Session;
-use crate::world::{StateEvent, WorldState, state::ServerTimeSync};
 use anyhow::Result;
 use holtburger_protocol::errors::WeenieError;
+use holtburger_session::Session;
+use holtburger_world::{StateEvent, WorldState, state::ServerTimeSync};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
@@ -116,6 +116,61 @@ impl Client {
                         message,
                     });
             }
+            WireEvent::ServerMessage { message, chat_type } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ServerMessage {
+                        message: message.clone(),
+                        chat_type: *chat_type,
+                    });
+            }
+            WireEvent::Chat { sender, message } => {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
+                    sender: sender.clone(),
+                    message: message.clone(),
+                });
+            }
+            WireEvent::CharacterList(list) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CharacterList(list.clone()));
+            }
+            WireEvent::PlayerEntered { guid, name } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerEntered {
+                        guid: *guid,
+                        name: name.clone(),
+                    });
+            }
+            WireEvent::GameMessage(msg) => {
+                if let holtburger_protocol::messages::GameMessage::ServerName(data) = &**msg {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));
+                }
+            }
+            WireEvent::Emote { sender, text } => {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
+                    sender: sender.clone(),
+                    text: text.clone(),
+                });
+            }
+            WireEvent::PingResponse => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PingResponse);
+            }
+            WireEvent::LogMessage(msg) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::LogMessage(msg.clone()));
+            }
+            WireEvent::BootAccount(reason) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::BootAccount(reason.clone()));
+            }
             _ => {}
         }
 
@@ -197,35 +252,47 @@ impl Client {
                 if let Some(entity) = self.world.entities.get(self.world.player.guid) {
                     let _ = self
                         .client_view_event_tx
-                        .send(ClientViewEvent::EntityUpserted {
+                        .send(ClientViewEvent::EntitySpawned {
                             entity: Box::new(entity.clone()),
                         });
                 }
             }
-            StateEvent::EntitySpawned(entity) | StateEvent::EntityIdentified(entity) => {
+            StateEvent::EntitySpawned(entity) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::EntityUpserted {
+                    .send(ClientViewEvent::EntitySpawned {
+                        entity: entity.clone(),
+                    });
+            }
+            StateEvent::EntityIdentified(entity) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityIdentified {
                         entity: entity.clone(),
                     });
             }
             StateEvent::EntityDespawned(guid) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::EntityRemoved { guid: *guid });
+                    .send(ClientViewEvent::EntityDespawned { guid: *guid });
             }
-            StateEvent::EntityMoved { guid, .. }
-            | StateEvent::EntityStateUpdated { guid, .. }
-            | StateEvent::EntityVectorUpdated { guid, .. }
-            | StateEvent::PropertyUpdated { guid, .. } => {
-                if let Some(entity) = self.world.entities.get(*guid) {
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::EntityUpserted {
-                            entity: Box::new(entity.clone()),
-                        });
-                }
+            StateEvent::PropertyUpdated { guid, update } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityPropertyUpdated {
+                        guid: *guid,
+                        update: update.clone(),
+                    });
             }
+            StateEvent::EntityMoved { guid, pos } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityMoved {
+                        guid: *guid,
+                        pos: *pos,
+                    });
+            }
+            StateEvent::EntityStateUpdated { .. } | StateEvent::EntityVectorUpdated { .. } => {}
             StateEvent::ServerTimeUpdate(time) => {
                 let _ = self
                     .client_view_event_tx
@@ -283,7 +350,7 @@ impl Client {
 
             tokio::select! {
                 res = self.session.recv_message() => {
-                    use crate::session::SessionEvent;
+                    use holtburger_session::SessionEvent;
                     match res {
                         Ok(events) => {
                             for event in events {
@@ -360,7 +427,7 @@ impl Client {
 
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);
-                    let physics_events = crate::world::dedupe_state_events(physics_events);
+                    let physics_events = holtburger_world::dedupe_state_events(physics_events);
                     for event in physics_events {
                         self.emit_state_event(event);
                     }

@@ -84,44 +84,49 @@
   - **Mitigation**: While replacing massive clones with delta events radically lowers CPU/Memory channel saturation, the UI still needs to hold the properties for rendering. This is marked as an "Accepted Sin" in the architecture comparison since a duplicated internal `HashMap` is vastly superior to locking a global `Arc<RwLock>`.
 
 ## 5. Definition of Done (DoD)
-- [ ] `holtburger-core` is successfully split into modular sub-crates.
-- [ ] Over 100% of event payload transmission logic has transitioned from `Box<Entity>` cloning to granular `ClientViewEvent` deltas.
-- [ ] System logic operates on `InteractorContext` traits to prevent duplicated rules.
-- [ ] The CLI maintains its own un-locked projection, processing the event stream effectively.
-- [ ] The workspace builds (`cargo check --workspace`), formats (`cargo fmt`), lints (`cargo clippy`), and passes all tests.
+- [x] `holtburger-core` is successfully split into modular sub-crates.
+- [x] Over 100% of event payload transmission logic has transitioned from `Box<Entity>` cloning to granular `ClientViewEvent` deltas.
+- [x] System logic operates on `InteractorContext` (via `WorldContext`) traits to prevent duplicated rules.
+- [x] The CLI maintains its own un-locked projection, processing the event stream effectively.
+- [x] The workspace builds (`cargo check --workspace`), formats (`cargo fmt`), lints (`cargo clippy`), and passes all tests.
 
 ## 6. The Living Worksheet
 
 ### Task Checklist
 **Phase 1: The Great Split**
-- [ ] Create `crates/holtburger-session` and move code.
-- [ ] Create `crates/holtburger-world` and move code.
-- [ ] Update all `Cargo.toml` dependencies and perform export wrap in `holtburger-core`.
+- [x] Create `crates/holtburger-session` and move code.
+- [x] Create `crates/holtburger-world` and move code.
+- [x] Update all `Cargo.toml` dependencies and perform export wrap in `holtburger-core`.
 
 **Phase 2: Semantic Event Feed**
-- [ ] Decouple UI receivers from `WireEvent` and `StateEvent`.
-- [ ] Define granular delta variants (entity property tracking) in `ClientViewEvent`.
-- [ ] Define UX protocol variants (`ServerMessage`, `CharacterList`) in `ClientViewEvent`.
-- [ ] Reconfigure Core -> UI payload translation layer to map `StateEvent` efficiently without clones.
-- [ ] Intercept raw `WireEvent` in Core and proxy purely UX necessary payloads into `ClientViewEvent`.
+- [x] Decouple UI receivers from `WireEvent` and `StateEvent`.
+- [x] Define granular delta variants (entity property tracking) in `ClientViewEvent`.
+- [x] Define UX protocol variants (`ServerMessage`, `CharacterList`) in `ClientViewEvent`.
+- [x] Reconfigure Core -> UI payload translation layer to map `StateEvent` efficiently without clones.
+- [x] Intercept raw `WireEvent` in Core and proxy purely UX necessary payloads into `ClientViewEvent`.
 
 **Phase 3: Pure Rule Abstractions**
-- [ ] Move `context.rs` to `holtburger-world` safely.
-- [ ] Retain `GameData: WorldContext` capability in the UI.
+- [x] Move `context.rs` to `holtburger-world` safely.
+- [x] Retain `GameData: WorldContext` capability in the UI.
 
 **Phase 4: Client Projection Wiring**
-- [ ] Update `GameData` in the CLI to selectively process `PropertyUpdated`, `EntityMoved`, etc.
-- [ ] Strip old monolithic graph inference from UI rendering where possible.
+- [x] Update `GameData` in the CLI to selectively process `PropertyUpdated`, `EntityMoved`, etc.
+- [x] Strip old monolithic graph inference from UI rendering where possible.
+- [x] Adopt the "Upstream Explicit Query" pattern for massive debug states (`ClientCommand::QueryEntityDebugInfo`).
 
 **Phase 5: Cleanup & De-duplication**
-- [ ] Cut all temporary re-exports from `holtburger-core`.
-- [ ] Update `holtburger-cli` inputs to strictly target their independent origins.
+- [x] Cut all temporary re-exports from `holtburger-core`.
+- [x] Update `holtburger-cli` inputs to strictly target their independent origins.
 
 ### Decisions Log
-- *Future decisions mapped here.*
+- **Phase 3 Fast-Track**: `WorldContext` was already migrated safely during Phase 1 crate splits, so Phase 3 structurally fell into place without extensive rework. We retained the original pure rules context by having the CLI's `GameData` implement `WorldContext`.
+- **Phase 4 Debug Query Pattern**: To abide by Architecture A's "lossy projection" concept without losing diagnostic power, we've implemented `ClientCommand::QueryEntityDebugInfo(guid)`. When the TUI requests an entity debug inspection, it explicitly asks the core network thread to respond with a rich `ClientViewEvent::EntityDebugInfoSnapshot` payload, which temporarily updates the UI's local cache without continuously spanning the channel with mega-clones.
+
+- **Phase 5 Cleanup**: Removed the temporary `pub use holtburger_session as session;` and `pub use holtburger_world as world;` fallbacks inside `holtburger-core` that were placed during Phase 1. `holtburger-cli` has logically updated its dependencies in `Cargo.toml` to explicitly target `holtburger-world` and `holtburger-session`, formally enforcing the architecture API boundaries.
 
 ### Verification Log
-- *Continuous integration checks mapped here.*
+- Validated tests across all 5 workspace crates (`Cargo test --workspace`), catching formatting errors.
+- Applied `cargo clippy --fix` on workspace crates to collapse `if` nestings and remove extraneous `.clone()` references during transition.
 
 ### Open Questions
 - *None.*

@@ -87,11 +87,24 @@ impl TabController for TradeTab {
             }
         }
 
-        // Generic trade options. Wait, we want these visible always?
-        verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::DeclineTrade])], 'x', "Decline"));
-        verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::AcceptTrade])], 'c', "Accept"));
-        verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::ResetTrade])], 'r', "Reset"));
-        verbs.push(Verb::new(vec![crate::ui::UiMessage::ClearVendor], 'q', "Exit"));
+
+        if let Some(trade) = &game.data.trade {
+            if trade.self_side.accepted {
+                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::DeclineTrade])], 'c', "Decline"));
+            } else {
+                verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::AcceptTrade])], 'c', "Accept"));
+            }
+            verbs.push(Verb::new(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::ResetTrade])], 'r', "Reset"));
+        }
+
+        if game.data.trade.is_some() || game.data.vendor.is_some() {
+            let cmds = if game.data.trade.is_some() {
+                vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::CloseTrade])]
+            } else {
+                vec![crate::ui::UiMessage::ClearVendor]
+            };
+            verbs.push(Verb::new(cmds, 'x', "Exit"));
+        }
 
         verbs
     }

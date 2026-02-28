@@ -3,13 +3,13 @@ use crate::messages::utils::{
     align_to_4, pad_to_4, read_packed_data_id, read_packed_wclass_id, read_string16,
     write_packed_data_id, write_packed_wclass_id, write_string16,
 };
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState, WeenieHeaderFlag,
     WeenieHeaderFlag2,
 };
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use holtburger_common::{Guid, Vector3};
 
 #[derive(Debug, Clone, PartialEq)]

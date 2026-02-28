@@ -1,9 +1,9 @@
 use crate::errors::WeenieError;
 use crate::messages::object::messages::PublicWeenieDescription;
 use crate::messages::utils::{read_string16, write_string16};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 use strum_macros::FromRepr;
 

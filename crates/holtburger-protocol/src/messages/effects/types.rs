@@ -1,6 +1,6 @@
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -73,7 +73,7 @@ mod tests {
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
-    use holtburger_common::traits::ProtocolUnpack;
+    use crate::traits::ProtocolUnpack;
 
     #[test]
     fn test_play_sound_fixture() {

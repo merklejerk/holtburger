@@ -1,6 +1,6 @@
 use super::GameMessage;
 use crate::test_fixtures;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 
 fn assert_dispatch_match(data: &[u8], check: impl Fn(&GameMessage) -> bool) {
     let mut offset = 0;

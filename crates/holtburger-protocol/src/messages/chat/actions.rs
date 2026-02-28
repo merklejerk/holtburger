@@ -1,5 +1,5 @@
 use crate::messages::utils::{read_string16, write_string16};
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TalkActionData {

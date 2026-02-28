@@ -1,5 +1,3 @@
-use crate::traits::{ProtocolPack, ProtocolUnpack};
-use byteorder::{ByteOrder, LittleEndian};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::{BitAnd, BitOr, Shl, Shr};
@@ -26,23 +24,6 @@ impl Guid {
 
     pub fn is_item(&self) -> bool {
         self.0 > 0 && self.0 < 0x50000000
-    }
-}
-
-impl ProtocolUnpack for Guid {
-    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
-        if *offset + 4 > data.len() {
-            return None;
-        }
-        let val = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-        *offset += 4;
-        Some(val.into())
-    }
-}
-
-impl ProtocolPack for Guid {
-    fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&<Guid as Into<u32>>::into(*self).to_le_bytes());
     }
 }
 

@@ -1,5 +1,5 @@
 use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
-use holtburger_core::world::entity::Entity;
+use holtburger_world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;

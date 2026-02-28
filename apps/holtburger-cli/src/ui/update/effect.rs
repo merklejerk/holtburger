@@ -149,7 +149,7 @@ pub fn apply_ui_effect(state: &mut AppState, effect: UIEffect) -> Vec<ClientComm
                 game.view.context_view = ContextView::Custom;
                 game.view.context_scroll_offset = 0;
             }
-            vec![]
+            vec![ClientCommand::QueryEntityDebugInfo(guid)]
         }
         UIEffect::Heal(guid) => {
             if let Some(game) = state.game_option_mut() {

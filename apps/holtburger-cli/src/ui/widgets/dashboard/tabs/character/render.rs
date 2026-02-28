@@ -9,9 +9,9 @@ use std::collections::HashMap;
 
 use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::PropertyFloat;
-use holtburger_core::world::magic::get_enchantment_name;
-use holtburger_core::world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::magic::get_enchantment_name;
+use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 
 use crate::ui::state::GameState;
 use crate::ui::theme;

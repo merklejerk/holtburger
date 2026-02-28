@@ -11,8 +11,8 @@ pub use crate::messages::player::types::*;
 pub use crate::messages::game_action::GameActionMessage;
 pub use crate::messages::game_event::GameEventMessage;
 use crate::opcodes::*;
+use crate::traits::ProtocolUnpack;
 use byteorder::{ByteOrder, LittleEndian};
-use holtburger_common::traits::ProtocolUnpack;
 
 impl ProtocolUnpack for GameMessage {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {

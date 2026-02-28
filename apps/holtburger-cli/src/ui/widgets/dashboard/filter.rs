@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PseudoEquipMask;
-use holtburger_core::world::entity::Entity;
+use holtburger_world::entity::Entity;
 
 use super::tabs::classification;
 

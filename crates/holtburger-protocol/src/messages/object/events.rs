@@ -4,11 +4,11 @@ use crate::messages::object::types::{
 use crate::messages::utils::{
     read_hashtable_header, read_string16, write_hashtable_header, write_string16,
 };
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectProperties;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 use serde::{Deserialize, Serialize};
 // Note: BTreeMap removed because we now use WorldObjectProperties which uses HashMap internally for efficiency
 

@@ -1,4 +1,4 @@
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PingRequestActionData;

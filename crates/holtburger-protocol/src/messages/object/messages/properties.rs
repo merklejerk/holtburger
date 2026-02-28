@@ -1,8 +1,8 @@
 use crate::messages::utils::{align_offset, pad_to_4, read_string16, write_string16};
+use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
 use holtburger_common::Guid;
 use holtburger_common::properties::PhysicsState;
-use holtburger_common::traits::{ProtocolPack, ProtocolUnpack};
 
 macro_rules! define_update_property {
     ($name:ident, $type:ty) => {

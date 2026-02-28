@@ -142,22 +142,18 @@ impl PlayerState {
         let base_armor = self.get_int_prop_default(PropertyInt::ArmorLevel);
         i32::max(
             -400,
-            crate::world::magic::get_enchanted_armor(base_armor, &self.enchantments),
+            crate::magic::get_enchanted_armor(base_armor, &self.enchantments),
         )
     }
 
     pub fn vitae(&self) -> f32 {
-        crate::world::magic::get_total_vitae(&self.enchantments)
+        crate::magic::get_total_vitae(&self.enchantments)
     }
 
     pub fn resistances(&self) -> stats::Resistances {
         let get_r = |prop: PropertyFloat| {
             let base = self.get_float_prop(prop).unwrap_or(1.0);
-            crate::world::magic::get_enchanted_resistance(
-                base as f32,
-                &self.enchantments,
-                prop as u32,
-            )
+            crate::magic::get_enchanted_resistance(base as f32, &self.enchantments, prop as u32)
         };
         stats::Resistances {
             slash: get_r(PropertyFloat::ResistSlash),
@@ -574,7 +570,7 @@ mod tests {
 
     #[test]
     fn test_vector_update_routing() {
-        use crate::world::StateEvent;
+        use crate::StateEvent;
         use holtburger_common::Vector3;
         use holtburger_protocol::messages::GameMessage;
         use holtburger_protocol::messages::VectorUpdateData;
@@ -612,7 +608,7 @@ mod tests {
 
     #[test]
     fn test_magic_purge_bad_enchantments_preserves_vitae() {
-        use crate::world::StateEvent;
+        use crate::StateEvent;
         use holtburger_protocol::messages::{
             GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsEventData,
         };
@@ -692,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_magic_purge_enchantments_preserves_vitae_only() {
-        use crate::world::StateEvent;
+        use crate::StateEvent;
         use holtburger_protocol::messages::{
             GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsEventData,
             MagicUpdateEnchantmentEventData,

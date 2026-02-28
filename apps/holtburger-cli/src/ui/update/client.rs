@@ -1,6 +1,6 @@
 use crate::ui::state::ChatMessageKind;
 use crate::ui::state::{AppState, GameState, Page, SelectionState};
-use holtburger_core::{ClientState, ClientViewEvent, ErrorReason, WireEvent};
+use holtburger_core::{ClientState, ClientViewEvent, ErrorReason};
 use holtburger_protocol::errors::CharacterError;
 
 impl AppState {
@@ -52,17 +52,15 @@ impl AppState {
         }
     }
 
-    pub(super) fn handle_setup_event(&mut self, event: WireEvent) {
+    pub(super) fn handle_setup_event(&mut self, event: ClientViewEvent) {
         match event {
-            WireEvent::GameMessage(msg) => {
-                if let holtburger_protocol::messages::GameMessage::ServerName(data) = *msg {
-                    self.world_name = data.name.clone();
-                    if let Page::Game(ref mut game) = self.page {
-                        game.data.world_name = data.name.clone();
-                    }
+            ClientViewEvent::WorldNameUpdated(name) => {
+                self.world_name = name.clone();
+                if let Page::Game(ref mut game) = self.page {
+                    game.data.world_name = name.clone();
                 }
             }
-            WireEvent::CharacterList(mut chars) => {
+            ClientViewEvent::CharacterList(mut chars) => {
                 chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                 self.page = Page::Selection(SelectionState {
                     characters: chars,
@@ -70,7 +68,7 @@ impl AppState {
                 });
                 self.logon_retry.reset();
             }
-            WireEvent::PlayerEntered { guid, name } => {
+            ClientViewEvent::PlayerEntered { guid, name } => {
                 if let Page::Game(game) = &mut self.page {
                     game.data.player_guid = Some(guid);
                     game.data.character_name = Some(name.clone());

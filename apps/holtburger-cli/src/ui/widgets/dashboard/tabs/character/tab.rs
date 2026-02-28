@@ -17,7 +17,7 @@ impl TabController for CharacterTab {
         render_character_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
+    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
         let active_interaction = game.view.active_interaction;
         let target = self.get_target_at_index(game, index);
         let mut verbs = Vec::new();

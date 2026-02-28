@@ -93,7 +93,8 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
         }
         KeyCode::Enter | KeyCode::Char(_) => {
             let index = game.view.selected_dashboard_index();
-            let verbs = tab.get_verbs(game, index);
+            let interaction = game.view.active_interaction;
+            let verbs = tab.get_verbs(game, &interaction, index);
 
             let shortcut = match key.code {
                 KeyCode::Enter => '\r',

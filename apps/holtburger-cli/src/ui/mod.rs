@@ -3,6 +3,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub mod interaction;
 pub mod layout;
+pub mod messages;
 pub mod page;
 pub mod state;
 pub mod theme;
@@ -14,6 +15,7 @@ pub mod widgets;
 
 pub use self::interaction::*;
 pub use self::layout::*;
+pub use self::messages::*;
 pub use self::state::view::*;
 pub use self::state::*;
 pub use self::traits::*;

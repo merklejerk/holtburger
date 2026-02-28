@@ -52,6 +52,38 @@ impl AppState {
         result
     }
 
+    pub fn handle_ui_message(&mut self, msg: crate::ui::UiMessage) -> UpdateResult {
+        let mut result = UpdateResult::new();
+        match msg {
+            crate::ui::UiMessage::BeginInteraction(interaction) => {
+                if let Some(game) = self.game_option_mut() {
+                    game.view.active_interaction = Some(interaction);
+                }
+                result.needs_redraw = true;
+            }
+            crate::ui::UiMessage::ConfirmInteractionTarget(_guid) => {
+                // We will implement this as we phase out UIEffect
+            }
+            crate::ui::UiMessage::ConfirmInteractionSplit(_guid, _amount) => {
+                // We will implement this as we phase out UIEffect
+            }
+            crate::ui::UiMessage::ConfirmInteractionText(_text) => {
+                // We will implement this as we phase out UIEffect
+            }
+            crate::ui::UiMessage::CancelInteraction => {
+                if let Some(game) = self.game_option_mut() {
+                    game.view.active_interaction = None;
+                }
+                result.needs_redraw = true;
+            }
+            crate::ui::UiMessage::AddLog(kind, text) => {
+                self.chat.log(kind, text);
+                result.needs_redraw = true;
+            }
+        }
+        result
+    }
+
     fn update_tick(&mut self, elapsed: f64) -> UpdateResult {
         let mut result = UpdateResult::new();
         let now = std::time::Instant::now();

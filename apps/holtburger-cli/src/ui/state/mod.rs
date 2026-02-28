@@ -49,6 +49,7 @@ pub struct AppState {
     pub net_stats: NetStats,
     pub world_name: String,
     pub verbosity: u8,
+    pub ui_message_tx: tokio::sync::mpsc::UnboundedSender<crate::ui::UiMessage>,
 }
 
 impl AppState {

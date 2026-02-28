@@ -33,10 +33,10 @@ impl TabController for NearbyTab {
         render_nearby_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
+    fn get_verbs(&self, game: &GameState, interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
         let target = self.get_target_at_index(game, index);
         let player_guid = game.data.player_guid;
-        let active_interaction = game.view.active_interaction;
+        let active_interaction = *interaction;
         let mut verbs = vec![];
 
         if let Some(interaction) = active_interaction

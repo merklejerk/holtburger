@@ -20,7 +20,7 @@ impl TabController for SpellsTab {
         render_spells_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, _index: usize) -> Vec<Verb> {
+    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, _index: usize) -> Vec<Verb> {
         let active_interaction = game.view.active_interaction;
         let mut verbs = vec![];
 

@@ -126,10 +126,10 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
 ## 7. The Living Worksheet
 
 ### Task Checklist
-- [ ] **Phase 1: Event & Message Bus Foundation**
-  - [ ] Create `messages.rs` with `UiMessage` enum.
-  - [ ] Set up the internal message bus channel in `app.rs`.
-  - [ ] Change `Interaction` to pass as read-only.
+- [x] **Phase 1: Event & Message Bus Foundation**
+  - [x] Create `messages.rs` with `UiMessage` enum.
+  - [x] Set up the internal message bus channel in `app.rs`.
+  - [x] Change `Interaction` to pass as read-only.
 - [ ] **Phase 2: Remove Visual Scrollbars**
   - [ ] Remove `Scrollbar` logic from lists and text panels.
   - [ ] Strip `maintain_scroll()` mechanics.
@@ -151,6 +151,7 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
 - *Decision*: Stateful Caching (`wrapped_chat_cache`) will use Ratatui `StatefulWidget` trait for isolated mutable caching.
 
 ### Verification Log
+- **Phase 1**: Initialized `mpsc::unbounded_channel` in `tui.rs`. Updated `TabController::get_verbs` signature across all 6 tabs to accept `&Option<Interaction>` to rely on read-only passing instead of grabbing `game.view.active_interaction`. Verified `cargo check` runs clean.
 - *(Empty - to be filled during execution)*
 
 ### Open Questions

@@ -1,3 +1,4 @@
+use crate::ui::Interaction;
 use crate::ui::CommandTarget;
 use crate::ui::state::GameState;
 use crate::ui::types::{Action, ContextView, Verb};
@@ -13,7 +14,7 @@ pub trait TabController {
     fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect);
 
     /// Returns the list of available verbs for the item at the specified index.
-    fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb>;
+    fn get_verbs(&self, game: &GameState, interaction: &Option<Interaction>, index: usize) -> Vec<Verb>;
 
     /// Returns the command target (e.g. Entity, Spell) at the specified index.
     fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a>;

@@ -17,7 +17,7 @@ impl TabController for EquipTab {
         render_equip_tab(f, game, area);
     }
 
-    fn get_verbs(&self, game: &GameState, index: usize) -> Vec<Verb> {
+    fn get_verbs(&self, game: &GameState, _interaction: &Option<Interaction>, index: usize) -> Vec<Verb> {
         let mut verbs = vec![];
         let lines = get_lines(game);
         let target = match lines.get(index) {

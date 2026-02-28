@@ -19,7 +19,8 @@ pub mod debug;
 pub mod filter;
 
 pub fn get_verbs_for_tab(game: &GameState, tab: DashboardTab, index: usize) -> Vec<Verb> {
-    get_tab_controller(tab).get_verbs(game, index)
+    let interaction = game.view.active_interaction;
+    get_tab_controller(tab).get_verbs(game, &interaction, index)
 }
 
 pub fn get_target_at_index<'a>(

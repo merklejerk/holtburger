@@ -38,7 +38,8 @@ impl TabController for SpellsTab {
                 ));
             } else {
                 let mut base_cmds = Vec::new();
-                if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic {
+                if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic
+                {
                     base_cmds.push(ClientCommand::SetCombatMode(
                         holtburger_protocol::messages::combat::CombatMode::Magic,
                     ));
@@ -47,7 +48,7 @@ impl TabController for SpellsTab {
                 if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
                     let mut cmds = base_cmds.clone();
                     cmds.push(ClientCommand::CastTargetedSpell {
-                        spell_id: spell_id,
+                        spell_id,
                         target: target_guid,
                     });
                     verbs.push(Verb::new(
@@ -58,27 +59,25 @@ impl TabController for SpellsTab {
                         'c',
                         "Cast on target",
                     ));
+                } else if let Some(player_guid) = game.data.player_guid {
+                    let mut cmds = base_cmds.clone();
+                    cmds.push(ClientCommand::CastTargetedSpell {
+                        spell_id,
+                        target: player_guid,
+                    });
+                    verbs.push(Verb::new(
+                        vec![crate::ui::UiMessage::SendCommands(cmds)],
+                        'c',
+                        "Cast on self",
+                    ));
                 } else {
-                    if let Some(player_guid) = game.data.player_guid {
-                        let mut cmds = base_cmds.clone();
-                        cmds.push(ClientCommand::CastTargetedSpell {
-                            spell_id,
-                            target: player_guid,
-                        });
-                        verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(cmds)],
-                            'c',
-                            "Cast on self",
-                        ));
-                    } else {
-                        let mut cmds = base_cmds.clone();
-                        cmds.push(ClientCommand::CastUntargetedSpell { spell_id });
-                        verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(cmds)],
-                            'c',
-                            "Cast",
-                        ));
-                    }
+                    let mut cmds = base_cmds.clone();
+                    cmds.push(ClientCommand::CastUntargetedSpell { spell_id });
+                    verbs.push(Verb::new(
+                        vec![crate::ui::UiMessage::SendCommands(cmds)],
+                        'c',
+                        "Cast",
+                    ));
                 }
             }
 

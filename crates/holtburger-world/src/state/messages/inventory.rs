@@ -153,10 +153,7 @@ impl WorldState {
                                 PropertyInstanceId::Container,
                                 data.container_guid,
                             ),
-                            PropertyUpdate::InstanceId(
-                                PropertyInstanceId::Wielder,
-                                Guid::NULL,
-                            ),
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
                             PropertyUpdate::Int(
                                 PropertyInt::CurrentWieldedLocation,
                                 EquipMask::NONE.bits() as i32,
@@ -183,14 +180,8 @@ impl WorldState {
                     events.push(StateEvent::PropertiesUpdated {
                         guid: data.object_guid,
                         updates: vec![
-                            PropertyUpdate::InstanceId(
-                                PropertyInstanceId::Container,
-                                Guid::NULL,
-                            ),
-                            PropertyUpdate::InstanceId(
-                                PropertyInstanceId::Wielder,
-                                Guid::NULL,
-                            ),
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
                             PropertyUpdate::Int(
                                 PropertyInt::CurrentWieldedLocation,
                                 EquipMask::NONE.bits() as i32,
@@ -294,7 +285,10 @@ impl WorldState {
                         updates: vec![
                             PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, ev.target),
                             PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
-                            PropertyUpdate::Int(PropertyInt::CurrentWieldedLocation, data.equip_mask.bits() as i32),
+                            PropertyUpdate::Int(
+                                PropertyInt::CurrentWieldedLocation,
+                                data.equip_mask.bits() as i32,
+                            ),
                         ],
                     });
                 }

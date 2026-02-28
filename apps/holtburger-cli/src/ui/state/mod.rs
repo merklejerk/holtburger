@@ -5,14 +5,13 @@ use holtburger_core::{ClientState, RetryState};
 
 use crate::ui::widgets::panels::modal::Modal;
 
-mod chat;
 pub mod game;
 mod net;
 mod page;
 mod selection;
 pub mod view;
 
-pub use self::chat::{ChatMessage, ChatMessageKind, ChatState};
+pub use crate::pages::game::panels::chat::{ChatMessage, ChatMessageKind, ChatState};
 pub use self::game::GameData;
 pub use self::net::NetStats;
 pub use self::page::Page;

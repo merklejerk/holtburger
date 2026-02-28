@@ -17,7 +17,7 @@ impl AppState {
             | ClientViewEvent::Emote { .. }
             | ClientViewEvent::PingResponse
             | ClientViewEvent::BootAccount(_) => {
-                self.handle_chat_event(&event);
+                self.chat.handle_event(&event);
             }
             _ => {}
         }

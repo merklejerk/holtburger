@@ -134,8 +134,8 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
   - [x] Remove `Scrollbar` logic from lists and text panels.
   - [x] Strip `maintain_scroll()` mechanics.
 - [ ] **Phase 3: Component-Centric Restructure**
-  - [ ] Scaffold `pages/` directory.
-  - [ ] Refactor `chat` feature (State, View, Update).
+  - [x] Scaffold `pages/` directory.
+  - [x] Refactor `chat` feature (State, View, Update).
   - [ ] Refactor `dashboard` tabs.
   - [ ] Dismantle `ViewState` God Object.
 - [ ] **Phase 4: Eradicate `Action` and `UIEffect`**
@@ -158,3 +158,5 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
 
 ### Open Questions
 - *(None at the moment)*
+- **Phase 3**: Scaffolded `pages/` directory. Consolidated `chat.rs`, decoupling it from `ViewState` God object. Extracted `render_context_pane`. Re-directed modules from `ui/page/mod.rs` to correctly call the newly consolidated `render_chat_pane` utilizing `&mut ChatState`. `cargo check -p holtburger-cli` runs cleanly with zero errors/warnings.
+- **Phase 3**: Scaffolded `pages/` directory. Consolidated `chat.rs`, decoupling it from `ViewState` God object. Extracted `render_context_pane`. Re-directed modules from `ui/page/mod.rs` to correctly call the newly consolidated `render_chat_pane` utilizing `&mut ChatState`. `cargo check -p holtburger-cli` runs cleanly with zero errors/warnings.

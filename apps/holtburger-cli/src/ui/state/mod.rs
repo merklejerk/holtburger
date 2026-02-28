@@ -21,6 +21,7 @@ pub use self::view::ViewState;
 #[derive(Debug, Clone, Default)]
 pub struct GameState {
     pub data: GameData,
+    pub dashboard: crate::pages::game::dashboard::DashboardState,
     pub view: ViewState,
 }
 
@@ -28,6 +29,7 @@ impl GameState {
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
         Self {
             data: GameData::new(guid, name, world_name),
+            dashboard: crate::pages::game::dashboard::DashboardState::default(),
             view: ViewState::default(),
         }
     }
@@ -97,7 +99,7 @@ impl AppState {
     pub fn refresh_context_buffer(&mut self) {
         let (tab, view_is_default) = if let Some(game) = self.game_option() {
             (
-                game.view.dashboard_tab,
+                game.dashboard.active_tab,
                 game.view.context_view == crate::ui::ContextView::Default,
             )
         } else {
@@ -111,7 +113,7 @@ impl AppState {
             return;
         }
 
-        let active_tab = crate::ui::widgets::dashboard::get_tab_controller(tab);
+        let active_tab = crate::pages::game::dashboard::get_tab_controller(tab);
         if let Some(game) = self.game_option() {
             let content = active_tab.get_context_panel_content(game);
             if let Some(game) = self.game_option_mut() {
@@ -123,7 +125,7 @@ impl AppState {
     pub fn dashboard_item_count(&self) -> usize {
         if let Some(game) = self.game_option() {
             let active_tab =
-                crate::ui::widgets::dashboard::get_tab_controller(game.view.dashboard_tab);
+                crate::pages::game::dashboard::get_tab_controller(game.dashboard.active_tab);
             active_tab.get_item_count(game)
         } else {
             0

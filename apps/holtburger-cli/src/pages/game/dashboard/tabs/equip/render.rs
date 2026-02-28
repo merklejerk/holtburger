@@ -24,14 +24,13 @@ pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
-    let selected_index = game.view.selected_dashboard_index();
-    game.view
-        .dashboard_list_state()
+    let selected_index = game.dashboard.selected_index();
+    game.dashboard.list_state()
         .select(Some(selected_index));
-    f.render_stateful_widget(dashboard_list, area, game.view.dashboard_list_state());
+    f.render_stateful_widget(dashboard_list, area, game.dashboard.list_state());
 
     let height = area.height as usize;
-    game.view.last_dashboard_height = height;
+    game.dashboard.last_height = height;
 }
 
 fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
@@ -39,7 +38,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     let mut list_items = Vec::new();
 
     for (i, line) in lines.into_iter().enumerate() {
-        let is_selected = i == game.view.selected_dashboard_index();
+        let is_selected = i == game.dashboard.selected_index();
         match line {
             EquipTabLine::Header(name, occupied) => {
                 let color = if occupied {

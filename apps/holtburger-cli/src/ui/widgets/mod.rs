@@ -1,9 +1,7 @@
-pub mod dashboard;
 pub mod hud;
 pub mod panels;
 pub mod selection;
 
-pub use dashboard::render_dashboard_pane;
 pub use hud::pulse::render_pulse_panel;
 pub use hud::status::render_status_bar;
 pub use hud::vitals::render_vitals;

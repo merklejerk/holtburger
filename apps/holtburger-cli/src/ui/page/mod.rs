@@ -8,7 +8,7 @@ use crate::ui::layout::PULSE_PANEL_WIDTH;
 use crate::ui::state::{ChatState, GameState, Page, SelectionState};
 use crate::ui::theme::{pane_block, pane_title_style};
 use crate::ui::update::UpdateResult;
-use crate::ui::widgets::dashboard::render_dashboard_pane;
+use crate::pages::game::dashboard::render_dashboard_pane;
 use crate::ui::widgets::hud::pulse::render_pulse_panel;
 use crate::ui::widgets::hud::status::render_status_bar;
 use crate::pages::game::panels::chat::render_chat_pane;
@@ -78,11 +78,12 @@ impl Page {
     pub fn handle_mouse(
         &mut self,
         mouse: crossterm::event::MouseEvent,
+        chat: &mut crate::pages::game::panels::chat::ChatState,
         main_chunks: &[Rect],
     ) -> UpdateResult {
         match self {
             Page::Selection(_) => UpdateResult::new(),
-            Page::Game(game) => game.handle_mouse(mouse, main_chunks),
+            Page::Game(game) => game.handle_mouse(mouse, chat, main_chunks),
         }
     }
 }

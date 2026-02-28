@@ -30,9 +30,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
-        let selected_index = game.view.selected_dashboard_index();
-        game.view
-            .dashboard_list_state()
+        let selected_index = game.dashboard.selected_index();
+        game.dashboard.list_state()
             .select(Some(selected_index));
 
         // Self side
@@ -53,7 +52,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     color = get_entity_color(class);
                 }
                 let is_selected =
-                    trade_focus == TradeFocus::Local && i == game.view.selected_dashboard_index();
+                    trade_focus == TradeFocus::Local && i == game.dashboard.selected_index();
 
                 let text = format!("[{}] {}", emoji, display_name);
                 ListItem::new(Line::styled(text, Style::default().fg(color)))
@@ -64,7 +63,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         // Calculate heights for PageUp/PageDown
         let self_area = chunks[0];
         let self_height = self_area.height as usize;
-        game.view.last_dashboard_height = self_height; // Both sides same height in 50/50 split
+        game.dashboard.last_height = self_height; // Both sides same height in 50/50 split
 
         let mut default_self_state = ListState::default();
         let (self_title, self_state) = match trade_focus {
@@ -77,7 +76,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                         ""
                     }),
                 ]),
-                game.view.dashboard_list_state(),
+                game.dashboard.list_state(),
             ),
             TradeFocus::Partner => (
                 Line::from(vec![
@@ -113,7 +112,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         f.render_stateful_widget(self_list, self_area, self_state);
 
-        let selected_index = game.view.selected_dashboard_index();
+        let selected_index = game.dashboard.selected_index();
 
         // Partner side
         let partner_area = chunks[1];
@@ -152,7 +151,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                         ""
                     }),
                 ]),
-                game.view.dashboard_list_state(),
+                game.dashboard.list_state(),
             ),
             TradeFocus::Local => (
                 Line::from(vec![
@@ -265,7 +264,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     .ceil()
                     .max(DEFAULT_PRICE as f32) as u32;
 
-                let is_selected = i == game.view.selected_dashboard_index();
+                let is_selected = i == game.dashboard.selected_index();
 
                 let currency_suffix = if vendor.alternate_currency_wcid == 0 {
                     "p".to_string()
@@ -289,13 +288,12 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
 
-        let selected_index = game.view.selected_dashboard_index();
-        game.view
-            .dashboard_list_state()
+        let selected_index = game.dashboard.selected_index();
+        game.dashboard.list_state()
             .select(Some(selected_index));
-        game.view.last_dashboard_height = list_area.height as usize;
+        game.dashboard.last_height = list_area.height as usize;
 
-        f.render_stateful_widget(list, list_area, game.view.dashboard_list_state());
+        f.render_stateful_widget(list, list_area, game.dashboard.list_state());
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let horizontal_margin = 2;

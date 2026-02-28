@@ -136,8 +136,8 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
 - [ ] **Phase 3: Component-Centric Restructure**
   - [x] Scaffold `pages/` directory.
   - [x] Refactor `chat` feature (State, View, Update).
-  - [ ] Refactor `dashboard` tabs.
-  - [ ] Dismantle `ViewState` God Object.
+  - [x] Refactor `dashboard` tabs.
+  - [x] Dismantle `ViewState` God Object.
 - [ ] **Phase 4: Eradicate `Action` and `UIEffect`**
   - [ ] Purge `UIEffect` handling block and struct.
   - [ ] Handle interactions natively returning `ClientCommand`s.
@@ -160,3 +160,5 @@ When a user highlights an item in the `InventoryTab` and hits "Use", but wants t
 - *(None at the moment)*
 - **Phase 3**: Scaffolded `pages/` directory. Consolidated `chat.rs`, decoupling it from `ViewState` God object. Extracted `render_context_pane`. Re-directed modules from `ui/page/mod.rs` to correctly call the newly consolidated `render_chat_pane` utilizing `&mut ChatState`. `cargo check -p holtburger-cli` runs cleanly with zero errors/warnings.
 - **Phase 3**: Scaffolded `pages/` directory. Consolidated `chat.rs`, decoupling it from `ViewState` God object. Extracted `render_context_pane`. Re-directed modules from `ui/page/mod.rs` to correctly call the newly consolidated `render_chat_pane` utilizing `&mut ChatState`. `cargo check -p holtburger-cli` runs cleanly with zero errors/warnings.
+- **Phase 3 Completion**: Re-routed all `dashboard` tab views and states away from the global `ViewState` into a deeply structured `pages/game/dashboard/mod.rs` component location. Stripped the heavily mutated `dashboard_tab`, `list_state`, and `last_height` from `ViewState` successfully, reducing its bloat. Re-routed complex inputs accurately. 0 compile errors!
+- **Phase 3 Completion**: Re-routed all `dashboard` tab views and states away from the global `ViewState` into a deeply structured `pages/game/dashboard/mod.rs` component location. Stripped the heavily mutated `dashboard_tab`, `list_state`, and `last_height` from `ViewState` successfully, reducing its bloat. Re-routed complex inputs accurately. 0 compile errors!

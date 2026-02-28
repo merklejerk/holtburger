@@ -112,7 +112,7 @@ impl AppState {
                         && target_guid == v_guid
                         && last_time.elapsed() < std::time::Duration::from_secs(5)
                     {
-                        game.view.dashboard_tab = DashboardTab::Trade;
+                        game.dashboard.active_tab = DashboardTab::Trade;
                     }
                 }
             }
@@ -126,7 +126,7 @@ impl AppState {
                         && target_guid == p_guid
                         && last_time.elapsed() < std::time::Duration::from_secs(5)
                     {
-                        game.view.dashboard_tab = DashboardTab::Trade;
+                        game.dashboard.active_tab = DashboardTab::Trade;
                     }
                 }
             }

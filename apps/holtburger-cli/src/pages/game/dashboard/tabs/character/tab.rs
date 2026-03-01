@@ -3,9 +3,9 @@ use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::state::GameState;
-use crate::types::UiMessage;
+use crate::actions::AppAction;
 use crate::ui::Interaction;
-use crate::actions::AppAction; use crate::types::Verb;
+use crate::types::Verb;
 use crate::ui::traits::TabController;
 use crate::types::{CommandTarget, StatType};
 use holtburger_core::client::types::ClientCommand;
@@ -63,7 +63,7 @@ impl TabController for CharacterTab {
                         },
                     };
                     verbs.push(Verb::new(
-                        AppAction::Custom(vec![UiMessage::SendCommands(vec![cmd])]),
+                        vec![AppAction::SendCommands(vec![cmd])],
                         'l',
                         "Level Up",
                     ));
@@ -79,10 +79,10 @@ impl TabController for CharacterTab {
                         >= credits_cost;
                     if is_skill_credits_enough {
                         verbs.push(Verb::new(
-                            AppAction::Custom(vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
+                            vec![AppAction::SendCommands(vec![ClientCommand::TrainSkill {
                                 skill,
                                 credits: credits_cost,
-                            }])]),
+                            }])],
                             'n',
                             "Train",
                         ));
@@ -99,10 +99,10 @@ impl TabController for CharacterTab {
                     >= credits_cost;
                 if is_skill_credits_enough {
                     verbs.push(Verb::new(
-                        AppAction::Custom(vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
+                        vec![AppAction::SendCommands(vec![ClientCommand::TrainSkill {
                             skill,
                             credits: credits_cost,
-                        }])]),
+                        }])],
                         'n',
                         "Train",
                     ));

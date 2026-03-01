@@ -2,12 +2,11 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
+use crate::actions::AppAction;
 use crate::state::GameState;
-use crate::ui::traits::TabController;
-use crate::types::UiMessage;
+use crate::types::{CommandTarget, Verb};
 use crate::ui::Interaction;
-use crate::actions::AppAction; use crate::types::Verb;
-use crate::types::CommandTarget;
+use crate::ui::traits::TabController;
 use holtburger_core::client::types::ClientCommand;
 
 pub struct EquipTab;
@@ -23,9 +22,9 @@ impl TabController for EquipTab {
         _interaction: &Option<Interaction>,
         index: usize,
     ) -> Vec<Verb> {
-        let mut verbs = vec![];
         let lines = get_lines(game);
         let target = self.get_target_at_index(game, index);
+        let mut verbs = Vec::new();
 
         if let Some(interaction) = &game.view.active_interaction
             && let CommandTarget::Entity(_e, _) = &target
@@ -41,11 +40,11 @@ impl TabController for EquipTab {
         match target {
             CommandTarget::Entity(e, slot) => {
                 verbs.extend([
-                    Verb::new(AppAction::Assess(e.guid), 'a', "Assess"),
+                    Verb::new(vec![AppAction::Assess(e.guid)], 'a', "Assess"),
                     Verb::new(
-                        AppAction::BeginInteraction(Interaction::Targeting {
+                        vec![AppAction::BeginInteraction(Interaction::Targeting {
                             target_guid: e.guid,
-                        }),
+                        })],
                         't',
                         "Target",
                     ),
@@ -59,22 +58,20 @@ impl TabController for EquipTab {
 
                 if is_here {
                     if let Some(_pguid) = game.data.player_guid {
-                        verbs.push(Verb::new(AppAction::Unequip(e.guid), 'q', "Unequip"));
+                        verbs.push(Verb::new(vec![AppAction::Unequip(e.guid)], 'q', "Unequip"));
                     }
                 } else if let Some(s) = slot {
                     verbs.push(Verb::new(
-                        AppAction::Custom(vec![UiMessage::SendCommands(vec![
-                            ClientCommand::GetAndWield {
-                                item: e.guid,
-                                slot: Some(s),
-                            },
-                        ])]),
+                        vec![AppAction::SendCommands(vec![ClientCommand::GetAndWield {
+                            item: e.guid,
+                            slot: Some(s),
+                        }])],
                         'e',
                         "Equip",
                     ));
                 }
 
-                verbs.push(Verb::new(AppAction::QueryDebugInfo(e.guid), 'g', "Debug"));
+                verbs.push(Verb::new(vec![AppAction::QueryDebugInfo(e.guid)], 'g', "Debug"));
                 verbs
             }
             _ => vec![],

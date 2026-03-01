@@ -3,12 +3,12 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
+use crate::actions::AppAction;
 use crate::state::GameState;
 use crate::ui::traits::TabController;
-use crate::types::UiMessage;
 use crate::ui::Interaction;
 use crate::types::ContextView;
-use crate::actions::AppAction; use crate::types::Verb;
+use crate::types::Verb;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 
@@ -31,10 +31,10 @@ impl TabController for SpellsTab {
         if let CommandTarget::Spell(spell_id) = target {
             if !game.data.is_wielding_caster() {
                 verbs.push(Verb::new(
-                    AppAction::Log(
+                    vec![AppAction::Log(
                         crate::state::ChatMessageKind::Error,
                         "You must be wielding a caster to cast spells!".to_string(),
-                    ),
+                    )],
                     'c',
                     "Cast (Need Caster)",
                 ));
@@ -42,31 +42,31 @@ impl TabController for SpellsTab {
                 if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic
                 {
                     verbs.push(Verb::new(
-                        AppAction::SetCombatMode(holtburger_protocol::messages::combat::CombatMode::Magic),
+                        vec![AppAction::SetCombatMode(holtburger_protocol::messages::combat::CombatMode::Magic)],
                         'c',
                         "Switch to Magic",
                     ));
                 } else if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
                     verbs.push(Verb::new(
-                        AppAction::Custom(vec![ // Still need Custom for combined Cast+Cancel
-                            UiMessage::SendCommands(vec![ClientCommand::CastTargetedSpell {
+                        vec![
+                            AppAction::SendCommands(vec![ClientCommand::CastTargetedSpell {
                                 spell_id,
                                 target: target_guid,
                             }]),
-                            UiMessage::CancelInteraction,
-                        ]),
+                            AppAction::CancelInteraction,
+                        ],
                         'c',
                         "Cast on target",
                     ));
                 } else if let Some(player_guid) = game.data.player_guid {
                     verbs.push(Verb::new(
-                        AppAction::CastSpell(spell_id, Some(player_guid)),
+                        vec![AppAction::CastSpell(spell_id, Some(player_guid))],
                         'c',
                         "Cast on self",
                     ));
                 } else {
                     verbs.push(Verb::new(
-                        AppAction::CastSpell(spell_id, None),
+                        vec![AppAction::CastSpell(spell_id, None)],
                         'c',
                         "Cast",
                     ));
@@ -74,7 +74,7 @@ impl TabController for SpellsTab {
             }
 
             verbs.push(Verb::new(
-                AppAction::ViewDetails(ContextView::Spell(spell_id)),
+                vec![AppAction::ViewDetails(ContextView::Spell(spell_id))],
                 'd',
                 "Details",
             ));
@@ -92,10 +92,11 @@ impl TabController for SpellsTab {
                 .cloned()
                 .unwrap_or_else(|| "".to_string())
         });
-        spells
-            .get(index)
-            .map(|&sid| CommandTarget::Spell(sid))
-            .unwrap_or(CommandTarget::None)
+        if let Some(&sid) = spells.get(index) {
+            CommandTarget::Spell(sid)
+        } else {
+            CommandTarget::None
+        }
     }
 
     fn get_item_count(&self, game: &GameState) -> usize {

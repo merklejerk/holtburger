@@ -49,19 +49,19 @@ impl TabController for InventoryTab {
             // Handle Interactions
             match interaction {
                 Some(Interaction::Healing { item_guid }) => {
-                    if e.guid == *item_guid {
-                        if let Some(pguid) = player_guid {
-                            let msgs = vec![
-                                crate::ui::UiMessage::SendCommands(vec![
-                                    ClientCommand::UseWithTarget {
-                                        item: *item_guid,
-                                        target: pguid,
-                                    },
-                                ]),
-                                crate::ui::UiMessage::CancelInteraction,
-                            ];
-                            verbs.push(Verb::new(msgs, '\r', "Heal yourself".to_string()));
-                        }
+                    if e.guid == *item_guid
+                        && let Some(pguid) = player_guid
+                    {
+                        let msgs = vec![
+                            crate::ui::UiMessage::SendCommands(vec![
+                                ClientCommand::UseWithTarget {
+                                    item: *item_guid,
+                                    target: pguid,
+                                },
+                            ]),
+                            crate::ui::UiMessage::CancelInteraction,
+                        ];
+                        verbs.push(Verb::new(msgs, '\r', "Heal yourself".to_string()));
                     }
                     return verbs;
                 }
@@ -272,12 +272,14 @@ impl TabController for InventoryTab {
                     'o',
                     "Offer",
                 ));
-            } else if game.data.vendor.is_some() && game.data.can_sell_to_vendor(e.guid) {
+            } else if let Some(vendor) = game.data.vendor.as_ref()
+                && game.data.can_sell_to_vendor(e.guid)
+            {
                 verbs.push(Verb::new(
                     vec![
                         crate::ui::UiMessage::SendCommands(vec![
                             ClientCommand::Sell {
-                                vendor: game.data.vendor.as_ref().unwrap().vendor_guid,
+                                vendor: vendor.vendor_guid,
                                 items: vec![
                                     holtburger_protocol::messages::trade::actions::ItemProfileActionData {
                                         object_guid: e.guid,

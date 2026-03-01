@@ -25,9 +25,5 @@ pub fn render_scrollbar(f: &mut Frame, area: Rect, content_length: usize, offset
         // Adjust viewport content length based on the area height
         .viewport_content_length(area.height as usize);
 
-    f.render_stateful_widget(
-        scrollbar,
-        area,
-        &mut scrollbar_state,
-    );
+    f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 }

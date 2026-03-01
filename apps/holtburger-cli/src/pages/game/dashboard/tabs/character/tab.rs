@@ -89,25 +89,23 @@ impl TabController for CharacterTab {
                     }
                 }
             }
-            CommandTarget::Stat(st, None, Some(credits_cost)) => {
-                if let StatType::Skill(skill) = st {
-                    let is_skill_credits_enough = game
-                        .data
-                        .level_info
-                        .as_ref()
-                        .map(|info| info.unspent_skill_points)
-                        .unwrap_or(0)
-                        >= credits_cost;
-                    if is_skill_credits_enough {
-                        verbs.push(Verb::new(
-                            vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
-                                skill,
-                                credits: credits_cost,
-                            }])],
-                            'n',
-                            "Train",
-                        ));
-                    }
+            CommandTarget::Stat(StatType::Skill(skill), None, Some(credits_cost)) => {
+                let is_skill_credits_enough = game
+                    .data
+                    .level_info
+                    .as_ref()
+                    .map(|info| info.unspent_skill_points)
+                    .unwrap_or(0)
+                    >= credits_cost;
+                if is_skill_credits_enough {
+                    verbs.push(Verb::new(
+                        vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
+                            skill,
+                            credits: credits_cost,
+                        }])],
+                        'n',
+                        "Train",
+                    ));
                 }
             }
             _ => {}

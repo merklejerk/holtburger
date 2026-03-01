@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::update::UpdateResult;
+use crate::update::UpdateResult;
 use crate::types::{DashboardTab, TradeFocus};
 
 /// Standard dashboard input handling (navigation, verbs).

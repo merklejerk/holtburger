@@ -12,7 +12,7 @@ use crate::types::FocusedPane;
 use crate::ui::get_layout;
 use crate::ui::layout::PULSE_PANEL_WIDTH;
 use crate::ui::theme::{pane_block, pane_title_style};
-use crate::ui::update::UpdateResult;
+use crate::update::UpdateResult;
 use crate::ui::widgets::hud::pulse::render_pulse_panel;
 use crate::ui::widgets::hud::status::render_status_bar;
 use crate::ui::widgets::panels::dynamic::render_dynamic_pane;

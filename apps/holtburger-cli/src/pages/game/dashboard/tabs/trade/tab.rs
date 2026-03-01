@@ -54,7 +54,7 @@ impl TabController for TradeTab {
             match target {
                 CommandTarget::VendorItem(v) => {
                     verbs.push(Verb::new(
-                        AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Buy {
+                        AppAction::Custom(vec![crate::types::UiMessage::SendCommands(vec![ClientCommand::Buy {
                             vendor: vendor.vendor_guid,
                             items: vec![holtburger_protocol::messages::trade::actions::ItemProfileActionData {
                                 object_guid: v.guid,
@@ -79,7 +79,7 @@ impl TabController for TradeTab {
         if let Some(trade) = &game.data.trade {
             if trade.self_side.accepted {
                 verbs.push(Verb::new(
-                    AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
+                    AppAction::Custom(vec![crate::types::UiMessage::SendCommands(vec![
                         ClientCommand::DeclineTrade,
                     ])]),
                     'c',
@@ -87,7 +87,7 @@ impl TabController for TradeTab {
                 ));
             } else {
                 verbs.push(Verb::new(
-                    AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
+                    AppAction::Custom(vec![crate::types::UiMessage::SendCommands(vec![
                         ClientCommand::AcceptTrade,
                     ])]),
                     'c',
@@ -95,7 +95,7 @@ impl TabController for TradeTab {
                 ));
             }
             verbs.push(Verb::new(
-                AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
+                AppAction::Custom(vec![crate::types::UiMessage::SendCommands(vec![
                     ClientCommand::ResetTrade,
                 ])]),
                 'r',
@@ -105,11 +105,11 @@ impl TabController for TradeTab {
 
         if game.data.trade.is_some() || game.data.vendor.is_some() {
             let action = if game.data.trade.is_some() {
-                AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
+                AppAction::Custom(vec![crate::types::UiMessage::SendCommands(vec![
                     ClientCommand::CloseTrade,
                 ])])
             } else {
-                AppAction::Custom(vec![crate::ui::UiMessage::ClearVendor])
+                AppAction::Custom(vec![crate::types::UiMessage::ClearVendor])
             };
             verbs.push(Verb::new(action, 'x', "Exit"));
         }

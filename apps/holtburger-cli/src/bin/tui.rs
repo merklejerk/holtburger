@@ -144,7 +144,7 @@ async fn main() -> Result<()> {
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
-    let (ui_message_tx, mut ui_message_rx) = mpsc::unbounded_channel::<ui::UiMessage>();
+    let (ui_message_tx, mut ui_message_rx) = mpsc::unbounded_channel::<holtburger_cli::types::UiMessage>();
 
     let chat_log = if let Some(path) = &args.log {
         match File::create(path) {

@@ -3,7 +3,7 @@ use holtburger_core::client::types::ClientCommand;
 #[derive(Debug, Default)]
 pub struct UpdateResult {
     pub commands: Vec<ClientCommand>,
-    pub ui_messages: Vec<crate::ui::UiMessage>,
+    pub ui_messages: Vec<crate::types::UiMessage>,
     pub needs_redraw: bool,
 }
 
@@ -17,7 +17,7 @@ impl UpdateResult {
         self
     }
 
-    pub fn with_ui_messages(mut self, msgs: Vec<crate::ui::UiMessage>) -> Self {
+    pub fn with_ui_messages(mut self, msgs: Vec<crate::types::UiMessage>) -> Self {
         self.ui_messages.extend(msgs);
         self
     }

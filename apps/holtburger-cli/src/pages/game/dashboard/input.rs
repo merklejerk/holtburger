@@ -99,7 +99,7 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             };
 
             let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
-            Some(UpdateResult::new().with_ui_messages(verb.execute()))
+            Some(UpdateResult::new().with_action(verb.action))
         }
         _ => None,
     }

@@ -47,7 +47,7 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        result = self.page.handle_input(
+        let mut page_result = self.page.handle_input(
             key,
             &mut self.input,
             &mut self.input_history,
@@ -56,13 +56,16 @@ impl AppState {
             width,
             &main_chunks,
         );
-        while !result.ui_messages.is_empty() {
-            let messages: Vec<_> = result.ui_messages.drain(..).collect();
-            for message in messages {
-                let msg_result = self.handle_ui_message(message);
-                result.merge(msg_result);
+
+        while !page_result.actions.is_empty() {
+            let actions: Vec<_> = page_result.actions.drain(..).collect();
+            for action in actions {
+                let action_result = self.handle_app_action(action);
+                result.merge(action_result);
             }
         }
+        result.merge(page_result);
+
         self.refresh_context_buffer();
         // Eagerly transition to GameState when a character is selected
         // This ensures we are listening for character data (vitals, skills)
@@ -99,14 +102,16 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        result = self.page.handle_mouse(mouse, &mut self.chat, &main_chunks);
-        while !result.ui_messages.is_empty() {
-            let messages: Vec<_> = result.ui_messages.drain(..).collect();
-            for message in messages {
-                let msg_result = self.handle_ui_message(message);
-                result.merge(msg_result);
+        let mut page_result = self.page.handle_mouse(mouse, &mut self.chat, &main_chunks);
+        while !page_result.actions.is_empty() {
+            let actions: Vec<_> = page_result.actions.drain(..).collect();
+            for action in actions {
+                let action_result = self.handle_app_action(action);
+                result.merge(action_result);
             }
         }
+        result.merge(page_result);
+
         self.refresh_context_buffer();
         result
     }
@@ -445,8 +450,8 @@ chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
                     }
                     if command == "/info" {
                         result
-                            .ui_messages
-                            .push(crate::types::UiMessage::DisplayClientInfo); //
+                            .actions
+                            .push(crate::actions::AppAction::DisplayClientInfo);
 
                         input_history.push(command.clone());
                         *history_index = None;

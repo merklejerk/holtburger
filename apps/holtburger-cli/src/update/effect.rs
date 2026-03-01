@@ -1,9 +1,10 @@
 use holtburger_core::client::types::ClientCommand;
+use crate::actions::AppAction;
 
 #[derive(Debug, Default)]
 pub struct UpdateResult {
     pub commands: Vec<ClientCommand>,
-    pub ui_messages: Vec<crate::types::UiMessage>,
+    pub actions: Vec<AppAction>,
     pub needs_redraw: bool,
 }
 
@@ -17,15 +18,15 @@ impl UpdateResult {
         self
     }
 
-    pub fn with_ui_messages(mut self, msgs: Vec<crate::types::UiMessage>) -> Self {
-        self.ui_messages.extend(msgs);
+    pub fn with_action(mut self, action: AppAction) -> Self {
+        self.actions.push(action);
         self
     }
 
     pub fn redraw() -> Self {
         Self {
             commands: Vec::new(),
-            ui_messages: Vec::new(),
+            actions: Vec::new(),
             needs_redraw: true,
         }
     }
@@ -33,14 +34,14 @@ impl UpdateResult {
     pub fn commands(commands: Vec<ClientCommand>) -> Self {
         Self {
             commands,
-            ui_messages: Vec::new(),
+            actions: Vec::new(),
             needs_redraw: false,
         }
     }
 
     pub fn merge(&mut self, other: UpdateResult) {
         self.commands.extend(other.commands);
-        self.ui_messages.extend(other.ui_messages);
+        self.actions.extend(other.actions);
         self.needs_redraw |= other.needs_redraw;
     }
 }

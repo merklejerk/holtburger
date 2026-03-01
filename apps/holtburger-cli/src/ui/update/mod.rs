@@ -85,7 +85,7 @@ impl AppState {
             crate::ui::UiMessage::ChangeContextView(view) => {
                 if let Some(game) = self.game_option_mut() {
                     game.view.context_view = view;
-                    game.view.focused_pane = crate::ui::FocusedPane::Context;
+                    game.view.context_scroll_offset = 0;
                     result.needs_redraw = true;
                     self.refresh_context_buffer();
                 }
@@ -94,7 +94,7 @@ impl AppState {
                 if let Some(game) = self.game_option_mut() {
                     game.view.current_debug_guid = guid;
                     game.view.context_view = crate::ui::ContextView::Custom;
-                    game.view.focused_pane = crate::ui::FocusedPane::Context;
+                    game.view.context_scroll_offset = 0;
                     result.needs_redraw = true;
                     self.refresh_context_buffer();
                 }

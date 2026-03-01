@@ -12,6 +12,7 @@ use holtburger_world::entity::Entity;
 
 pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game);
+    let content_len = items.len();
 
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
@@ -20,6 +21,8 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let selected_index = game.dashboard.selected_index();
     game.dashboard.list_state().select(Some(selected_index));
     f.render_stateful_widget(dashboard_list, area, game.dashboard.list_state());
+    let offset = game.dashboard.list_state().offset();
+    crate::ui::widgets::scroll::render_scrollbar(f, area, content_len, offset);
 
     let height = area.height as usize;
     game.dashboard.last_height = height;

@@ -49,17 +49,19 @@ impl TabController for InventoryTab {
             // Handle Interactions
             match interaction {
                 Some(Interaction::Healing { item_guid }) => {
-                    if e.flags.intersects(ObjectDescriptionFlag::PLAYER) {
-                        let msgs = vec![
-                            crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::UseWithTarget {
-                                    item: *item_guid,
-                                    target: e.guid,
-                                },
-                            ]),
-                            crate::ui::UiMessage::CancelInteraction,
-                        ];
-                        verbs.push(Verb::new(msgs, '\r', "Heal yourself".to_string()));
+                    if e.guid == *item_guid {
+                        if let Some(pguid) = player_guid {
+                            let msgs = vec![
+                                crate::ui::UiMessage::SendCommands(vec![
+                                    ClientCommand::UseWithTarget {
+                                        item: *item_guid,
+                                        target: pguid,
+                                    },
+                                ]),
+                                crate::ui::UiMessage::CancelInteraction,
+                            ];
+                            verbs.push(Verb::new(msgs, '\r', "Heal yourself".to_string()));
+                        }
                     }
                     return verbs;
                 }
@@ -166,7 +168,8 @@ impl TabController for InventoryTab {
             ));
 
             match class {
-                EntityClass::Tool
+                EntityClass::Unknown
+                | EntityClass::Tool
                 | EntityClass::Container
                 | EntityClass::Consumable
                 | EntityClass::Key

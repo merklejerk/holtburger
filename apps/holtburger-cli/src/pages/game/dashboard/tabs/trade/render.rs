@@ -89,6 +89,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             ),
         };
 
+        let self_content_len = self_items.len();
         let mut self_list = List::new(self_items).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -107,6 +108,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         }
 
         f.render_stateful_widget(self_list, self_area, self_state);
+        let offset = self_state.offset();
+        crate::ui::widgets::scroll::render_scrollbar(f, self_area, self_content_len, offset);
 
         let selected_index = game.dashboard.selected_index();
 
@@ -163,6 +166,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             ),
         };
 
+        let partner_content_len = partner_items.len();
         let mut partner_list = List::new(partner_items).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -181,6 +185,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         }
 
         f.render_stateful_widget(partner_list, partner_area, partner_state);
+        let offset = partner_state.offset();
+        crate::ui::widgets::scroll::render_scrollbar(f, partner_area, partner_content_len, offset);
     } else if let Some(vendor) = &game.data.vendor {
         let vendor_name = game
             .data
@@ -278,6 +284,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             })
             .collect();
 
+        let content_len = items.len();
         let list = List::new(items)
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
@@ -287,6 +294,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         game.dashboard.last_height = list_area.height as usize;
 
         f.render_stateful_widget(list, list_area, game.dashboard.list_state());
+        let offset = game.dashboard.list_state().offset();
+        crate::ui::widgets::scroll::render_scrollbar(f, list_area, content_len, offset);
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let horizontal_margin = 2;

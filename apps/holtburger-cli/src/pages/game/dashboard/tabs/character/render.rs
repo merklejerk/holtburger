@@ -68,6 +68,7 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     }
 
     let items = get_stats_list_items(game);
+    let content_len = items.len();
 
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
@@ -76,6 +77,8 @@ pub fn render_character_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let selected_index = game.dashboard.selected_index();
     game.dashboard.list_state().select(Some(selected_index));
     f.render_stateful_widget(dashboard_list, bottom_area, game.dashboard.list_state());
+    let offset = game.dashboard.list_state().offset();
+    crate::ui::widgets::scroll::render_scrollbar(f, bottom_area, content_len, offset);
 
     let height = bottom_area.height as usize;
     game.dashboard.last_height = height;

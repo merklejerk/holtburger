@@ -1,4 +1,4 @@
-use crate::ui::types::CommandTarget;
+use crate::types::CommandTarget;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -7,7 +7,8 @@ use super::render::render_inventory_tab;
 use crate::state::GameState;
 use crate::ui::traits::TabController;
 use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
-use crate::ui::{Interaction, UiMessage, Verb, AppAction};
+use crate::ui::{Interaction, UiMessage};
+use crate::actions::AppAction; use crate::types::Verb;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;

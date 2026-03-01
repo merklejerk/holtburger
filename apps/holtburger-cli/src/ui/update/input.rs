@@ -5,7 +5,7 @@ use holtburger_world::context::WorldContextExt;
 use ratatui::layout::Rect;
 
 use crate::state::{AppState, ChatState, GameState, Page, SelectionState};
-use crate::ui::FocusedPane;
+use crate::types::{FocusedPane, SCROLL_STEP};
 use crate::ui::update::UpdateResult;
 
 impl AppState {
@@ -181,7 +181,7 @@ impl GameState {
                     && mouse.column >= main_chunks[1].x
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
-                    chat.scroll_offset = chat.scroll_offset.saturating_add(crate::ui::SCROLL_STEP);
+chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
 
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
@@ -192,7 +192,7 @@ impl GameState {
                     self.view.context_scroll_offset = self
                         .view
                         .context_scroll_offset
-                        .saturating_add(crate::ui::SCROLL_STEP);
+                        .saturating_add(SCROLL_STEP);
 
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[0].y
@@ -211,7 +211,7 @@ impl GameState {
                     && mouse.column >= main_chunks[1].x
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
-                    chat.scroll_offset = chat.scroll_offset.saturating_sub(crate::ui::SCROLL_STEP);
+                    chat.scroll_offset = chat.scroll_offset.saturating_sub(SCROLL_STEP);
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
                     && mouse.row < main_chunks[2].y + main_chunks[2].height
@@ -221,7 +221,7 @@ impl GameState {
                     self.view.context_scroll_offset = self
                         .view
                         .context_scroll_offset
-                        .saturating_sub(crate::ui::SCROLL_STEP);
+                        .saturating_sub(SCROLL_STEP);
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[0].y
                     && mouse.row < main_chunks[0].y + main_chunks[0].height

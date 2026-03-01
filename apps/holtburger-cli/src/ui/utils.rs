@@ -1,3 +1,4 @@
+use crate::types::FocusedPane;
 use crate::state::GameState;
 use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
@@ -139,11 +140,11 @@ pub fn render_verb_bar(game: &GameState) -> Paragraph<'static> {
 }
 
 pub fn get_adjacent_pane(
-    current: crate::ui::FocusedPane,
+    current: FocusedPane,
     width: u16,
     active_interaction: bool,
     delta: i32,
-) -> crate::ui::FocusedPane {
+) -> FocusedPane {
     let order = get_pane_order(width);
     let n = order.len() as i32;
     let current_idx = order.iter().position(|&p| p == current).unwrap_or(0) as i32;
@@ -151,29 +152,29 @@ pub fn get_adjacent_pane(
     let mut next_idx = (current_idx + delta).rem_euclid(n);
 
     // Skip dynamic if not moving anything
-    if order[next_idx as usize] == crate::ui::FocusedPane::Dynamic && !active_interaction {
+    if order[next_idx as usize] == FocusedPane::Dynamic && !active_interaction {
         next_idx = (next_idx + delta).rem_euclid(n);
     }
 
     order[next_idx as usize]
 }
 
-fn get_pane_order(width: u16) -> [crate::ui::FocusedPane; 4] {
+fn get_pane_order(width: u16) -> [FocusedPane; 4] {
     if width < crate::ui::layout::WIDTH_BREAKPOINT {
         // Portrait: Dashboard -> Context -> Dynamic -> Chat
         [
-            crate::ui::FocusedPane::Dashboard,
-            crate::ui::FocusedPane::Context,
-            crate::ui::FocusedPane::Dynamic,
-            crate::ui::FocusedPane::Chat,
+            FocusedPane::Dashboard,
+            FocusedPane::Context,
+            FocusedPane::Dynamic,
+            FocusedPane::Chat,
         ]
     } else {
         // Landscape: Dashboard -> Chat -> Context -> Dynamic
         [
-            crate::ui::FocusedPane::Dashboard,
-            crate::ui::FocusedPane::Chat,
-            crate::ui::FocusedPane::Context,
-            crate::ui::FocusedPane::Dynamic,
+            FocusedPane::Dashboard,
+            FocusedPane::Chat,
+            FocusedPane::Context,
+            FocusedPane::Dynamic,
         ]
     }
 }

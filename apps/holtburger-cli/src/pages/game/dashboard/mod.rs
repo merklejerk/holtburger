@@ -1,8 +1,9 @@
 use crate::state::GameState;
 use crate::ui::theme::pane_block;
 use crate::ui::traits::TabController;
-use crate::ui::types::CommandTarget;
-use crate::ui::{DashboardTab, FocusedPane};
+use crate::types::CommandTarget;
+use crate::types::{DashboardTab, FocusedPane};
+use crate::types::Verb;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -12,7 +13,6 @@ pub mod input;
 pub mod tabs;
 
 pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
-pub use crate::ui::types::Verb;
 
 pub mod assess;
 pub mod debug;

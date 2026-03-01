@@ -1,11 +1,13 @@
-use crate::ui::types::CommandTarget;
+use crate::types::CommandTarget;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
 use crate::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::{Interaction, Verb, AppAction, UiMessage};
+use crate::ui::{Interaction, UiMessage};
+use crate::types::ContextView;
+use crate::actions::AppAction; use crate::types::Verb;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 
@@ -71,7 +73,7 @@ impl TabController for SpellsTab {
             }
 
             verbs.push(Verb::new(
-                AppAction::ViewDetails(crate::ui::ContextView::Spell(spell_id)),
+                AppAction::ViewDetails(ContextView::Spell(spell_id)),
                 'd',
                 "Details",
             ));

@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use crate::ui::ContextView;
+use crate::types::ContextView;
 use holtburger_core::ClientViewEvent;
 use holtburger_world::entity::Entity;
 

@@ -1,4 +1,4 @@
-use crate::ui::types::{ContextView, FocusedPane, TradeFocus};
+use crate::types::{ContextView, FocusedPane, TradeFocus};
 use holtburger_common::Guid;
 use ratatui::text::Line;
 

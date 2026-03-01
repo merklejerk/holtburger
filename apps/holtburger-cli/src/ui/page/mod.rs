@@ -8,7 +8,7 @@ use crate::pages::game::panels::chat::render_chat_pane;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::state::NetStats;
 use crate::state::{ChatState, GameState, Page, SelectionState};
-use crate::ui::FocusedPane;
+use crate::types::FocusedPane;
 use crate::ui::get_layout;
 use crate::ui::layout::PULSE_PANEL_WIDTH;
 use crate::ui::theme::{pane_block, pane_title_style};

@@ -1,5 +1,5 @@
 use crate::state::GameState;
-use crate::ui::FocusedPane;
+use crate::types::FocusedPane;
 use crate::ui::theme::{pane_block, pane_title_style};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

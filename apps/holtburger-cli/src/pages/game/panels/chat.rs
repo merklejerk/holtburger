@@ -262,5 +262,13 @@ pub fn render_chat_pane(f: &mut Frame, chat: &mut ChatState, is_focused: bool, a
     );
     f.render_widget(chat_list, area);
 
-    crate::ui::widgets::scroll::render_scrollbar(f, area.inner(&ratatui::layout::Margin { vertical: 1, horizontal: 0 }), total_lines, start);
+    crate::ui::widgets::scroll::render_scrollbar(
+        f,
+        area.inner(&ratatui::layout::Margin {
+            vertical: 1,
+            horizontal: 0,
+        }),
+        total_lines,
+        start,
+    );
 }

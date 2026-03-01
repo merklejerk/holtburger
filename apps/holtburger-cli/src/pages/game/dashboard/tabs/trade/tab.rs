@@ -4,9 +4,10 @@ use ratatui::layout::Rect;
 
 use super::render::render_trade_tab;
 use crate::state::GameState;
-use crate::ui::{Interaction, Verb, AppAction};
+use crate::ui::{Interaction};
+use crate::actions::AppAction; use crate::types::Verb;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, TradeFocus};
+use crate::types::{CommandTarget, TradeFocus};
 
 pub struct TradeTab;
 

@@ -1,4 +1,5 @@
 use crate::state::ChatMessageKind;
+use crate::types::ContextView;
 use crate::ui::Interaction;
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
@@ -12,7 +13,7 @@ pub enum UiMessage {
     CancelInteraction,
     AddLog(ChatMessageKind, String),
     SendCommands(Vec<ClientCommand>),
-    ChangeContextView(crate::ui::ContextView),
+    ChangeContextView(ContextView),
     RequestDebugContext(Option<Guid>),
     ClearVendor,
     DisplayClientInfo,

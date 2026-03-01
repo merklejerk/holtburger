@@ -4,8 +4,9 @@ use ratatui::layout::Rect;
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::state::GameState;
 use crate::ui::traits::TabController;
-use crate::ui::{Interaction, Verb, AppAction, UiMessage};
-use crate::ui::types::CommandTarget;
+use crate::ui::{Interaction, UiMessage};
+use crate::actions::AppAction; use crate::types::Verb;
+use crate::types::CommandTarget;
 use holtburger_core::client::types::ClientCommand;
 
 pub struct EquipTab;

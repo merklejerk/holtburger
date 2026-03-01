@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::update::UpdateResult;
-use crate::ui::{DashboardTab, TradeFocus};
+use crate::types::{DashboardTab, TradeFocus};
 
 /// Standard dashboard input handling (navigation, verbs).
 pub fn handle_common_dashboard_input<T: TabController + ?Sized>(

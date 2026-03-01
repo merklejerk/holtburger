@@ -3,9 +3,10 @@ use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::state::GameState;
-use crate::ui::{Interaction, UiMessage, Verb, AppAction};
+use crate::ui::{Interaction, UiMessage};
+use crate::actions::AppAction; use crate::types::Verb;
 use crate::ui::traits::TabController;
-use crate::ui::types::{CommandTarget, StatType};
+use crate::types::{CommandTarget, StatType};
 use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;

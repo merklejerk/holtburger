@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::widgets::{List, ListItem};
 
-use crate::ui::ContextView;
+use crate::types::ContextView;
 use crate::ui::theme::{pane_block, pane_title_style};
 
 // In a fully dismantled view state, Context State should be passed directly here.

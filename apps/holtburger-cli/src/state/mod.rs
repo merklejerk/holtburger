@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
+use crate::types::ContextView;
 use crate::ui::widgets::panels::modal::Modal;
 
 pub mod game;
@@ -98,7 +99,7 @@ impl AppState {
         let (tab, view_is_default) = if let Some(game) = self.game_option() {
             (
                 game.dashboard.active_tab,
-                game.view.context_view == crate::ui::ContextView::Default,
+                game.view.context_view == ContextView::Default,
             )
         } else {
             return;

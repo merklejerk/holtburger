@@ -9,7 +9,7 @@ pub mod world;
 use crate::state::AppState;
 use crate::state::ChatMessageKind;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
-use crate::ui::types::AppEvent;
+use crate::types::{AppEvent, ContextView};
 use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 
@@ -93,7 +93,7 @@ impl AppState {
             crate::ui::UiMessage::RequestDebugContext(guid) => {
                 if let Some(game) = self.game_option_mut() {
                     game.view.current_debug_guid = guid;
-                    game.view.context_view = crate::ui::ContextView::Custom;
+                    game.view.context_view = ContextView::Custom;
                     game.view.context_scroll_offset = 0;
                     result.needs_redraw = true;
                     self.refresh_context_buffer();

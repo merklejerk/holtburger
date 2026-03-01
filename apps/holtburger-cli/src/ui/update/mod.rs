@@ -9,28 +9,28 @@ pub mod world;
 use crate::state::AppState;
 use crate::state::ChatMessageKind;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
-use crate::ui::types::AppAction;
+use crate::ui::types::AppEvent;
 use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 
 pub use effect::UpdateResult;
 
 impl AppState {
-    pub fn handle_action(&mut self, action: AppAction) -> UpdateResult {
+    pub fn handle_action(&mut self, action: AppEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         match action {
-            AppAction::Tick(elapsed) => {
+            AppEvent::Tick(elapsed) => {
                 result = self.update_tick(elapsed);
             }
-            AppAction::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
+            AppEvent::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
                 result = self.handle_key_press(key, width, height, main_chunks, dynamic_chunk);
                 result.needs_redraw = true; // Input always redraws
             }
-            AppAction::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
+            AppEvent::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
                 result = self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
                 result.needs_redraw = true;
             }
-            AppAction::ReceivedViewEvent(event) => {
+            AppEvent::ReceivedViewEvent(event) => {
                 let should_redraw =
                     !matches!(event, holtburger_core::ClientViewEvent::LogMessage(_));
                 self.handle_client_view_event(event);

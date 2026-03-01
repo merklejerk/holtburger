@@ -1,5 +1,5 @@
+use crate::state::AppState;
 use crate::ui::DashboardTab;
-use crate::ui::state::AppState;
 use holtburger_core::ClientViewEvent;
 
 impl AppState {

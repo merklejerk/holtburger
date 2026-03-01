@@ -149,6 +149,12 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
+- [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
+- [ ] Splitting is broken.
+- [ ] Netstats is broken (not showing incoming activity).
+- [ ] Heal verb/interaction is missing/broken.
+- [ ] Cast verb is clearing target interaction.
+- [ ] Trade tab lets you add item already being traded. 
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

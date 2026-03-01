@@ -1,5 +1,5 @@
-use crate::ui::state::AppState;
-use crate::ui::state::ChatMessageKind;
+use crate::state::AppState;
+use crate::state::ChatMessageKind;
 use holtburger_core::ClientViewEvent;
 
 impl AppState {

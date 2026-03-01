@@ -2,9 +2,9 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
+use crate::state::GameState;
 use crate::ui::Interaction;
 use crate::ui::Verb;
-use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;
 use holtburger_core::client::types::ClientCommand;

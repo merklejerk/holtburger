@@ -6,9 +6,8 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use directories::ProjectDirs;
-use holtburger_cli::ui::{
-    self, AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState,
-};
+use holtburger_cli::state::{AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState};
+use holtburger_cli::ui;
 use holtburger_core::{Client, ClientCommand, ClientState, ClientViewEvent, RetryState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;

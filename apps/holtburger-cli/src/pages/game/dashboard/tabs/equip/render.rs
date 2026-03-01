@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
 use super::super::classification::{classify_entity, get_entity_color};
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use crate::ui::theme;
 use crate::ui::utils::format_item_name;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};

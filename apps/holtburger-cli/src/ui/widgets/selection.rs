@@ -1,4 +1,4 @@
-use crate::ui::state::SelectionState;
+use crate::state::SelectionState;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};

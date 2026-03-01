@@ -1,4 +1,4 @@
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use holtburger_world::stats::VitalType;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

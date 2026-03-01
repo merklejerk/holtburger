@@ -2,10 +2,10 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
+use crate::state::GameState;
 use crate::ui::Interaction;
 use crate::ui::UiMessage;
 use crate::ui::Verb;
-use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, StatType};
 use holtburger_core::client::types::ClientCommand;

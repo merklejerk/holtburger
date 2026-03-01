@@ -4,8 +4,8 @@ use holtburger_core::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 use ratatui::layout::Rect;
 
+use crate::state::{AppState, ChatState, GameState, Page, SelectionState};
 use crate::ui::FocusedPane;
-use crate::ui::state::{AppState, ChatState, GameState, Page, SelectionState};
 use crate::ui::update::UpdateResult;
 
 impl AppState {
@@ -74,7 +74,7 @@ impl AppState {
                 && *idx <= sel.characters.len()
             {
                 let char_info = &sel.characters[*idx - 1];
-                self.page = Page::Game(Box::new(crate::ui::state::GameState::new(
+                self.page = Page::Game(Box::new(crate::state::GameState::new(
                     char_info.guid,
                     char_info.name.clone(),
                     self.world_name.clone(),
@@ -454,7 +454,7 @@ impl GameState {
                         return result.with_redraw(true);
                     }
                     if command == "/help" {
-                        use crate::ui::state::ChatMessageKind;
+                        use crate::state::ChatMessageKind;
                         chat.log(
                             ChatMessageKind::System,
                             "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>, /stack <src> <dst> [amount], /split <item> <amount>".to_string()

@@ -1,5 +1,5 @@
-use crate::ui::state::ChatMessageKind;
-use crate::ui::state::{AppState, GameState, Page, SelectionState};
+use crate::state::ChatMessageKind;
+use crate::state::{AppState, GameState, Page, SelectionState};
 use holtburger_core::{ClientState, ClientViewEvent, ErrorReason};
 use holtburger_protocol::errors::CharacterError;
 

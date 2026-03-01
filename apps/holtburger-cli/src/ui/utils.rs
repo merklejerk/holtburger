@@ -1,4 +1,4 @@
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
 use ratatui::text::{Line, Span};

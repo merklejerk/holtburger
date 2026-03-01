@@ -1,4 +1,4 @@
-use crate::ui::state::AppState;
+use crate::state::AppState;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};

@@ -1,5 +1,5 @@
+use crate::state::ChatMessageKind;
 use crate::ui::Interaction;
-use crate::ui::state::ChatMessageKind;
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 

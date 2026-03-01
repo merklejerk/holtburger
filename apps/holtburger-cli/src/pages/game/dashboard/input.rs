@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use crate::ui::traits::TabController;
 use crate::ui::update::UpdateResult;
 use crate::ui::{DashboardTab, TradeFocus};

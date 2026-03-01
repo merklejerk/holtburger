@@ -3,9 +3,9 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
+use crate::state::GameState;
 use crate::ui::Interaction;
 use crate::ui::Verb;
-use crate::ui::state::GameState;
 use crate::ui::traits::TabController;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;
@@ -30,7 +30,7 @@ impl TabController for SpellsTab {
             if !game.data.is_wielding_caster() {
                 verbs.push(Verb::new(
                     vec![crate::ui::UiMessage::AddLog(
-                        crate::ui::state::ChatMessageKind::Error,
+                        crate::state::ChatMessageKind::Error,
                         "You must be wielding a caster to cast spells!".to_string(),
                     )],
                     'c',

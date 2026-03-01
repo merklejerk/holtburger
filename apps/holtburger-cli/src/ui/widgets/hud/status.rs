@@ -1,4 +1,4 @@
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use crate::ui::widgets::hud::vitals::render_vitals;
 use holtburger_common::time::*;
 use holtburger_core::RetryState;

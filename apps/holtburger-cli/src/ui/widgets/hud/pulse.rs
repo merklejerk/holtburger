@@ -1,4 +1,4 @@
-use crate::ui::NetStats;
+use crate::state::NetStats;
 use holtburger_core::ClientState;
 use ratatui::Frame;
 use ratatui::layout::Rect;

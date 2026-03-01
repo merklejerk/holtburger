@@ -1,6 +1,6 @@
 use crate::pages::game::dashboard::{assess, debug, input::handle_common_dashboard_input};
+use crate::state::GameState;
 use crate::ui::Interaction;
-use crate::ui::state::GameState;
 use crate::ui::types::CommandTarget;
 use crate::ui::types::{ContextView, Verb};
 use crate::ui::update::UpdateResult;

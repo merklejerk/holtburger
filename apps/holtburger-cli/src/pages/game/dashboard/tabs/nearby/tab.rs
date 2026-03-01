@@ -5,8 +5,9 @@ use ratatui::layout::Rect;
 
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
+use crate::state::GameState;
 use crate::ui::Interaction;
-use crate::ui::state::GameState;
+use crate::ui::UiMessage;
 use crate::ui::traits::TabController;
 
 use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
@@ -92,8 +93,8 @@ impl TabController for NearbyTab {
                         && let Some(cmd) = cmd
                     {
                         let msgs = vec![
-                            crate::ui::UiMessage::SendCommands(vec![cmd]),
-                            crate::ui::UiMessage::CancelInteraction,
+                            UiMessage::SendCommands(vec![cmd]),
+                            UiMessage::CancelInteraction,
                         ];
                         verbs.push(Verb::new(msgs, '\r', label));
                     }
@@ -109,13 +110,11 @@ impl TabController for NearbyTab {
                             "Heal target".to_string()
                         };
                         let msgs = vec![
-                            crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::UseWithTarget {
-                                    item: item_guid,
-                                    target: e.guid,
-                                },
-                            ]),
-                            crate::ui::UiMessage::CancelInteraction,
+                            UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
+                                item: item_guid,
+                                target: e.guid,
+                            }]),
+                            UiMessage::CancelInteraction,
                         ];
                         verbs.push(Verb::new(msgs, '\r', label));
                     }
@@ -128,13 +127,11 @@ impl TabController for NearbyTab {
                         && target_type.intersects(dest_item_type)
                     {
                         let msgs = vec![
-                            crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::UseWithTarget {
-                                    item: item_guid,
-                                    target: e.guid,
-                                },
-                            ]),
-                            crate::ui::UiMessage::CancelInteraction,
+                            UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
+                                item: item_guid,
+                                target: e.guid,
+                            }]),
+                            UiMessage::CancelInteraction,
                         ];
                         verbs.push(Verb::new(msgs, '\r', "Apply to target"));
                     }
@@ -150,7 +147,7 @@ impl TabController for NearbyTab {
 
             if is_open_container {
                 verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::SendCommands(vec![
+                    vec![UiMessage::SendCommands(vec![
                         ClientCommand::CloseContainer(e.guid),
                     ])],
                     'x',
@@ -191,7 +188,7 @@ impl TabController for NearbyTab {
                 }
 
                 verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::SendCommands(vec![pick_up_cmd])],
+                    vec![UiMessage::SendCommands(vec![pick_up_cmd])],
                     'p',
                     "Pick Up",
                 ));
@@ -200,29 +197,23 @@ impl TabController for NearbyTab {
             verbs.extend([
                 Verb::new(
                     vec![
-                        crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(e.guid)]),
-                        crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Assess(
-                            e.guid,
-                        )),
+                        UiMessage::SendCommands(vec![ClientCommand::Identify(e.guid)]),
+                        UiMessage::ChangeContextView(crate::ui::ContextView::Assess(e.guid)),
                     ],
                     'a',
                     "Assess",
                 ),
                 Verb::new(
-                    vec![crate::ui::UiMessage::BeginInteraction(
-                        Interaction::Targeting {
-                            target_guid: e.guid,
-                        },
-                    )],
+                    vec![UiMessage::BeginInteraction(Interaction::Targeting {
+                        target_guid: e.guid,
+                    })],
                     't',
                     "Target",
                 ),
                 Verb::new(
                     vec![
-                        crate::ui::UiMessage::SendCommands(vec![
-                            ClientCommand::QueryEntityDebugInfo(e.guid),
-                        ]),
-                        crate::ui::UiMessage::RequestDebugContext(Some(e.guid)),
+                        UiMessage::SendCommands(vec![ClientCommand::QueryEntityDebugInfo(e.guid)]),
+                        UiMessage::RequestDebugContext(Some(e.guid)),
                     ],
                     'g',
                     "Debug",
@@ -231,18 +222,18 @@ impl TabController for NearbyTab {
 
             // Nearby entities allow Approach
             verbs.push(Verb::new(
-                vec![crate::ui::UiMessage::SendCommands(vec![
-                    ClientCommand::MoveTo { target: e.guid },
-                ])],
+                vec![UiMessage::SendCommands(vec![ClientCommand::MoveTo {
+                    target: e.guid,
+                }])],
                 'r',
                 "Approach",
             ));
 
             if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
                 verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::BeginInteraction(
-                        Interaction::Healing { item_guid: e.guid },
-                    )],
+                    vec![UiMessage::BeginInteraction(Interaction::Healing {
+                        item_guid: e.guid,
+                    })],
                     'u',
                     "Use",
                 ));
@@ -250,18 +241,14 @@ impl TabController for NearbyTab {
                 match class {
                     EntityClass::Vendor => {
                         verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::Use(e.guid),
-                            ])],
+                            vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
                             's',
                             "Shop",
                         ));
                     }
                     EntityClass::Npc => {
                         verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::Use(e.guid),
-                            ])],
+                            vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
                             'k',
                             "Talk",
                         ));
@@ -276,9 +263,7 @@ impl TabController for NearbyTab {
                     | EntityClass::Money
                     | EntityClass::Item => {
                         verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::Use(e.guid),
-                            ])],
+                            vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
                             'u',
                             "Use",
                         ));
@@ -286,7 +271,7 @@ impl TabController for NearbyTab {
                     EntityClass::Chest | EntityClass::Container => {
                         if game.data.open_containers.contains(&e.guid) {
                             verbs.push(Verb::new(
-                                vec![crate::ui::UiMessage::SendCommands(vec![
+                                vec![UiMessage::SendCommands(vec![
                                     ClientCommand::CloseContainer(e.guid),
                                 ])],
                                 'o',
@@ -294,9 +279,7 @@ impl TabController for NearbyTab {
                             ));
                         } else {
                             verbs.push(Verb::new(
-                                vec![crate::ui::UiMessage::SendCommands(vec![
-                                    ClientCommand::Use(e.guid),
-                                ])],
+                                vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
                                 'o',
                                 "Open",
                             ));
@@ -304,9 +287,9 @@ impl TabController for NearbyTab {
                     }
                     EntityClass::Player => {
                         verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::OpenTrade(e.guid),
-                            ])],
+                            vec![UiMessage::SendCommands(vec![ClientCommand::OpenTrade(
+                                e.guid,
+                            )])],
                             'd',
                             "Trade",
                         ));

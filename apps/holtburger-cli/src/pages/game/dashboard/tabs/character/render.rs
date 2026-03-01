@@ -11,7 +11,7 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::magic::get_enchantment_name;
 use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use crate::ui::theme;
 use crate::ui::types::StatType;
 use crate::ui::utils::format_cost;

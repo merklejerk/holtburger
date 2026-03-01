@@ -1,4 +1,4 @@
-use crate::ui::state::{AppState, Page};
+use crate::state::{AppState, Page};
 use holtburger_world::entity::Entity;
 
 impl AppState {

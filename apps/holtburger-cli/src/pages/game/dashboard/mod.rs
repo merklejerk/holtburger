@@ -1,4 +1,4 @@
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use crate::ui::theme::pane_block;
 use crate::ui::traits::TabController;
 use crate::ui::types::CommandTarget;

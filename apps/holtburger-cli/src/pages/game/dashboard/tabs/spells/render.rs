@@ -4,7 +4,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
-use crate::ui::state::GameState;
+use crate::state::GameState;
 use crate::ui::theme;
 
 pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, area: Rect) {

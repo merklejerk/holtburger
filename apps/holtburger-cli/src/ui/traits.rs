@@ -4,7 +4,7 @@ use crate::ui::Interaction;
 use crate::types::CommandTarget;
 use crate::types::{ContextView};
 use crate::types::Verb;
-use crate::ui::update::UpdateResult;
+use crate::update::UpdateResult;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;

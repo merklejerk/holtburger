@@ -6,7 +6,7 @@ use ratatui::layout::Rect;
 
 use crate::state::{AppState, ChatState, GameState, Page, SelectionState};
 use crate::types::{FocusedPane, SCROLL_STEP};
-use crate::ui::update::UpdateResult;
+use crate::update::UpdateResult;
 
 impl AppState {
     pub(super) fn handle_key_press(
@@ -446,7 +446,7 @@ chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
                     if command == "/info" {
                         result
                             .ui_messages
-                            .push(crate::ui::UiMessage::DisplayClientInfo); //
+                            .push(crate::types::UiMessage::DisplayClientInfo); //
 
                         input_history.push(command.clone());
                         *history_index = None;

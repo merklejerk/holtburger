@@ -10,10 +10,28 @@ use std::borrow::Cow;
 use std::time::Instant;
 
 use crate::actions::{AppAction};
+use crate::ui::Interaction;
+use holtburger_core::client::types::ClientCommand;
+use crate::state::ChatMessageKind;
 
 pub const SCROLL_STEP: usize = 3;
 
 pub type VerbSet = Vec<Verb>;
+
+#[derive(Debug, Clone)]
+pub enum UiMessage {
+    BeginInteraction(Interaction),
+    ConfirmInteractionTarget(Guid),
+    ConfirmInteractionSplit(Guid, u32),
+    ConfirmInteractionText(String),
+    CancelInteraction,
+    AddLog(ChatMessageKind, String),
+    SendCommands(Vec<ClientCommand>),
+    ChangeContextView(ContextView),
+    RequestDebugContext(Option<Guid>),
+    ClearVendor,
+    DisplayClientInfo,
+}
 
 #[derive(Debug, Clone)]
 pub struct Verb {
@@ -35,7 +53,7 @@ impl Verb {
         }
     }
 
-    pub fn execute(&self) -> Vec<crate::ui::UiMessage> {
+    pub fn execute(&self) -> Vec<crate::types::UiMessage> {
         self.action.evaluate()
     }
 

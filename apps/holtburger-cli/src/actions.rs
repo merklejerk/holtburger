@@ -1,6 +1,7 @@
 use crate::state::ChatMessageKind;
 use crate::types::ContextView;
-use crate::ui::{Interaction, UiMessage};
+use crate::types::UiMessage;
+use crate::ui::Interaction;
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_protocol::messages::combat::CombatMode;

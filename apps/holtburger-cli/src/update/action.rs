@@ -1,19 +1,10 @@
-pub mod client;
-pub mod combat;
-pub mod effect;
-pub mod input;
-pub mod inventory;
-pub mod navigation;
-pub mod world;
-
 use crate::state::AppState;
-use crate::state::ChatMessageKind;
+use crate::types::AppEvent;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
-use crate::types::{AppEvent, ContextView};
 use crate::ui::widgets::panels::modal::Modal;
+use crate::state::ChatMessageKind;
 use holtburger_core::client::types::ClientCommand;
-
-pub use effect::UpdateResult;
+use crate::update::UpdateResult;
 
 impl AppState {
     pub fn handle_action(&mut self, action: AppEvent) -> UpdateResult {
@@ -48,66 +39,6 @@ impl AppState {
             self.net_stats.bytes_out += 64;
         }
 
-        result
-    }
-
-    pub fn handle_ui_message(&mut self, msg: crate::ui::UiMessage) -> UpdateResult {
-        let mut result = UpdateResult::new();
-        match msg {
-            crate::ui::UiMessage::BeginInteraction(interaction) => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.active_interaction = Some(interaction);
-                }
-                result.needs_redraw = true;
-            }
-            crate::ui::UiMessage::ConfirmInteractionTarget(_guid) => {
-                // We will implement this as we phase out UIEffect
-            }
-            crate::ui::UiMessage::ConfirmInteractionSplit(_guid, _amount) => {
-                // We will implement this as we phase out UIEffect
-            }
-            crate::ui::UiMessage::ConfirmInteractionText(_text) => {
-                // We will implement this as we phase out UIEffect
-            }
-            crate::ui::UiMessage::CancelInteraction => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.active_interaction = None;
-                }
-                result.needs_redraw = true;
-            }
-            crate::ui::UiMessage::AddLog(kind, text) => {
-                self.chat.log(kind, text);
-                result.needs_redraw = true;
-            }
-            crate::ui::UiMessage::SendCommands(cmds) => {
-                result.commands.extend(cmds);
-            }
-            crate::ui::UiMessage::ChangeContextView(view) => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.context_view = view;
-                    game.view.context_scroll_offset = 0;
-                    result.needs_redraw = true;
-                    self.refresh_context_buffer();
-                }
-            }
-            crate::ui::UiMessage::RequestDebugContext(guid) => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.current_debug_guid = guid;
-                    game.view.context_view = ContextView::Custom;
-                    game.view.context_scroll_offset = 0;
-                    result.needs_redraw = true;
-                    self.refresh_context_buffer();
-                }
-            }
-            crate::ui::UiMessage::ClearVendor => {
-                if let Some(game) = self.game_option_mut() {
-                    game.data.vendor = None;
-                }
-            }
-            crate::ui::UiMessage::DisplayClientInfo => {
-                self.display_client_info();
-            }
-        }
         result
     }
 

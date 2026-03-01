@@ -3,7 +3,8 @@ use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::state::GameState;
-use crate::ui::{Interaction, UiMessage};
+use crate::types::UiMessage;
+use crate::ui::Interaction;
 use crate::actions::AppAction; use crate::types::Verb;
 use crate::ui::traits::TabController;
 use crate::types::{CommandTarget, StatType};

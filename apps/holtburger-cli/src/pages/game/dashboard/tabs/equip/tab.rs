@@ -3,9 +3,8 @@ use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::state::GameState;
-use crate::ui::Interaction;
-use crate::ui::Verb;
 use crate::ui::traits::TabController;
+use crate::ui::{Interaction, Verb, AppAction, UiMessage};
 use crate::ui::types::CommandTarget;
 use holtburger_core::client::types::ClientCommand;
 
@@ -40,24 +39,11 @@ impl TabController for EquipTab {
         match target {
             CommandTarget::Entity(e, slot) => {
                 verbs.extend([
+                    Verb::new(AppAction::Assess(e.guid), 'a', "Assess"),
                     Verb::new(
-                        vec![
-                            crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(
-                                e.guid,
-                            )]),
-                            crate::ui::UiMessage::ChangeContextView(
-                                crate::ui::ContextView::Assess(e.guid),
-                            ),
-                        ],
-                        'a',
-                        "Assess",
-                    ),
-                    Verb::new(
-                        vec![crate::ui::UiMessage::BeginInteraction(
-                            Interaction::Targeting {
-                                target_guid: e.guid,
-                            },
-                        )],
+                        AppAction::BeginInteraction(Interaction::Targeting {
+                            target_guid: e.guid,
+                        }),
                         't',
                         "Target",
                     ),
@@ -70,42 +56,23 @@ impl TabController for EquipTab {
                 };
 
                 if is_here {
-                    if let Some(pguid) = game.data.player_guid {
-                        verbs.push(Verb::new(
-                            vec![crate::ui::UiMessage::SendCommands(vec![
-                                ClientCommand::MoveItem {
-                                    item: e.guid,
-                                    container: pguid,
-                                    placement: 0,
-                                },
-                            ])],
-                            'q',
-                            "Unequip",
-                        ));
+                    if let Some(_pguid) = game.data.player_guid {
+                        verbs.push(Verb::new(AppAction::Unequip(e.guid), 'q', "Unequip"));
                     }
                 } else if let Some(s) = slot {
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![
+                        AppAction::Custom(vec![UiMessage::SendCommands(vec![
                             ClientCommand::GetAndWield {
                                 item: e.guid,
                                 slot: Some(s),
                             },
-                        ])],
+                        ])]),
                         'e',
                         "Equip",
                     ));
                 }
 
-                verbs.push(Verb::new(
-                    vec![
-                        crate::ui::UiMessage::SendCommands(vec![
-                            ClientCommand::QueryEntityDebugInfo(e.guid),
-                        ]),
-                        crate::ui::UiMessage::RequestDebugContext(Some(e.guid)),
-                    ],
-                    'g',
-                    "Debug",
-                ));
+                verbs.push(Verb::new(AppAction::QueryDebugInfo(e.guid), 'g', "Debug"));
                 verbs
             }
             _ => vec![],

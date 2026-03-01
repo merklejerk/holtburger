@@ -4,9 +4,8 @@ use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
 use crate::state::GameState;
-use crate::ui::Interaction;
-use crate::ui::Verb;
 use crate::ui::traits::TabController;
+use crate::ui::{Interaction, Verb, AppAction, UiMessage};
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 
@@ -29,52 +28,42 @@ impl TabController for SpellsTab {
         if let CommandTarget::Spell(spell_id) = target {
             if !game.data.is_wielding_caster() {
                 verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::AddLog(
+                    AppAction::Log(
                         crate::state::ChatMessageKind::Error,
                         "You must be wielding a caster to cast spells!".to_string(),
-                    )],
+                    ),
                     'c',
                     "Cast (Need Caster)",
                 ));
             } else {
-                let mut base_cmds = Vec::new();
                 if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic
                 {
-                    base_cmds.push(ClientCommand::SetCombatMode(
-                        holtburger_protocol::messages::combat::CombatMode::Magic,
-                    ));
-                }
-
-                if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
-                    let mut cmds = base_cmds.clone();
-                    cmds.push(ClientCommand::CastTargetedSpell {
-                        spell_id,
-                        target: target_guid,
-                    });
                     verbs.push(Verb::new(
-                        vec![
-                            crate::ui::UiMessage::SendCommands(cmds),
-                            crate::ui::UiMessage::CancelInteraction,
-                        ],
+                        AppAction::SetCombatMode(holtburger_protocol::messages::combat::CombatMode::Magic),
+                        'c',
+                        "Switch to Magic",
+                    ));
+                } else if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
+                    verbs.push(Verb::new(
+                        AppAction::Custom(vec![ // Still need Custom for combined Cast+Cancel
+                            UiMessage::SendCommands(vec![ClientCommand::CastTargetedSpell {
+                                spell_id,
+                                target: target_guid,
+                            }]),
+                            UiMessage::CancelInteraction,
+                        ]),
                         'c',
                         "Cast on target",
                     ));
                 } else if let Some(player_guid) = game.data.player_guid {
-                    let mut cmds = base_cmds.clone();
-                    cmds.push(ClientCommand::CastTargetedSpell {
-                        spell_id,
-                        target: player_guid,
-                    });
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(cmds)],
+                        AppAction::CastSpell(spell_id, Some(player_guid)),
                         'c',
                         "Cast on self",
                     ));
                 } else {
-                    let mut cmds = base_cmds.clone();
-                    cmds.push(ClientCommand::CastUntargetedSpell { spell_id });
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(cmds)],
+                        AppAction::CastSpell(spell_id, None),
                         'c',
                         "Cast",
                     ));
@@ -82,9 +71,7 @@ impl TabController for SpellsTab {
             }
 
             verbs.push(Verb::new(
-                vec![crate::ui::UiMessage::ChangeContextView(
-                    crate::ui::ContextView::Spell(spell_id),
-                )],
+                AppAction::ViewDetails(crate::ui::ContextView::Spell(spell_id)),
                 'd',
                 "Details",
             ));

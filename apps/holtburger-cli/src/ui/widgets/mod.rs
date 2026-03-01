@@ -9,3 +9,4 @@ pub use hud::vitals::render_vitals;
 pub use panels::dynamic::render_dynamic_pane;
 pub use panels::modal::{Modal, render_modal};
 pub use selection::render_character_selection;
+pub mod scroll;

@@ -82,6 +82,7 @@
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Label unlocked chests in nearby tab.
 - [ ] Server messages being printed twice in chat, colored as errors, even though they aren't all errors.
+- [ ] Some echantments duplicated in char tab.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -147,6 +148,7 @@
 - [ ] Precise splitting.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
+- [ ] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

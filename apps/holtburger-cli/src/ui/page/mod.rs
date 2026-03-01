@@ -131,6 +131,9 @@ impl GameState {
         );
 
         // Context Pane
+        let ctx_h = main_chunks[2].height.saturating_sub(2) as usize;
+        let max_ctx_scroll = self.view.context_buffer.len().saturating_sub(ctx_h);
+        self.view.context_scroll_offset = self.view.context_scroll_offset.min(max_ctx_scroll);
         render_context_pane(
             f,
             &self.view.context_buffer,

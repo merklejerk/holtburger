@@ -4,8 +4,7 @@ use ratatui::layout::Rect;
 
 use super::render::render_trade_tab;
 use crate::state::GameState;
-use crate::ui::Interaction;
-use crate::ui::Verb;
+use crate::ui::{Interaction, Verb, AppAction};
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, TradeFocus};
 
@@ -36,11 +35,7 @@ impl TabController for TradeTab {
             }
 
             if !matches!(interaction, Interaction::Targeting { .. }) {
-                verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::CancelInteraction],
-                    '',
-                    "Cancel",
-                ));
+                verbs.push(Verb::new(AppAction::CancelInteraction, '\x1b', "Cancel"));
             }
         }
 
@@ -50,61 +45,30 @@ impl TabController for TradeTab {
             _ => None,
         } {
             // Assess and Debug
-            verbs.push(Verb::new(
-                vec![
-                    crate::ui::UiMessage::SendCommands(vec![ClientCommand::Identify(target_item)]),
-                    crate::ui::UiMessage::ChangeContextView(crate::ui::ContextView::Assess(
-                        target_item,
-                    )),
-                ],
-                'a',
-                "Assess",
-            ));
-            verbs.push(Verb::new(
-                vec![
-                    crate::ui::UiMessage::SendCommands(vec![ClientCommand::QueryEntityDebugInfo(
-                        target_item,
-                    )]),
-                    crate::ui::UiMessage::RequestDebugContext(Some(target_item)),
-                ],
-                'g',
-                "Debug",
-            ));
+            verbs.push(Verb::new(AppAction::Assess(target_item), 'a', "Assess"));
+            verbs.push(Verb::new(AppAction::QueryDebugInfo(target_item), 'g', "Debug"));
         }
 
         if let Some(vendor) = &game.data.vendor {
             match target {
                 CommandTarget::VendorItem(v) => {
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Buy {
+                        AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Buy {
                             vendor: vendor.vendor_guid,
                             items: vec![holtburger_protocol::messages::trade::actions::ItemProfileActionData {
                                 object_guid: v.guid,
                                 amount: 1,
                             }],
-                        }])],
+                        }])]),
                         'b',
                         "Buy",
                     ));
                 }
                 CommandTarget::Entity(e, _) => {
                     verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![ClientCommand::Sell {
-                            vendor: vendor.vendor_guid,
-                            items: vec![holtburger_protocol::messages::trade::actions::ItemProfileActionData {
-                                object_guid: e.guid,
-                                amount: 1,
-                            }],
-                        }])],
+                        AppAction::SellToVendor(e.guid, vendor.vendor_guid),
                         's',
                         "Sell",
-                    ));
-                    verbs.push(Verb::new(
-                        vec![crate::ui::UiMessage::SendCommands(vec![
-                            ClientCommand::AddToTrade { item: e.guid },
-                        ])],
-                        't',
-                        "Add to Trade",
                     ));
                 }
                 _ => {}
@@ -114,39 +78,39 @@ impl TabController for TradeTab {
         if let Some(trade) = &game.data.trade {
             if trade.self_side.accepted {
                 verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::SendCommands(vec![
+                    AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
                         ClientCommand::DeclineTrade,
-                    ])],
+                    ])]),
                     'c',
                     "Decline",
                 ));
             } else {
                 verbs.push(Verb::new(
-                    vec![crate::ui::UiMessage::SendCommands(vec![
+                    AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
                         ClientCommand::AcceptTrade,
-                    ])],
+                    ])]),
                     'c',
                     "Accept",
                 ));
             }
             verbs.push(Verb::new(
-                vec![crate::ui::UiMessage::SendCommands(vec![
+                AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
                     ClientCommand::ResetTrade,
-                ])],
+                ])]),
                 'r',
                 "Reset",
             ));
         }
 
         if game.data.trade.is_some() || game.data.vendor.is_some() {
-            let cmds = if game.data.trade.is_some() {
-                vec![crate::ui::UiMessage::SendCommands(vec![
+            let action = if game.data.trade.is_some() {
+                AppAction::Custom(vec![crate::ui::UiMessage::SendCommands(vec![
                     ClientCommand::CloseTrade,
-                ])]
+                ])])
             } else {
-                vec![crate::ui::UiMessage::ClearVendor]
+                AppAction::Custom(vec![crate::ui::UiMessage::ClearVendor])
             };
-            verbs.push(Verb::new(cmds, 'x', "Exit"));
+            verbs.push(Verb::new(action, 'x', "Exit"));
         }
 
         verbs

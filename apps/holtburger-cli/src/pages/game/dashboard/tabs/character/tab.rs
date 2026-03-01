@@ -3,9 +3,7 @@ use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::state::GameState;
-use crate::ui::Interaction;
-use crate::ui::UiMessage;
-use crate::ui::Verb;
+use crate::ui::{Interaction, UiMessage, Verb, AppAction};
 use crate::ui::traits::TabController;
 use crate::ui::types::{CommandTarget, StatType};
 use holtburger_core::client::types::ClientCommand;
@@ -63,7 +61,7 @@ impl TabController for CharacterTab {
                         },
                     };
                     verbs.push(Verb::new(
-                        vec![UiMessage::SendCommands(vec![cmd])],
+                        AppAction::Custom(vec![UiMessage::SendCommands(vec![cmd])]),
                         'l',
                         "Level Up",
                     ));
@@ -79,10 +77,10 @@ impl TabController for CharacterTab {
                         >= credits_cost;
                     if is_skill_credits_enough {
                         verbs.push(Verb::new(
-                            vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
+                            AppAction::Custom(vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
                                 skill,
                                 credits: credits_cost,
-                            }])],
+                            }])]),
                             'n',
                             "Train",
                         ));
@@ -99,10 +97,10 @@ impl TabController for CharacterTab {
                     >= credits_cost;
                 if is_skill_credits_enough {
                     verbs.push(Verb::new(
-                        vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
+                        AppAction::Custom(vec![UiMessage::SendCommands(vec![ClientCommand::TrainSkill {
                             skill,
                             credits: credits_cost,
-                        }])],
+                        }])]),
                         'n',
                         "Train",
                     ));

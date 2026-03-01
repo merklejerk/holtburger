@@ -6,12 +6,9 @@ use ratatui::layout::Rect;
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::state::GameState;
-use crate::ui::Interaction;
-use crate::ui::UiMessage;
 use crate::ui::traits::TabController;
-
 use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
-use crate::ui::Verb;
+use crate::ui::{Interaction, UiMessage, Verb, AppAction};
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::entity::Entity;
@@ -92,11 +89,15 @@ impl TabController for NearbyTab {
                     if let Some(label) = label
                         && let Some(cmd) = cmd
                     {
-                        let msgs = vec![
-                            UiMessage::SendCommands(vec![cmd]),
-                            UiMessage::CancelInteraction,
-                        ];
-                        verbs.push(Verb::new(msgs, '\r', label));
+                        let action = match cmd {
+                            ClientCommand::MoveItem { item, container, .. } => AppAction::MoveItem(item, container),
+                            ClientCommand::Stack { source, destination, amount } => AppAction::StackItems(source, destination, amount),
+                            _ => AppAction::Custom(vec![
+                                UiMessage::SendCommands(vec![cmd]),
+                                UiMessage::CancelInteraction,
+                            ]),
+                        };
+                        verbs.push(Verb::new(action, '\r', label));
                     }
                     return verbs;
                 }
@@ -109,14 +110,7 @@ impl TabController for NearbyTab {
                         } else {
                             "Heal target".to_string()
                         };
-                        let msgs = vec![
-                            UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
-                                item: item_guid,
-                                target: e.guid,
-                            }]),
-                            UiMessage::CancelInteraction,
-                        ];
-                        verbs.push(Verb::new(msgs, '\r', label));
+                        verbs.push(Verb::new(AppAction::ApplyItem(item_guid, e.guid), '\r', label));
                     }
                     return verbs;
                 }
@@ -126,14 +120,7 @@ impl TabController for NearbyTab {
                         && let Some(dest_item_type) = e.item_type()
                         && target_type.intersects(dest_item_type)
                     {
-                        let msgs = vec![
-                            UiMessage::SendCommands(vec![ClientCommand::UseWithTarget {
-                                item: item_guid,
-                                target: e.guid,
-                            }]),
-                            UiMessage::CancelInteraction,
-                        ];
-                        verbs.push(Verb::new(msgs, '\r', "Apply to target"));
+                        verbs.push(Verb::new(AppAction::ApplyItem(item_guid, e.guid), '\r', "Apply to target"));
                     }
                     return verbs;
                 }
@@ -146,13 +133,7 @@ impl TabController for NearbyTab {
             let is_open_container = game.data.open_containers.contains(&e.guid);
 
             if is_open_container {
-                verbs.push(Verb::new(
-                    vec![UiMessage::SendCommands(vec![
-                        ClientCommand::CloseContainer(e.guid),
-                    ])],
-                    'x',
-                    "Close",
-                ));
+                verbs.push(Verb::new(AppAction::Close(e.guid), 'x', "Close"));
             }
 
             // Pick up logic: checks stackability.
@@ -188,70 +169,46 @@ impl TabController for NearbyTab {
                 }
 
                 verbs.push(Verb::new(
-                    vec![UiMessage::SendCommands(vec![pick_up_cmd])],
+                    match pick_up_cmd {
+                        ClientCommand::MoveItem { item, container, .. } => AppAction::MoveItem(item, container),
+                        ClientCommand::Stack { source, destination, amount } => AppAction::StackItems(source, destination, amount),
+                        _ => AppAction::Custom(vec![UiMessage::SendCommands(vec![pick_up_cmd])]),
+                    },
                     'p',
                     "Pick Up",
                 ));
             }
 
             verbs.extend([
+                Verb::new(AppAction::Assess(e.guid), 'a', "Assess"),
                 Verb::new(
-                    vec![
-                        UiMessage::SendCommands(vec![ClientCommand::Identify(e.guid)]),
-                        UiMessage::ChangeContextView(crate::ui::ContextView::Assess(e.guid)),
-                    ],
-                    'a',
-                    "Assess",
-                ),
-                Verb::new(
-                    vec![UiMessage::BeginInteraction(Interaction::Targeting {
+                    AppAction::BeginInteraction(Interaction::Targeting {
                         target_guid: e.guid,
-                    })],
+                    }),
                     't',
                     "Target",
                 ),
-                Verb::new(
-                    vec![
-                        UiMessage::SendCommands(vec![ClientCommand::QueryEntityDebugInfo(e.guid)]),
-                        UiMessage::RequestDebugContext(Some(e.guid)),
-                    ],
-                    'g',
-                    "Debug",
-                ),
+                Verb::new(AppAction::QueryDebugInfo(e.guid), 'g', "Debug"),
             ]);
 
             // Nearby entities allow Approach
-            verbs.push(Verb::new(
-                vec![UiMessage::SendCommands(vec![ClientCommand::MoveTo {
-                    target: e.guid,
-                }])],
-                'r',
-                "Approach",
-            ));
+            verbs.push(Verb::new(AppAction::Approach(e.guid), 'r', "Approach"));
 
             if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
                 verbs.push(Verb::new(
-                    vec![UiMessage::BeginInteraction(Interaction::Healing {
+                    AppAction::BeginInteraction(Interaction::Healing {
                         item_guid: e.guid,
-                    })],
+                    }),
                     'u',
                     "Use",
                 ));
             } else {
                 match class {
                     EntityClass::Vendor => {
-                        verbs.push(Verb::new(
-                            vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
-                            's',
-                            "Shop",
-                        ));
+                        verbs.push(Verb::new(AppAction::Use(e.guid), 's', "Shop"));
                     }
                     EntityClass::Npc => {
-                        verbs.push(Verb::new(
-                            vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
-                            'k',
-                            "Talk",
-                        ));
+                        verbs.push(Verb::new(AppAction::Use(e.guid), 'k', "Talk"));
                     }
                     EntityClass::Portal
                     | EntityClass::Door
@@ -262,37 +219,17 @@ impl TabController for NearbyTab {
                     | EntityClass::Writable
                     | EntityClass::Money
                     | EntityClass::Item => {
-                        verbs.push(Verb::new(
-                            vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
-                            'u',
-                            "Use",
-                        ));
+                        verbs.push(Verb::new(AppAction::Use(e.guid), 'u', "Use"));
                     }
                     EntityClass::Chest | EntityClass::Container => {
                         if game.data.open_containers.contains(&e.guid) {
-                            verbs.push(Verb::new(
-                                vec![UiMessage::SendCommands(vec![
-                                    ClientCommand::CloseContainer(e.guid),
-                                ])],
-                                'o',
-                                "Close",
-                            ));
+                            verbs.push(Verb::new(AppAction::Close(e.guid), 'o', "Close"));
                         } else {
-                            verbs.push(Verb::new(
-                                vec![UiMessage::SendCommands(vec![ClientCommand::Use(e.guid)])],
-                                'o',
-                                "Open",
-                            ));
+                            verbs.push(Verb::new(AppAction::Use(e.guid), 'o', "Open"));
                         }
                     }
                     EntityClass::Player => {
-                        verbs.push(Verb::new(
-                            vec![UiMessage::SendCommands(vec![ClientCommand::OpenTrade(
-                                e.guid,
-                            )])],
-                            'd',
-                            "Trade",
-                        ));
+                        verbs.push(Verb::new(AppAction::OpenTrade(e.guid), 'd', "Trade"));
                     }
                     _ => {}
                 }

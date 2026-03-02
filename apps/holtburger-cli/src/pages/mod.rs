@@ -10,10 +10,6 @@ use crate::types::{Page, UpdateResult};
 use crate::components::modal::render_modal;
 use holtburger_core::ClientState;
 
-pub mod components {
-    pub use crate::components::*;
-}
-
 impl Page {
     #[allow(clippy::too_many_arguments)]
     pub fn render(

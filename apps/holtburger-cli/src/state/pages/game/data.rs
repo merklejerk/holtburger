@@ -9,7 +9,7 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::{
-    Attribute, AttributeType, CharacterLevelInfo, Skill, SkillType, Vital, VitalType,
+    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType
 };
 
 #[derive(Debug, Clone)]
@@ -27,7 +27,7 @@ pub struct GameData {
     /// Skills like Sword, Mace, Magic Defense.
     pub skills: HashMap<SkillType, Skill>,
     /// Calculated damage resistance values.
-    pub resistances: holtburger_world::stats::Resistances,
+    pub resistances: Resistances,
     /// Total armor value.
     pub armor: i32,
     /// Current vitae penalty (0.0 to 1.0, where 1.0 is no penalty).
@@ -75,7 +75,7 @@ impl Default for GameData {
             attributes: HashMap::new(),
             vitals: HashMap::new(),
             skills: HashMap::new(),
-            resistances: holtburger_world::stats::Resistances::default(),
+            resistances: Resistances::default(),
             armor: 0,
             vitae: 1.0,
             player_pos: None,

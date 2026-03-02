@@ -1,4 +1,4 @@
-use crate::types::{ContextView, FocusedPane, TradeFocus};
+use crate::{types::{ContextView, FocusedPane, TradeFocus}, ui::Interaction};
 use holtburger_common::Guid;
 use ratatui::text::Line;
 
@@ -21,7 +21,7 @@ pub struct ViewState {
     /// GUID of the entity we are currently "debugging".
     pub current_debug_guid: Option<Guid>,
     /// State of current interaction like vendor transactions.
-    pub active_interaction: Option<crate::ui::Interaction>,
+    pub active_interaction: Option<Interaction>,
     /// Current focused side of the trade window.
     pub trade_focus: TradeFocus,
     /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.

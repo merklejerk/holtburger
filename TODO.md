@@ -155,6 +155,8 @@
 - [ ] Heal verb/interaction is missing/broken.
 - [ ] Cast verb is clearing target interaction.
 - [ ] Trade tab lets you add item already being traded. 
+- [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
+- [ ] Dashboard and tabs should own their own state.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

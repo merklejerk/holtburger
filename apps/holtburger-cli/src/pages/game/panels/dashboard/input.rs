@@ -1,14 +1,15 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::pages::game::GameState;
+use crate::pages::game::{GameData, ViewState};
 use crate::types::{DashboardTab, TradeFocus, UpdateResult};
 use crate::ui::traits::TabController;
 
 /// Standard dashboard input handling (navigation, verbs).
 pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
-    tab: &T,
+    tab: &mut T,
     key: KeyEvent,
-    game: &mut GameState,
+    data: &GameData,
+    view: &ViewState,
 ) -> Option<UpdateResult> {
     match key.code {
         KeyCode::Char('1') => {

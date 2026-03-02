@@ -12,10 +12,15 @@ use crate::ui::traits::TabController;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 
-pub struct SpellsTab;
+#[derive(Default, Debug, Clone)]
+pub struct SpellsTab {
+    pub selected_index: usize,
+    pub list_state: ratatui::widgets::ListState,
+}
+
 
 impl TabController for SpellsTab {
-    fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect) {
+    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
         render_spells_tab(f, game, area);
     }
 
@@ -106,7 +111,7 @@ impl TabController for SpellsTab {
         }
     }
 
-    fn get_item_count(&self, game: &GameState) -> usize {
+    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
         game.data.player_spells.len()
     }
 }

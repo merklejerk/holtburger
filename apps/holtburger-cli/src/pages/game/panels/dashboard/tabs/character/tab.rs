@@ -10,10 +10,15 @@ use crate::ui::Interaction;
 use crate::ui::traits::TabController;
 use holtburger_core::client::types::ClientCommand;
 
-pub struct CharacterTab;
+#[derive(Default, Debug, Clone)]
+pub struct CharacterTab {
+    pub selected_index: usize,
+    pub list_state: ratatui::widgets::ListState,
+}
+
 
 impl TabController for CharacterTab {
-    fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect) {
+    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
         render_character_tab(f, game, area);
     }
 
@@ -116,7 +121,7 @@ impl TabController for CharacterTab {
         get_command_target_at_index(game, index).unwrap_or(CommandTarget::None)
     }
 
-    fn get_item_count(&self, game: &GameState) -> usize {
+    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
         get_char_tab_lines(game).len()
     }
 }

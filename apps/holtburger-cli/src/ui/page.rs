@@ -13,10 +13,10 @@ use crate::types::{FocusedPane, UpdateResult};
 use crate::ui::get_layout;
 use crate::pages::game::layout::PULSE_PANEL_WIDTH;
 use crate::theme::{pane_block, pane_title_style};
-use crate::ui::widgets::hud::pulse::render_pulse_panel;
-use crate::ui::widgets::hud::status::render_status_bar;
-use crate::ui::widgets::panels::dynamic::render_dynamic_pane;
-use crate::ui::widgets::selection::render_character_selection;
+use crate::pages::game::hud::pulse::render_pulse_panel;
+use crate::pages::game::hud::status::render_status_bar;
+use crate::pages::game::panels::dynamic::render_dynamic_pane;
+use crate::pages::selection::render_widgets::render_character_selection;
 use holtburger_core::ClientState;
 
 impl Page {

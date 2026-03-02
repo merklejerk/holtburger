@@ -1,5 +1,5 @@
 use crate::pages::game::GameState;
-use crate::ui::widgets::hud::vitals::render_vitals;
+use crate::pages::game::hud::vitals::render_vitals;
 use holtburger_common::time::*;
 use holtburger_core::RetryState;
 use ratatui::Frame;

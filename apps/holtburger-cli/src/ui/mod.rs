@@ -2,17 +2,13 @@ use crate::state::AppState;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
-pub mod interaction;
 pub mod layout;
 pub mod page;
 pub mod theme;
-pub mod traits;
 pub mod utils;
 pub mod widgets;
 
-pub use self::interaction::*;
 pub use self::layout::*;
-pub use self::traits::*;
 pub use self::widgets::panels::modal::Modal;
 use self::widgets::panels::modal::render_modal;
 pub use crate::update::*;

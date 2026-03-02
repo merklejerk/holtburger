@@ -6,8 +6,7 @@ use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
-use crate::types::{ContextView, FocusedPane};
-use crate::ui::Interaction;
+use crate::types::{ContextView, FocusedPane, Interaction};
 
 #[derive(Default)]
 pub struct GameState {

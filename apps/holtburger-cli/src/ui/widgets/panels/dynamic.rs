@@ -1,5 +1,5 @@
 use crate::pages::game::GameState;
-use crate::types::FocusedPane;
+use crate::types::{FocusedPane, Interaction};
 use crate::ui::theme::{pane_block, pane_title_style};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -33,11 +33,11 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
         let title_text = format!(
             " {} ",
             match interaction {
-                crate::ui::Interaction::Targeting { .. } => "Targeting",
-                crate::ui::Interaction::Healing { .. } => "Healing",
-                crate::ui::Interaction::Moving { .. } => "Moving",
-                crate::ui::Interaction::Combining { .. } => "Combining",
-                crate::ui::Interaction::Splitting { .. } => "Splitting",
+                Interaction::Targeting { .. } => "Targeting",
+                Interaction::Healing { .. } => "Healing",
+                Interaction::Moving { .. } => "Moving",
+                Interaction::Combining { .. } => "Combining",
+                Interaction::Splitting { .. } => "Splitting",
             }
         );
 
@@ -74,11 +74,11 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
     // --- 1. Interaction Info / World Name ---
     if let Some(interaction) = game.view.active_interaction {
         let target_guid = match interaction {
-            crate::ui::Interaction::Moving { item_guid } => item_guid,
-            crate::ui::Interaction::Healing { item_guid } => item_guid,
-            crate::ui::Interaction::Targeting { target_guid } => target_guid,
-            crate::ui::Interaction::Combining { item_guid } => item_guid,
-            crate::ui::Interaction::Splitting { item_guid, .. } => item_guid,
+            Interaction::Moving { item_guid } => item_guid,
+            Interaction::Healing { item_guid } => item_guid,
+            Interaction::Targeting { target_guid } => target_guid,
+            Interaction::Combining { item_guid } => item_guid,
+            Interaction::Splitting { item_guid, .. } => item_guid,
         };
 
         let (name, guid) = if let Some(entity) = game.data.entities.get(&target_guid) {

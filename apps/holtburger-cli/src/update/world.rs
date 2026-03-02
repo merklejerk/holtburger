@@ -37,6 +37,11 @@ impl AppState {
                     )));
                 }
             }
+            ClientViewEvent::ServerTimeUpdated { time } => {
+                if let Some(game) = self.game_option_mut() {
+                    game.data.server_time = Some((*time, std::time::Instant::now()));
+                }
+            }
             _ => {}
         }
     }
@@ -96,6 +101,7 @@ impl AppState {
         match &event {
             ClientViewEvent::CharacterList(_)
             | ClientViewEvent::PlayerEntered { .. }
+            | ClientViewEvent::ServerTimeUpdated { .. } 
             | ClientViewEvent::WorldNameUpdated(_) => {
                 self.handle_setup_event(&event);
             }
@@ -139,7 +145,7 @@ impl AppState {
             | ClientViewEvent::PlayerVitalsUpdated { .. }
             | ClientViewEvent::PlayerSpellsUpdated { .. }
             | ClientViewEvent::CombatModeUpdated { .. } => {
-                self.handle_combat_event(event);
+                self.handle_player_event(event);
             }
             ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
                 let entity_ref = entity.as_ref();
@@ -230,7 +236,7 @@ impl AppState {
                 self.update_inventory_and_equipment(entity_ref);
                 self.handle_entity_identified(entity_ref);
             }
-            ClientViewEvent::ServerTimeUpdated { .. } | ClientViewEvent::NoClipUpdated { .. } => {
+            ClientViewEvent::NoClipUpdated { .. } => {
                 self.handle_navigation_event(event);
             }
             ClientViewEvent::ContainerOpened { guid } => {
@@ -247,7 +253,7 @@ impl AppState {
         }
     }
 
-    fn handle_combat_event(&mut self, event: ClientViewEvent) {
+    fn handle_player_event(&mut self, event: ClientViewEvent) {
         match event {
             ClientViewEvent::PlayerEnchantmentsUpdated {
                 enchantments,
@@ -371,24 +377,15 @@ impl AppState {
     }
 
     fn handle_navigation_event(&mut self, event: ClientViewEvent) {
-        match event {
-            ClientViewEvent::NoClipUpdated { enabled } => {
-                if let Some(game) = self.game_option_mut() {
-                    game.data.noclip = enabled;
-                    let status = if enabled { "ENABLED" } else { "DISABLED" };
-                    self.chat.log(
-                        ChatMessageKind::System,
-                        format!(">> NoClip is now {}", status),
-                    );
-                }
+        if let ClientViewEvent::NoClipUpdated { enabled } = event
+            && let Some(game) = self.game_option_mut() {
+                game.data.noclip = enabled;
+                let status = if enabled { "ENABLED" } else { "DISABLED" };
+                self.chat.log(
+                    ChatMessageKind::System,
+                    format!(">> NoClip is now {}", status),
+                );
             }
-            ClientViewEvent::ServerTimeUpdated { time } => {
-                if let Some(game) = self.game_option_mut() {
-                    game.data.server_time = Some((time, std::time::Instant::now()));
-                }
-            }
-            _ => {}
-        }
     }
 }
 

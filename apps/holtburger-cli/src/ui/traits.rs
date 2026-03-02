@@ -1,10 +1,7 @@
 use crate::pages::game::dashboard::{assess, debug, input::handle_common_dashboard_input};
 use crate::state::GameState;
 use crate::ui::Interaction;
-use crate::types::CommandTarget;
-use crate::types::{ContextView};
-use crate::types::Verb;
-use crate::update::UpdateResult;
+use crate::types::{CommandTarget, ContextView, UpdateResult, Verb};
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;

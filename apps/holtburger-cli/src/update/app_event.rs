@@ -1,13 +1,12 @@
 use crate::state::AppState;
-use crate::types::AppEvent;
+use crate::types::{AppEvent, UpdateResult};
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 use crate::ui::widgets::panels::modal::Modal;
 use crate::state::ChatMessageKind;
 use holtburger_core::client::types::ClientCommand;
-use crate::update::UpdateResult;
 
 impl AppState {
-    pub fn handle_action(&mut self, action: AppEvent) -> UpdateResult {
+    pub fn handle_app_event(&mut self, action: AppEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         match action {
             AppEvent::Tick(elapsed) => {

@@ -5,8 +5,7 @@ use holtburger_world::context::WorldContextExt;
 use ratatui::layout::Rect;
 
 use crate::state::{AppState, ChatState, GameState, Page, SelectionState};
-use crate::types::{FocusedPane, SCROLL_STEP};
-use crate::update::UpdateResult;
+use crate::types::{FocusedPane, SCROLL_STEP, UpdateResult};
 
 impl AppState {
     pub(super) fn handle_key_press(

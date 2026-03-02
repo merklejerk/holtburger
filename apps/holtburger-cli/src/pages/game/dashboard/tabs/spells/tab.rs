@@ -38,39 +38,37 @@ impl TabController for SpellsTab {
                     'c',
                     "Cast (Need Caster)",
                 ));
+            } else if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic
+            {
+                verbs.push(Verb::new(
+                    vec![AppAction::SetCombatMode(holtburger_protocol::messages::combat::CombatMode::Magic)],
+                    'c',
+                    "Switch to Magic",
+                ));
+            } else if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
+                verbs.push(Verb::new(
+                    vec![
+                        AppAction::SendCommands(vec![ClientCommand::CastTargetedSpell {
+                            spell_id,
+                            target: target_guid,
+                        }]),
+                        AppAction::CancelInteraction,
+                    ],
+                    'c',
+                    "Cast on target",
+                ));
+            } else if let Some(player_guid) = game.data.player_guid {
+                verbs.push(Verb::new(
+                    vec![AppAction::CastSpell(spell_id, Some(player_guid))],
+                    'c',
+                    "Cast on self",
+                ));
             } else {
-                if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic
-                {
-                    verbs.push(Verb::new(
-                        vec![AppAction::SetCombatMode(holtburger_protocol::messages::combat::CombatMode::Magic)],
-                        'c',
-                        "Switch to Magic",
-                    ));
-                } else if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
-                    verbs.push(Verb::new(
-                        vec![
-                            AppAction::SendCommands(vec![ClientCommand::CastTargetedSpell {
-                                spell_id,
-                                target: target_guid,
-                            }]),
-                            AppAction::CancelInteraction,
-                        ],
-                        'c',
-                        "Cast on target",
-                    ));
-                } else if let Some(player_guid) = game.data.player_guid {
-                    verbs.push(Verb::new(
-                        vec![AppAction::CastSpell(spell_id, Some(player_guid))],
-                        'c',
-                        "Cast on self",
-                    ));
-                } else {
-                    verbs.push(Verb::new(
-                        vec![AppAction::CastSpell(spell_id, None)],
-                        'c',
-                        "Cast",
-                    ));
-                }
+                verbs.push(Verb::new(
+                    vec![AppAction::CastSpell(spell_id, None)],
+                    'c',
+                    "Cast",
+                ));
             }
 
             verbs.push(Verb::new(

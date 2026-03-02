@@ -260,7 +260,7 @@ async fn main() -> Result<()> {
     loop {
         // 1. Process Network Events (Drain batch)
         while let Ok(event) = event_rx.try_recv() {
-            let res = app_state.handle_action(AppEvent::ReceivedViewEvent(event));
+            let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
             needs_redraw |= res.needs_redraw;
             for cmd in res.commands {
                 let _ = command_tx.send(cmd);
@@ -268,7 +268,7 @@ async fn main() -> Result<()> {
         }
 
         while let Ok(event) = view_event_rx.try_recv() {
-            let res = app_state.handle_action(AppEvent::ReceivedViewEvent(event));
+            let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
             needs_redraw |= res.needs_redraw;
             for cmd in res.commands {
                 let _ = command_tx.send(cmd);
@@ -301,7 +301,7 @@ async fn main() -> Result<()> {
 
                         let size = terminal.size()?;
                         let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                        let res = app_state.handle_action(AppEvent::KeyPress(
+                        let res = app_state.handle_app_event(AppEvent::KeyPress(
                             key,
                             size.width,
                             size.height,
@@ -319,7 +319,7 @@ async fn main() -> Result<()> {
                     Event::Mouse(mouse) => {
                         let size = terminal.size()?;
                         let (chunks, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                        let res = app_state.handle_action(AppEvent::Mouse(
+                        let res = app_state.handle_app_event(AppEvent::Mouse(
                             mouse,
                             chunks.to_vec(),
                             main_chunks.to_vec(),
@@ -341,7 +341,7 @@ async fn main() -> Result<()> {
         // 3. Tick
         let elapsed = last_tick.elapsed().as_secs_f64();
         if last_tick.elapsed() >= tick_rate {
-            let res = app_state.handle_action(AppEvent::Tick(elapsed));
+            let res = app_state.handle_app_event(AppEvent::Tick(elapsed));
             needs_redraw |= res.needs_redraw;
             for cmd in res.commands {
                 let _ = command_tx.send(cmd);

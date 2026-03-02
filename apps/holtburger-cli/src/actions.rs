@@ -31,7 +31,6 @@ pub enum AppAction {
     SetCombatMode(CombatMode),
     ViewDetails(ContextView),
     Log(ChatMessageKind, String),
-    // UI Actions absorbed from UiMessage
     BeginInteraction(Interaction),
     ConfirmInteractionTarget(Guid),
     ConfirmInteractionSplit(Guid, u32),

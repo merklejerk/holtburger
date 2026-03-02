@@ -1,7 +1,6 @@
 use crate::state::AppState;
-use crate::types::ContextView;
+use crate::types::{ContextView, UpdateResult};
 use crate::actions::AppAction;
-use crate::update::UpdateResult;
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;

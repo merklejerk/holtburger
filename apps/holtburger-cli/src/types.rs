@@ -1,7 +1,7 @@
 use crossterm::event::{KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
-use holtburger_core::ClientViewEvent;
+use holtburger_core::{ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
@@ -125,4 +125,50 @@ pub enum AppEvent {
     KeyPress(KeyEvent, u16, u16, Vec<Rect>, Rect), // key, width, height, main_chunks, dynamic_chunk
     Mouse(MouseEvent, Vec<Rect>, Vec<Rect>, Rect), // mouse, chunks, main_chunks, dynamic_chunk
     ReceivedViewEvent(ClientViewEvent),
+}
+
+
+#[derive(Debug, Default)]
+pub struct UpdateResult {
+    pub commands: Vec<ClientCommand>,
+    pub actions: Vec<AppAction>,
+    pub needs_redraw: bool,
+}
+
+impl UpdateResult {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_redraw(mut self, needs_redraw: bool) -> Self {
+        self.needs_redraw = needs_redraw;
+        self
+    }
+
+    pub fn with_action(mut self, action: AppAction) -> Self {
+        self.actions.push(action);
+        self
+    }
+
+    pub fn redraw() -> Self {
+        Self {
+            commands: Vec::new(),
+            actions: Vec::new(),
+            needs_redraw: true,
+        }
+    }
+
+    pub fn commands(commands: Vec<ClientCommand>) -> Self {
+        Self {
+            commands,
+            actions: Vec::new(),
+            needs_redraw: false,
+        }
+    }
+
+    pub fn merge(&mut self, other: UpdateResult) {
+        self.commands.extend(other.commands);
+        self.actions.extend(other.actions);
+        self.needs_redraw |= other.needs_redraw;
+    }
 }

@@ -6,8 +6,8 @@ use ratatui::widgets::{List, ListItem};
 use super::super::classification::{classify_entity, get_entity_color};
 use crate::pages::game::{GameData, ViewState};
 use super::tab::NearbyTab;
-use crate::ui::theme;
-use crate::ui::utils::format_item_name;
+use crate::theme;
+use crate::utils::format_item_name;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 

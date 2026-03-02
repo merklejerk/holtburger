@@ -6,7 +6,7 @@ use ratatui::widgets::{List, ListItem};
 
 use crate::pages::game::{GameData, ViewState};
 use super::tab::SpellsTab;
-use crate::ui::theme;
+use crate::theme;
 
 pub fn render_spells_tab(tab: &mut SpellsTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
     let items = get_list_items(tab.selected_index, data);

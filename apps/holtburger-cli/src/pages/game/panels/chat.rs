@@ -9,8 +9,8 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
 
-use crate::ui::theme::{pane_block, pane_title_style};
-use crate::ui::utils::wrap_text;
+use crate::theme::{pane_block, pane_title_style};
+use crate::utils::wrap_text;
 
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 

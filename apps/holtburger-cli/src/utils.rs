@@ -161,7 +161,7 @@ pub fn get_adjacent_pane(
 }
 
 fn get_pane_order(width: u16) -> [FocusedPane; 4] {
-    if width < crate::ui::layout::WIDTH_BREAKPOINT {
+    if width < crate::pages::game::layout::WIDTH_BREAKPOINT {
         // Portrait: Dashboard -> Context -> Dynamic -> Chat
         [
             FocusedPane::Dashboard,

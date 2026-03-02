@@ -1,78 +1,18 @@
 use crate::state::AppState;
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 
-pub mod layout;
 pub mod page;
-pub mod theme;
-pub mod utils;
 pub mod widgets;
 
-pub use self::layout::*;
 pub use crate::types::Modal;
 use self::widgets::panels::modal::render_modal;
 pub use crate::update::*;
 
+pub use crate::pages::game::layout::*;
+
 pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(STATUS_BAR_HEIGHT),
-            Constraint::Min(MIN_MAIN_AREA_HEIGHT),
-            Constraint::Length(INPUT_AREA_HEIGHT),
-        ])
-        .split(area);
-
-    let is_narrow = area.width < WIDTH_BREAKPOINT || area.height > area.width;
-
-    if is_narrow {
-        let vertical_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Fill(1),
-                Constraint::Length(DYNAMIC_PANEL_HEIGHT),
-                Constraint::Fill(1),
-            ])
-            .split(chunks[1]);
-
-        let top_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(LAYOUT_NARROW_DASHBOARD_PCT),
-                Constraint::Percentage(LAYOUT_NARROW_CONTEXT_PCT),
-            ])
-            .split(vertical_chunks[0]);
-
-        (
-            chunks.to_vec(),
-            vec![top_chunks[0], vertical_chunks[2], top_chunks[1]],
-            vertical_chunks[1],
-        )
-    } else {
-        let vertical_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(0), Constraint::Length(DYNAMIC_PANEL_HEIGHT)])
-            .split(chunks[1]);
-
-        let horizontal_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(LAYOUT_WIDE_NEARBY_PCT),
-                Constraint::Percentage(LAYOUT_WIDE_CHAT_PCT),
-                Constraint::Percentage(LAYOUT_WIDE_CONTEXT_PCT),
-            ])
-            .split(vertical_chunks[0]);
-
-        (
-            chunks.to_vec(),
-            vec![
-                horizontal_chunks[0],
-                horizontal_chunks[1],
-                horizontal_chunks[2],
-            ],
-            vertical_chunks[1],
-        )
-    }
+    crate::pages::game::layout::get_layout(area)
 }
 
 pub fn ui(f: &mut Frame, state: &mut AppState) {

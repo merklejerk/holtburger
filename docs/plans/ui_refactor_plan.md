@@ -12,16 +12,16 @@
 
 ## 🏗 Phased Implementation
 
-### Phase 1: Core TUI Utilities & Game Layout (Complexity: Medium)
+### Phase 1: Core TUI Utilities & Game Layout (Completed)
 - **Deliverables:**
-  - Move `ui/theme.rs` to `src/theme.rs`
-  - Move `ui/utils.rs` to `src/utils.rs`
-  - Move `ui/layout.rs` into `pages/game/layout.rs` (Since the layout defines chunks like `chat` and `nearby`, it is game-specific).
-  - Explicitly move the `pub fn get_layout(...)` function located directly inside `ui/mod.rs` into `pages/game/layout.rs`.
-  - Export `mod theme;` and `mod utils;` at the root `src/lib.rs` (or `src/main.rs`).
-- **Acceptance Criteria:** `cargo check -p holtburger-cli` successfully builds when these files are moved and their localized imports (`use crate::ui::theme::*` -> `use crate::theme::*`) are fixed. Note that `NET_PULSE_HISTORY_SIZE` imports in `state.rs` and `app_event.rs` will also need updating to `crate::pages::game::layout`.
+  - Move `ui/theme.rs` to `src/theme.rs` (Done)
+  - Move `ui/utils.rs` to `src/utils.rs` (Done)
+  - Move `ui/layout.rs` into `pages/game/layout.rs` (Done)
+  - Explicitly move the `pub fn get_layout(...)` function located directly inside `ui/mod.rs` into `pages/game/layout.rs`. (Done)
+  - Export `mod theme;` and `mod utils;` at the root `src/lib.rs`. (Done)
+- **Acceptance Criteria:** `cargo check -p holtburger-cli` successfully builds when these files are moved and their localized imports are fixed. (Verified)
 
-### Phase 2: Relocate Generic Components (Complexity: Low)
+### Phase 2: Relocate Generic Components (In Progress)
 - **Deliverables:**
   - Create a new directory: `src/components/` with a `mod.rs`.
   - Move `ui/widgets/scroll.rs` -> `src/components/scroll.rs`.

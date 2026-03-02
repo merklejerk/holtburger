@@ -62,11 +62,11 @@ impl ChatState {
         }
     }
 
-    pub fn handle_event(&mut self, event: &holtburger_core::ClientViewEvent) {
-        use holtburger_core::ClientViewEvent;
+    pub fn handle_event(&mut self, event: &holtburger_core::WorldViewEvent) {
+        use holtburger_core::WorldViewEvent;
         use holtburger_protocol::messages::ChatMessageType;
         match event {
-            ClientViewEvent::LogMessage(msg) => {
+            WorldViewEvent::LogMessage(msg) => {
                 let kind = if msg.contains("[ERROR]") {
                     ChatMessageKind::Error
                 } else if msg.contains("[WARN]") {
@@ -80,7 +80,7 @@ impl ChatState {
                 };
                 self.log(kind, msg.clone());
             }
-            ClientViewEvent::ServerMessage { message, chat_type } => {
+            WorldViewEvent::ServerMessage { message, chat_type } => {
                 let kind = match ChatMessageType::from_repr(*chat_type) {
                     Some(ChatMessageType::Error) => ChatMessageKind::Error,
                     Some(ChatMessageType::Warning) => ChatMessageKind::Warning,
@@ -93,16 +93,16 @@ impl ChatState {
                 };
                 self.log(kind, message.clone());
             }
-            ClientViewEvent::Chat { sender, message } => {
+            WorldViewEvent::Chat { sender, message } => {
                 self.log(ChatMessageKind::Chat, format!("{}: {}", sender, message));
             }
-            ClientViewEvent::Emote { sender, text } => {
+            WorldViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
-            ClientViewEvent::PingResponse => {
+            WorldViewEvent::PingResponse => {
                 self.log(ChatMessageKind::System, "Pong!".to_string());
             }
-            ClientViewEvent::BootAccount(reason) => {
+            WorldViewEvent::BootAccount(reason) => {
                 self.log(
                     ChatMessageKind::Error,
                     format!("Booted from server: {}", reason),

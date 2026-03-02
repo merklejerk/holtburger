@@ -74,7 +74,7 @@ sequenceDiagram
     participant S as AppState (state/mod.rs)
     participant P as Page (page/mod.rs)
 
-    C->>T: ClientViewEvent (Guid, VitalUpdate)
+    C->>T: WorldViewEvent (Guid, VitalUpdate)
     T->>S: handle_action(ReceivedViewEvent)
     S-->>S: Update vitals in GameData
     S->>T: UpdateResult { needs_redraw: true }
@@ -87,7 +87,7 @@ sequenceDiagram
 ### Task-Driven Shortcuts
 - **Adding a new UI element?** Create a new file in `widgets/` and call it from `page/game.rs`.
 - **Handling a new server message?** 
-    1. Ensure `holtburger-core` emits a `ClientViewEvent`.
+    1. Ensure `holtburger-core` emits a `WorldViewEvent`.
     2. Add the handler in `update/world.rs` to mutate `GameData`.
 - **Changing hotkeys?** Look in `update/input.rs`.
 - **Modifying the theme?** Check `ui/theme.rs` for colors and symbols.

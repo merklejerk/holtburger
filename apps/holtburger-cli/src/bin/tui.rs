@@ -9,7 +9,7 @@ use crossterm::{
 use directories::ProjectDirs;
 use holtburger_cli::state::{AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState};
 use holtburger_cli::ui;
-use holtburger_core::{Client, ClientCommand, ClientState, ClientViewEvent, RetryState};
+use holtburger_core::{Client, ClientCommand, ClientState, WorldViewEvent, RetryState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -18,7 +18,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 struct TuiLogger {
-    tx: mpsc::UnboundedSender<holtburger_core::ClientViewEvent>,
+    tx: mpsc::UnboundedSender<holtburger_core::WorldViewEvent>,
     file: Option<Mutex<File>>,
     verbosity: u8,
 }
@@ -57,7 +57,7 @@ impl log::Log for TuiLogger {
             };
 
             if should_send {
-                let _ = self.tx.send(ClientViewEvent::LogMessage(log_msg));
+                let _ = self.tx.send(WorldViewEvent::LogMessage(log_msg));
             }
         }
     }

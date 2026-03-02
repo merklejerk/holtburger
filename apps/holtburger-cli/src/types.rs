@@ -85,7 +85,7 @@ pub enum CommandTarget<'a> {
     None,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Modal {
     Retry { message: String, end_time: Instant },
 }

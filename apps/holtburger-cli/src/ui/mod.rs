@@ -9,7 +9,7 @@ pub mod utils;
 pub mod widgets;
 
 pub use self::layout::*;
-pub use self::widgets::panels::modal::Modal;
+pub use crate::types::Modal;
 use self::widgets::panels::modal::render_modal;
 pub use crate::update::*;
 

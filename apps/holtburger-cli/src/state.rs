@@ -4,12 +4,10 @@ use std::time::Instant;
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
-use crate::types::ContextView;
+use crate::types::{ContextView, Modal, Page};
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
-use crate::ui::widgets::panels::modal::Modal;
 
 use crate::pages::game::{GameState, ViewState};
-use crate::types::Page;
 
 use crate::pages::game::panels::chat::ChatMessageKind;
 

@@ -1,8 +1,7 @@
 use crate::pages::game::panels::chat::ChatMessageKind;
 use crate::state::AppState;
-use crate::types::{AppEvent, UpdateResult};
+use crate::types::{AppEvent, Modal, UpdateResult};
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
-use crate::ui::widgets::panels::modal::Modal;
 use holtburger_core::client::types::ClientCommand;
 
 impl AppState {

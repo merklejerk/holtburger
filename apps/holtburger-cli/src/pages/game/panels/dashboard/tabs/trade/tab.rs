@@ -10,10 +10,15 @@ use crate::types::{CommandTarget, TradeFocus};
 use crate::ui::Interaction;
 use crate::ui::traits::TabController;
 
-pub struct TradeTab;
+#[derive(Default, Debug, Clone)]
+pub struct TradeTab {
+    pub selected_index: usize,
+    pub list_state: ratatui::widgets::ListState,
+}
+
 
 impl TabController for TradeTab {
-    fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect) {
+    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
         render_trade_tab(f, game, area);
     }
 
@@ -141,7 +146,7 @@ impl TabController for TradeTab {
         CommandTarget::None
     }
 
-    fn get_item_count(&self, game: &GameState) -> usize {
+    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
         if let Some(trade) = &game.data.trade {
             match game.view.trade_focus {
                 TradeFocus::Local => trade.self_side.items.len(),

@@ -15,7 +15,12 @@ use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::entity::Entity;
 
-pub struct NearbyTab;
+#[derive(Default, Debug, Clone)]
+pub struct NearbyTab {
+    pub selected_index: usize,
+    pub list_state: ratatui::widgets::ListState,
+}
+
 
 pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
     filter_entities(
@@ -29,7 +34,7 @@ pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
 }
 
 impl TabController for NearbyTab {
-    fn render(&self, f: &mut Frame, game: &mut GameState, area: Rect) {
+    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
         render_nearby_tab(f, game, area);
     }
 
@@ -268,7 +273,7 @@ impl TabController for NearbyTab {
         }
     }
 
-    fn get_item_count(&self, game: &GameState) -> usize {
+    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
         get_entities(game).len()
     }
 }

@@ -1,6 +1,6 @@
+use crate::actions::AppAction;
 use crate::state::AppState;
 use crate::types::{ContextView, UpdateResult};
-use crate::actions::AppAction;
 use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -14,13 +14,17 @@ impl AppState {
             }
             AppAction::Assess(guid) => {
                 result.commands.push(ClientCommand::Identify(guid));
-                result.merge(self.handle_app_action(AppAction::ChangeContextView(ContextView::Assess(guid))));
+                result.merge(
+                    self.handle_app_action(AppAction::ChangeContextView(ContextView::Assess(guid))),
+                );
             }
             AppAction::Use(guid) => {
                 result.commands.push(ClientCommand::Use(guid));
             }
             AppAction::UseOn(item, target) => {
-                result.commands.push(ClientCommand::UseWithTarget { item, target });
+                result
+                    .commands
+                    .push(ClientCommand::UseWithTarget { item, target });
             }
             AppAction::Approach(guid) => {
                 result.commands.push(ClientCommand::MoveTo { target: guid });
@@ -61,7 +65,9 @@ impl AppState {
                 result.commands.push(ClientCommand::OpenTrade(guid));
             }
             AppAction::AddToTrade(guid) => {
-                result.commands.push(ClientCommand::AddToTrade { item: guid });
+                result
+                    .commands
+                    .push(ClientCommand::AddToTrade { item: guid });
             }
             AppAction::SellToVendor(item, vendor) => {
                 result.commands.push(ClientCommand::Sell {
@@ -86,11 +92,11 @@ impl AppState {
                     amount,
                 });
             }
-            AppAction::SplitItem(item, container, amount) => {
+            AppAction::SplitItem(item, container) => {
                 result.commands.push(ClientCommand::Split {
                     item,
                     container,
-                    amount: amount as i32,
+                    amount: 1, // TODO
                 });
             }
             AppAction::BeginInteraction(interaction) => {
@@ -100,11 +106,15 @@ impl AppState {
                 result.needs_redraw = true;
             }
             AppAction::ApplyItem(item, target) => {
-                result.commands.push(ClientCommand::UseWithTarget { item, target });
+                result
+                    .commands
+                    .push(ClientCommand::UseWithTarget { item, target });
                 result.merge(self.handle_app_action(AppAction::CancelInteraction));
             }
             AppAction::QueryDebugInfo(guid) => {
-                result.commands.push(ClientCommand::QueryEntityDebugInfo(guid));
+                result
+                    .commands
+                    .push(ClientCommand::QueryEntityDebugInfo(guid));
                 result.merge(self.handle_app_action(AppAction::RequestDebugContext(Some(guid))));
             }
             AppAction::CancelInteraction => {
@@ -115,9 +125,13 @@ impl AppState {
             }
             AppAction::CastSpell(spell_id, target) => {
                 if let Some(target) = target {
-                    result.commands.push(ClientCommand::CastTargetedSpell { spell_id, target });
+                    result
+                        .commands
+                        .push(ClientCommand::CastTargetedSpell { spell_id, target });
                 } else {
-                    result.commands.push(ClientCommand::CastUntargetedSpell { spell_id });
+                    result
+                        .commands
+                        .push(ClientCommand::CastUntargetedSpell { spell_id });
                 }
             }
             AppAction::SetCombatMode(mode) => {
@@ -164,8 +178,6 @@ impl AppState {
                 }
             }
             AppAction::ConfirmInteractionTarget(_guid) => {}
-            AppAction::ConfirmInteractionSplit(_guid, _amount) => {}
-            AppAction::ConfirmInteractionText(_text) => {}
         }
         result
     }

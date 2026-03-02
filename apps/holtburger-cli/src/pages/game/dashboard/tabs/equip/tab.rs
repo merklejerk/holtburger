@@ -19,14 +19,14 @@ impl TabController for EquipTab {
     fn get_verbs(
         &self,
         game: &GameState,
-        _interaction: &Option<Interaction>,
+        interaction: &Option<Interaction>,
         index: usize,
     ) -> Vec<Verb> {
         let lines = get_lines(game);
         let target = self.get_target_at_index(game, index);
         let mut verbs = Vec::new();
 
-        if let Some(interaction) = &game.view.active_interaction
+        if let Some(interaction) = interaction
             && let CommandTarget::Entity(_e, _) = &target
         {
             match interaction {
@@ -71,7 +71,11 @@ impl TabController for EquipTab {
                     ));
                 }
 
-                verbs.push(Verb::new(vec![AppAction::QueryDebugInfo(e.guid)], 'g', "Debug"));
+                verbs.push(Verb::new(
+                    vec![AppAction::QueryDebugInfo(e.guid)],
+                    'g',
+                    "Debug",
+                ));
                 verbs
             }
             _ => vec![],

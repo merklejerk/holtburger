@@ -2,12 +2,12 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
-use crate::state::GameState;
 use crate::actions::AppAction;
-use crate::ui::Interaction;
+use crate::state::GameState;
 use crate::types::Verb;
-use crate::ui::traits::TabController;
 use crate::types::{CommandTarget, StatType};
+use crate::ui::Interaction;
+use crate::ui::traits::TabController;
 use holtburger_core::client::types::ClientCommand;
 
 pub struct CharacterTab;
@@ -20,14 +20,13 @@ impl TabController for CharacterTab {
     fn get_verbs(
         &self,
         game: &GameState,
-        _interaction: &Option<Interaction>,
+        interaction: &Option<Interaction>,
         index: usize,
     ) -> Vec<Verb> {
-        let active_interaction = game.view.active_interaction;
         let target = self.get_target_at_index(game, index);
         let mut verbs = Vec::new();
 
-        if let Some(interaction) = active_interaction {
+        if let Some(interaction) = interaction {
             match interaction {
                 Interaction::Targeting { .. } => {}
                 _ => {

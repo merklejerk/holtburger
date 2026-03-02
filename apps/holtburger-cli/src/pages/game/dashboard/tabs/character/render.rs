@@ -12,8 +12,8 @@ use holtburger_world::magic::get_enchantment_name;
 use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 
 use crate::state::GameState;
-use crate::ui::theme;
 use crate::types::StatType;
+use crate::ui::theme;
 use crate::ui::utils::format_cost;
 
 pub enum CharTabLine {

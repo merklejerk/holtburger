@@ -6,8 +6,8 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use super::super::classification::{classify_entity, classify_vendor_item, get_entity_color};
 use crate::state::GameState;
-use crate::ui::theme;
 use crate::types::TradeFocus;
+use crate::ui::theme;
 use crate::ui::utils::format_item_name;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
 use holtburger_common::properties::{ItemType, PropertyInt};

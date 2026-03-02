@@ -13,9 +13,9 @@ pub mod widgets;
 pub use self::interaction::*;
 pub use self::layout::*;
 pub use self::traits::*;
-pub use crate::update::*;
 pub use self::widgets::panels::modal::Modal;
 use self::widgets::panels::modal::render_modal;
+pub use crate::update::*;
 
 pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
     let chunks = Layout::default()

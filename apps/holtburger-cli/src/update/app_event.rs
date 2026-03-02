@@ -1,8 +1,8 @@
 use crate::state::AppState;
+use crate::state::ChatMessageKind;
 use crate::types::{AppEvent, UpdateResult};
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 use crate::ui::widgets::panels::modal::Modal;
-use crate::state::ChatMessageKind;
 use holtburger_core::client::types::ClientCommand;
 
 impl AppState {

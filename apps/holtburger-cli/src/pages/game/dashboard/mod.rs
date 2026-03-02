@@ -1,9 +1,9 @@
 use crate::state::GameState;
+use crate::types::CommandTarget;
+use crate::types::Verb;
+use crate::types::{DashboardTab, FocusedPane};
 use crate::ui::theme::pane_block;
 use crate::ui::traits::TabController;
-use crate::types::CommandTarget;
-use crate::types::{DashboardTab, FocusedPane};
-use crate::types::Verb;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};

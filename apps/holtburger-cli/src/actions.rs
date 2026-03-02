@@ -24,7 +24,7 @@ pub enum AppAction {
     SellToVendor(Guid, Guid), // item, vendor
     MoveItem(Guid, Guid),
     StackItems(Guid, Guid, i32), // source, destination, amount
-    SplitItem(Guid, Guid, u32),
+    SplitItem(Guid, Guid),
     ApplyItem(Guid, Guid), // item, target (e.g. healing kit, tool)
     QueryDebugInfo(Guid),
     CastSpell(u32, Option<Guid>), // spell_id, target (None for untargeted)
@@ -33,8 +33,6 @@ pub enum AppAction {
     Log(ChatMessageKind, String),
     BeginInteraction(Interaction),
     ConfirmInteractionTarget(Guid),
-    ConfirmInteractionSplit(Guid, u32),
-    ConfirmInteractionText(String),
     CancelInteraction,
     SendCommands(Vec<ClientCommand>),
     ChangeContextView(ContextView),

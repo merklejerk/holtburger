@@ -185,7 +185,7 @@ impl GameState {
                     && mouse.column >= main_chunks[1].x
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
-chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
+                    chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
 
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
@@ -193,10 +193,8 @@ chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
                     && mouse.column >= main_chunks[2].x
                     && mouse.column < main_chunks[2].x + main_chunks[2].width
                 {
-                    self.view.context_scroll_offset = self
-                        .view
-                        .context_scroll_offset
-                        .saturating_add(SCROLL_STEP);
+                    self.view.context_scroll_offset =
+                        self.view.context_scroll_offset.saturating_add(SCROLL_STEP);
 
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[0].y
@@ -222,10 +220,8 @@ chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
                     && mouse.column >= main_chunks[2].x
                     && mouse.column < main_chunks[2].x + main_chunks[2].width
                 {
-                    self.view.context_scroll_offset = self
-                        .view
-                        .context_scroll_offset
-                        .saturating_sub(SCROLL_STEP);
+                    self.view.context_scroll_offset =
+                        self.view.context_scroll_offset.saturating_sub(SCROLL_STEP);
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[0].y
                     && mouse.row < main_chunks[0].y + main_chunks[0].height

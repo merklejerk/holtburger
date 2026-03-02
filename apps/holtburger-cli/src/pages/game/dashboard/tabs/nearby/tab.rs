@@ -6,11 +6,11 @@ use ratatui::layout::Rect;
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::actions::AppAction;
-use crate::state::GameState;
-use crate::ui::traits::TabController;
 use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
-use crate::ui::Interaction;
+use crate::state::GameState;
 use crate::types::Verb;
+use crate::ui::Interaction;
+use crate::ui::traits::TabController;
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::entity::Entity;
@@ -92,8 +92,14 @@ impl TabController for NearbyTab {
                         && let Some(cmd) = cmd
                     {
                         let actions = match cmd {
-                            ClientCommand::MoveItem { item, container, .. } => vec![AppAction::MoveItem(item, container)],
-                            ClientCommand::Stack { source, destination, amount } => vec![AppAction::StackItems(source, destination, amount)],
+                            ClientCommand::MoveItem {
+                                item, container, ..
+                            } => vec![AppAction::MoveItem(item, container)],
+                            ClientCommand::Stack {
+                                source,
+                                destination,
+                                amount,
+                            } => vec![AppAction::StackItems(source, destination, amount)],
                             _ => vec![
                                 AppAction::SendCommands(vec![cmd]),
                                 AppAction::CancelInteraction,
@@ -112,7 +118,11 @@ impl TabController for NearbyTab {
                         } else {
                             "Heal target".to_string()
                         };
-                        verbs.push(Verb::new(vec![AppAction::ApplyItem(item_guid, e.guid)], '\r', label));
+                        verbs.push(Verb::new(
+                            vec![AppAction::ApplyItem(item_guid, e.guid)],
+                            '\r',
+                            label,
+                        ));
                     }
                     return verbs;
                 }
@@ -122,7 +132,11 @@ impl TabController for NearbyTab {
                         && let Some(dest_item_type) = e.item_type()
                         && target_type.intersects(dest_item_type)
                     {
-                        verbs.push(Verb::new(vec![AppAction::ApplyItem(item_guid, e.guid)], '\r', "Apply to target"));
+                        verbs.push(Verb::new(
+                            vec![AppAction::ApplyItem(item_guid, e.guid)],
+                            '\r',
+                            "Apply to target",
+                        ));
                     }
                     return verbs;
                 }
@@ -172,8 +186,14 @@ impl TabController for NearbyTab {
 
                 verbs.push(Verb::new(
                     match pick_up_cmd {
-                        ClientCommand::MoveItem { item, container, .. } => vec![AppAction::MoveItem(item, container)],
-                        ClientCommand::Stack { source, destination, amount } => vec![AppAction::StackItems(source, destination, amount)],
+                        ClientCommand::MoveItem {
+                            item, container, ..
+                        } => vec![AppAction::MoveItem(item, container)],
+                        ClientCommand::Stack {
+                            source,
+                            destination,
+                            amount,
+                        } => vec![AppAction::StackItems(source, destination, amount)],
                         _ => vec![AppAction::SendCommands(vec![pick_up_cmd])],
                     },
                     'p',

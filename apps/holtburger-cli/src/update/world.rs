@@ -2,7 +2,7 @@ use crate::state::ChatMessageKind;
 use crate::state::{AppState, GameState, Page, SelectionState};
 use crate::types::{ContextView, DashboardTab};
 use holtburger_common::Guid;
-use holtburger_core::{ClientState, WorldViewEvent, ErrorReason};
+use holtburger_core::{ClientState, ErrorReason, WorldViewEvent};
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::entity::Entity;
 
@@ -56,9 +56,7 @@ impl AppState {
                 }
             }
             WorldViewEvent::ErrorRaised {
-                reason,
-                message,
-                ..
+                reason, message, ..
             } => {
                 if let ErrorReason::Character(error) = reason {
                     if error == CharacterError::Logon {
@@ -101,7 +99,7 @@ impl AppState {
         match &event {
             WorldViewEvent::CharacterList(_)
             | WorldViewEvent::PlayerEntered { .. }
-            | WorldViewEvent::ServerTimeUpdated { .. } 
+            | WorldViewEvent::ServerTimeUpdated { .. }
             | WorldViewEvent::WorldNameUpdated(_) => {
                 self.handle_setup_event(&event);
             }
@@ -290,10 +288,7 @@ impl AppState {
                     }
                 }
             }
-            WorldViewEvent::PlayerSpellsUpdated {
-                spell_ids,
-                spells,
-            } => {
+            WorldViewEvent::PlayerSpellsUpdated { spell_ids, spells } => {
                 if let Some(game) = self.game_option_mut() {
                     game.data.player_spells = spell_ids;
                     for (id, info) in spells {
@@ -378,14 +373,14 @@ impl AppState {
 
     fn handle_navigation_event(&mut self, event: WorldViewEvent) {
         if let WorldViewEvent::NoClipUpdated { enabled } = event
-            && let Some(game) = self.game_option_mut() {
-                game.data.noclip = enabled;
-                let status = if enabled { "ENABLED" } else { "DISABLED" };
-                self.chat.log(
-                    ChatMessageKind::System,
-                    format!(">> NoClip is now {}", status),
-                );
-            }
+            && let Some(game) = self.game_option_mut()
+        {
+            game.data.noclip = enabled;
+            let status = if enabled { "ENABLED" } else { "DISABLED" };
+            self.chat.log(
+                ChatMessageKind::System,
+                format!(">> NoClip is now {}", status),
+            );
+        }
     }
 }
-

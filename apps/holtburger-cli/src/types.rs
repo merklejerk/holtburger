@@ -9,7 +9,7 @@ use ratatui::layout::Rect;
 use std::borrow::Cow;
 use std::time::Instant;
 
-use crate::actions::{AppAction};
+use crate::actions::AppAction;
 
 pub const SCROLL_STEP: usize = 3;
 
@@ -126,7 +126,6 @@ pub enum AppEvent {
     Mouse(MouseEvent, Vec<Rect>, Vec<Rect>, Rect), // mouse, chunks, main_chunks, dynamic_chunk
     ReceivedViewEvent(WorldViewEvent),
 }
-
 
 #[derive(Debug, Default)]
 pub struct UpdateResult {

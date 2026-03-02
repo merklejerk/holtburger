@@ -1,5 +1,5 @@
-use crate::types::FocusedPane;
 use crate::state::GameState;
+use crate::types::FocusedPane;
 use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
 use ratatui::text::{Line, Span};

@@ -45,14 +45,16 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let items = get_list_items(game, &counts);
     let content_len = items.len();
 
+    let selected_index = game.dashboard.selected_index();
+    let list_state = game.dashboard.list_state();
+    list_state.select(Some(selected_index));
+
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
-    let selected_index = game.dashboard.selected_index();
-    game.dashboard.list_state().select(Some(selected_index));
-    f.render_stateful_widget(dashboard_list, bottom_area, game.dashboard.list_state());
-    let offset = game.dashboard.list_state().offset();
+    f.render_stateful_widget(dashboard_list, bottom_area, list_state);
+    let offset = list_state.offset();
     crate::ui::widgets::scroll::render_scrollbar(f, bottom_area, content_len, offset);
 
     let height = bottom_area.height as usize;

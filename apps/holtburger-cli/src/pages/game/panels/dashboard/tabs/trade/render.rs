@@ -28,9 +28,6 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
-        let selected_index = game.dashboard.selected_index();
-        game.dashboard.list_state().select(Some(selected_index));
-
         // Self side
         let self_items: Vec<ListItem> = trade
             .self_side

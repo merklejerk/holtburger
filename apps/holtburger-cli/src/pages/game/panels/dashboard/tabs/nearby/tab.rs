@@ -5,9 +5,9 @@ use ratatui::layout::Rect;
 
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
-use crate::actions::AppAction;
-use crate::pages::game::dashboard::filter::{EntityFilter, filter_entities};
-use crate::state::GameState;
+use crate::types::AppAction;
+use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
+use crate::pages::game::GameState;
 use crate::types::Verb;
 use crate::ui::Interaction;
 use crate::ui::traits::TabController;

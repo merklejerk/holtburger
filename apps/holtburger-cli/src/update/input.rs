@@ -4,7 +4,9 @@ use holtburger_core::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 use ratatui::layout::Rect;
 
-use crate::state::{AppState, ChatState, GameState, Page, SelectionState};
+use crate::state::AppState;
+use crate::pages::{game::GameState, selection::SelectionState};
+use crate::types::Page;
 use crate::types::{FocusedPane, SCROLL_STEP, UpdateResult};
 
 impl AppState {
@@ -46,15 +48,7 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        let mut page_result = self.page.handle_input(
-            key,
-            &mut self.input,
-            &mut self.input_history,
-            &mut self.history_index,
-            &mut self.chat,
-            width,
-            &main_chunks,
-        );
+        let mut page_result = self.page.handle_input(key, width, &main_chunks);
 
         while !page_result.actions.is_empty() {
             let actions: Vec<_> = page_result.actions.drain(..).collect();
@@ -75,8 +69,8 @@ impl AppState {
                 && *idx > 0
                 && *idx <= sel.characters.len()
             {
-                let char_info = &sel.characters[*idx - 1];
-                self.page = Page::Game(Box::new(crate::state::GameState::new(
+                let char_info = &sel.characters[idx - 1];
+                self.page = Page::Game(Box::new(crate::pages::game::GameState::new(
                     char_info.guid,
                     char_info.name.clone(),
                     self.world_name.clone(),
@@ -101,7 +95,7 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        let mut page_result = self.page.handle_mouse(mouse, &mut self.chat, &main_chunks);
+        let mut page_result = self.page.handle_mouse(mouse, &main_chunks);
         while !page_result.actions.is_empty() {
             let actions: Vec<_> = page_result.actions.drain(..).collect();
             for action in actions {
@@ -174,7 +168,6 @@ impl GameState {
     pub fn handle_mouse(
         &mut self,
         mouse: MouseEvent,
-        chat: &mut ChatState,
         main_chunks: &[Rect],
     ) -> UpdateResult {
         let mut result = UpdateResult::new();
@@ -185,7 +178,7 @@ impl GameState {
                     && mouse.column >= main_chunks[1].x
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
-                    chat.scroll_offset = chat.scroll_offset.saturating_add(SCROLL_STEP);
+                    self.chat.scroll_offset = self.chat.scroll_offset.saturating_add(SCROLL_STEP);
 
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
@@ -213,7 +206,7 @@ impl GameState {
                     && mouse.column >= main_chunks[1].x
                     && mouse.column < main_chunks[1].x + main_chunks[1].width
                 {
-                    chat.scroll_offset = chat.scroll_offset.saturating_sub(SCROLL_STEP);
+                    self.chat.scroll_offset = self.chat.scroll_offset.saturating_sub(SCROLL_STEP);
                     result.needs_redraw = true;
                 } else if mouse.row >= main_chunks[2].y
                     && mouse.row < main_chunks[2].y + main_chunks[2].height
@@ -242,10 +235,6 @@ impl GameState {
     pub fn handle_input(
         &mut self,
         key: KeyEvent,
-        input: &mut String,
-        input_history: &mut Vec<String>,
-        history_index: &mut Option<usize>,
-        chat: &mut ChatState,
         width: u16,
         main_chunks: &[Rect],
     ) -> UpdateResult {
@@ -253,7 +242,7 @@ impl GameState {
 
         if self.view.focused_pane == FocusedPane::Dashboard {
             let active_tab =
-                crate::pages::game::dashboard::get_tab_controller(self.dashboard.active_tab);
+                crate::pages::game::panels::dashboard::get_tab_controller(self.dashboard.active_tab);
             if let Some(tab_result) = active_tab.handle_input(key, self) {
                 result.merge(tab_result);
                 return result;
@@ -289,7 +278,7 @@ impl GameState {
             }
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    let command = std::mem::take(input);
+                    let command = std::mem::take(&mut self.chat_input.input);
                     if command.is_empty() {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
@@ -299,15 +288,15 @@ impl GameState {
                         return result;
                     }
                     if command == "/clear" {
-                        chat.messages.clear();
-                        chat.wrapped_chat_cache.clear();
-                        input.clear();
+                        self.chat.messages.clear();
+                        self.chat.wrapped_chat_cache.clear();
+                        self.chat_input.input.clear();
                         return result.with_redraw(true);
                     }
                     if command == "/ping" {
                         result.commands.push(ClientCommand::Ping);
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
@@ -316,8 +305,8 @@ impl GameState {
                             extent: 10.0,
                             velocity: holtburger_common::Vector3::default(),
                         });
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
@@ -329,22 +318,22 @@ impl GameState {
                                 message: parts[2].to_string(),
                             });
                         }
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
                     if command == "/sit" {
                         result.commands.push(ClientCommand::SetState(0x13));
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
                     if command == "/stand" {
                         result.commands.push(ClientCommand::SetState(0x04));
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
@@ -352,15 +341,15 @@ impl GameState {
                         if let Ok(heading) = args.parse::<f32>() {
                             result.commands.push(ClientCommand::TurnTo { heading });
                         }
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
                     if command == "/sync" {
                         result.commands.push(ClientCommand::SyncPosition);
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
@@ -373,8 +362,8 @@ impl GameState {
                         };
 
                         result.commands.push(ClientCommand::SetCombatMode(mode));
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
@@ -390,8 +379,8 @@ impl GameState {
                         };
                         result.commands.push(ClientCommand::SetNoClip(enabled));
                         self.data.noclip = enabled;
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
@@ -417,8 +406,8 @@ impl GameState {
                                 });
                             }
                         }
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
@@ -438,37 +427,37 @@ impl GameState {
                                 });
                             }
                         }
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
                     if command == "/info" {
                         result
                             .actions
-                            .push(crate::actions::AppAction::DisplayClientInfo);
+                            .push(crate::types::AppAction::DisplayClientInfo);
 
-                        input_history.push(command.clone());
-                        *history_index = None;
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
                     if command == "/help" {
-                        use crate::state::ChatMessageKind;
-                        chat.log(
+                        use crate::pages::game::panels::chat::ChatMessageKind;
+                        self.chat.log(
                             ChatMessageKind::System,
                             "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>, /stack <src> <dst> [amount], /split <item> <amount>".to_string()
                         );
-                        chat.log(
+                        self.chat.log(
                             ChatMessageKind::System,
                             "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)"
                                 .to_string(),
                         );
-                        input.clear();
+                        self.chat_input.input.clear();
                         return result.with_redraw(true);
                     }
-                    input_history.push(command.clone());
-                    *history_index = None;
+                    self.chat_input.input_history.push(command.clone());
+                    self.chat_input.history_index = None;
                     result.commands.push(ClientCommand::Talk(command));
                     self.view.focused_pane = self.view.previous_focused_pane;
                     result.needs_redraw = true;
@@ -480,7 +469,7 @@ impl GameState {
             }
             KeyCode::Backspace => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    input.pop();
+                    self.chat_input.input.pop();
                     result.needs_redraw = true;
                 }
             }
@@ -508,17 +497,17 @@ impl GameState {
             }
             KeyCode::Up => match self.view.focused_pane {
                 FocusedPane::Input => {
-                    if !input_history.is_empty() {
-                        let idx = history_index
+                    if !self.chat_input.input_history.is_empty() {
+                        let idx = self.chat_input.history_index
                             .map(|i| i.saturating_sub(1))
-                            .unwrap_or(input_history.len().saturating_sub(1));
-                        *history_index = Some(idx);
-                        *input = input_history[idx].clone();
+                            .unwrap_or(self.chat_input.input_history.len().saturating_sub(1));
+                        self.chat_input.history_index = Some(idx);
+                        self.chat_input.input = self.chat_input.input_history[idx].clone();
                         result.needs_redraw = true;
                     }
                 }
                 FocusedPane::Chat => {
-                    chat.scroll_offset = chat.scroll_offset.saturating_add(1);
+                    self.chat.scroll_offset = self.chat.scroll_offset.saturating_add(1);
 
                     result.needs_redraw = true;
                 }
@@ -532,20 +521,20 @@ impl GameState {
             },
             KeyCode::Down => match self.view.focused_pane {
                 FocusedPane::Input => {
-                    if let Some(idx) = history_index {
-                        if *idx + 1 < input_history.len() {
-                            let next = *idx + 1;
-                            *history_index = Some(next);
-                            *input = input_history[next].clone();
+                    if let Some(idx) = self.chat_input.history_index {
+                        if idx + 1 < self.chat_input.input_history.len() {
+                            let next = idx + 1;
+                            self.chat_input.history_index = Some(next);
+                            self.chat_input.input = self.chat_input.input_history[next].clone();
                         } else {
-                            *history_index = None;
-                            input.clear();
+                            self.chat_input.history_index = None;
+                            self.chat_input.input.clear();
                         }
                         result.needs_redraw = true;
                     }
                 }
                 FocusedPane::Chat => {
-                    chat.scroll_offset = chat.scroll_offset.saturating_sub(1);
+                    self.chat.scroll_offset = self.chat.scroll_offset.saturating_sub(1);
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
@@ -559,7 +548,7 @@ impl GameState {
                 FocusedPane::Chat => {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
-                    chat.scroll_offset = chat.scroll_offset.saturating_add(step);
+                    self.chat.scroll_offset = self.chat.scroll_offset.saturating_add(step);
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
@@ -575,7 +564,7 @@ impl GameState {
                 FocusedPane::Chat => {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     let step = (h / 2) + 1;
-                    chat.scroll_offset = chat.scroll_offset.saturating_sub(step);
+                    self.chat.scroll_offset = self.chat.scroll_offset.saturating_sub(step);
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
@@ -589,14 +578,14 @@ impl GameState {
             },
             KeyCode::Char(c) => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    input.push(c);
+                    self.chat_input.input.push(c);
                     result.needs_redraw = true;
                 }
             }
             KeyCode::Home => match self.view.focused_pane {
                 FocusedPane::Chat => {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
-                    chat.scroll_offset = chat.wrapped_chat_cache.len().saturating_sub(h);
+                    self.chat.scroll_offset = self.chat.wrapped_chat_cache.len().saturating_sub(h);
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
@@ -609,7 +598,7 @@ impl GameState {
             },
             KeyCode::End => match self.view.focused_pane {
                 FocusedPane::Chat => {
-                    chat.scroll_offset = 0;
+                    self.chat.scroll_offset = 0;
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {

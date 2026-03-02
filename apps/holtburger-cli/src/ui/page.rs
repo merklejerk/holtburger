@@ -3,11 +3,12 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use unicode_width::UnicodeWidthStr;
 
-use crate::pages::game::dashboard::render_dashboard_pane;
+use crate::pages::game::panels::dashboard::render_dashboard_pane;
 use crate::pages::game::panels::chat::render_chat_pane;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::state::NetStats;
-use crate::state::{ChatState, GameState, Page, SelectionState};
+use crate::pages::{game::GameState, selection::SelectionState};
+use crate::types::Page;
 use crate::types::{FocusedPane, UpdateResult};
 use crate::ui::get_layout;
 use crate::ui::layout::PULSE_PANEL_WIDTH;
@@ -24,9 +25,7 @@ impl Page {
         &mut self,
         f: &mut Frame,
         area: Rect,
-        chat: &mut ChatState,
         account_name: &str,
-        input: &str,
         core_state: &ClientState,
         net_stats: &NetStats,
         is_modal_active: bool,
@@ -38,9 +37,7 @@ impl Page {
             Page::Game(game) => game.render(
                 f,
                 area,
-                chat,
                 account_name,
-                input,
                 core_state,
                 net_stats,
                 is_modal_active,
@@ -54,10 +51,6 @@ impl Page {
     pub fn handle_input(
         &mut self,
         key: KeyEvent,
-        input: &mut String,
-        input_history: &mut Vec<String>,
-        history_index: &mut Option<usize>,
-        chat: &mut ChatState,
         width: u16,
         main_chunks: &[Rect],
     ) -> UpdateResult {
@@ -65,10 +58,6 @@ impl Page {
             Page::Selection(selection) => selection.handle_input(key),
             Page::Game(game) => game.handle_input(
                 key,
-                input,
-                input_history,
-                history_index,
-                chat,
                 width,
                 main_chunks,
             ),
@@ -78,12 +67,12 @@ impl Page {
     pub fn handle_mouse(
         &mut self,
         mouse: crossterm::event::MouseEvent,
-        chat: &mut crate::pages::game::panels::chat::ChatState,
+        
         main_chunks: &[Rect],
     ) -> UpdateResult {
         match self {
             Page::Selection(_) => UpdateResult::new(),
-            Page::Game(game) => game.handle_mouse(mouse, chat, main_chunks),
+            Page::Game(game) => game.handle_mouse(mouse, main_chunks),
         }
     }
 }
@@ -101,9 +90,9 @@ impl GameState {
         &mut self,
         f: &mut Frame,
         area: Rect,
-        chat: &mut ChatState,
+        
         account_name: &str,
-        input: &str,
+        
         core_state: &ClientState,
         net_stats: &NetStats,
         is_modal_active: bool,
@@ -125,7 +114,7 @@ impl GameState {
         // Chat Pane
         render_chat_pane(
             f,
-            chat,
+            &mut self.chat,
             self.view.focused_pane == FocusedPane::Chat,
             main_chunks[1],
         );
@@ -161,13 +150,13 @@ impl GameState {
         let input_block = pane_block(is_focused)
             .title(input_title)
             .title_style(pane_title_style(is_focused));
-        let input_width = input.width() as u16;
+        let input_width = self.chat_input.input.width() as u16;
         let max_visible_width = input_chunks[0].width.saturating_sub(2);
 
         let display_input = if input_width > max_visible_width {
             let mut width = 0;
-            let mut start_index = input.len();
-            for (i, c) in input.char_indices().rev() {
+            let mut start_index = self.chat_input.input.len();
+            for (i, c) in self.chat_input.input.char_indices().rev() {
                 let c_width = UnicodeWidthStr::width(c.to_string().as_str());
                 if width + c_width > max_visible_width as usize {
                     break;
@@ -175,9 +164,9 @@ impl GameState {
                 width += c_width;
                 start_index = i;
             }
-            &input[start_index..]
+            &self.chat_input.input[start_index..]
         } else {
-            input
+            &self.chat_input.input
         };
 
         let input_para = ratatui::widgets::Paragraph::new(display_input).block(input_block);

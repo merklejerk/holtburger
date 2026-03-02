@@ -1,37 +1,50 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
 use crate::types::ContextView;
 use crate::ui::widgets::panels::modal::Modal;
+use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 
-pub mod pages;
-mod net;
+use crate::types::Page;
+use crate::pages::game::{GameState, ViewState};
 
-pub use self::net::NetStats;
-pub use self::pages::{Page, GameState, SelectionState};
-pub use self::pages::game::data::GameData;
-pub use self::pages::game::view::ViewState;
-pub use self::pages::game::dashboard::DashboardState;
-pub use crate::pages::game::panels::chat::{ChatMessage, ChatMessageKind, ChatState};
+use crate::pages::game::panels::chat::ChatMessageKind;
+
+pub struct NetStats {
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+    pub history_in: Vec<u64>,
+    pub history_out: Vec<u64>,
+    pub last_update: Option<Instant>,
+}
+
+impl Default for NetStats {
+    fn default() -> Self {
+        Self {
+            bytes_in: 0,
+            bytes_out: 0,
+            history_in: vec![0; NET_PULSE_HISTORY_SIZE],
+            history_out: vec![0; NET_PULSE_HISTORY_SIZE],
+            last_update: None,
+        }
+    }
+}
 
 pub struct AppState {
     pub account_name: String,
     pub account_password: String,
     pub page: Page,
     pub modal: Option<Modal>,
-    pub chat: ChatState,
-    pub input: String,
-    pub input_history: Vec<String>,
-    pub history_index: Option<usize>,
     pub logon_retry: RetryState,
     pub enter_retry: RetryState,
     pub core_state: ClientState,
     pub net_stats: NetStats,
     pub world_name: String,
     pub verbosity: u8,
-    pub app_action_tx: tokio::sync::mpsc::UnboundedSender<crate::actions::AppAction>,
+    pub app_action_tx: tokio::sync::mpsc::UnboundedSender<crate::types::AppAction>,
 }
 
 impl AppState {
@@ -92,7 +105,7 @@ impl AppState {
             return;
         }
 
-        let active_tab = crate::pages::game::dashboard::get_tab_controller(tab);
+        let active_tab = crate::pages::game::panels::dashboard::get_tab_controller(tab);
         if let Some(game) = self.game_option() {
             let content = active_tab.get_context_panel_content(game);
             if let Some(game) = self.game_option_mut() {
@@ -104,7 +117,7 @@ impl AppState {
     pub fn dashboard_item_count(&self) -> usize {
         if let Some(game) = self.game_option() {
             let active_tab =
-                crate::pages::game::dashboard::get_tab_controller(game.dashboard.active_tab);
+                crate::pages::game::panels::dashboard::get_tab_controller(game.dashboard.active_tab);
             active_tab.get_item_count(game)
         } else {
             0
@@ -195,7 +208,7 @@ impl AppState {
             "══════════════════════════".to_string(),
         ));
         for (kind, msg) in logs {
-            self.chat.log(kind, msg);
+            self.log(kind, msg);
         }
     }
 }
@@ -221,6 +234,14 @@ impl AppState {
                 }
                 stack.extend(children);
             }
+        }
+    }
+}
+
+impl AppState {
+    pub fn log(&mut self, kind: ChatMessageKind, msg: impl Into<String>) {
+        if let Some(game) = self.game_option_mut() {
+            game.chat.log(kind, msg.into());
         }
     }
 }

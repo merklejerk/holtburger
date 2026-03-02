@@ -3,8 +3,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_trade_tab;
-use crate::actions::AppAction;
-use crate::state::GameState;
+use crate::types::AppAction;
+use crate::pages::game::GameState;
 use crate::types::Verb;
 use crate::types::{CommandTarget, TradeFocus};
 use crate::ui::Interaction;

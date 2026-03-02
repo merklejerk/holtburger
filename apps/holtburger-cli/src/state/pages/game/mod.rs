@@ -2,20 +2,24 @@
 
 use holtburger_common::Guid;
 
-pub mod dashboard;
 pub mod data;
-pub mod view;
 
-use crate::state::pages::game::dashboard::DashboardState;
+use crate::pages::game::dashboard::DashboardState;
 
 use self::data::GameData;
-use self::view::ViewState;
+use crate::pages::game::view::ViewState;
 
-#[derive(Debug, Clone, Default)]
+use crate::pages::game::panels::chat::ChatState;
+
+#[derive(Default)]
 pub struct GameState {
     pub data: GameData,
     pub dashboard: DashboardState,
     pub view: ViewState,
+    pub chat: ChatState,
+    pub input: String,
+    pub input_history: Vec<String>,
+    pub history_index: Option<usize>,
 }
 
 impl GameState {
@@ -24,6 +28,10 @@ impl GameState {
             data: GameData::new(guid, name, world_name),
             dashboard: DashboardState::default(),
             view: ViewState::default(),
+            chat: ChatState::default(),
+            input: String::new(),
+            input_history: Vec::new(),
+            history_index: None,
         }
     }
 }

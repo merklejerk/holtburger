@@ -2,8 +2,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
-use crate::actions::AppAction;
-use crate::state::GameState;
+use crate::types::AppAction;
+use crate::pages::game::GameState;
 use crate::types::{CommandTarget, Verb};
 use crate::ui::Interaction;
 use crate::ui::traits::TabController;

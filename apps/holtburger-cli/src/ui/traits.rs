@@ -1,5 +1,5 @@
-use crate::pages::game::dashboard::{assess, debug, input::handle_common_dashboard_input};
-use crate::state::GameState;
+use crate::pages::game::panels::dashboard::{assess, debug, input::handle_common_dashboard_input};
+use crate::pages::game::GameState;
 use crate::types::{CommandTarget, ContextView, UpdateResult, Verb};
 use crate::ui::Interaction;
 use crossterm::event::KeyEvent;

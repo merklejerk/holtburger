@@ -1,5 +1,7 @@
-use crate::state::ChatMessageKind;
-use crate::state::{AppState, GameState, Page, SelectionState};
+use crate::pages::game::panels::chat::ChatMessageKind;
+use crate::state::AppState;
+use crate::pages::{game::GameState, selection::SelectionState};
+use crate::types::Page;
 use crate::types::{ContextView, DashboardTab};
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, ErrorReason, ClientViewEvent};
@@ -61,7 +63,7 @@ impl AppState {
                 if let ErrorReason::Character(error) = reason {
                     if error == CharacterError::Logon {
                         self.logon_retry.schedule();
-                        self.chat.log(
+                        self.log(
                             ChatMessageKind::Warning,
                             format!(
                                 "* Retrying login (attempt {}/{})...",
@@ -71,7 +73,7 @@ impl AppState {
                         return;
                     } else if error == CharacterError::EnterGameCharacterInWorld {
                         self.enter_retry.schedule();
-                        self.chat.log(
+                        self.log(
                             ChatMessageKind::Warning,
                             format!(
                                 "* Retrying enter world (attempt {}/{})...",
@@ -88,7 +90,7 @@ impl AppState {
                     | ErrorReason::General(_) => ChatMessageKind::Error,
                     ErrorReason::Transport(_) => ChatMessageKind::Warning,
                 };
-                self.chat.log(chat_kind, format!("[!] {}", message));
+                self.log(chat_kind, format!("[!] {}", message));
             }
             _ => {}
         }
@@ -109,7 +111,7 @@ impl AppState {
             | ClientViewEvent::Emote { .. }
             | ClientViewEvent::PingResponse
             | ClientViewEvent::BootAccount(_) => {
-                self.chat.handle_event(&event);
+                if let Some(g) = self.game_option_mut() { g.chat.handle_event(&event); }
             }
             _ => {}
         }
@@ -377,7 +379,7 @@ impl AppState {
         {
             game.data.noclip = enabled;
             let status = if enabled { "ENABLED" } else { "DISABLED" };
-            self.chat.log(
+            self.log(
                 ChatMessageKind::System,
                 format!(">> NoClip is now {}", status),
             );

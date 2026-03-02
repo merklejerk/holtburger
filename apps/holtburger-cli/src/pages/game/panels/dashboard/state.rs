@@ -1,5 +1,5 @@
 
-use std::collections::{self, HashMap};
+use std::collections::HashMap;
 
 use crate::types::DashboardTab;
 

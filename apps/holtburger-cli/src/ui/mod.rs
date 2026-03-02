@@ -84,9 +84,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
     state.page.render(
         f,
         f.size(),
-        &mut state.chat,
         &state.account_name,
-        &state.input,
         &state.core_state,
         &state.net_stats,
         state.modal.is_some(),

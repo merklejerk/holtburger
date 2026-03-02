@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use crate::state::ChatMessageKind;
+use crate::pages::game::panels::chat::ChatMessageKind;
 use crate::types::{AppEvent, UpdateResult};
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 use crate::ui::widgets::panels::modal::Modal;
@@ -65,7 +65,7 @@ impl AppState {
         }
 
         if self.logon_retry.tick(now) {
-            self.chat.log(
+            self.log(
                 ChatMessageKind::System,
                 format!(
                     "* Retrying login (attempt {}/{})...",
@@ -78,7 +78,7 @@ impl AppState {
             result.needs_redraw = true;
         }
         if self.enter_retry.tick(now) {
-            self.chat.log(
+            self.log(
                 ChatMessageKind::System,
                 format!(
                     "* Retrying enter world (attempt {}/{})...",

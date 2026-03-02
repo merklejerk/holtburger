@@ -1,4 +1,4 @@
-use crate::actions::AppAction;
+use crate::types::AppAction;
 use crate::state::AppState;
 use crate::types::{ContextView, UpdateResult};
 use holtburger_common::Guid;
@@ -141,7 +141,7 @@ impl AppState {
                 result.merge(self.handle_app_action(AppAction::ChangeContextView(view)));
             }
             AppAction::Log(kind, text) => {
-                self.chat.log(kind, text);
+                self.log(kind, text);
                 result.needs_redraw = true;
             }
             AppAction::SendCommands(cmds) => {

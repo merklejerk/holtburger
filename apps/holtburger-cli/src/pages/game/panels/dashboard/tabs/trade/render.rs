@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use super::super::classification::{classify_entity, classify_vendor_item, get_entity_color};
-use crate::state::GameState;
+use crate::pages::game::GameState;
 use crate::types::TradeFocus;
 use crate::ui::theme;
 use crate::ui::utils::format_item_name;

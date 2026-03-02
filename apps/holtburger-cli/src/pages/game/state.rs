@@ -1,6 +1,34 @@
-use crate::{types::{ContextView, FocusedPane, TradeFocus}, ui::Interaction};
+use std::time::Instant;
 use holtburger_common::Guid;
 use ratatui::text::Line;
+
+use crate::types::{ContextView, FocusedPane, TradeFocus};
+use crate::ui::Interaction;
+use crate::pages::game::panels::dashboard::DashboardState;
+use crate::pages::game::GameData;
+use crate::pages::game::panels::chat::ChatState;
+use crate::pages::game::panels::chat_input::ChatInputState;
+
+#[derive(Default)]
+pub struct GameState {
+    pub data: GameData,
+    pub dashboard: DashboardState,
+    pub view: ViewState,
+    pub chat: ChatState,
+    pub chat_input: ChatInputState,
+}
+
+impl GameState {
+    pub fn new(guid: Guid, name: String, world_name: String) -> Self {
+        Self {
+            data: GameData::new(guid, name, world_name),
+            dashboard: DashboardState::default(),
+            view: ViewState::default(),
+            chat: ChatState::default(),
+            chat_input: ChatInputState::default(),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ViewState {
@@ -25,7 +53,7 @@ pub struct ViewState {
     /// Current focused side of the trade window.
     pub trade_focus: TradeFocus,
     /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.
-    pub last_trade_initiation: Option<(std::time::Instant, Guid)>,
+    pub last_trade_initiation: Option<(Instant, Guid)>,
     /// Cached wrapped message for empty trade tab: (width, wrapped_lines).
     pub trade_no_session_msg_cache: Option<(u16, Vec<String>)>,
 }

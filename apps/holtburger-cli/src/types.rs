@@ -1,3 +1,5 @@
+use crate::pages::game::GameState;
+use crate::pages::selection::SelectionState;
 use crossterm::event::{KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
@@ -9,7 +11,9 @@ use ratatui::layout::Rect;
 use std::borrow::Cow;
 use std::time::Instant;
 
-use crate::actions::AppAction;
+use crate::pages::game::panels::chat::ChatMessageKind;
+use crate::ui::Interaction;
+use holtburger_protocol::messages::combat::CombatMode;
 
 pub const SCROLL_STEP: usize = 3;
 
@@ -169,5 +173,53 @@ impl UpdateResult {
         self.commands.extend(other.commands);
         self.actions.extend(other.actions);
         self.needs_redraw |= other.needs_redraw;
+    }
+}
+
+pub enum Page {
+    Selection(SelectionState),
+    Game(Box<GameState>),
+}
+
+#[derive(Debug, Clone)]
+pub enum AppAction {
+    Identify(Guid),
+    Assess(Guid),
+    Use(Guid),
+    UseOn(Guid, Guid),
+    Approach(Guid),
+    PickUp(Guid),
+    Drop(Guid),
+    Equip(Guid),
+    Unequip(Guid),
+    TalkTo(Guid),
+    Open(Guid),
+    Close(Guid),
+    OpenTrade(Guid),
+    AddToTrade(Guid),
+    SellToVendor(Guid, Guid), // item, vendor
+    MoveItem(Guid, Guid),
+    StackItems(Guid, Guid, i32), // source, destination, amount
+    SplitItem(Guid, Guid),
+    ApplyItem(Guid, Guid), // item, target (e.g. healing kit, tool)
+    QueryDebugInfo(Guid),
+    CastSpell(u32, Option<Guid>), // spell_id, target (None for untargeted)
+    SetCombatMode(CombatMode),
+    ViewDetails(ContextView),
+    Log(ChatMessageKind, String),
+    BeginInteraction(Interaction),
+    ConfirmInteractionTarget(Guid),
+    CancelInteraction,
+    SendCommands(Vec<ClientCommand>),
+    ChangeContextView(ContextView),
+    RequestDebugContext(Option<Guid>),
+    ClearVendor,
+    DisplayClientInfo,
+    Sequence(Vec<AppAction>),
+}
+
+impl From<Vec<AppAction>> for AppAction {
+    fn from(actions: Vec<AppAction>) -> Self {
+        AppAction::Sequence(actions)
     }
 }

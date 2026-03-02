@@ -6,7 +6,11 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use directories::ProjectDirs;
-use holtburger_cli::state::{AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState};
+use holtburger_cli::state::AppState;
+use holtburger_cli::pages::game::panels::chat::ChatMessageKind;
+use holtburger_cli::state::NetStats;
+use holtburger_cli::types::Page;
+use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::types::AppEvent;
 use holtburger_cli::ui;
 use holtburger_core::{Client, ClientCommand, ClientState, RetryState, ClientViewEvent};
@@ -145,9 +149,9 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (app_action_tx, mut app_action_rx) =
-        mpsc::unbounded_channel::<holtburger_cli::actions::AppAction>();
+        mpsc::unbounded_channel::<holtburger_cli::types::AppAction>();
 
-    let chat_log = if let Some(path) = &args.log {
+    let _chat_log = if let Some(path) = &args.log {
         match File::create(path) {
             Ok(f) => Some(Mutex::new(f)),
             Err(e) => {
@@ -224,10 +228,6 @@ async fn main() -> Result<()> {
         account_password: args.password.clone(),
         page: Page::Selection(SelectionState::default()),
         modal: None,
-        chat: ChatState::new(chat_log),
-        input: String::new(),
-        input_history: Vec::new(),
-        history_index: None,
         logon_retry: RetryState::new(5),
         enter_retry: RetryState::new(5),
         core_state: ClientState::Connected,
@@ -240,7 +240,7 @@ async fn main() -> Result<()> {
     app_state.refresh_context_buffer();
 
     if args.verbose > 0 {
-        app_state.chat.log(
+        app_state.log(
             ChatMessageKind::System,
             format!("Verbosity level {} enabled.", args.verbose),
         );

@@ -3,8 +3,8 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
-use crate::actions::AppAction;
-use crate::state::GameState;
+use crate::types::AppAction;
+use crate::pages::game::GameState;
 use crate::types::ContextView;
 use crate::types::Verb;
 use crate::ui::Interaction;
@@ -38,7 +38,7 @@ impl TabController for SpellsTab {
             if !game.data.is_wielding_caster() {
                 verbs.push(Verb::new(
                     vec![AppAction::Log(
-                        crate::state::ChatMessageKind::Error,
+                        crate::pages::game::panels::chat::ChatMessageKind::Error,
                         "You must be wielding a caster to cast spells!".to_string(),
                     )],
                     'c',

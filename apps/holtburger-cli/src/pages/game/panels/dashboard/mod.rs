@@ -1,4 +1,4 @@
-use crate::state::GameState;
+use crate::pages::game::GameState;
 use crate::types::CommandTarget;
 use crate::types::Verb;
 use crate::types::{DashboardTab, FocusedPane};
@@ -109,3 +109,5 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     let verb_bar = crate::ui::utils::render_verb_bar(game);
     f.render_widget(verb_bar, dashboard_inner_chunks[1]);
 }
+pub mod state;
+pub use self::state::DashboardState;

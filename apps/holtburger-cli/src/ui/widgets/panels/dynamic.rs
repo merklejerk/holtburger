@@ -1,4 +1,4 @@
-use crate::state::GameState;
+use crate::pages::game::GameState;
 use crate::types::FocusedPane;
 use crate::ui::theme::{pane_block, pane_title_style};
 use ratatui::Frame;

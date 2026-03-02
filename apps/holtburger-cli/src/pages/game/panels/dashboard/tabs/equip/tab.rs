@@ -1,13 +1,13 @@
+use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_core::client::types::ClientCommand;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
-use crate::types::AppAction;
-use crate::pages::game::GameState;
-use crate::types::{CommandTarget, Verb};
+use crate::pages::game::{GameData, ViewState};
+use crate::types::{AppAction, CommandTarget, UpdateResult, Verb};
 use crate::ui::Interaction;
 use crate::ui::traits::TabController;
-use holtburger_core::client::types::ClientCommand;
 
 #[derive(Default, Debug, Clone)]
 pub struct EquipTab {
@@ -15,20 +15,33 @@ pub struct EquipTab {
     pub list_state: ratatui::widgets::ListState,
 }
 
+impl EquipTab {
+    fn get_target<'a>(&self, data: &'a GameData) -> CommandTarget<'a> {
+        let lines = get_lines(data);
+        match lines.get(self.selected_index) {
+            Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::Entity(e, *slot),
+            _ => CommandTarget::None,
+        }
+    }
+
+    fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
+        get_lines(data).len()
+    }
+}
 
 impl TabController for EquipTab {
-    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
-        render_equip_tab(f, game, area);
+    fn render(&mut self, f: &mut Frame, data: &GameData, view: &ViewState, area: Rect) {
+        render_equip_tab(self, f, data, view, area);
     }
 
     fn get_verbs(
         &self,
-        game: &GameState,
+        data: &GameData,
+        _view: &ViewState,
         interaction: &Option<Interaction>,
-        index: usize,
     ) -> Vec<Verb> {
-        let lines = get_lines(game);
-        let target = self.get_target_at_index(game, index);
+        let lines = get_lines(data);
+        let target = self.get_target(data);
         let mut verbs = Vec::new();
 
         if let Some(interaction) = interaction
@@ -55,14 +68,16 @@ impl TabController for EquipTab {
                     ),
                 ]);
 
-                let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) = lines.get(index) {
+                let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) =
+                    lines.get(self.selected_index)
+                {
                     *here
                 } else {
                     false
                 };
 
                 if is_here {
-                    if let Some(_pguid) = game.data.player_guid {
+                    if let Some(_pguid) = data.player_guid {
                         verbs.push(Verb::new(vec![AppAction::Unequip(e.guid)], 'q', "Unequip"));
                     }
                 } else if let Some(s) = slot {
@@ -87,15 +102,55 @@ impl TabController for EquipTab {
         }
     }
 
-    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
-        let lines = get_lines(game);
-        match lines.get(index) {
-            Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::Entity(e, *slot),
-            _ => CommandTarget::None,
+    fn handle_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let count = self.item_count(data, view);
+        match key.code {
+            KeyCode::Down => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 1).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Up => {
+                self.selected_index = self.selected_index.saturating_sub(1);
+                Some(UpdateResult::new())
+            }
+            KeyCode::Home => {
+                self.selected_index = 0;
+                Some(UpdateResult::new())
+            }
+            KeyCode::End => {
+                if count > 0 {
+                    self.selected_index = count - 1;
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageUp => {
+                self.selected_index = self.selected_index.saturating_sub(10);
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageDown => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 10).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Enter | KeyCode::Char(_) => {
+                let shortcut = match key.code {
+                    KeyCode::Enter => '\r',
+                    KeyCode::Char(c) => c,
+                    _ => return None,
+                };
+                let verbs = self.get_verbs(data, view, &view.active_interaction);
+                let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
+                Some(UpdateResult::new().with_action(verb.action))
+            }
+            _ => None,
         }
-    }
-
-    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
-        get_lines(game).len()
     }
 }

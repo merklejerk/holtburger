@@ -1,5 +1,5 @@
-use crate::state::AppState;
 use crate::pages::game::panels::chat::ChatMessageKind;
+use crate::state::AppState;
 use crate::types::{AppEvent, UpdateResult};
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
 use crate::ui::widgets::panels::modal::Modal;
@@ -127,17 +127,7 @@ impl AppState {
         }
 
         // GameState logic
-        let dashboard_count = self.dashboard_item_count();
         if let Some(game) = self.game_option_mut() {
-            // Enforce dashboard index bounds
-            if game.dashboard.selected_index() >= dashboard_count && dashboard_count > 0 {
-                game.dashboard.set_selected_index(dashboard_count - 1);
-                result.needs_redraw = true;
-            } else if dashboard_count == 0 && game.dashboard.selected_index() != 0 {
-                game.dashboard.set_selected_index(0);
-                result.needs_redraw = true;
-            }
-
             // Proactive enchantment purge
             let old_count = game.data.player_enchantments.len();
             game.data.player_enchantments.retain(|e| {

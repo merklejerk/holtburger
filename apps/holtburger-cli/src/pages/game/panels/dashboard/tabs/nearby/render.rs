@@ -4,25 +4,25 @@ use ratatui::style::Style;
 use ratatui::widgets::{List, ListItem};
 
 use super::super::classification::{classify_entity, get_entity_color};
-use crate::pages::game::GameState;
+use crate::pages::game::{GameData, ViewState};
+use super::tab::NearbyTab;
 use crate::ui::theme;
 use crate::ui::utils::format_item_name;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 
-pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
-    let items = get_list_items(game);
+pub fn render_nearby_tab(tab: &mut NearbyTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
+    let items = get_list_items(tab.selected_index, data);
     let content_len = items.len();
 
-    let height = area.height as usize;
-    game.dashboard.last_height = height;
+    let _height = area.height as usize;
 
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
-    let selected_index = game.dashboard.selected_index();
-    let list_state = game.dashboard.list_state();
+    let selected_index = tab.selected_index;
+    let list_state = &mut tab.list_state;
     list_state.select(Some(selected_index));
 
     f.render_stateful_widget(dashboard_list, area, list_state);
@@ -30,9 +30,9 @@ pub fn render_nearby_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     crate::ui::widgets::scroll::render_scrollbar(f, area, content_len, offset);
 }
 
-fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
-    let entities = super::tab::get_entities(game);
-    let container_counts = game.data.get_container_counts();
+fn get_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<'static>> {
+    let entities = super::tab::get_entities(data);
+    let container_counts = data.get_container_counts();
     let mut list_items = Vec::new();
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {
@@ -45,9 +45,9 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
             e,
             display_dist,
             *depth,
-            i == game.dashboard.selected_index(),
+            i == selected_index,
             container_count,
-            game.data.open_containers.contains(&e.guid),
+            data.open_containers.contains(&e.guid),
         ));
     }
 

@@ -5,7 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use super::super::classification::{classify_entity, classify_vendor_item, get_entity_color};
-use crate::pages::game::GameState;
+use crate::pages::game::{GameData, ViewState};
+use super::tab::TradeTab;
 use crate::types::TradeFocus;
 use crate::ui::theme;
 use crate::ui::utils::format_item_name;
@@ -13,11 +14,10 @@ use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VEND
 use holtburger_common::properties::{ItemType, PropertyInt};
 use holtburger_world::context::WorldContextExt;
 
-pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
-    if let Some(trade) = &game.data.trade {
-        let trade_focus = game.view.trade_focus;
-        let partner_name = game
-            .data
+pub fn render_trade_tab(tab: &mut TradeTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
+    if let Some(trade) = &data.trade {
+        let trade_focus = tab.trade_focus;
+        let partner_name = data
             .entities
             .get(&trade.partner_guid)
             .map(|e| e.name())
@@ -38,7 +38,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 let mut display_name = "Unknown Item".to_string();
                 let mut emoji = "❓";
                 let mut color = Color::White;
-                if let Some(e) = game.data.entities.get(guid) {
+                if let Some(e) = data.entities.get(guid) {
                     display_name = format_item_name(e, e.guid);
 
                     let class = classify_entity(e);
@@ -46,7 +46,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     color = get_entity_color(class);
                 }
                 let is_selected =
-                    trade_focus == TradeFocus::Local && i == game.dashboard.selected_index();
+                    trade_focus == TradeFocus::Local && i == tab.selected_index;
 
                 let text = format!("[{}] {}", emoji, display_name);
                 ListItem::new(Line::styled(text, Style::default().fg(color)))
@@ -56,8 +56,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         // Calculate heights for PageUp/PageDown
         let self_area = chunks[0];
-        let self_height = self_area.height as usize;
-        game.dashboard.last_height = self_height; // Both sides same height in 50/50 split
+        let _self_height = self_area.height as usize; // Both sides same height in 50/50 split
 
         let mut default_self_state = ListState::default();
         let (self_title, self_state) = match trade_focus {
@@ -70,7 +69,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                         ""
                     }),
                 ]),
-                game.dashboard.list_state(),
+                &mut tab.list_state,
             ),
             TradeFocus::Partner => (
                 Line::from(vec![
@@ -108,7 +107,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         let offset = self_state.offset();
         crate::ui::widgets::scroll::render_scrollbar(f, self_area, self_content_len, offset);
 
-        let selected_index = game.dashboard.selected_index();
+        let selected_index = tab.selected_index;
 
         // Partner side
         let partner_area = chunks[1];
@@ -121,7 +120,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                 let mut display_name = "Unknown Item".to_string();
                 let mut emoji = "❓";
                 let mut color = Color::White;
-                if let Some(e) = game.data.entities.get(guid) {
+                if let Some(e) = data.entities.get(guid) {
                     display_name = format_item_name(e, e.guid);
 
                     let class = classify_entity(e);
@@ -147,7 +146,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                         ""
                     }),
                 ]),
-                game.dashboard.list_state(),
+                &mut tab.list_state,
             ),
             TradeFocus::Local => (
                 Line::from(vec![
@@ -184,9 +183,8 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         f.render_stateful_widget(partner_list, partner_area, partner_state);
         let offset = partner_state.offset();
         crate::ui::widgets::scroll::render_scrollbar(f, partner_area, partner_content_len, offset);
-    } else if let Some(vendor) = &game.data.vendor {
-        let vendor_name = game
-            .data
+    } else if let Some(vendor) = &data.vendor {
+        let vendor_name = data
             .entities
             .get(&vendor.vendor_guid)
             .map(|e| e.name())
@@ -206,7 +204,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
 
         // Summary Line
         let balance = if vendor.alternate_currency_wcid == 0 {
-            format!("{}p", game.data.get_pyreal_balance())
+            format!("{}p", data.get_pyreal_balance())
         } else {
             format!(
                 "{} {}",
@@ -262,7 +260,7 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
                     .ceil()
                     .max(DEFAULT_PRICE as f32) as u32;
 
-                let is_selected = i == game.dashboard.selected_index();
+                let is_selected = i == tab.selected_index;
 
                 let currency_suffix = if vendor.alternate_currency_wcid == 0 {
                     "p".to_string()
@@ -286,30 +284,19 @@ pub fn render_trade_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
 
-        let selected_index = game.dashboard.selected_index();
-        game.dashboard.list_state().select(Some(selected_index));
-        game.dashboard.last_height = list_area.height as usize;
+        let selected_index = tab.selected_index;
+        tab.list_state.select(Some(selected_index));
 
-        f.render_stateful_widget(list, list_area, game.dashboard.list_state());
-        let offset = game.dashboard.list_state().offset();
+        f.render_stateful_widget(list, list_area, &mut tab.list_state);
+        let offset = tab.list_state.offset();
         crate::ui::widgets::scroll::render_scrollbar(f, list_area, content_len, offset);
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let horizontal_margin = 2;
         let wrap_width = area.width.saturating_sub(horizontal_margin * 2);
-
-        let needs_wrap = match &game.view.trade_no_session_msg_cache {
-            Some((w, _)) => *w != wrap_width,
-            None => true,
-        };
-
-        if needs_wrap {
-            let wrapped = crate::ui::utils::wrap_text(msg, wrap_width as usize);
-            game.view.trade_no_session_msg_cache = Some((wrap_width, wrapped));
-        }
-
-        if let Some((_, wrapped)) = &game.view.trade_no_session_msg_cache {
-            let lines: Vec<Line> = wrapped.iter().map(|s| Line::from(s.as_str())).collect();
+        let wrapped = crate::ui::utils::wrap_text(msg, wrap_width as usize);
+        {
+            let lines: Vec<Line> = wrapped.iter().map(|s| Line::from(s.clone())).collect();
             let msg_height = lines.len() as u16;
             let vertical_margin = area.height.saturating_sub(msg_height) / 2;
 

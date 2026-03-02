@@ -4,8 +4,8 @@ use holtburger_core::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 use ratatui::layout::Rect;
 
-use crate::state::AppState;
 use crate::pages::{game::GameState, selection::SelectionState};
+use crate::state::AppState;
 use crate::types::Page;
 use crate::types::{FocusedPane, SCROLL_STEP, UpdateResult};
 
@@ -165,11 +165,7 @@ impl SelectionState {
 }
 
 impl GameState {
-    pub fn handle_mouse(
-        &mut self,
-        mouse: MouseEvent,
-        main_chunks: &[Rect],
-    ) -> UpdateResult {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent, main_chunks: &[Rect]) -> UpdateResult {
         let mut result = UpdateResult::new();
         match mouse.kind {
             crossterm::event::MouseEventKind::ScrollUp => {
@@ -195,8 +191,13 @@ impl GameState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    let new_idx = self.dashboard.selected_index().saturating_sub(1);
-                    self.dashboard.set_selected_index(new_idx);
+                    let data = &self.data;
+                    let view = &self.view;
+                    self.dashboard.active_tab_mut().handle_input(
+                        KeyEvent::new(KeyCode::Up, crossterm::event::KeyModifiers::NONE),
+                        data,
+                        view,
+                    );
                     result.needs_redraw = true;
                 }
             }
@@ -221,8 +222,13 @@ impl GameState {
                     && mouse.column >= main_chunks[0].x
                     && mouse.column < main_chunks[0].x + main_chunks[0].width
                 {
-                    let new_idx = self.dashboard.selected_index().saturating_add(1);
-                    self.dashboard.set_selected_index(new_idx);
+                    let data = &self.data;
+                    let view = &self.view;
+                    self.dashboard.active_tab_mut().handle_input(
+                        KeyEvent::new(KeyCode::Down, crossterm::event::KeyModifiers::NONE),
+                        data,
+                        view,
+                    );
                     result.needs_redraw = true;
                 }
             }
@@ -241,9 +247,13 @@ impl GameState {
         let mut result = UpdateResult::new();
 
         if self.view.focused_pane == FocusedPane::Dashboard {
-            let active_tab =
-                crate::pages::game::panels::dashboard::get_tab_controller(self.dashboard.active_tab);
-            if let Some(tab_result) = active_tab.handle_input(key, self) {
+            if let Some(tab_result) = self.dashboard.handle_input(key) {
+                result.merge(tab_result);
+                return result;
+            }
+            let data = &self.data;
+            let view = &self.view;
+            if let Some(tab_result) = self.dashboard.active_tab_mut().handle_input(key, data, view) {
                 result.merge(tab_result);
                 return result;
             }
@@ -498,7 +508,9 @@ impl GameState {
             KeyCode::Up => match self.view.focused_pane {
                 FocusedPane::Input => {
                     if !self.chat_input.input_history.is_empty() {
-                        let idx = self.chat_input.history_index
+                        let idx = self
+                            .chat_input
+                            .history_index
                             .map(|i| i.saturating_sub(1))
                             .unwrap_or(self.chat_input.input_history.len().saturating_sub(1));
                         self.chat_input.history_index = Some(idx);

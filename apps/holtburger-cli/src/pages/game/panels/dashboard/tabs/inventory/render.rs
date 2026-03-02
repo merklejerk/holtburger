@@ -5,7 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 
 use super::super::classification::{classify_entity, get_entity_color};
-use crate::pages::game::GameState;
+use crate::pages::game::{GameData, ViewState};
+use super::tab::InventoryTab;
 use crate::ui::theme;
 use crate::ui::utils::format_item_name;
 use holtburger_common::Guid;
@@ -14,14 +15,14 @@ use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 use std::collections::HashMap;
 
-pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
+pub fn render_inventory_tab(tab: &mut InventoryTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
     let mut bottom_area = area;
 
-    let counts = game.data.get_container_counts();
+    let counts = data.get_container_counts();
 
     // Sticky summary line for the player's main inventory container
-    if let Some(player_guid) = game.data.player_guid
-        && let Some(player_entity) = game.data.entities.get(&player_guid)
+    if let Some(player_guid) = data.player_guid
+        && let Some(player_entity) = data.entities.get(&player_guid)
         && let Some(capacity) = player_entity.items_capacity()
     {
         let count = counts.get(&player_guid).cloned().unwrap_or(0);
@@ -42,11 +43,11 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         f.render_widget(summary, top_area);
     }
 
-    let items = get_list_items(game, &counts);
+    let items = get_list_items(tab.selected_index, data, &counts);
     let content_len = items.len();
 
-    let selected_index = game.dashboard.selected_index();
-    let list_state = game.dashboard.list_state();
+    let selected_index = tab.selected_index;
+    let list_state = &mut tab.list_state;
     list_state.select(Some(selected_index));
 
     let dashboard_list = List::new(items)
@@ -57,24 +58,22 @@ pub fn render_inventory_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
     let offset = list_state.offset();
     crate::ui::widgets::scroll::render_scrollbar(f, bottom_area, content_len, offset);
 
-    let height = bottom_area.height as usize;
-    game.dashboard.last_height = height;
+    let _height = bottom_area.height as usize;
 }
 
 fn get_list_items(
-    game: &GameState,
-
+    selected_index: usize,
+    data: &GameData,
     container_counts: &HashMap<Guid, usize>,
 ) -> Vec<ListItem<'static>> {
-    let entities = super::tab::get_entities(game);
+    let entities = super::tab::get_entities(data);
     let mut list_items = Vec::new();
 
-    let equipment = &game.data.equipment;
+    let equipment = &data.equipment;
 
     for (i, (e, _, depth)) in entities.iter().enumerate() {
         let is_equipped = equipment.get(&e.guid).unwrap_or(&EquipMask::NONE) != &EquipMask::NONE;
-        let is_offered = game
-            .data
+        let is_offered = data
             .trade
             .as_ref()
             .map(|t| t.self_side.items.contains(&e.guid))
@@ -85,7 +84,7 @@ fn get_list_items(
         list_items.push(render_inventory_item(
             e,
             *depth,
-            i == game.dashboard.selected_index(),
+            i == selected_index,
             is_equipped,
             is_offered,
             container_count,

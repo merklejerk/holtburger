@@ -1,17 +1,17 @@
+use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_common::properties::ObjectDescriptionFlag;
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
-use crate::types::AppAction;
 use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
-use crate::pages::game::GameState;
-use crate::types::{CommandTarget, Verb};
+use crate::pages::game::{GameData, ViewState};
+use crate::types::{AppAction, UpdateResult, Verb};
 use crate::ui::Interaction;
 use crate::ui::traits::TabController;
-use holtburger_world::entity::Entity;
 
 #[derive(Default, Debug, Clone)]
 pub struct InventoryTab {
@@ -19,40 +19,47 @@ pub struct InventoryTab {
     pub list_state: ratatui::widgets::ListState,
 }
 
-
-pub fn get_entities(game: &GameState) -> Vec<(&Entity, f32, usize)> {
+pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     filter_entities(
-        &game.data.entities,
-        &game.data.inventory,
-        &game.data.equipment,
-        game.data.player_pos.as_ref(),
-        Some(&game.data.open_containers),
+        &data.entities,
+        &data.inventory,
+        &data.equipment,
+        data.player_pos.as_ref(),
+        Some(&data.open_containers),
         EntityFilter::Inventory,
     )
 }
 
+impl InventoryTab {
+    fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
+        get_entities(data).len()
+    }
+}
+
 impl TabController for InventoryTab {
-    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
-        render_inventory_tab(f, game, area);
+    fn render(&mut self, f: &mut Frame, data: &GameData, view: &ViewState, area: Rect) {
+        render_inventory_tab(self, f, data, view, area);
     }
 
     fn get_verbs(
         &self,
-        game: &GameState,
+        data: &GameData,
+        _view: &ViewState,
         interaction: &Option<Interaction>,
-        index: usize,
     ) -> Vec<Verb> {
-        let entities = get_entities(game);
+        let entities = get_entities(data);
         let mut verbs = Vec::new();
 
-        if let Some((cur_entity, _, _)) = entities.get(index) {
+        if let Some((cur_entity, _, _)) = entities.get(self.selected_index) {
             let class = classify_entity(cur_entity);
-            let player_guid = game.data.player_guid;
+            let player_guid = data.player_guid;
 
             if let Some(active_interaction) = interaction {
                 match active_interaction {
                     Interaction::Healing { item_guid: interact_guid } => {
-                        if cur_entity.guid == *interact_guid && let Some(pguid) = player_guid {
+                        if cur_entity.guid == *interact_guid
+                            && let Some(pguid) = player_guid
+                        {
                             verbs.push(Verb::new(
                                 vec![
                                     AppAction::ApplyItem(*interact_guid, pguid),
@@ -65,7 +72,7 @@ impl TabController for InventoryTab {
                         return verbs;
                     }
                     Interaction::Combining { item_guid: interact_guid } => {
-                        if let Some(source_e) = game.data.entities.get(interact_guid) {
+                        if let Some(source_e) = data.entities.get(interact_guid) {
                             if let (Some(target_type), Some(dest_item_type)) =
                                 (source_e.target_item_type(), cur_entity.item_type())
                             {
@@ -86,13 +93,13 @@ impl TabController for InventoryTab {
                     Interaction::Moving { item_guid: interact_guid } => {
                         let is_self = Some(cur_entity.guid) == player_guid;
                         let is_same_item = cur_entity.guid == *interact_guid;
-                        let is_in_main_pack = game.data.is_in_main_pack(*interact_guid);
+                        let is_in_main_pack = data.is_in_main_pack(*interact_guid);
                         let is_container = matches!(
                             class,
                             EntityClass::Container | EntityClass::Chest
                         );
 
-                        let merge_label = game.data.entities.get(interact_guid).and_then(|source_e| {
+                        let merge_label = data.entities.get(interact_guid).and_then(|source_e| {
                             if !is_same_item
                                 && source_e.is_stackable()
                                 && source_e.wcid == cur_entity.wcid
@@ -154,12 +161,14 @@ impl TabController for InventoryTab {
                             "Combine",
                         ));
                     } else {
-                        verbs.push(Verb::new(vec![AppAction::Use(cur_entity.guid)], 'u', "Use"));
+                        verbs.push(Verb::new(
+                            vec![AppAction::Use(cur_entity.guid)],
+                            'u',
+                            "Use",
+                        ));
                     }
                 }
-                EntityClass::Apparel
-                | EntityClass::Wand
-                | EntityClass::Weapon => {
+                EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {
                     verbs.push(Verb::new(
                         vec![AppAction::BeginInteraction(Interaction::Targeting {
                             target_guid: cur_entity.guid,
@@ -186,9 +195,7 @@ impl TabController for InventoryTab {
                 ));
             }
 
-            if !cur_entity.flags.intersects(
-                ObjectDescriptionFlag::REQUIRES_PACK_SLOT,
-            ) {
+            if !cur_entity.flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
                 verbs.push(Verb::new(
                     vec![AppAction::BeginInteraction(Interaction::Moving {
                         item_guid: cur_entity.guid,
@@ -198,21 +205,26 @@ impl TabController for InventoryTab {
                 ));
             }
 
-            let is_equipped = if let (Some(pguid), Some(wielder)) = (player_guid, cur_entity.wielder_id()) {
-                pguid == wielder
-            } else {
-                false
-            };
+            let is_equipped =
+                if let (Some(pguid), Some(wielder)) = (player_guid, cur_entity.wielder_id()) {
+                    pguid == wielder
+                } else {
+                    false
+                };
 
-            if let Some(trade) = &game.data.trade {
+            if let Some(trade) = &data.trade {
                 if !is_equipped
                     && !trade.self_side.items.contains(&cur_entity.guid)
-                    && game.data.can_add_to_trade(cur_entity.guid)
+                    && data.can_add_to_trade(cur_entity.guid)
                 {
-                    verbs.push(Verb::new(vec![AppAction::AddToTrade(cur_entity.guid)], 'o', "Offer"));
+                    verbs.push(Verb::new(
+                        vec![AppAction::AddToTrade(cur_entity.guid)],
+                        'o',
+                        "Offer",
+                    ));
                 }
-            } else if let Some(vendor) = &game.data.vendor {
-                if game.data.can_sell_to_vendor(cur_entity.guid) {
+            } else if let Some(vendor) = &data.vendor {
+                if data.can_sell_to_vendor(cur_entity.guid) {
                     verbs.push(Verb::new(
                         vec![AppAction::SellToVendor(cur_entity.guid, vendor.vendor_guid)],
                         's',
@@ -231,15 +243,55 @@ impl TabController for InventoryTab {
         verbs
     }
 
-    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
-        let entities = get_entities(game);
-        match entities.get(index) {
-            Some((e, _, _)) => CommandTarget::Entity(e, None),
-            _ => CommandTarget::None,
+    fn handle_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let count = self.item_count(data, view);
+        match key.code {
+            KeyCode::Down => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 1).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Up => {
+                self.selected_index = self.selected_index.saturating_sub(1);
+                Some(UpdateResult::new())
+            }
+            KeyCode::Home => {
+                self.selected_index = 0;
+                Some(UpdateResult::new())
+            }
+            KeyCode::End => {
+                if count > 0 {
+                    self.selected_index = count - 1;
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageUp => {
+                self.selected_index = self.selected_index.saturating_sub(10);
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageDown => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 10).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Enter | KeyCode::Char(_) => {
+                let shortcut = match key.code {
+                    KeyCode::Enter => '\r',
+                    KeyCode::Char(c) => c,
+                    _ => return None,
+                };
+                let verbs = self.get_verbs(data, view, &view.active_interaction);
+                let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
+                Some(UpdateResult::new().with_action(verb.action))
+            }
+            _ => None,
         }
-    }
-
-    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
-        get_entities(game).len()
     }
 }

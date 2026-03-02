@@ -1,7 +1,7 @@
-use crate::pages::game::panels::dashboard::{assess, debug, input::handle_common_dashboard_input};
+use crate::ui::Interaction;
+use crate::pages::game::panels::dashboard::{assess, debug};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{CommandTarget, ContextView, UpdateResult, Verb};
-use crate::ui::Interaction;
 use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -11,25 +11,18 @@ pub trait TabController {
     /// Renders the tab's content into the given area.
     fn render(&mut self, f: &mut Frame, data: &GameData, view: &ViewState, area: Rect);
 
-    /// Returns the list of available verbs for the item at the specified index.
+    /// Returns the list of available verbs based on the tab's current internal selection.
     fn get_verbs(
         &self,
-        data: &GameData,
-        view: &ViewState,
-        interaction: &Option<Interaction>,
-        index: usize,
-    ) -> Vec<Verb>;
-
-    /// Returns the command target (e.g. Entity, Spell) at the specified index.
-    fn get_target_at_index<'a>(&self, data: &'a GameData, view: &'a ViewState, index: usize) -> CommandTarget<'a>;
-
-    /// Returns the total number of items in the tab.
-    fn get_item_count(&self, data: &GameData, view: &ViewState) -> usize;
-
-    /// Optional: Handles tab-specific input. Returns a list of commands to execute.
-    fn handle_input(&mut self, key: KeyEvent, data: &GameData, view: &ViewState) -> Option<UpdateResult> {
-        handle_common_dashboard_input(self, key, data, view)
+        _data: &GameData,
+        _view: &ViewState,
+        _interaction: &Option<Interaction>,
+    ) -> Vec<Verb> {
+        vec![]
     }
+
+    /// Handles tab-specific input. Returns a list of commands to execute.
+    fn handle_input(&mut self, key: KeyEvent, data: &GameData, view: &ViewState) -> Option<UpdateResult>;
 
     /// Returns the content to be displayed in the context panel for the current selection.
     fn get_context_panel_content(&self, data: &GameData, view: &ViewState) -> Vec<Line<'static>> {

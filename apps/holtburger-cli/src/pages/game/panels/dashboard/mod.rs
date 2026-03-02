@@ -1,9 +1,6 @@
 use crate::pages::game::GameState;
-use crate::types::CommandTarget;
-use crate::types::Verb;
 use crate::types::{DashboardTab, FocusedPane};
 use crate::ui::theme::pane_block;
-use crate::ui::traits::TabController;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -18,33 +15,8 @@ pub mod assess;
 pub mod debug;
 pub mod filter;
 
-
-pub fn get_verbs_for_tab(game: &GameState, tab: DashboardTab, index: usize) -> Vec<Verb> {
-    let interaction = game.view.active_interaction;
-    get_tab_controller(tab).get_verbs(game, &interaction, index)
-}
-
-pub fn get_target_at_index<'a>(
-    game: &'a GameState,
-    tab: DashboardTab,
-    index: usize,
-) -> CommandTarget<'a> {
-    get_tab_controller(tab).get_target_at_index(game, index)
-}
-
-pub fn get_tab_controller(tab: DashboardTab) -> Box<dyn TabController> {
-    match tab {
-        DashboardTab::Equip => Box::new(EquipTab),
-        DashboardTab::Nearby => Box::new(NearbyTab),
-        DashboardTab::Inventory => Box::new(InventoryTab),
-        DashboardTab::Character => Box::new(CharacterTab),
-        DashboardTab::Spells => Box::new(SpellsTab),
-        DashboardTab::Trade => Box::new(TradeTab),
-    }
-}
-
 pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
-    let (focused_pane, dashboard_tab) = (game.view.focused_pane, game.dashboard.active_tab);
+    let (focused_pane, _dashboard_tab) = (game.view.focused_pane, game.dashboard.active_tab);
     let is_focused = focused_pane == FocusedPane::Dashboard;
 
     let top_tabs = [
@@ -104,7 +76,9 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     f.render_widget(&dashboard_block, area);
 
     // Tab-specific rendering
-    get_tab_controller(dashboard_tab).render(f, game, dashboard_inner_chunks[0]);
+    game.dashboard
+        .active_tab_mut()
+        .render(f, &game.data, &game.view, dashboard_inner_chunks[0]);
 
     let verb_bar = crate::ui::utils::render_verb_bar(game);
     f.render_widget(verb_bar, dashboard_inner_chunks[1]);

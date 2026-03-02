@@ -1,13 +1,13 @@
-use std::time::Instant;
 use holtburger_common::Guid;
 use ratatui::text::Line;
+use std::time::Instant;
 
-use crate::types::{ContextView, FocusedPane, TradeFocus};
-use crate::ui::Interaction;
-use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
+use crate::pages::game::panels::dashboard::DashboardState;
+use crate::types::{ContextView, FocusedPane};
+use crate::ui::Interaction;
 
 #[derive(Default)]
 pub struct GameState {

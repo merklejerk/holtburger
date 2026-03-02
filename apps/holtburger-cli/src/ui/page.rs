@@ -3,11 +3,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use unicode_width::UnicodeWidthStr;
 
-use crate::pages::game::panels::dashboard::render_dashboard_pane;
 use crate::pages::game::panels::chat::render_chat_pane;
 use crate::pages::game::panels::context::render_context_pane;
-use crate::state::NetStats;
+use crate::pages::game::panels::dashboard::render_dashboard_pane;
 use crate::pages::{game::GameState, selection::SelectionState};
+use crate::state::NetStats;
 use crate::types::Page;
 use crate::types::{FocusedPane, UpdateResult};
 use crate::ui::get_layout;
@@ -56,18 +56,14 @@ impl Page {
     ) -> UpdateResult {
         match self {
             Page::Selection(selection) => selection.handle_input(key),
-            Page::Game(game) => game.handle_input(
-                key,
-                width,
-                main_chunks,
-            ),
+            Page::Game(game) => game.handle_input(key, width, main_chunks),
         }
     }
 
     pub fn handle_mouse(
         &mut self,
         mouse: crossterm::event::MouseEvent,
-        
+
         main_chunks: &[Rect],
     ) -> UpdateResult {
         match self {
@@ -90,9 +86,9 @@ impl GameState {
         &mut self,
         f: &mut Frame,
         area: Rect,
-        
+
         account_name: &str,
-        
+
         core_state: &ClientState,
         net_stats: &NetStats,
         is_modal_active: bool,

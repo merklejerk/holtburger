@@ -2,20 +2,20 @@ use crate::state::ChatMessageKind;
 use crate::state::{AppState, GameState, Page, SelectionState};
 use crate::types::{ContextView, DashboardTab};
 use holtburger_common::Guid;
-use holtburger_core::{ClientState, ErrorReason, WorldViewEvent};
+use holtburger_core::{ClientState, ErrorReason, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::entity::Entity;
 
 impl AppState {
-    fn handle_setup_event(&mut self, event: &WorldViewEvent) {
+    fn handle_setup_event(&mut self, event: &ClientViewEvent) {
         match event {
-            WorldViewEvent::WorldNameUpdated(name) => {
+            ClientViewEvent::WorldNameUpdated(name) => {
                 self.world_name = name.clone();
                 if let Page::Game(ref mut game) = self.page {
                     game.data.world_name = name.clone();
                 }
             }
-            WorldViewEvent::CharacterList(chars) => {
+            ClientViewEvent::CharacterList(chars) => {
                 let mut chars = chars.clone();
                 chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
                 self.page = Page::Selection(SelectionState {
@@ -24,7 +24,7 @@ impl AppState {
                 });
                 self.logon_retry.reset();
             }
-            WorldViewEvent::PlayerEntered { guid, name } => {
+            ClientViewEvent::PlayerEntered { guid, name } => {
                 if let Page::Game(game) = &mut self.page {
                     game.data.player_guid = Some(*guid);
                     game.data.character_name = Some(name.clone());
@@ -37,7 +37,7 @@ impl AppState {
                     )));
                 }
             }
-            WorldViewEvent::ServerTimeUpdated { time } => {
+            ClientViewEvent::ServerTimeUpdated { time } => {
                 if let Some(game) = self.game_option_mut() {
                     game.data.server_time = Some((*time, std::time::Instant::now()));
                 }
@@ -46,16 +46,16 @@ impl AppState {
         }
     }
 
-    fn handle_client_status_event(&mut self, event: WorldViewEvent) {
+    fn handle_client_status_event(&mut self, event: ClientViewEvent) {
         match event {
-            WorldViewEvent::StatusUpdate { state } => {
+            ClientViewEvent::StatusUpdate { state } => {
                 self.core_state = state;
                 if self.core_state == ClientState::InWorld {
                     self.logon_retry.reset();
                     self.enter_retry.reset();
                 }
             }
-            WorldViewEvent::ErrorRaised {
+            ClientViewEvent::ErrorRaised {
                 reason, message, ..
             } => {
                 if let ErrorReason::Character(error) = reason {
@@ -94,21 +94,21 @@ impl AppState {
         }
     }
 
-    pub(super) fn handle_client_view_event(&mut self, event: WorldViewEvent) {
+    pub(super) fn handle_client_view_event(&mut self, event: ClientViewEvent) {
         // Handle setup and chat events regardless of being locally in-game
         match &event {
-            WorldViewEvent::CharacterList(_)
-            | WorldViewEvent::PlayerEntered { .. }
-            | WorldViewEvent::ServerTimeUpdated { .. }
-            | WorldViewEvent::WorldNameUpdated(_) => {
+            ClientViewEvent::CharacterList(_)
+            | ClientViewEvent::PlayerEntered { .. }
+            | ClientViewEvent::ServerTimeUpdated { .. }
+            | ClientViewEvent::WorldNameUpdated(_) => {
                 self.handle_setup_event(&event);
             }
-            WorldViewEvent::LogMessage(_)
-            | WorldViewEvent::ServerMessage { .. }
-            | WorldViewEvent::Chat { .. }
-            | WorldViewEvent::Emote { .. }
-            | WorldViewEvent::PingResponse
-            | WorldViewEvent::BootAccount(_) => {
+            ClientViewEvent::LogMessage(_)
+            | ClientViewEvent::ServerMessage { .. }
+            | ClientViewEvent::Chat { .. }
+            | ClientViewEvent::Emote { .. }
+            | ClientViewEvent::PingResponse
+            | ClientViewEvent::BootAccount(_) => {
                 self.chat.handle_event(&event);
             }
             _ => {}
@@ -118,34 +118,34 @@ impl AppState {
         // that handles transitions.
         if !matches!(
             event,
-            WorldViewEvent::CharacterList(_)
-                | WorldViewEvent::PlayerEntered { .. }
-                | WorldViewEvent::WorldNameUpdated(_)
-                | WorldViewEvent::StatusUpdate { .. }
-                | WorldViewEvent::ErrorRaised { .. }
-                | WorldViewEvent::LogMessage(_)
-                | WorldViewEvent::ServerMessage { .. }
-                | WorldViewEvent::Chat { .. }
-                | WorldViewEvent::Emote { .. }
-                | WorldViewEvent::PingResponse
-                | WorldViewEvent::BootAccount(_)
+            ClientViewEvent::CharacterList(_)
+                | ClientViewEvent::PlayerEntered { .. }
+                | ClientViewEvent::WorldNameUpdated(_)
+                | ClientViewEvent::StatusUpdate { .. }
+                | ClientViewEvent::ErrorRaised { .. }
+                | ClientViewEvent::LogMessage(_)
+                | ClientViewEvent::ServerMessage { .. }
+                | ClientViewEvent::Chat { .. }
+                | ClientViewEvent::Emote { .. }
+                | ClientViewEvent::PingResponse
+                | ClientViewEvent::BootAccount(_)
         ) && self.game_option().is_none()
         {
             return;
         }
 
         match event {
-            WorldViewEvent::StatusUpdate { .. } | WorldViewEvent::ErrorRaised { .. } => {
+            ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. } => {
                 self.handle_client_status_event(event);
             }
-            WorldViewEvent::PlayerEnchantmentsUpdated { .. }
-            | WorldViewEvent::PlayerStatsSkillsUpdated { .. }
-            | WorldViewEvent::PlayerVitalsUpdated { .. }
-            | WorldViewEvent::PlayerSpellsUpdated { .. }
-            | WorldViewEvent::CombatModeUpdated { .. } => {
+            ClientViewEvent::PlayerEnchantmentsUpdated { .. }
+            | ClientViewEvent::PlayerStatsSkillsUpdated { .. }
+            | ClientViewEvent::PlayerVitalsUpdated { .. }
+            | ClientViewEvent::PlayerSpellsUpdated { .. }
+            | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
             }
-            WorldViewEvent::EntityDebugInfoSnapshot { entity } => {
+            ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
                 let entity_ref = entity.as_ref();
                 if let Some(game) = self.game_option_mut() {
                     // Update our local cache with the high-fidelity snapshot
@@ -154,7 +154,7 @@ impl AppState {
                         .insert(entity_ref.guid, entity_ref.clone());
                 }
             }
-            WorldViewEvent::EntitySpawned { entity } => {
+            ClientViewEvent::EntitySpawned { entity } => {
                 let entity_ref = entity.as_ref();
                 if let Some(game) = self.game_option_mut() {
                     game.data
@@ -163,7 +163,7 @@ impl AppState {
                 }
                 self.update_inventory_and_equipment(entity_ref);
             }
-            WorldViewEvent::EntityPropertiesUpdated { guid, updates } => {
+            ClientViewEvent::EntityPropertiesUpdated { guid, updates } => {
                 let mut needs_update = false;
                 if let Some(game) = self.game_option_mut()
                     && let Some(entity) = game.data.entities.get_mut(&guid)
@@ -180,7 +180,7 @@ impl AppState {
                     self.update_inventory_and_equipment(&entity);
                 }
             }
-            WorldViewEvent::EntityMoved { guid, pos } => {
+            ClientViewEvent::EntityMoved { guid, pos } => {
                 if let Some(game) = self.game_option_mut()
                     && let Some(entity) = game.data.entities.get_mut(&guid)
                 {
@@ -190,13 +190,13 @@ impl AppState {
                     }
                 }
             }
-            WorldViewEvent::EntityDespawned { guid } => {
+            ClientViewEvent::EntityDespawned { guid } => {
                 if let Some(game) = self.game_option_mut() {
                     game.data.entities.remove(&guid);
                 }
                 self.handle_entity_removed(guid);
             }
-            WorldViewEvent::VendorStateUpdated { vendor } => {
+            ClientViewEvent::VendorStateUpdated { vendor } => {
                 if let Some(game) = self.game_option_mut() {
                     let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
                     game.data.vendor = vendor;
@@ -210,7 +210,7 @@ impl AppState {
                     }
                 }
             }
-            WorldViewEvent::TradeStateUpdated { trade } => {
+            ClientViewEvent::TradeStateUpdated { trade } => {
                 if let Some(game) = self.game_option_mut() {
                     let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
                     game.data.trade = trade;
@@ -224,7 +224,7 @@ impl AppState {
                     }
                 }
             }
-            WorldViewEvent::EntityIdentified { entity } => {
+            ClientViewEvent::EntityIdentified { entity } => {
                 let entity_ref = entity.as_ref();
                 if let Some(game) = self.game_option_mut() {
                     let guid = entity_ref.guid;
@@ -234,15 +234,15 @@ impl AppState {
                 self.update_inventory_and_equipment(entity_ref);
                 self.handle_entity_identified(entity_ref);
             }
-            WorldViewEvent::NoClipUpdated { .. } => {
+            ClientViewEvent::NoClipUpdated { .. } => {
                 self.handle_navigation_event(event);
             }
-            WorldViewEvent::ContainerOpened { guid } => {
+            ClientViewEvent::ContainerOpened { guid } => {
                 if let Some(game) = self.game_option_mut() {
                     game.data.open_containers.insert(guid);
                 }
             }
-            WorldViewEvent::ContainerClosed { guid } => {
+            ClientViewEvent::ContainerClosed { guid } => {
                 if let Some(game) = self.game_option_mut() {
                     game.data.open_containers.remove(&guid);
                 }
@@ -251,9 +251,9 @@ impl AppState {
         }
     }
 
-    fn handle_player_event(&mut self, event: WorldViewEvent) {
+    fn handle_player_event(&mut self, event: ClientViewEvent) {
         match event {
-            WorldViewEvent::PlayerEnchantmentsUpdated {
+            ClientViewEvent::PlayerEnchantmentsUpdated {
                 enchantments,
                 resolved_names,
             } => {
@@ -264,7 +264,7 @@ impl AppState {
                     }
                 }
             }
-            WorldViewEvent::PlayerStatsSkillsUpdated {
+            ClientViewEvent::PlayerStatsSkillsUpdated {
                 attributes,
                 skills,
                 resistances,
@@ -281,14 +281,14 @@ impl AppState {
                     game.data.level_info = Some(level_info);
                 }
             }
-            WorldViewEvent::PlayerVitalsUpdated { vitals } => {
+            ClientViewEvent::PlayerVitalsUpdated { vitals } => {
                 if let Some(game) = self.game_option_mut() {
                     for (vt, v) in vitals {
                         game.data.vitals.insert(vt, v);
                     }
                 }
             }
-            WorldViewEvent::PlayerSpellsUpdated { spell_ids, spells } => {
+            ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells } => {
                 if let Some(game) = self.game_option_mut() {
                     game.data.player_spells = spell_ids;
                     for (id, info) in spells {
@@ -297,7 +297,7 @@ impl AppState {
                     }
                 }
             }
-            WorldViewEvent::CombatModeUpdated { mode } => {
+            ClientViewEvent::CombatModeUpdated { mode } => {
                 if let Some(game) = self.game_option_mut() {
                     game.data.combat_mode = mode;
                 }
@@ -371,8 +371,8 @@ impl AppState {
         }
     }
 
-    fn handle_navigation_event(&mut self, event: WorldViewEvent) {
-        if let WorldViewEvent::NoClipUpdated { enabled } = event
+    fn handle_navigation_event(&mut self, event: ClientViewEvent) {
+        if let ClientViewEvent::NoClipUpdated { enabled } = event
             && let Some(game) = self.game_option_mut()
         {
             game.data.noclip = enabled;

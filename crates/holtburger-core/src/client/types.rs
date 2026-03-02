@@ -103,7 +103,7 @@ pub enum WireEvent {
 }
 
 #[derive(Debug, Clone)]
-pub enum WorldViewEvent {
+pub enum ClientViewEvent {
     StatusUpdate {
         state: ClientState,
     },

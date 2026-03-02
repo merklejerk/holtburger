@@ -5,5 +5,4 @@ pub mod utils;
 pub mod components;
 
 pub mod types;
-pub mod ui;
 pub mod update;

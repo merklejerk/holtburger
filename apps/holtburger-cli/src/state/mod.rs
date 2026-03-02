@@ -6,35 +6,15 @@ use holtburger_core::{ClientState, RetryState};
 use crate::types::ContextView;
 use crate::ui::widgets::panels::modal::Modal;
 
-pub mod game;
+pub mod pages;
 mod net;
-mod page;
-mod selection;
-pub mod view;
 
-pub use self::game::GameData;
 pub use self::net::NetStats;
-pub use self::page::Page;
-pub use self::selection::SelectionState;
-pub use self::view::ViewState;
+pub use self::pages::{Page, GameState, SelectionState};
+pub use self::pages::game::data::GameData;
+pub use self::pages::game::view::ViewState;
+pub use self::pages::game::dashboard::DashboardState;
 pub use crate::pages::game::panels::chat::{ChatMessage, ChatMessageKind, ChatState};
-
-#[derive(Debug, Clone, Default)]
-pub struct GameState {
-    pub data: GameData,
-    pub dashboard: crate::pages::game::dashboard::DashboardState,
-    pub view: ViewState,
-}
-
-impl GameState {
-    pub fn new(guid: Guid, name: String, world_name: String) -> Self {
-        Self {
-            data: GameData::new(guid, name, world_name),
-            dashboard: crate::pages::game::dashboard::DashboardState::default(),
-            view: ViewState::default(),
-        }
-    }
-}
 
 pub struct AppState {
     pub account_name: String,

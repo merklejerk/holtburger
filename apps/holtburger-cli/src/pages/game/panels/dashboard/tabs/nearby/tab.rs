@@ -10,9 +10,7 @@ use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, UpdateResult, Verb};
-use crate::ui::Interaction;
-use crate::ui::traits::TabController;
+use crate::types::{AppAction, CommandTarget, Interaction, TabController, UpdateResult, Verb};
 
 #[derive(Default, Debug, Clone)]
 pub struct NearbyTab {

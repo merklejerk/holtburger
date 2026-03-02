@@ -5,9 +5,7 @@ use ratatui::layout::Rect;
 
 use super::render::render_trade_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, TradeFocus, UpdateResult, Verb};
-use crate::ui::Interaction;
-use crate::ui::traits::TabController;
+use crate::types::{AppAction, CommandTarget, Interaction, TabController, TradeFocus, UpdateResult, Verb};
 
 #[derive(Default, Debug, Clone)]
 pub struct TradeTab {

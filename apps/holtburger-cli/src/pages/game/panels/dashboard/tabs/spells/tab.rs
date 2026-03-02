@@ -6,9 +6,7 @@ use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, ContextView, UpdateResult, Verb};
-use crate::ui::Interaction;
-use crate::ui::traits::TabController;
+use crate::types::{AppAction, CommandTarget, ContextView, Interaction, TabController, UpdateResult, Verb};
 
 #[derive(Default, Debug, Clone)]
 pub struct SpellsTab {

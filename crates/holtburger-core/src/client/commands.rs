@@ -592,7 +592,7 @@ impl Client {
                 log::info!(">>> Client requested Debug Snapshot for {}", guid);
                 if let Some(entity) = self.world.entities.get(guid) {
                     let snapshot_event =
-                        crate::client::types::ClientViewEvent::EntityDebugInfoSnapshot {
+                        crate::client::types::WorldViewEvent::EntityDebugInfoSnapshot {
                             entity: Box::new(entity.clone()),
                         };
                     let _ = self.client_view_event_tx.send(snapshot_event);

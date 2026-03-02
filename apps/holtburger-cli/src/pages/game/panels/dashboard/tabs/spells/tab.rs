@@ -1,16 +1,14 @@
-use crate::types::CommandTarget;
+use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_core::client::types::ClientCommand;
+use holtburger_world::context::WorldContextExt;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
-use crate::types::AppAction;
-use crate::pages::game::GameState;
-use crate::types::ContextView;
-use crate::types::Verb;
+use crate::pages::game::{GameData, ViewState};
+use crate::types::{AppAction, CommandTarget, ContextView, UpdateResult, Verb};
 use crate::ui::Interaction;
 use crate::ui::traits::TabController;
-use holtburger_core::client::types::ClientCommand;
-use holtburger_world::context::WorldContextExt;
 
 #[derive(Default, Debug, Clone)]
 pub struct SpellsTab {
@@ -18,20 +16,37 @@ pub struct SpellsTab {
     pub list_state: ratatui::widgets::ListState,
 }
 
+impl SpellsTab {
+    fn get_target(&self, data: &GameData) -> CommandTarget<'static> {
+        let mut spells = data.player_spells.clone();
+        spells.sort_by_key(|&sid| {
+            data.spell_names.get(&sid).cloned().unwrap_or_default()
+        });
+        if let Some(&sid) = spells.get(self.selected_index) {
+            CommandTarget::Spell(sid)
+        } else {
+            CommandTarget::None
+        }
+    }
+
+    fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
+        data.player_spells.len()
+    }
+}
 
 impl TabController for SpellsTab {
-    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
-        render_spells_tab(f, game, area);
+    fn render(&mut self, f: &mut Frame, data: &GameData, view: &ViewState, area: Rect) {
+        render_spells_tab(self, f, data, view, area);
     }
 
     fn get_verbs(
         &self,
-        game: &GameState,
+        data: &GameData,
+        _view: &ViewState,
         interaction: &Option<Interaction>,
-        index: usize,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
-        let target = self.get_target_at_index(game, index);
+        let target = self.get_target(data);
 
         if let Some(interaction) = interaction {
             if !matches!(interaction, Interaction::Targeting { .. }) {
@@ -40,7 +55,7 @@ impl TabController for SpellsTab {
         }
 
         if let CommandTarget::Spell(spell_id) = target {
-            if !game.data.is_wielding_caster() {
+            if !data.is_wielding_caster() {
                 verbs.push(Verb::new(
                     vec![AppAction::Log(
                         crate::pages::game::panels::chat::ChatMessageKind::Error,
@@ -49,7 +64,7 @@ impl TabController for SpellsTab {
                     'c',
                     "Cast (Need Caster)",
                 ));
-            } else if game.data.combat_mode
+            } else if data.combat_mode
                 != holtburger_protocol::messages::combat::CombatMode::Magic
             {
                 verbs.push(Verb::new(
@@ -71,7 +86,7 @@ impl TabController for SpellsTab {
                     'c',
                     "Cast on target",
                 ));
-            } else if let Some(player_guid) = game.data.player_guid {
+            } else if let Some(player_guid) = data.player_guid {
                 verbs.push(Verb::new(
                     vec![AppAction::CastSpell(spell_id, Some(player_guid))],
                     'c',
@@ -95,23 +110,55 @@ impl TabController for SpellsTab {
         verbs
     }
 
-    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
-        let mut spells = game.data.player_spells.clone();
-        spells.sort_by_key(|&sid| {
-            game.data
-                .spell_names
-                .get(&sid)
-                .cloned()
-                .unwrap_or_else(|| "".to_string())
-        });
-        if let Some(&sid) = spells.get(index) {
-            CommandTarget::Spell(sid)
-        } else {
-            CommandTarget::None
+    fn handle_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let count = self.item_count(data, view);
+        match key.code {
+            KeyCode::Down => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 1).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Up => {
+                self.selected_index = self.selected_index.saturating_sub(1);
+                Some(UpdateResult::new())
+            }
+            KeyCode::Home => {
+                self.selected_index = 0;
+                Some(UpdateResult::new())
+            }
+            KeyCode::End => {
+                if count > 0 {
+                    self.selected_index = count - 1;
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageUp => {
+                self.selected_index = self.selected_index.saturating_sub(10);
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageDown => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 10).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Enter | KeyCode::Char(_) => {
+                let shortcut = match key.code {
+                    KeyCode::Enter => '\r',
+                    KeyCode::Char(c) => c,
+                    _ => return None,
+                };
+                let verbs = self.get_verbs(data, view, &view.active_interaction);
+                let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
+                Some(UpdateResult::new().with_action(verb.action))
+            }
+            _ => None,
         }
-    }
-
-    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
-        game.data.player_spells.len()
     }
 }

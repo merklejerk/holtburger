@@ -5,7 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
 use super::super::classification::{classify_entity, get_entity_color};
-use crate::pages::game::GameState;
+use crate::pages::game::{GameData, ViewState};
+use super::tab::EquipTab;
 use crate::ui::theme;
 use crate::ui::utils::format_item_name;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
@@ -17,32 +18,31 @@ pub enum EquipTabLine<'a> {
     Item(&'a Entity, bool, bool, Option<TargetSlot>),
 }
 
-pub fn render_equip_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
-    let items = get_list_items(game);
+pub fn render_equip_tab(tab: &mut EquipTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
+    let items = get_list_items(tab.selected_index, data);
     let content_len = items.len();
 
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
-    let selected_index = game.dashboard.selected_index();
-    let list_state = game.dashboard.list_state();
+    let selected_index = tab.selected_index;
+    let list_state = &mut tab.list_state;
     list_state.select(Some(selected_index));
 
     f.render_stateful_widget(dashboard_list, area, list_state);
     let offset = list_state.offset();
     crate::ui::widgets::scroll::render_scrollbar(f, area, content_len, offset);
 
-    let height = area.height as usize;
-    game.dashboard.last_height = height;
+    let _height = area.height as usize;
 }
 
-fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
-    let lines = get_lines(game);
+fn get_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<'static>> {
+    let lines = get_lines(data);
     let mut list_items = Vec::new();
 
     for (i, line) in lines.into_iter().enumerate() {
-        let is_selected = i == game.dashboard.selected_index();
+        let is_selected = i == selected_index;
         match line {
             EquipTabLine::Header(name, occupied) => {
                 let color = if occupied {
@@ -88,7 +88,7 @@ fn get_list_items(game: &GameState) -> Vec<ListItem<'static>> {
     list_items
 }
 
-pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
+pub fn get_lines<'a>(data: &'a GameData) -> Vec<EquipTabLine<'a>> {
     let mut lines = Vec::new();
 
     let categories = [
@@ -134,11 +134,10 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
         (EquipMask::SIGIL_THREE, "Sigil 3", None),
     ];
 
-    let mut equippable_items: Vec<&Entity> = game
-        .data
+    let mut equippable_items: Vec<&Entity> = data
         .inventory
         .iter()
-        .filter_map(|guid| game.data.entities.get(guid))
+        .filter_map(|guid| data.entities.get(guid))
         .filter(|e| !e.valid_locations().is_empty())
         .collect();
 
@@ -162,8 +161,7 @@ pub fn get_lines<'a>(game: &'a GameState) -> Vec<EquipTabLine<'a>> {
             let valid = item.valid_locations();
 
             if valid.intersects(mask) {
-                let current_mask = game
-                    .data
+                let current_mask = data
                     .equipment
                     .get(&item.guid)
                     .cloned()

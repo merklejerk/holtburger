@@ -1,7 +1,6 @@
-
+use super::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
 use crate::types::{DashboardTab, UpdateResult};
 use crate::ui::traits::TabController;
-use super::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, Default)]
@@ -73,4 +72,3 @@ impl DashboardState {
         }
     }
 }
-

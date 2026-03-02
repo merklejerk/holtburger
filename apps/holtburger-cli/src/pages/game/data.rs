@@ -9,7 +9,7 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::{
-    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType
+    Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
 
 #[derive(Debug, Clone)]

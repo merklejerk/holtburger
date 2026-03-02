@@ -5,11 +5,11 @@ use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
 use crate::types::ContextView;
-use crate::ui::widgets::panels::modal::Modal;
 use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
+use crate::ui::widgets::panels::modal::Modal;
 
-use crate::types::Page;
 use crate::pages::game::{GameState, ViewState};
+use crate::types::Page;
 
 use crate::pages::game::panels::chat::ChatMessageKind;
 
@@ -89,38 +89,17 @@ impl AppState {
     }
 
     pub fn refresh_context_buffer(&mut self) {
-        let (tab, view_is_default) = if let Some(game) = self.game_option() {
-            (
-                game.dashboard.active_tab,
-                game.view.context_view == ContextView::Default,
-            )
-        } else {
-            return;
-        };
-
-        if view_is_default {
-            if let Some(game) = self.game_option_mut() {
+        if let Some(game) = self.game_option_mut() {
+            if game.view.context_view == ContextView::Default {
                 game.view.context_buffer.clear();
+                return;
             }
-            return;
-        }
-
-        let active_tab = crate::pages::game::panels::dashboard::get_tab_controller(tab);
-        if let Some(game) = self.game_option() {
-            let content = active_tab.get_context_panel_content(game);
-            if let Some(game) = self.game_option_mut() {
-                game.view.context_buffer = content;
-            }
-        }
-    }
-
-    pub fn dashboard_item_count(&self) -> usize {
-        if let Some(game) = self.game_option() {
-            let active_tab =
-                crate::pages::game::panels::dashboard::get_tab_controller(game.dashboard.active_tab);
-            active_tab.get_item_count(game)
-        } else {
-            0
+            let content = {
+                let data = &game.data;
+                let view = &game.view;
+                game.dashboard.active_tab_mut().get_context_panel_content(data, view)
+            };
+            game.view.context_buffer = content;
         }
     }
 

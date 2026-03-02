@@ -1,12 +1,11 @@
+use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_core::client::types::ClientCommand;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_trade_tab;
-use crate::types::AppAction;
-use crate::pages::game::GameState;
-use crate::types::Verb;
-use crate::types::{CommandTarget, TradeFocus};
+use crate::pages::game::{GameData, ViewState};
+use crate::types::{AppAction, CommandTarget, TradeFocus, UpdateResult, Verb};
 use crate::ui::Interaction;
 use crate::ui::traits::TabController;
 
@@ -14,22 +13,56 @@ use crate::ui::traits::TabController;
 pub struct TradeTab {
     pub selected_index: usize,
     pub list_state: ratatui::widgets::ListState,
+    pub trade_focus: TradeFocus,
 }
 
+impl TradeTab {
+    fn get_target<'a>(&self, data: &'a GameData) -> CommandTarget<'a> {
+        if let Some(trade) = &data.trade {
+            let items = match self.trade_focus {
+                TradeFocus::Local => &trade.self_side.items,
+                TradeFocus::Partner => &trade.partner_side.items,
+            };
+            if let Some(&guid) = items.get(self.selected_index)
+                && let Some(entity) = data.entities.get(&guid)
+            {
+                return CommandTarget::Entity(entity, None);
+            }
+        } else if let Some(vendor) = &data.vendor
+            && let Some(m) = vendor.items.get(self.selected_index)
+        {
+            return CommandTarget::VendorItem(m);
+        }
+        CommandTarget::None
+    }
+
+    fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
+        if let Some(trade) = &data.trade {
+            match self.trade_focus {
+                TradeFocus::Local => trade.self_side.items.len(),
+                TradeFocus::Partner => trade.partner_side.items.len(),
+            }
+        } else if let Some(vendor) = &data.vendor {
+            vendor.items.len()
+        } else {
+            0
+        }
+    }
+}
 
 impl TabController for TradeTab {
-    fn render(&mut self, f: &mut Frame, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState, area: Rect) {
-        render_trade_tab(f, game, area);
+    fn render(&mut self, f: &mut Frame, data: &GameData, view: &ViewState, area: Rect) {
+        render_trade_tab(self, f, data, view, area);
     }
 
     fn get_verbs(
         &self,
-        game: &GameState,
+        data: &GameData,
+        _view: &ViewState,
         interaction: &Option<Interaction>,
-        index: usize,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
-        let target = self.get_target_at_index(game, index);
+        let target = self.get_target(data);
 
         if let Some(interaction) = interaction {
             if let CommandTarget::Entity(_e, _) = &target {
@@ -40,7 +73,6 @@ impl TabController for TradeTab {
                     }
                 }
             }
-
             if !matches!(interaction, Interaction::Targeting { .. }) {
                 verbs.push(Verb::new(
                     vec![AppAction::CancelInteraction],
@@ -55,29 +87,22 @@ impl TabController for TradeTab {
             CommandTarget::Entity(e, _) => Some(e.guid),
             _ => None,
         } {
-            // Assess and Debug
-            verbs.push(Verb::new(
-                vec![AppAction::Assess(target_item)],
-                'a',
-                "Assess",
-            ));
-            verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(target_item)],
-                'g',
-                "Debug",
-            ));
+            verbs.push(Verb::new(vec![AppAction::Assess(target_item)], 'a', "Assess"));
+            verbs.push(Verb::new(vec![AppAction::QueryDebugInfo(target_item)], 'g', "Debug"));
         }
 
-        if let Some(vendor) = &game.data.vendor {
+        if let Some(vendor) = &data.vendor {
             match target {
                 CommandTarget::VendorItem(v) => {
                     verbs.push(Verb::new(
                         vec![AppAction::SendCommands(vec![ClientCommand::Buy {
                             vendor: vendor.vendor_guid,
-                            items: vec![holtburger_protocol::messages::trade::actions::ItemProfileActionData {
-                                object_guid: v.guid,
-                                amount: 1,
-                            }],
+                            items: vec![
+                                holtburger_protocol::messages::trade::actions::ItemProfileActionData {
+                                    object_guid: v.guid,
+                                    amount: 1,
+                                },
+                            ],
                         }])],
                         'b',
                         "Buy",
@@ -94,7 +119,7 @@ impl TabController for TradeTab {
             }
         }
 
-        if let Some(trade) = &game.data.trade {
+        if let Some(trade) = &data.trade {
             if trade.self_side.accepted {
                 verbs.push(Verb::new(
                     vec![AppAction::SendCommands(vec![ClientCommand::DeclineTrade])],
@@ -115,8 +140,8 @@ impl TabController for TradeTab {
             ));
         }
 
-        if game.data.trade.is_some() || game.data.vendor.is_some() {
-            let action = if game.data.trade.is_some() {
+        if data.trade.is_some() || data.vendor.is_some() {
+            let action = if data.trade.is_some() {
                 vec![AppAction::SendCommands(vec![ClientCommand::CloseTrade])]
             } else {
                 vec![AppAction::ClearVendor]
@@ -127,35 +152,66 @@ impl TabController for TradeTab {
         verbs
     }
 
-    fn get_target_at_index<'a>(&self, game: &'a GameState, index: usize) -> CommandTarget<'a> {
-        if let Some(trade) = &game.data.trade {
-            let items = match game.view.trade_focus {
-                TradeFocus::Local => &trade.self_side.items,
-                TradeFocus::Partner => &trade.partner_side.items,
+    fn handle_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        // Toggle trade focus side (local vs partner).
+        if matches!(key.code, KeyCode::Char('z') | KeyCode::Char('Z')) {
+            self.trade_focus = if self.trade_focus == TradeFocus::Local {
+                TradeFocus::Partner
+            } else {
+                TradeFocus::Local
             };
-            if let Some(&guid) = items.get(index)
-                && let Some(entity) = game.data.entities.get(&guid)
-            {
-                return CommandTarget::Entity(entity, None);
-            }
-        } else if let Some(vendor) = &game.data.vendor
-            && let Some(m) = vendor.items.get(index)
-        {
-            return CommandTarget::VendorItem(m);
+            self.selected_index = 0;
+            return Some(UpdateResult::new());
         }
-        CommandTarget::None
-    }
 
-    fn get_item_count(&self, data: &crate::pages::game::GameData, view: &crate::pages::game::ViewState) -> usize {
-        if let Some(trade) = &game.data.trade {
-            match game.view.trade_focus {
-                TradeFocus::Local => trade.self_side.items.len(),
-                TradeFocus::Partner => trade.partner_side.items.len(),
+        let count = self.item_count(data, view);
+        match key.code {
+            KeyCode::Down => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 1).min(count - 1);
+                }
+                Some(UpdateResult::new())
             }
-        } else if let Some(vendor) = &game.data.vendor {
-            vendor.items.len()
-        } else {
-            0
+            KeyCode::Up => {
+                self.selected_index = self.selected_index.saturating_sub(1);
+                Some(UpdateResult::new())
+            }
+            KeyCode::Home => {
+                self.selected_index = 0;
+                Some(UpdateResult::new())
+            }
+            KeyCode::End => {
+                if count > 0 {
+                    self.selected_index = count - 1;
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageUp => {
+                self.selected_index = self.selected_index.saturating_sub(10);
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageDown => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 10).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Enter | KeyCode::Char(_) => {
+                let shortcut = match key.code {
+                    KeyCode::Enter => '\r',
+                    KeyCode::Char(c) => c,
+                    _ => return None,
+                };
+                let verbs = self.get_verbs(data, view, &view.active_interaction);
+                let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
+                Some(UpdateResult::new().with_action(verb.action))
+            }
+            _ => None,
         }
     }
 }

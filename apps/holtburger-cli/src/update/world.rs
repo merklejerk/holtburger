@@ -1,10 +1,10 @@
 use crate::pages::game::panels::chat::ChatMessageKind;
-use crate::state::AppState;
 use crate::pages::{game::GameState, selection::SelectionState};
+use crate::state::AppState;
 use crate::types::Page;
 use crate::types::{ContextView, DashboardTab};
 use holtburger_common::Guid;
-use holtburger_core::{ClientState, ErrorReason, ClientViewEvent};
+use holtburger_core::{ClientState, ClientViewEvent, ErrorReason};
 use holtburger_protocol::errors::CharacterError;
 use holtburger_world::entity::Entity;
 
@@ -111,7 +111,9 @@ impl AppState {
             | ClientViewEvent::Emote { .. }
             | ClientViewEvent::PingResponse
             | ClientViewEvent::BootAccount(_) => {
-                if let Some(g) = self.game_option_mut() { g.chat.handle_event(&event); }
+                if let Some(g) = self.game_option_mut() {
+                    g.chat.handle_event(&event);
+                }
             }
             _ => {}
         }

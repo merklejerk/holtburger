@@ -12,7 +12,7 @@ use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::AppEvent;
 use holtburger_cli::types::Page;
-use holtburger_cli::ui;
+use holtburger_cli::pages;
 use holtburger_core::{Client, ClientCommand, ClientState, ClientViewEvent, RetryState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
@@ -301,7 +301,7 @@ async fn main() -> Result<()> {
                         }
 
                         let size = terminal.size()?;
-                        let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
+                        let (_, main_chunks, dynamic_chunk) = pages::game::layout::get_layout(size);
                         let res = app_state.handle_app_event(AppEvent::KeyPress(
                             key,
                             size.width,
@@ -319,7 +319,7 @@ async fn main() -> Result<()> {
                     }
                     Event::Mouse(mouse) => {
                         let size = terminal.size()?;
-                        let (chunks, main_chunks, dynamic_chunk) = ui::get_layout(size);
+                        let (chunks, main_chunks, dynamic_chunk) = pages::game::layout::get_layout(size);
                         let res = app_state.handle_app_event(AppEvent::Mouse(
                             mouse,
                             chunks.to_vec(),
@@ -354,7 +354,7 @@ async fn main() -> Result<()> {
         if needs_redraw {
             let now = Instant::now();
             if now.duration_since(last_draw) >= frame_rate {
-                terminal.draw(|f| ui::ui(f, &mut app_state))?;
+                terminal.draw(|f| pages::render_app(f, &mut app_state))?;
                 last_draw = now;
                 needs_redraw = false;
             }

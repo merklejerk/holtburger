@@ -29,22 +29,22 @@
   - Update all `crate::ui::widgets::scroll` and `crate::ui::widgets::panels::modal` references. (Done)
 - **Acceptance Criteria:** Generic TUI utilities are separated from game/selection specific components, residing safely at the app-level `src/`, and all module imports correctly resolve. (Verified)
 
-### Phase 3: Game HUD & Extraneous Panels (In Progress)
+### Phase 3: Game HUD & Extraneous Panels (Completed)
 - **Deliverables:**
-  - Create `pages/game/hud/` (with a `mod.rs`) and export it in `pages/game/mod.rs`.
-  - Move `ui/widgets/hud/vitals.rs`, `pulse.rs`, and `status.rs` to `pages/game/hud/`.
-  - Move `ui/widgets/panels/dynamic.rs` into `pages/game/panels/dynamic.rs` and export it in `panels/mod.rs`.
-  - Move `ui/widgets/selection.rs` deeply inside `pages/selection/render.rs` to colocate with the selection state.
-- **Acceptance Criteria:** The UI module is completely drained of all concrete widget rendering files.
+  - Create `pages/game/hud/` (with a `mod.rs`) and export it in `pages/game/mod.rs`. (Done)
+  - Move `ui/widgets/hud/vitals.rs`, `pulse.rs`, and `status.rs` to `pages/game/hud/`. (Done)
+  - Move `ui/widgets/panels/dynamic.rs` into `pages/game/panels/dynamic.rs` and export it in `panels/mod.rs`. (Done)
+  - Move `ui/widgets/selection.rs` deeply inside `pages/selection/render_widgets.rs` to colocate with the selection state. (Done)
+- **Acceptance Criteria:** The UI module is completely drained of all concrete widget rendering files. (Verified)
 
 ### Phase 4: Gut the Root `ui/` Module
 
 Instead of a monolithic refactor, this phase is broken down to safely unwire the root UI logic.
 
-#### Phase 4.1: Relocate Specific Page State Logic (Complexity: Low)
+#### Phase 4.1: Relocate Specific Page State Logic (In Progress)
 - **Deliverables:**
   - Relocate the `impl GameState` block (specifically the `render` method) from `ui/page.rs` into `pages/game/mod.rs` (or create `pages/game/render.rs`).
-  - Relocate the `impl SelectionState` block from `ui/page.rs` directly into `pages/selection/mod.rs` (or `pages/selection/render.rs`).
+  - Relocate the `impl SelectionState` block from `ui/page.rs` directly into `pages/selection/mod.rs` (or `pages/selection/render_widgets.rs`).
 - **Acceptance Criteria:** Page-specific renders are colocated with their states, and `cargo check` passes.
 
 #### Phase 4.2: Relocate Generic App Boundaries (Complexity: Medium)
@@ -83,8 +83,8 @@ Instead of a monolithic refactor, this phase is broken down to safely unwire the
 #### Execution Checklist
 - [x] Phase 1 (Utilities & Layout)
 - [x] Phase 2 (Components)
-- [/] Phase 3 (Panels & HUD)
-- [ ] Phase 4.1 (Relocate Specific Page State Logic)
+- [x] Phase 3 (Panels & HUD)
+- [/] Phase 4.1 (Relocate Specific Page State Logic)
 - [ ] Phase 4.2 (Relocate Generic App Boundaries)
 - [ ] Phase 4.3 (Final UI Excision)
 
@@ -93,7 +93,10 @@ Instead of a monolithic refactor, this phase is broken down to safely unwire the
 - **2026-03-02**: Phase 1 successfully completed and verified with `cargo check`.
 - **2026-03-02**: Established `src/components/` for shared, generic UI widgets like `scroll` and `modal`. This keeps them central but outside the `pages/` hierarchy since they aren't tied to any single page state.
 - **2026-03-02**: Phase 2 successfully completed.
+- **2026-03-02**: Relocated HUD and dynamic panels into `pages/game/` as they are strictly game-related. Moved selection widget to `pages/selection/render_widgets.rs`.
+- **2026-03-02**: Phase 3 successfully completed.
 
 ### Verification Log
 - **Phase 1**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.
 - **Phase 2**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.
+- **Phase 3**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.

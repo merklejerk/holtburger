@@ -25,7 +25,7 @@ pub struct Client {
     state: ClientState,
     wire_event_tx: broadcast::Sender<WireEvent>,
     state_event_tx: broadcast::Sender<StateEvent>,
-    client_view_event_tx: broadcast::Sender<WorldViewEvent>,
+    client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     pub message_dump_dir: Option<std::path::PathBuf>,
     message_counter: usize,
@@ -42,7 +42,7 @@ impl Client {
         self.state_event_tx.subscribe()
     }
 
-    pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<WorldViewEvent> {
+    pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
         self.client_view_event_tx.subscribe()
     }
 
@@ -62,14 +62,14 @@ impl Client {
             WireEvent::StatusUpdate { state } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::StatusUpdate {
+                    .send(ClientViewEvent::StatusUpdate {
                         state: state.clone(),
                     });
             }
             WireEvent::InventoryServerSaveFailed { item_guid, error } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ErrorRaised {
+                    .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
                         reason: ErrorReason::Weenie(*error, None),
                         message: format!(
@@ -82,7 +82,7 @@ impl Client {
                 let message = crate::errors::format_weenie_error(*error, parameter.as_deref());
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ErrorRaised {
+                    .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
                         reason: ErrorReason::Weenie(*error, parameter.clone()),
                         message,
@@ -91,7 +91,7 @@ impl Client {
             WireEvent::CharacterError(err) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ErrorRaised {
+                    .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
                         reason: ErrorReason::Character(*err),
                         message: format!("Character error: {:?}", err),
@@ -100,7 +100,7 @@ impl Client {
             WireEvent::ClientError(msg) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ErrorRaised {
+                    .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Client,
                         reason: ErrorReason::General(msg.clone()),
                         message: msg.clone(),
@@ -110,7 +110,7 @@ impl Client {
                 let message = crate::errors::format_weenie_error(*error, None);
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ErrorRaised {
+                    .send(ClientViewEvent::ErrorRaised {
                         source: ErrorSource::Wire,
                         reason: ErrorReason::Weenie(*error, None),
                         message,
@@ -119,13 +119,13 @@ impl Client {
             WireEvent::ServerMessage { message, chat_type } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ServerMessage {
+                    .send(ClientViewEvent::ServerMessage {
                         message: message.clone(),
                         chat_type: *chat_type,
                     });
             }
             WireEvent::Chat { sender, message } => {
-                let _ = self.client_view_event_tx.send(WorldViewEvent::Chat {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
                     sender: sender.clone(),
                     message: message.clone(),
                 });
@@ -133,12 +133,12 @@ impl Client {
             WireEvent::CharacterList(list) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::CharacterList(list.clone()));
+                    .send(ClientViewEvent::CharacterList(list.clone()));
             }
             WireEvent::PlayerEntered { guid, name } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::PlayerEntered {
+                    .send(ClientViewEvent::PlayerEntered {
                         guid: *guid,
                         name: name.clone(),
                     });
@@ -147,11 +147,11 @@ impl Client {
                 if let holtburger_protocol::messages::GameMessage::ServerName(data) = &**msg {
                     let _ = self
                         .client_view_event_tx
-                        .send(WorldViewEvent::WorldNameUpdated(data.name.clone()));
+                        .send(ClientViewEvent::WorldNameUpdated(data.name.clone()));
                 }
             }
             WireEvent::Emote { sender, text } => {
-                let _ = self.client_view_event_tx.send(WorldViewEvent::Emote {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Emote {
                     sender: sender.clone(),
                     text: text.clone(),
                 });
@@ -159,17 +159,17 @@ impl Client {
             WireEvent::PingResponse => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::PingResponse);
+                    .send(ClientViewEvent::PingResponse);
             }
             WireEvent::LogMessage(msg) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::LogMessage(msg.clone()));
+                    .send(ClientViewEvent::LogMessage(msg.clone()));
             }
             WireEvent::BootAccount(reason) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::BootAccount(reason.clone()));
+                    .send(ClientViewEvent::BootAccount(reason.clone()));
             }
             _ => {}
         }
@@ -187,7 +187,7 @@ impl Client {
             StateEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 let _ =
                     self.client_view_event_tx
-                        .send(WorldViewEvent::PlayerEnchantmentsUpdated {
+                        .send(ClientViewEvent::PlayerEnchantmentsUpdated {
                             enchantments: enchantments.clone(),
                             resolved_names: self.world.get_player_spell_names(),
                         });
@@ -199,7 +199,7 @@ impl Client {
                 let level_info = self.world.get_level_info().unwrap_or_default();
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::PlayerStatsSkillsUpdated {
+                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
                         attributes: self.world.player.attributes.clone(),
                         skills: self.world.player.skills.clone(),
                         resistances: self.world.player.resistances(),
@@ -209,7 +209,7 @@ impl Client {
                     });
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::PlayerVitalsUpdated {
+                    .send(ClientViewEvent::PlayerVitalsUpdated {
                         vitals: self.world.player.vitals.clone(),
                     });
             }
@@ -218,7 +218,7 @@ impl Client {
                 vitals.insert(vital.vital_type, vital.clone());
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::PlayerVitalsUpdated { vitals });
+                    .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
             StateEvent::SpellUpdated { .. } | StateEvent::SpellRemoved { .. } => {
                 let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();
@@ -233,7 +233,7 @@ impl Client {
 
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::PlayerSpellsUpdated { spell_ids, spells });
+                    .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells });
             }
             StateEvent::PlayerInfo(_) => {
                 // Emit all snapshots
@@ -252,7 +252,7 @@ impl Client {
                 if let Some(entity) = self.world.entities.get(self.world.player.guid) {
                     let _ = self
                         .client_view_event_tx
-                        .send(WorldViewEvent::EntitySpawned {
+                        .send(ClientViewEvent::EntitySpawned {
                             entity: Box::new(entity.clone()),
                         });
                 }
@@ -260,26 +260,26 @@ impl Client {
             StateEvent::EntitySpawned(entity) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::EntitySpawned {
+                    .send(ClientViewEvent::EntitySpawned {
                         entity: entity.clone(),
                     });
             }
             StateEvent::EntityIdentified(entity) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::EntityIdentified {
+                    .send(ClientViewEvent::EntityIdentified {
                         entity: entity.clone(),
                     });
             }
             StateEvent::EntityDespawned(guid) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::EntityDespawned { guid: *guid });
+                    .send(ClientViewEvent::EntityDespawned { guid: *guid });
             }
             StateEvent::PropertiesUpdated { guid, updates } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::EntityPropertiesUpdated {
+                    .send(ClientViewEvent::EntityPropertiesUpdated {
                         guid: *guid,
                         updates: updates.clone(),
                     });
@@ -287,7 +287,7 @@ impl Client {
             StateEvent::EntityMoved { guid, pos } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::EntityMoved {
+                    .send(ClientViewEvent::EntityMoved {
                         guid: *guid,
                         pos: *pos,
                     });
@@ -296,41 +296,41 @@ impl Client {
             StateEvent::ServerTimeUpdate(time) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ServerTimeUpdated { time: *time });
+                    .send(ClientViewEvent::ServerTimeUpdated { time: *time });
             }
             StateEvent::CombatModeUpdated(mode) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::CombatModeUpdated { mode: *mode });
+                    .send(ClientViewEvent::CombatModeUpdated { mode: *mode });
             }
             StateEvent::NoClipUpdated(enabled) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::NoClipUpdated { enabled: *enabled });
+                    .send(ClientViewEvent::NoClipUpdated { enabled: *enabled });
             }
             StateEvent::VendorStateUpdated(vendor) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::VendorStateUpdated {
+                    .send(ClientViewEvent::VendorStateUpdated {
                         vendor: vendor.clone(),
                     });
             }
             StateEvent::TradeStateUpdated(trade) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::TradeStateUpdated {
+                    .send(ClientViewEvent::TradeStateUpdated {
                         trade: trade.clone(),
                     });
             }
             StateEvent::ContainerOpened(guid) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ContainerOpened { guid: *guid });
+                    .send(ClientViewEvent::ContainerOpened { guid: *guid });
             }
             StateEvent::ContainerClosed(guid) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(WorldViewEvent::ContainerClosed { guid: *guid });
+                    .send(ClientViewEvent::ContainerClosed { guid: *guid });
             }
             _ => {}
         }

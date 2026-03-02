@@ -22,7 +22,7 @@ impl AppState {
             }
             AppEvent::ReceivedViewEvent(event) => {
                 let should_redraw =
-                    !matches!(event, holtburger_core::WorldViewEvent::LogMessage(_));
+                    !matches!(event, holtburger_core::ClientViewEvent::LogMessage(_));
                 self.handle_client_view_event(event);
                 if should_redraw {
                     self.refresh_context_buffer();

@@ -1,7 +1,7 @@
 use crossterm::event::{KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
-use holtburger_core::{ClientCommand, WorldViewEvent};
+use holtburger_core::{ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
@@ -124,7 +124,7 @@ pub enum AppEvent {
     Tick(f64),
     KeyPress(KeyEvent, u16, u16, Vec<Rect>, Rect), // key, width, height, main_chunks, dynamic_chunk
     Mouse(MouseEvent, Vec<Rect>, Vec<Rect>, Rect), // mouse, chunks, main_chunks, dynamic_chunk
-    ReceivedViewEvent(WorldViewEvent),
+    ReceivedViewEvent(ClientViewEvent),
 }
 
 #[derive(Debug, Default)]

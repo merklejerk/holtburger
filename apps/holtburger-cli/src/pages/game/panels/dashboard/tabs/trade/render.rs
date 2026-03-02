@@ -8,8 +8,8 @@ use super::super::classification::{classify_entity, classify_vendor_item, get_en
 use crate::pages::game::{GameData, ViewState};
 use super::tab::TradeTab;
 use crate::types::TradeFocus;
-use crate::ui::theme;
-use crate::ui::utils::format_item_name;
+use crate::theme;
+use crate::utils::format_item_name;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
 use holtburger_common::properties::{ItemType, PropertyInt};
 use holtburger_world::context::WorldContextExt;
@@ -294,7 +294,7 @@ pub fn render_trade_tab(tab: &mut TradeTab, f: &mut Frame, data: &GameData, _vie
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let horizontal_margin = 2;
         let wrap_width = area.width.saturating_sub(horizontal_margin * 2);
-        let wrapped = crate::ui::utils::wrap_text(msg, wrap_width as usize);
+        let wrapped = crate::utils::wrap_text(msg, wrap_width as usize);
         {
             let lines: Vec<Line> = wrapped.iter().map(|s| Line::from(s.clone())).collect();
             let msg_height = lines.len() as u16;

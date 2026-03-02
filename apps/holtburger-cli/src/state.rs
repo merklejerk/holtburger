@@ -5,7 +5,7 @@ use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
 use crate::types::{ContextView, Modal, Page};
-use crate::ui::layout::NET_PULSE_HISTORY_SIZE;
+use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
 
 use crate::pages::game::{GameState, ViewState};
 

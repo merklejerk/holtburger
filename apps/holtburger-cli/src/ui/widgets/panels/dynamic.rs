@@ -1,6 +1,6 @@
 use crate::pages::game::GameState;
 use crate::types::{FocusedPane, Interaction};
-use crate::ui::theme::{pane_block, pane_title_style};
+use crate::theme::{pane_block, pane_title_style};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};

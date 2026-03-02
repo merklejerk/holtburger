@@ -271,7 +271,7 @@ impl GameState {
                 } else {
                     1
                 };
-                self.view.focused_pane = crate::ui::utils::get_adjacent_pane(
+                self.view.focused_pane = crate::utils::get_adjacent_pane(
                     self.view.focused_pane,
                     width,
                     active,

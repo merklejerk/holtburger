@@ -14,8 +14,8 @@ use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType
 use crate::pages::game::{GameData, ViewState};
 use super::tab::CharacterTab;
 use crate::types::StatType;
-use crate::ui::theme;
-use crate::ui::utils::format_cost;
+use crate::theme;
+use crate::utils::format_cost;
 
 pub enum CharTabLine {
     Header(&'static str),

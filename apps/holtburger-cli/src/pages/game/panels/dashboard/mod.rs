@@ -1,6 +1,6 @@
 use crate::pages::game::GameState;
 use crate::types::{DashboardTab, FocusedPane};
-use crate::ui::theme::pane_block;
+use crate::theme::pane_block;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -80,7 +80,7 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
         .active_tab_mut()
         .render(f, &game.data, &game.view, dashboard_inner_chunks[0]);
 
-    let verb_bar = crate::ui::utils::render_verb_bar(game);
+    let verb_bar = crate::utils::render_verb_bar(game);
     f.render_widget(verb_bar, dashboard_inner_chunks[1]);
 }
 pub mod state;

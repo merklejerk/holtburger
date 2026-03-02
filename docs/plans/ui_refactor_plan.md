@@ -39,15 +39,13 @@
 
 ### Phase 4: Gut the Root `ui/` Module
 
-Instead of a monolithic refactor, this phase is broken down to safely unwire the root UI logic.
-
-#### Phase 4.1: Relocate Specific Page State Logic (In Progress)
+#### Phase 4.1: Relocate Specific Page State Logic (Completed)
 - **Deliverables:**
-  - Relocate the `impl GameState` block (specifically the `render` method) from `ui/page.rs` into `pages/game/mod.rs` (or create `pages/game/render.rs`).
-  - Relocate the `impl SelectionState` block from `ui/page.rs` directly into `pages/selection/mod.rs` (or `pages/selection/render_widgets.rs`).
-- **Acceptance Criteria:** Page-specific renders are colocated with their states, and `cargo check` passes.
+  - Relocate the `impl GameState` block (specifically the `render` method) from `ui/page.rs` into `pages/game/render.rs`. (Done)
+  - Relocate the `impl SelectionState` block from `ui/page.rs` directly into `pages/selection/render.rs`. (Done)
+- **Acceptance Criteria:** Page-specific renders are colocated with their states, and `cargo check` passes. (Verified)
 
-#### Phase 4.2: Relocate Generic App Boundaries (Complexity: Medium)
+#### Phase 4.2: Relocate Generic App Boundaries (In Progress)
 - **Deliverables:**
   - Move the overarching `impl Page` block (`render`, `handle_input`, `handle_mouse`) from `ui/page.rs` into `pages/mod.rs`.
   - Move the top level `pub fn ui(...)` from `ui/mod.rs` into `pages/mod.rs` as `pub fn render_app(...)`.
@@ -84,8 +82,8 @@ Instead of a monolithic refactor, this phase is broken down to safely unwire the
 - [x] Phase 1 (Utilities & Layout)
 - [x] Phase 2 (Components)
 - [x] Phase 3 (Panels & HUD)
-- [/] Phase 4.1 (Relocate Specific Page State Logic)
-- [ ] Phase 4.2 (Relocate Generic App Boundaries)
+- [x] Phase 4.1 (Relocate Specific Page State Logic)
+- [/] Phase 4.2 (Relocate Generic App Boundaries)
 - [ ] Phase 4.3 (Final UI Excision)
 
 ### Decisions Log
@@ -95,8 +93,11 @@ Instead of a monolithic refactor, this phase is broken down to safely unwire the
 - **2026-03-02**: Phase 2 successfully completed.
 - **2026-03-02**: Relocated HUD and dynamic panels into `pages/game/` as they are strictly game-related. Moved selection widget to `pages/selection/render_widgets.rs`.
 - **2026-03-02**: Phase 3 successfully completed.
+- **2026-03-02**: Moved `GameState::render` and `SelectionState::render` into dedicated `render.rs` files within their respective page modules. This firmly colocates the presentation with the state.
+- **2026-03-02**: Phase 4.1 successfully completed.
 
 ### Verification Log
 - **Phase 1**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.
 - **Phase 2**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.
 - **Phase 3**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.
+- **Phase 4.1**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.

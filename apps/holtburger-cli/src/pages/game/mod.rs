@@ -7,3 +7,4 @@ pub mod layout;
 pub mod hud;
 pub use self::state::ViewState;
 pub use data::GameData;
+pub mod render;

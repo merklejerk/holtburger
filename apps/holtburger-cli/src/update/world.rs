@@ -51,8 +51,8 @@ impl AppState {
     fn handle_client_status_event(&mut self, event: ClientViewEvent) {
         match event {
             ClientViewEvent::StatusUpdate { state } => {
-                self.core_state = state;
-                if self.core_state == ClientState::InWorld {
+                self.client_state = state;
+                if self.client_state == ClientState::InWorld {
                     self.logon_retry.reset();
                     self.enter_retry.reset();
                 }

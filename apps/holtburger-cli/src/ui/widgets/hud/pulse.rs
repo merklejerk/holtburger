@@ -11,7 +11,7 @@ const SPARK_CHARS: &[&str] = &[" ", "▂", "▃", "▄", "▅", "▆", "▇", "�
 
 pub fn render_pulse_panel(
     f: &mut Frame,
-    core_state: &ClientState,
+    client_state: &ClientState,
     net_stats: &NetStats,
     area: Rect,
 ) {
@@ -22,7 +22,7 @@ pub fn render_pulse_panel(
     f.render_widget(block, area);
 
     // 1. Status Emoji
-    let status_emoji = match core_state {
+    let status_emoji = match client_state {
         ClientState::Connected => "🔌",
         ClientState::CharacterSelection(_) => "👥",
         ClientState::EnteringWorld => "🚪",

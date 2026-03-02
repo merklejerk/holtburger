@@ -43,47 +43,35 @@ pub fn handle_common_dashboard_input<T: TabController + ?Sized>(
             } else {
                 TradeFocus::Local
             };
-            game.dashboard.set_selected_index(0);
+            game.dashboard.home();
             Some(UpdateResult::new())
         }
         KeyCode::Down => {
             let total = tab.get_item_count(game);
-            if total > 0 {
-                let new_idx = (game.dashboard.selected_index() + 1) % total;
-                game.dashboard.set_selected_index(new_idx);
-            }
+            game.dashboard.next(total);
             Some(UpdateResult::new())
         }
         KeyCode::Up => {
             let total = tab.get_item_count(game);
-            if total > 0 {
-                let new_idx = (game.dashboard.selected_index() + total - 1) % total;
-                game.dashboard.set_selected_index(new_idx);
-            }
+            game.dashboard.previous(total);
             Some(UpdateResult::new())
         }
         KeyCode::Home => {
-            game.dashboard.set_selected_index(0);
+            game.dashboard.home();
             Some(UpdateResult::new())
         }
         KeyCode::End => {
             let total = tab.get_item_count(game);
-            game.dashboard.set_selected_index(total.saturating_sub(1));
+            game.dashboard.end(total);
             Some(UpdateResult::new())
         }
         KeyCode::PageUp => {
-            let h = game.dashboard.last_height;
-            let step = (h / 2) + 1;
-            let new_idx = game.dashboard.selected_index().saturating_sub(step);
-            game.dashboard.set_selected_index(new_idx);
+            game.dashboard.page_up();
             Some(UpdateResult::new())
         }
         KeyCode::PageDown => {
             let total = tab.get_item_count(game);
-            let h = game.dashboard.last_height;
-            let step = (h / 2) + 1;
-            let new_idx = (game.dashboard.selected_index() + step).min(total.saturating_sub(1));
-            game.dashboard.set_selected_index(new_idx);
+            game.dashboard.page_down(total);
             Some(UpdateResult::new())
         }
         KeyCode::Enter | KeyCode::Char(_) => {

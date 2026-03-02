@@ -16,9 +16,11 @@ pub fn render_spells_tab(f: &mut Frame, game: &mut GameState, area: Rect) {
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
     let selected_index = game.dashboard.selected_index();
-    game.dashboard.list_state().select(Some(selected_index));
-    f.render_stateful_widget(dashboard_list, area, game.dashboard.list_state());
-    let offset = game.dashboard.list_state().offset();
+    let list_state = game.dashboard.list_state();
+    list_state.select(Some(selected_index));
+
+    f.render_stateful_widget(dashboard_list, area, list_state);
+    let offset = list_state.offset();
     crate::ui::widgets::scroll::render_scrollbar(f, area, content_len, offset);
 
     let height = area.height as usize;

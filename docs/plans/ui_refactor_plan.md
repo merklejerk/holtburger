@@ -21,14 +21,15 @@
   - Export `mod theme;` and `mod utils;` at the root `src/lib.rs`. (Done)
 - **Acceptance Criteria:** `cargo check -p holtburger-cli` successfully builds when these files are moved and their localized imports are fixed. (Verified)
 
-### Phase 2: Relocate Generic Components (In Progress)
+### Phase 2: Relocate Generic Components (Completed)
 - **Deliverables:**
-  - Create a new directory: `src/components/` with a `mod.rs`.
-  - Move `ui/widgets/scroll.rs` -> `src/components/scroll.rs`.
-  - Move `ui/widgets/panels/modal.rs` -> `src/components/modal.rs`
-- **Acceptance Criteria:** Generic TUI utilities are separated from game/selection specific components, residing safely at the app-level `src/`, and all module imports correctly resolve.
+  - Create a new directory: `src/components/` with a `mod.rs`. (Done)
+  - Move `ui/widgets/scroll.rs` -> `src/components/scroll.rs`. (Done)
+  - Move `ui/widgets/panels/modal.rs` -> `src/components/modal.rs` (Done)
+  - Update all `crate::ui::widgets::scroll` and `crate::ui::widgets::panels::modal` references. (Done)
+- **Acceptance Criteria:** Generic TUI utilities are separated from game/selection specific components, residing safely at the app-level `src/`, and all module imports correctly resolve. (Verified)
 
-### Phase 3: Game HUD & Extraneous Panels (Complexity: Medium)
+### Phase 3: Game HUD & Extraneous Panels (In Progress)
 - **Deliverables:**
   - Create `pages/game/hud/` (with a `mod.rs`) and export it in `pages/game/mod.rs`.
   - Move `ui/widgets/hud/vitals.rs`, `pulse.rs`, and `status.rs` to `pages/game/hud/`.
@@ -74,15 +75,25 @@ Instead of a monolithic refactor, this phase is broken down to safely unwire the
 ---
 ## 📝 The Living Worksheet
 
-### Status: Not Started
+### Status: In Progress
 
 #### Open Questions
 - None.
 
 #### Execution Checklist
-- [ ] Phase 1 (Utilities & Layout)
-- [ ] Phase 2 (Components)
-- [ ] Phase 3 (Panels & HUD)
+- [x] Phase 1 (Utilities & Layout)
+- [x] Phase 2 (Components)
+- [/] Phase 3 (Panels & HUD)
 - [ ] Phase 4.1 (Relocate Specific Page State Logic)
 - [ ] Phase 4.2 (Relocate Generic App Boundaries)
 - [ ] Phase 4.3 (Final UI Excision)
+
+### Decisions Log
+- **2026-03-02**: Decided to move `theme.rs` and `utils.rs` to root `src/` because they are used globally across the app, while moving `layout.rs` and `get_layout` to `pages/game/layout.rs` because they are specific to the game screen layout.
+- **2026-03-02**: Phase 1 successfully completed and verified with `cargo check`.
+- **2026-03-02**: Established `src/components/` for shared, generic UI widgets like `scroll` and `modal`. This keeps them central but outside the `pages/` hierarchy since they aren't tied to any single page state.
+- **2026-03-02**: Phase 2 successfully completed.
+
+### Verification Log
+- **Phase 1**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.
+- **Phase 2**: Verified successfully by running `cargo check -p holtburger-cli --message-format=short`. Build is clean.

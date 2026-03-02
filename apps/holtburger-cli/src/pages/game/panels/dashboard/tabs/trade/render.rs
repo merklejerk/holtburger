@@ -105,7 +105,7 @@ pub fn render_trade_tab(tab: &mut TradeTab, f: &mut Frame, data: &GameData, _vie
 
         f.render_stateful_widget(self_list, self_area, self_state);
         let offset = self_state.offset();
-        crate::ui::widgets::scroll::render_scrollbar(f, self_area, self_content_len, offset);
+        crate::components::scroll::render_scrollbar(f, self_area, self_content_len, offset);
 
         let selected_index = tab.selected_index;
 
@@ -182,7 +182,7 @@ pub fn render_trade_tab(tab: &mut TradeTab, f: &mut Frame, data: &GameData, _vie
 
         f.render_stateful_widget(partner_list, partner_area, partner_state);
         let offset = partner_state.offset();
-        crate::ui::widgets::scroll::render_scrollbar(f, partner_area, partner_content_len, offset);
+        crate::components::scroll::render_scrollbar(f, partner_area, partner_content_len, offset);
     } else if let Some(vendor) = &data.vendor {
         let vendor_name = data
             .entities
@@ -289,7 +289,7 @@ pub fn render_trade_tab(tab: &mut TradeTab, f: &mut Frame, data: &GameData, _vie
 
         f.render_stateful_widget(list, list_area, &mut tab.list_state);
         let offset = tab.list_state.offset();
-        crate::ui::widgets::scroll::render_scrollbar(f, list_area, content_len, offset);
+        crate::components::scroll::render_scrollbar(f, list_area, content_len, offset);
     } else {
         let msg = "No active trade or vendor session. Approach a vendor or trade with a player.";
         let horizontal_margin = 2;

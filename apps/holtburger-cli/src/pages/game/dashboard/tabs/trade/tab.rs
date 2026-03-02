@@ -5,10 +5,10 @@ use ratatui::layout::Rect;
 use super::render::render_trade_tab;
 use crate::actions::AppAction;
 use crate::state::GameState;
-use crate::ui::Interaction;
 use crate::types::Verb;
-use crate::ui::traits::TabController;
 use crate::types::{CommandTarget, TradeFocus};
+use crate::ui::Interaction;
+use crate::ui::traits::TabController;
 
 pub struct TradeTab;
 
@@ -20,13 +20,13 @@ impl TabController for TradeTab {
     fn get_verbs(
         &self,
         game: &GameState,
-        _interaction: &Option<Interaction>,
+        interaction: &Option<Interaction>,
         index: usize,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
         let target = self.get_target_at_index(game, index);
 
-        if let Some(interaction) = _interaction {
+        if let Some(interaction) = interaction {
             if let CommandTarget::Entity(_e, _) = &target {
                 match interaction {
                     Interaction::Targeting { .. } => {}
@@ -37,7 +37,11 @@ impl TabController for TradeTab {
             }
 
             if !matches!(interaction, Interaction::Targeting { .. }) {
-                verbs.push(Verb::new(vec![AppAction::CancelInteraction], '\x1b', "Cancel"));
+                verbs.push(Verb::new(
+                    vec![AppAction::CancelInteraction],
+                    '\x1b',
+                    "Cancel",
+                ));
             }
         }
 
@@ -47,8 +51,16 @@ impl TabController for TradeTab {
             _ => None,
         } {
             // Assess and Debug
-            verbs.push(Verb::new(vec![AppAction::Assess(target_item)], 'a', "Assess"));
-            verbs.push(Verb::new(vec![AppAction::QueryDebugInfo(target_item)], 'g', "Debug"));
+            verbs.push(Verb::new(
+                vec![AppAction::Assess(target_item)],
+                'a',
+                "Assess",
+            ));
+            verbs.push(Verb::new(
+                vec![AppAction::QueryDebugInfo(target_item)],
+                'g',
+                "Debug",
+            ));
         }
 
         if let Some(vendor) = &game.data.vendor {
@@ -80,25 +92,19 @@ impl TabController for TradeTab {
         if let Some(trade) = &game.data.trade {
             if trade.self_side.accepted {
                 verbs.push(Verb::new(
-                    vec![AppAction::SendCommands(vec![
-                        ClientCommand::DeclineTrade,
-                    ])],
+                    vec![AppAction::SendCommands(vec![ClientCommand::DeclineTrade])],
                     'd',
                     "Decline",
                 ));
             } else {
                 verbs.push(Verb::new(
-                    vec![AppAction::SendCommands(vec![
-                        ClientCommand::AcceptTrade,
-                    ])],
+                    vec![AppAction::SendCommands(vec![ClientCommand::AcceptTrade])],
                     'c',
                     "Accept",
                 ));
             }
             verbs.push(Verb::new(
-                vec![AppAction::SendCommands(vec![
-                    ClientCommand::ResetTrade,
-                ])],
+                vec![AppAction::SendCommands(vec![ClientCommand::ResetTrade])],
                 'r',
                 "Reset",
             ));
@@ -106,9 +112,7 @@ impl TabController for TradeTab {
 
         if game.data.trade.is_some() || game.data.vendor.is_some() {
             let action = if game.data.trade.is_some() {
-                vec![AppAction::SendCommands(vec![
-                    ClientCommand::CloseTrade,
-                ])]
+                vec![AppAction::SendCommands(vec![ClientCommand::CloseTrade])]
             } else {
                 vec![AppAction::ClearVendor]
             };

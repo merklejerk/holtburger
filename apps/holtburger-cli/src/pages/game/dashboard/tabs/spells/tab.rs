@@ -5,10 +5,10 @@ use ratatui::layout::Rect;
 use super::render::render_spells_tab;
 use crate::actions::AppAction;
 use crate::state::GameState;
-use crate::ui::traits::TabController;
-use crate::ui::Interaction;
 use crate::types::ContextView;
 use crate::types::Verb;
+use crate::ui::Interaction;
+use crate::ui::traits::TabController;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 
@@ -22,11 +22,17 @@ impl TabController for SpellsTab {
     fn get_verbs(
         &self,
         game: &GameState,
-        _interaction: &Option<Interaction>,
+        interaction: &Option<Interaction>,
         index: usize,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
         let target = self.get_target_at_index(game, index);
+
+        if let Some(interaction) = interaction {
+            if !matches!(interaction, Interaction::Targeting { .. }) {
+                return verbs;
+            }
+        }
 
         if let CommandTarget::Spell(spell_id) = target {
             if !game.data.is_wielding_caster() {
@@ -38,19 +44,22 @@ impl TabController for SpellsTab {
                     'c',
                     "Cast (Need Caster)",
                 ));
-            } else if game.data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic
+            } else if game.data.combat_mode
+                != holtburger_protocol::messages::combat::CombatMode::Magic
             {
                 verbs.push(Verb::new(
-                    vec![AppAction::SetCombatMode(holtburger_protocol::messages::combat::CombatMode::Magic)],
+                    vec![AppAction::SetCombatMode(
+                        holtburger_protocol::messages::combat::CombatMode::Magic,
+                    )],
                     'c',
                     "Switch to Magic",
                 ));
-            } else if let Some(Interaction::Targeting { target_guid }) = game.view.active_interaction {
+            } else if let Some(Interaction::Targeting { target_guid }) = interaction {
                 verbs.push(Verb::new(
                     vec![
                         AppAction::SendCommands(vec![ClientCommand::CastTargetedSpell {
                             spell_id,
-                            target: target_guid,
+                            target: *target_guid,
                         }]),
                         AppAction::CancelInteraction,
                     ],

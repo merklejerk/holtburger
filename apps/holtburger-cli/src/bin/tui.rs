@@ -1,4 +1,3 @@
-use holtburger_cli::types::AppEvent;
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
@@ -8,8 +7,9 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::state::{AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState};
+use holtburger_cli::types::AppEvent;
 use holtburger_cli::ui;
-use holtburger_core::{Client, ClientCommand, ClientState, WorldViewEvent, RetryState};
+use holtburger_core::{Client, ClientCommand, ClientState, RetryState, WorldViewEvent};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -144,7 +144,8 @@ async fn main() -> Result<()> {
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
-    let (app_action_tx, mut app_action_rx) = mpsc::unbounded_channel::<holtburger_cli::actions::AppAction>();
+    let (app_action_tx, mut app_action_rx) =
+        mpsc::unbounded_channel::<holtburger_cli::actions::AppAction>();
 
     let chat_log = if let Some(path) = &args.log {
         match File::create(path) {

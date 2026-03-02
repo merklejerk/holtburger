@@ -59,7 +59,7 @@ pub fn render_context_pane(
     );
     f.render_widget(ctx_list, area);
 
-    crate::ui::widgets::scroll::render_scrollbar(
+    crate::components::scroll::render_scrollbar(
         f,
         area.inner(&ratatui::layout::Margin {
             vertical: 1,

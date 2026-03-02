@@ -56,7 +56,7 @@ pub fn render_inventory_tab(tab: &mut InventoryTab, f: &mut Frame, data: &GameDa
 
     f.render_stateful_widget(dashboard_list, bottom_area, list_state);
     let offset = list_state.offset();
-    crate::ui::widgets::scroll::render_scrollbar(f, bottom_area, content_len, offset);
+    crate::components::scroll::render_scrollbar(f, bottom_area, content_len, offset);
 
     let _height = bottom_area.height as usize;
 }

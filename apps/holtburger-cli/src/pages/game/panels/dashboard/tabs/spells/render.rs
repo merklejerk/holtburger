@@ -22,7 +22,7 @@ pub fn render_spells_tab(tab: &mut SpellsTab, f: &mut Frame, data: &GameData, _v
 
     f.render_stateful_widget(dashboard_list, area, list_state);
     let offset = list_state.offset();
-    crate::ui::widgets::scroll::render_scrollbar(f, area, content_len, offset);
+    crate::components::scroll::render_scrollbar(f, area, content_len, offset);
 
     let _height = area.height as usize;
 }

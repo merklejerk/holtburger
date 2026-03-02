@@ -6,7 +6,7 @@ pub mod page;
 pub mod widgets;
 
 pub use crate::types::Modal;
-use self::widgets::panels::modal::render_modal;
+use crate::components::modal::render_modal;
 pub use crate::update::*;
 
 pub use crate::pages::game::layout::*;

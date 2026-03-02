@@ -262,7 +262,7 @@ pub fn render_chat_pane(f: &mut Frame, chat: &mut ChatState, is_focused: bool, a
     );
     f.render_widget(chat_list, area);
 
-    crate::ui::widgets::scroll::render_scrollbar(
+    crate::components::scroll::render_scrollbar(
         f,
         area.inner(&ratatui::layout::Margin {
             vertical: 1,

@@ -81,7 +81,7 @@ pub fn ui(f: &mut Frame, state: &mut AppState) {
         f,
         f.size(),
         &state.account_name,
-        &state.core_state,
+        &state.client_state,
         &state.net_stats,
         state.modal.is_some(),
         &state.logon_retry,

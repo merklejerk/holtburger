@@ -26,7 +26,7 @@ impl Page {
         f: &mut Frame,
         area: Rect,
         account_name: &str,
-        core_state: &ClientState,
+        client_state: &ClientState,
         net_stats: &NetStats,
         is_modal_active: bool,
         logon_retry: &holtburger_core::RetryState,
@@ -38,7 +38,7 @@ impl Page {
                 f,
                 area,
                 account_name,
-                core_state,
+                client_state,
                 net_stats,
                 is_modal_active,
                 logon_retry,
@@ -89,7 +89,7 @@ impl GameState {
 
         account_name: &str,
 
-        core_state: &ClientState,
+        client_state: &ClientState,
         net_stats: &NetStats,
         is_modal_active: bool,
         logon_retry: &holtburger_core::RetryState,
@@ -169,7 +169,7 @@ impl GameState {
         f.render_widget(input_para, input_chunks[0]);
 
         // Pulse Panel
-        render_pulse_panel(f, core_state, net_stats, input_chunks[1]);
+        render_pulse_panel(f, client_state, net_stats, input_chunks[1]);
 
         if !is_modal_active && focused_pane == FocusedPane::Input {
             let display_width = UnicodeWidthStr::width(display_input) as u16;

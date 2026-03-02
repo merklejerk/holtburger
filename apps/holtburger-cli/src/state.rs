@@ -38,7 +38,7 @@ pub struct AppState {
     pub modal: Option<Modal>,
     pub logon_retry: RetryState,
     pub enter_retry: RetryState,
-    pub core_state: ClientState,
+    pub client_state: ClientState,
     pub net_stats: NetStats,
     pub world_name: String,
     pub verbosity: u8,
@@ -121,7 +121,7 @@ impl AppState {
             }
         }
 
-        let state_str = match &self.core_state {
+        let state_str = match &self.client_state {
             ClientState::Connected => "Connected",
             ClientState::CharacterSelection(_) => "Character Selection",
             ClientState::EnteringWorld => "Entering World",

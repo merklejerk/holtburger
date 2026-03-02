@@ -230,7 +230,7 @@ async fn main() -> Result<()> {
         modal: None,
         logon_retry: RetryState::new(5),
         enter_retry: RetryState::new(5),
-        core_state: ClientState::Connected,
+        client_state: ClientState::Connected,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),

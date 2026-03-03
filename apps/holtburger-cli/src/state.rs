@@ -45,6 +45,15 @@ pub struct AppState {
     pub app_action_tx: tokio::sync::mpsc::UnboundedSender<crate::types::AppAction>,
 }
 
+pub struct RenderContext<'a> {
+    pub account_name: &'a str,
+    pub client_state: &'a ClientState,
+    pub net_stats: &'a NetStats,
+    pub is_modal_active: bool,
+    pub logon_retry: &'a RetryState,
+    pub enter_retry: &'a RetryState,
+}
+
 impl AppState {
     pub fn game_view(&self) -> &ViewState {
         match &self.page {
@@ -213,9 +222,7 @@ impl AppState {
             }
         }
     }
-}
 
-impl AppState {
     pub fn log(&mut self, kind: ChatMessageKind, msg: impl Into<String>) {
         if let Some(game) = self.game_option_mut() {
             game.chat.log(kind, msg.into());

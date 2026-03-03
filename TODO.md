@@ -25,6 +25,7 @@
 - [ ] Show enchantment source (caster) in enchantment debug.
 - [ ] Don't show Give verb on items that are attuned/sticky.
 - [ ] Replace context panel header with entity name.
+- [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -61,6 +62,8 @@
 - [x] Actions and `handle_base_action()` don't belong in `common.rs`.
 - [x] Just get rid of verbs.rs and move the fn into the tab controller.
 - [x] Active panel needs to be much more obvious.
+- [x] HATE `world/state.rs`
+- [x] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -72,16 +75,14 @@
 - [ ] Add a movable cursor to the chat input.
 - [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
-- [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
+- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
-- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
-- [ ] HATE `world/state.rs`
 - [ ] Resolve Spellbook entries in debug info.
 - [ ] Exit combat mode when trying to trade.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Label unlocked chests in nearby tab.
-- [ ] Server messages being printed twice in chat, colored as errors, even though they aren't all errors.
+- [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
 
 ### High
@@ -128,6 +129,7 @@
 - [x] Crafting.
 - [x] Show charges/uses/etc for items.
 - [x] Useful errors also appear in ServerMessage.
+- [x] Dashboard and tabs should own their own state.
 - [ ] DC detection + /reconnect command.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
@@ -155,8 +157,7 @@
 - [ ] Heal verb/interaction is missing/broken.
 - [ ] Cast verb is clearing target interaction.
 - [ ] Trade tab lets you add item already being traded. 
-- [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
-- [ ] Dashboard and tabs should own their own state.
+- [ ] Merge stacks broken?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -170,9 +171,9 @@
 ### Investigate
 - [x] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
+- [x] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?
+- [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
 - [ ] Do we prune entities?
     - When they go out of range.
     - When they are explicitly deleted.
     - When a trade is closed.
-- [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
-- [ ] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?

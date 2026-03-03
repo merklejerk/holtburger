@@ -301,14 +301,7 @@ async fn main() -> Result<()> {
                         }
 
                         let size = terminal.size()?;
-                        let (_, main_chunks, dynamic_chunk) = pages::game::layout::get_layout(size);
-                        let res = app_state.handle_app_event(AppEvent::KeyPress(
-                            key,
-                            size.width,
-                            size.height,
-                            main_chunks,
-                            dynamic_chunk,
-                        ));
+                        let res = app_state.handle_app_event(AppEvent::KeyPress(key, size.width));
                         needs_redraw |= res.needs_redraw;
                         for cmd in res.commands {
                             if let ClientCommand::Quit = cmd {
@@ -318,15 +311,7 @@ async fn main() -> Result<()> {
                         }
                     }
                     Event::Mouse(mouse) => {
-                        let size = terminal.size()?;
-                        let (chunks, main_chunks, dynamic_chunk) =
-                            pages::game::layout::get_layout(size);
-                        let res = app_state.handle_app_event(AppEvent::Mouse(
-                            mouse,
-                            chunks.to_vec(),
-                            main_chunks.to_vec(),
-                            dynamic_chunk,
-                        ));
+                        let res = app_state.handle_app_event(AppEvent::Mouse(mouse));
                         needs_redraw |= res.needs_redraw;
                         for cmd in res.commands {
                             let _ = command_tx.send(cmd);

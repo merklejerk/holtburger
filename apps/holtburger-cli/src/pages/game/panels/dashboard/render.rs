@@ -44,7 +44,7 @@ pub fn render_dashboard_pane(
 
             let is_active = active_tab == *tab;
             let is_trade_active =
-                *tab == DashboardTab::Trade && (data.trade.is_some() || data.vendor.is_some());
+                *tab == DashboardTab::Trade && (data.trade.is_some() || view.vendor.is_some());
 
             let mut style = Style::default();
             if is_active {

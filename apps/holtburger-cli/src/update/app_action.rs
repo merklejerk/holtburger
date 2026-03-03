@@ -166,7 +166,7 @@ impl AppState {
             }
             AppAction::ClearVendor => {
                 if let Some(game) = self.game_option_mut() {
-                    game.data.vendor = None;
+                    game.view.vendor = None;
                 }
             }
             AppAction::DisplayClientInfo => {

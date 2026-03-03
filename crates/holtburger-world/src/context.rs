@@ -11,7 +11,6 @@ pub trait WorldContext {
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
-    fn get_vendor(&self) -> Option<&VendorState>;
 }
 
 /// Common game logic shared across all clients.
@@ -97,7 +96,7 @@ pub trait WorldContextExt: WorldContext {
         true
     }
 
-    fn can_sell_to_vendor(&self, guid: Guid) -> bool {
+    fn can_sell_to_vendor(&self, guid: Guid, vendor: Option<&VendorState>) -> bool {
         let e = match self.get_entity(guid) {
             Some(e) => e,
             None => return false,
@@ -114,7 +113,7 @@ pub trait WorldContextExt: WorldContext {
             return false;
         }
 
-        if let Some(vendor) = self.get_vendor()
+        if let Some(vendor) = vendor
             && (itype.bits() & vendor.merchandise_item_types) == 0
         {
             return false;

@@ -42,7 +42,7 @@ impl TabController for InventoryTab {
     fn get_verbs(
         &self,
         data: &GameData,
-        _view: &ViewState,
+        view: &ViewState,
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let entities = get_entities(data);
@@ -236,8 +236,8 @@ impl TabController for InventoryTab {
                         "Offer",
                     ));
                 }
-            } else if let Some(vendor) = &data.vendor
-                && data.can_sell_to_vendor(cur_entity.guid)
+            } else if let Some(vendor) = &view.vendor
+                && data.can_sell_to_vendor(cur_entity.guid, view.vendor.as_ref())
             {
                 verbs.push(Verb::new(
                     vec![AppAction::SellToVendor(cur_entity.guid, vendor.vendor_guid)],

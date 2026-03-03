@@ -21,26 +21,17 @@ impl Page {
         }
     }
 
-    pub fn handle_input(
-        &mut self,
-        key: KeyEvent,
-        width: u16,
-        main_chunks: &[Rect],
-    ) -> UpdateResult {
+    pub fn handle_input(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
         match self {
             Page::Selection(selection) => selection.handle_input(key),
-            Page::Game(game) => game.handle_input(key, width, main_chunks),
+            Page::Game(game) => game.handle_input(key, width),
         }
     }
 
-    pub fn handle_mouse(
-        &mut self,
-        mouse: crossterm::event::MouseEvent,
-        main_chunks: &[Rect],
-    ) -> UpdateResult {
+    pub fn handle_mouse(&mut self, mouse: crossterm::event::MouseEvent) -> UpdateResult {
         match self {
             Page::Selection(_) => UpdateResult::new(),
-            Page::Game(game) => game.handle_mouse(mouse, main_chunks),
+            Page::Game(game) => game.handle_mouse(mouse),
         }
     }
 }

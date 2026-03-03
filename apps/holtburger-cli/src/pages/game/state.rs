@@ -47,10 +47,20 @@ pub struct ViewState {
     pub context_view: ContextView,
     /// GUID of the entity we are currently "debugging".
     pub current_debug_guid: Option<Guid>,
+    /// Current vendor state (inventory and multipliers) - note: pseudo-client state.
+    pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// State of current interaction like vendor transactions.
     pub active_interaction: Option<Interaction>,
     /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.
     pub last_trade_initiation: Option<(Instant, Guid)>,
+    /// Cache of the exact bounding boxes computed during update_layout.
+    pub layout_cache: LayoutCache,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LayoutCache {
+    pub main_chunks: std::rc::Rc<Vec<ratatui::layout::Rect>>,
+    pub dynamic_chunk: ratatui::layout::Rect,
 }
 
 impl Default for ViewState {
@@ -64,8 +74,10 @@ impl Default for ViewState {
             context_scroll_offset: 0,
             context_view: ContextView::Default,
             current_debug_guid: None,
+            vendor: None,
             active_interaction: None,
             last_trade_initiation: None,
+            layout_cache: LayoutCache::default(),
         }
     }
 }

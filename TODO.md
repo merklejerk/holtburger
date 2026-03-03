@@ -130,7 +130,8 @@
 - [x] Show charges/uses/etc for items.
 - [x] Useful errors also appear in ServerMessage.
 - [x] Dashboard and tabs should own their own state.
-- [ ] DC detection + /reconnect command.
+- [x] Netstats is broken (not showing incoming activity).
+- [x] DC detection + /reconnect command. (/reconnect punted)
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -153,7 +154,6 @@
 - [ ] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Splitting is broken.
-- [ ] Netstats is broken (not showing incoming activity).
 - [ ] Heal verb/interaction is missing/broken.
 - [ ] Cast verb is clearing target interaction.
 - [ ] Trade tab lets you add item already being traded. 

@@ -5,7 +5,6 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use unicode_width::UnicodeWidthStr;
 
 const SPARK_CHARS: &[&str] = &[" ", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 
@@ -31,55 +30,40 @@ pub fn render_pulse_panel(
     };
 
     let prefix = format!("{} ", status_emoji);
-    let prefix_width = prefix.as_str().width() as u16;
-    let spark_width = (inner_area.width.saturating_sub(prefix_width)) / 2;
-    let spark_width = spark_width as usize;
-
     let mut net_spans = vec![Span::raw(prefix)];
 
-    // 2. Net Stats (Sparklines)
-    let history_in = net_stats.history_in.clone();
-    let history_out = net_stats.history_out.clone();
+    // 2. Net Stats (Compact Spark indicators)
+    let history_in = &net_stats.history_in;
+    let history_out = &net_stats.history_out;
 
-    // Take at most spark_width elements
-    let take_in = history_in.len().min(spark_width);
-    let take_out = history_out.len().min(spark_width);
+    // Use a simple EMA-like max threshold that tracks the recent window
+    let window_in = history_in.iter().rev().take(5).max().cloned().unwrap_or(0);
+    let window_out = history_out.iter().rev().take(5).max().cloned().unwrap_or(0);
 
-    let sub_in = &history_in[history_in.len() - take_in..];
-    let sub_out = &history_out[history_out.len() - take_out..];
+    // Smooth the peak max slightly so bars don't jitter too much (simple thresholding)
+    let threshold_in = window_in.max(1024); // floor at 1KB
+    let threshold_out = window_out.max(1024);
 
-    // Use the full history for the max to keep the scale stable as it scrolls
-    let max_in = history_in.iter().max().cloned().unwrap_or(1).max(1);
-    let max_out = history_out.iter().max().cloned().unwrap_or(1).max(1);
+    let current_in = history_in.last().cloned().unwrap_or(0);
+    let current_out = history_out.last().cloned().unwrap_or(0);
 
-    let max_spark_idx = SPARK_CHARS.len() as u64 - 1;
-    for i in (0..spark_width).rev() {
-        // Inbound (Green)
-        let in_idx_offset = spark_width - take_in;
-        if i >= in_idx_offset {
-            let val = sub_in[i - in_idx_offset];
-            let char_idx = (val * max_spark_idx / max_in) as usize;
-            net_spans.push(Span::styled(
-                SPARK_CHARS[char_idx.min(max_spark_idx as usize)],
-                Style::default().fg(Color::Green),
-            ));
-        } else {
-            net_spans.push(Span::raw(" "));
-        }
+    let max_idx = SPARK_CHARS.len() - 1;
 
-        // Outbound (LightRed)
-        let out_idx_offset = spark_width - take_out;
-        if i >= out_idx_offset {
-            let val = sub_out[i - out_idx_offset];
-            let char_idx = (val * max_spark_idx / max_out) as usize;
-            net_spans.push(Span::styled(
-                SPARK_CHARS[char_idx.min(max_spark_idx as usize)],
-                Style::default().fg(Color::LightRed),
-            ));
-        } else {
-            net_spans.push(Span::raw(" "));
-        }
-    }
+    // Inbound (Green)
+    let in_idx = (current_in as usize * max_idx / threshold_in as usize).min(max_idx);
+    net_spans.push(Span::styled(
+        SPARK_CHARS[in_idx],
+        Style::default().fg(Color::Green),
+    ));
+
+    net_spans.push(Span::raw(" "));
+
+    // Outbound (Blue as requested)
+    let out_idx = (current_out as usize * max_idx / threshold_out as usize).min(max_idx);
+    net_spans.push(Span::styled(
+        SPARK_CHARS[out_idx],
+        Style::default().fg(Color::Blue),
+    ));
 
     f.render_widget(
         Paragraph::new(Line::from(net_spans)).alignment(ratatui::layout::Alignment::Center),

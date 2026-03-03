@@ -197,6 +197,11 @@ pub enum ClientViewEvent {
     EntityDebugInfoSnapshot {
         entity: Box<Entity>,
     },
+    NetPulse {
+        bytes_in: u64,
+        bytes_out: u64,
+    },
+    Disconnected,
 }
 
 #[derive(Debug, Clone)]

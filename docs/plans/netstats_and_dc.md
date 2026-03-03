@@ -21,14 +21,12 @@
 - **Decision: Use wrapping addition for byte counters to prevent panic on very long sessions.**
 - **Decision: Imported `std::time::Instant` since we are not using tokio's mocked time in these specific structs yet.**
 
-**Phase 2: Core Ticking & Ping Dispatch (Complexity: Medium)**
-- **Deliverables**: Modify `Client::run` and `ClientViewEvent` in `crates/holtburger-core`.
-  - Add `NetPulse { bytes_in: u64, bytes_out: u64 }` and `Disconnected` to `ClientViewEvent` (`crates/holtburger-core/src/client/types.rs`).
-  - Add a 1-second `net_tick` interval to the `tokio::select!` multiplexer alongside `physics_tick` and `recv_message` inside `Client::run`.
-  - On `net_tick` tick: Calculate byte deltas from `Session`, broadcast `NetPulse`.
-  - On `net_tick` tick: Check if `last_recv_time` exceeds the disconnect threshold (e.g., 15 seconds). If so, update state to `ClientState::Disconnected`, trigger a `Disconnected` event, and `break` the run loop.
-  - On `net_tick` tick: Check if `last_send_time` exceeds the heartbeat threshold (e.g., 5 seconds). If so, queue a `PingRequestActionData` to the server via `self.session.send_action(...)`.
-- **Acceptance Criteria**: `NetPulse` events fire every second with accurate byte changes, `PingRequest` actions are sent when idle, and UDP receive timeouts are properly caught and shift the client state to `Disconnected`.
+### Phase 2: Core Ticking & Ping Dispatch (Complexity: Medium)
+- **Status: Completed**
+- **Decision: Added `NetPulse` and `Disconnected` to `ClientViewEvent`.**
+- **Decision: NetPulse sends *total* bytes, delegating delta calculation to the client UI.**
+- **Decision: Set disconnect threshold to 15s and heartbeat threshold to 5s idle.**
+- **Decision: Used a dedicated `net_tick` in the `select!` multiplexer to avoid blocking recv_message.**
 
 **Phase 3: Connect UI to NetPulse Events (Complexity: Low)**
 - **Deliverables**: Modify UI event handling in `apps/holtburger-cli`.

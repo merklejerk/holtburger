@@ -58,8 +58,6 @@ pub struct GameData {
     pub inventory: HashSet<Guid>,
     /// Map of GUIDs currently equipped on the character.
     pub equipment: HashMap<Guid, EquipMask>,
-    /// Current vendor state (inventory and multipliers).
-    pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// Current active trade with another player.
     pub trade: Option<holtburger_world::state::TradeState>,
     /// Currently open containers in the world.
@@ -91,7 +89,6 @@ impl Default for GameData {
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
-            vendor: None,
             trade: None,
             open_containers: HashSet::new(),
         }
@@ -161,9 +158,5 @@ impl WorldContext for GameData {
 
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
         self.entities.values()
-    }
-
-    fn get_vendor(&self) -> Option<&holtburger_world::vendor::VendorState> {
-        self.vendor.as_ref()
     }
 }

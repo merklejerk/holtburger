@@ -18,7 +18,7 @@ pub fn render_trade_tab(
     tab: &mut TradeTab,
     f: &mut Frame,
     data: &GameData,
-    _view: &ViewState,
+    view: &ViewState,
     area: Rect,
 ) {
     if let Some(trade) = &data.trade {
@@ -188,7 +188,7 @@ pub fn render_trade_tab(
         f.render_stateful_widget(partner_list, partner_area, partner_state);
         let offset = partner_state.offset();
         crate::components::scroll::render_scrollbar(f, partner_area, partner_content_len, offset);
-    } else if let Some(vendor) = &data.vendor {
+    } else if let Some(vendor) = &view.vendor {
         let vendor_name = data
             .entities
             .get(&vendor.vendor_guid)

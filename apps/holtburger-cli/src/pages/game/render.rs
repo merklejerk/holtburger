@@ -19,6 +19,10 @@ impl GameState {
     pub fn update_layout(&mut self, area: Rect) {
         let (_chunks, main_chunks_vec, _dynamic_chunk) = get_layout(area);
 
+        // Update layout cache
+        self.view.layout_cache.main_chunks = std::rc::Rc::new(main_chunks_vec.clone());
+        self.view.layout_cache.dynamic_chunk = _dynamic_chunk;
+
         let chat_area = main_chunks_vec[1];
         // Note: the chat area rendering uses an inner margin horizontally
         // Chat pane uses pane_block which adds 1 to all sides, so the actual text area is smaller.
@@ -29,6 +33,10 @@ impl GameState {
             width: chat_area.width.saturating_sub(2),
             height: chat_area.height.saturating_sub(2),
         };
+
+        let ctx_h = main_chunks_vec[2].height.saturating_sub(2) as usize;
+        let max_ctx_scroll = self.view.context_buffer.len().saturating_sub(ctx_h);
+        self.view.context_scroll_offset = self.view.context_scroll_offset.min(max_ctx_scroll);
 
         self.chat.update_layout(chat_inner);
     }
@@ -68,9 +76,6 @@ impl GameState {
         );
 
         // Context Pane
-        let ctx_h = main_chunks[2].height.saturating_sub(2) as usize;
-        let max_ctx_scroll = self.view.context_buffer.len().saturating_sub(ctx_h);
-        self.view.context_scroll_offset = self.view.context_scroll_offset.min(max_ctx_scroll);
         render_context_pane(
             f,
             &self.view.context_buffer,

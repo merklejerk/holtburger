@@ -11,12 +11,12 @@ impl AppState {
             AppEvent::Tick(elapsed) => {
                 result = self.update_tick(elapsed);
             }
-            AppEvent::KeyPress(key, width, height, main_chunks, dynamic_chunk) => {
-                result = self.handle_key_press(key, width, height, main_chunks, dynamic_chunk);
+            AppEvent::KeyPress(key, width) => {
+                result = self.handle_key_press(key, width);
                 result.needs_redraw = true; // Input always redraws
             }
-            AppEvent::Mouse(mouse, chunks, main_chunks, dynamic_chunk) => {
-                result = self.handle_mouse_event(mouse, chunks, main_chunks, dynamic_chunk);
+            AppEvent::Mouse(mouse) => {
+                result = self.handle_mouse_event(mouse);
                 result.needs_redraw = true;
             }
             AppEvent::ReceivedViewEvent(event) => {

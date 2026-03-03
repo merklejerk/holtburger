@@ -2,7 +2,6 @@ use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::ClientCommand;
 use holtburger_world::context::WorldContextExt;
-use ratatui::layout::Rect;
 
 use crate::pages::{game::GameState, selection::SelectionState};
 use crate::state::AppState;
@@ -10,14 +9,7 @@ use crate::types::Page;
 use crate::types::{FocusedPane, SCROLL_STEP, UpdateResult};
 
 impl AppState {
-    pub(super) fn handle_key_press(
-        &mut self,
-        key: KeyEvent,
-        width: u16,
-        _height: u16,
-        main_chunks: Vec<Rect>,
-        _dynamic_chunk: Rect,
-    ) -> UpdateResult {
+    pub(super) fn handle_key_press(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
         let mut result = UpdateResult::new();
 
         // Modal blocks all input except Quit
@@ -48,7 +40,7 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        let mut page_result = self.page.handle_input(key, width, &main_chunks);
+        let mut page_result = self.page.handle_input(key, width);
 
         while !page_result.actions.is_empty() {
             let actions: Vec<_> = page_result.actions.drain(..).collect();
@@ -58,36 +50,10 @@ impl AppState {
             }
         }
         result.merge(page_result);
-
-        self.refresh_context_buffer();
-        // Eagerly transition to GameState when a character is selected
-        // This ensures we are listening for character data (vitals, skills)
-        // that the server sends *before* the final PlayerEntered event.
-        for cmd in &result.commands {
-            if let ClientCommand::SelectCharacterByIndex(idx) = cmd
-                && let Page::Selection(sel) = &self.page
-                && *idx > 0
-                && *idx <= sel.characters.len()
-            {
-                let char_info = &sel.characters[idx - 1];
-                self.page = Page::Game(Box::new(crate::pages::game::GameState::new(
-                    char_info.guid,
-                    char_info.name.clone(),
-                    self.world_name.clone(),
-                )));
-            }
-        }
-
         result
     }
 
-    pub(super) fn handle_mouse_event(
-        &mut self,
-        mouse: MouseEvent,
-        _chunks: Vec<Rect>,
-        main_chunks: Vec<Rect>,
-        _dynamic_chunk: Rect,
-    ) -> UpdateResult {
+    pub(super) fn handle_mouse_event(&mut self, mouse: MouseEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
 
         if self.modal.is_some() {
@@ -95,7 +61,7 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        let mut page_result = self.page.handle_mouse(mouse, &main_chunks);
+        let mut page_result = self.page.handle_mouse(mouse);
         while !page_result.actions.is_empty() {
             let actions: Vec<_> = page_result.actions.drain(..).collect();
             for action in actions {
@@ -154,19 +120,18 @@ impl SelectionState {
         result
     }
 
-    pub fn handle_mouse(
-        &mut self,
-        _mouse: MouseEvent,
-        _app: &mut AppState,
-        _main_chunks: &[Rect],
-    ) -> UpdateResult {
+    pub fn handle_mouse(&mut self, _mouse: MouseEvent, _app: &mut AppState) -> UpdateResult {
         UpdateResult::new()
     }
 }
 
 impl GameState {
-    pub fn handle_mouse(&mut self, mouse: MouseEvent, main_chunks: &[Rect]) -> UpdateResult {
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
+
+        // Grab chunks from layout cache
+        let main_chunks = std::rc::Rc::clone(&self.view.layout_cache.main_chunks);
+
         match mouse.kind {
             crossterm::event::MouseEventKind::ScrollUp => {
                 if mouse.row >= main_chunks[1].y
@@ -238,13 +203,9 @@ impl GameState {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn handle_input(
-        &mut self,
-        key: KeyEvent,
-        width: u16,
-        main_chunks: &[Rect],
-    ) -> UpdateResult {
+    pub fn handle_input(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
         let mut result = UpdateResult::new();
+        let main_chunks = std::rc::Rc::clone(&self.view.layout_cache.main_chunks);
 
         if self.view.focused_pane == FocusedPane::Dashboard {
             if let Some(tab_result) = self.dashboard.handle_input(key) {

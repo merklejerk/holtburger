@@ -17,7 +17,7 @@ pub struct TradeTab {
 }
 
 impl TradeTab {
-    fn get_target<'a>(&self, data: &'a GameData) -> CommandTarget<'a> {
+    fn get_target<'a>(&self, data: &'a GameData, view: &'a ViewState) -> CommandTarget<'a> {
         if let Some(trade) = &data.trade {
             let items = match self.trade_focus {
                 TradeFocus::Local => &trade.self_side.items,
@@ -28,7 +28,7 @@ impl TradeTab {
             {
                 return CommandTarget::Entity(entity, None);
             }
-        } else if let Some(vendor) = &data.vendor
+        } else if let Some(vendor) = &view.vendor
             && let Some(m) = vendor.items.get(self.selected_index)
         {
             return CommandTarget::VendorItem(m);
@@ -36,13 +36,13 @@ impl TradeTab {
         CommandTarget::None
     }
 
-    fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
+    fn item_count(&self, data: &GameData, view: &ViewState) -> usize {
         if let Some(trade) = &data.trade {
             match self.trade_focus {
                 TradeFocus::Local => trade.self_side.items.len(),
                 TradeFocus::Partner => trade.partner_side.items.len(),
             }
-        } else if let Some(vendor) = &data.vendor {
+        } else if let Some(vendor) = &view.vendor {
             vendor.items.len()
         } else {
             0
@@ -58,11 +58,11 @@ impl TabController for TradeTab {
     fn get_verbs(
         &self,
         data: &GameData,
-        _view: &ViewState,
+        view: &ViewState,
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
-        let target = self.get_target(data);
+        let target = self.get_target(data, view);
 
         if let Some(interaction) = interaction {
             if let CommandTarget::Entity(_e, _) = &target {
@@ -99,7 +99,7 @@ impl TabController for TradeTab {
             ));
         }
 
-        if let Some(vendor) = &data.vendor {
+        if let Some(vendor) = &view.vendor {
             match target {
                 CommandTarget::VendorItem(v) => {
                     verbs.push(Verb::new(
@@ -148,7 +148,7 @@ impl TabController for TradeTab {
             ));
         }
 
-        if data.trade.is_some() || data.vendor.is_some() {
+        if data.trade.is_some() || view.vendor.is_some() {
             let action = if data.trade.is_some() {
                 vec![AppAction::SendCommands(vec![ClientCommand::CloseTrade])]
             } else {

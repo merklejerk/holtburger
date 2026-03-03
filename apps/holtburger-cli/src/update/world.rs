@@ -55,6 +55,18 @@ impl AppState {
                 if self.client_state == ClientState::InWorld {
                     self.logon_retry.reset();
                     self.enter_retry.reset();
+                } else if self.client_state == ClientState::EnteringWorld
+                    && let crate::types::Page::Selection(sel) = &self.page
+                    && !sel.characters.is_empty()
+                    && sel.selected_character_index < sel.characters.len()
+                {
+                    let char_info = &sel.characters[sel.selected_character_index];
+                    self.page =
+                        crate::types::Page::Game(Box::new(crate::pages::game::GameState::new(
+                            char_info.guid,
+                            char_info.name.clone(),
+                            self.world_name.clone(),
+                        )));
                 }
             }
             ClientViewEvent::ErrorRaised {
@@ -203,7 +215,7 @@ impl AppState {
             ClientViewEvent::VendorStateUpdated { vendor } => {
                 if let Some(game) = self.game_option_mut() {
                     let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
-                    game.data.vendor = vendor;
+                    game.view.vendor = vendor;
                     // If we just opened a vendor and we initiated it, switch to Trade tab.
                     if let Some(v_guid) = vendor_guid
                         && let Some((last_time, target_guid)) = game.view.last_trade_initiation

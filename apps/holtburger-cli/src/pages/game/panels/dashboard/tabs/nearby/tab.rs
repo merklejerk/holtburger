@@ -202,25 +202,27 @@ impl TabController for NearbyTab {
                     };
                 }
 
-                verbs.push(Verb::new(
-                    match pick_up_cmd {
-                        ClientCommand::MoveItem {
-                            item, container, ..
-                        } => {
-                            vec![AppAction::MoveItem(item, container)]
-                        }
-                        ClientCommand::Stack {
-                            source,
-                            destination,
-                            amount,
-                        } => {
-                            vec![AppAction::StackItems(source, destination, amount)]
-                        }
-                        _ => vec![AppAction::SendCommands(vec![pick_up_cmd])],
-                    },
-                    'p',
-                    "Pick Up",
-                ));
+                if !e.is_stuck() && e.is_root() {
+                    verbs.push(Verb::new(
+                        match pick_up_cmd {
+                            ClientCommand::MoveItem {
+                                item, container, ..
+                            } => {
+                                vec![AppAction::MoveItem(item, container)]
+                            }
+                            ClientCommand::Stack {
+                                source,
+                                destination,
+                                amount,
+                            } => {
+                                vec![AppAction::StackItems(source, destination, amount)]
+                            }
+                            _ => vec![AppAction::SendCommands(vec![pick_up_cmd])],
+                        },
+                        'p',
+                        "Pick Up",
+                    ));
+                }
             }
 
             verbs.extend([

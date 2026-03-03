@@ -90,6 +90,10 @@ impl Entity {
         self.set_iid_prop(PropertyInstanceId::Wielder, val.unwrap_or(Guid::NULL))
     }
 
+    pub fn is_root(&self) -> bool {
+        self.container_id().is_none() && self.wielder_id().is_none()
+    }
+
     pub fn item_value(&self) -> u32 {
         self.get_int_prop(PropertyInt::Value).unwrap_or(0) as u32
     }
@@ -307,6 +311,10 @@ impl Entity {
             Some(2) => AttunedStatus::Sticky,
             _ => AttunedStatus::Normal,
         }
+    }
+
+    pub fn is_stuck(&self) -> bool {
+        self.get_bool_prop(PropertyBool::Stuck)
     }
 
     pub fn is_attuned_sticky(&self) -> bool {

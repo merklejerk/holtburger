@@ -117,7 +117,10 @@ impl TabController for InventoryTab {
                         if is_self || is_same_item {
                             if !is_in_main_pack {
                                 if let Some(p) = player_guid {
-                                    actions.push(AppAction::MoveItem(*interact_guid, p));
+                                    actions.extend_from_slice(&[
+                                        AppAction::MoveItem(*interact_guid, p),
+                                        AppAction::CancelInteraction,
+                                    ]);
                                 }
                                 label = Some("Move to main pack");
                             } else {
@@ -129,9 +132,13 @@ impl TabController for InventoryTab {
                                 cur_entity.guid,
                                 -1,
                             ));
+                            actions.push(AppAction::CancelInteraction);
                             label = Some(merge);
                         } else if is_container {
-                            actions.push(AppAction::MoveItem(*interact_guid, cur_entity.guid));
+                            actions.extend_from_slice(&[
+                                AppAction::MoveItem(*interact_guid, cur_entity.guid),
+                                AppAction::CancelInteraction,
+                            ]);
                             label = Some("Move to container");
                         } else {
                             label = None;
@@ -181,6 +188,15 @@ impl TabController for InventoryTab {
                         })],
                         't',
                         "Target",
+                    ));
+                }
+                EntityClass::HealingKit => {
+                    verbs.push(Verb::new(
+                        vec![AppAction::BeginInteraction(Interaction::Healing {
+                            item_guid: cur_entity.guid,
+                        })],
+                        'h',
+                        "Heal",
                     ));
                 }
                 _ => {}

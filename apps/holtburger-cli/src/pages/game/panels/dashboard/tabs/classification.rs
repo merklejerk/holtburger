@@ -20,6 +20,7 @@ pub enum EntityClass {
     Money,      // Pyreals, Notes
     Key,        // Keys, Lockpicks
     Writable,   // Books, Scrolls
+    HealingKit,
     Door,
     Portal,
     LifeStone,
@@ -52,6 +53,7 @@ impl EntityClass {
             EntityClass::Chest => "🧰",
             EntityClass::Tool => "🔧",
             EntityClass::StaticObject => "🪧",
+            EntityClass::HealingKit => "🩹",
             EntityClass::Unknown => "❓",
         }
     }
@@ -77,6 +79,7 @@ impl EntityClass {
             EntityClass::Chest => "Chest",
             EntityClass::Tool => "Tool",
             EntityClass::StaticObject => "Static",
+            EntityClass::HealingKit => "Healing Kit",
             EntityClass::Unknown => "?",
         }
     }
@@ -243,6 +246,9 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
     if flags.intersects(ObjectDescriptionFlag::PLAYER) {
         return EntityClass::Player;
     }
+    if flags.intersects(ObjectDescriptionFlag::HEALER) {
+        return EntityClass::HealingKit;
+    }
 
     // Rule: item class for things that are Attackable but not stuck.
     if is_attackable && !is_stuck {
@@ -259,36 +265,4 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
     }
 
     EntityClass::Unknown
-}
-
-pub fn is_targetable(entity: &Entity) -> bool {
-    // Targetable heuristic:
-    // 1. Not UI_HIDDEN
-    // 2. Class-based: Players and Dynamic objects are usually targetable even without names
-    if entity.flags.intersects(ObjectDescriptionFlag::UI_HIDDEN) {
-        return false;
-    }
-
-    match classify_entity(entity) {
-        EntityClass::Player => true,
-        EntityClass::Npc
-        | EntityClass::Vendor
-        | EntityClass::Monster
-        | EntityClass::Weapon
-        | EntityClass::Apparel
-        | EntityClass::Container
-        | EntityClass::Item
-        | EntityClass::Consumable
-        | EntityClass::Money
-        | EntityClass::Key
-        | EntityClass::Writable
-        | EntityClass::Door
-        | EntityClass::Portal
-        | EntityClass::LifeStone
-        | EntityClass::Chest
-        | EntityClass::Wand
-        | EntityClass::Tool
-        | EntityClass::StaticObject => !entity.name().trim().is_empty(),
-        EntityClass::Unknown => false,
-    }
 }

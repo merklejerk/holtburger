@@ -220,7 +220,6 @@ pub enum AppAction {
     ViewDetails(ContextView),
     Log(ChatMessageKind, String),
     BeginInteraction(Interaction),
-    ConfirmInteractionTarget(Guid),
     CancelInteraction,
     SendCommands(Vec<ClientCommand>),
     ChangeContextView(ContextView),

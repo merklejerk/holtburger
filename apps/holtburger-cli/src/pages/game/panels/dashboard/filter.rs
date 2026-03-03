@@ -5,8 +5,6 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PseudoEquipMask;
 use holtburger_world::entity::Entity;
 
-use super::tabs::classification;
-
 #[derive(Clone, Copy)]
 pub enum EntityFilter {
     World,
@@ -37,8 +35,7 @@ pub fn filter_entities<'a>(
                     false
                 };
 
-                (classification::is_targetable(e)
-                    && (e.position.landblock_id != Guid::NULL
+                ((e.position.landblock_id != Guid::NULL
                         || (e.wielder_id().is_some() && is_combat_implement)
                         || e.physics_parent_id.is_some()))
                     || in_open_container

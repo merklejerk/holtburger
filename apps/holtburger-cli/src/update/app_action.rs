@@ -109,7 +109,6 @@ impl AppState {
                 result
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
-                result.merge(self.handle_app_action(AppAction::CancelInteraction));
             }
             AppAction::QueryDebugInfo(guid) => {
                 result
@@ -177,7 +176,6 @@ impl AppState {
                     result.merge(self.handle_app_action(sub));
                 }
             }
-            AppAction::ConfirmInteractionTarget(_guid) => {}
         }
         result
     }

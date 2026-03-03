@@ -28,12 +28,11 @@
 - **Decision: Set disconnect threshold to 15s and heartbeat threshold to 5s idle.**
 - **Decision: Used a dedicated `net_tick` in the `select!` multiplexer to avoid blocking recv_message.**
 
-**Phase 3: Connect UI to NetPulse Events (Complexity: Low)**
-- **Deliverables**: Modify UI event handling in `apps/holtburger-cli`.
-  - Catch `ClientViewEvent::NetPulse` in `handle_client_view_event` (`apps/holtburger-cli/src/update/world.rs`).
-  - Update `app_state.net_stats` (pushing deltas to `history_in` and `history_out`).
-  - Route `ClientViewEvent::Disconnected` to transition the UI back correctly from `GameState` to `SelectionState` (or displaying an error modal).
-- **Acceptance Criteria**: TUI's netstats graph accurately reflects network traffic over the 1-second intervals, and dropping connection shows the UI disconnection clearly.
+### Phase 3: Connect UI to NetPulse Events (Complexity: Low)
+- **Status: Completed**
+- **Decision: Hooked `NetPulse` and `Disconnected` into `AppState::handle_client_view_event`.**
+- **Decision: Calculated deltas in the UI (by storing previous total) to keep history arrays moving. No cap, that graph is gonna be vibing now.**
+- **Decision: Automatically update history with `rotate_left(1)` to maintain the sliding window.**
 
 ## 4. Risks & Mitigations
 - **Risk**: tokio `select!` loop overhead with too many intervals.
@@ -42,16 +41,16 @@
   - **Mitigation**: UDP doesn't "fail to write" easily. We rely purely on `last_recv_time` since an unresponsive server (or a disconnected node) ceases sending packets (including ping replies).
 
 ## 5. Definition of Done (DoD)
-- [ ] `holtburger-session` accurately tracks bytes in/out and packet times.
-- [ ] `holtburger-core` sends `NetPulse` events every second via new interval arm.
-- [ ] `holtburger-core` sends `PingRequest` over UDP to keep connection open.
-- [ ] `holtburger-core` drops connection explicitly if idle for too long.
-- [ ] `holtburger-cli` visibly shows bytes on the dashboard, handles disconnect safely.
-- [ ] Code compiles, and existing tests pass.
+- [x] `holtburger-session` accurately tracks bytes in/out and packet times.
+- [x] `holtburger-core` sends `NetPulse` events every second via new interval arm.
+- [x] `holtburger-core` sends `PingRequest` over UDP to keep connection open.
+- [x] `holtburger-core` drops connection explicitly if idle for too long.
+- [x] `holtburger-cli` visibly shows bytes on the dashboard, handles disconnect safely.
+- [x] Code compiles, and existing tests pass.
 
 ## 6. The Living Worksheet
 ### Task Checklist
-- [ ] Add tracking fields to `holtburger-session::Session`.
-- [ ] Add `NetPulse` and `Disconnected` to `ClientViewEvent`.
-- [ ] Add `net_tick` interval loop and checks to `Client::run`.
-- [ ] Implement UI response to `NetPulse` and `Disconnected` in CLI.
+- [x] Add tracking fields to `holtburger-session::Session`.
+- [x] Add `NetPulse` and `Disconnected` to `ClientViewEvent`.
+- [x] Add `net_tick` interval loop and checks to `Client::run`.
+- [x] Implement UI response to `NetPulse` and `Disconnected` in CLI.

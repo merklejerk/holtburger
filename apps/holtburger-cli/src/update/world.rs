@@ -122,7 +122,9 @@ impl AppState {
             | ClientViewEvent::Chat { .. }
             | ClientViewEvent::Emote { .. }
             | ClientViewEvent::PingResponse
-            | ClientViewEvent::BootAccount(_) => {
+            | ClientViewEvent::BootAccount(_)
+            | ClientViewEvent::NetPulse { .. }
+            | ClientViewEvent::Disconnected => {
                 if let Some(g) = self.game_option_mut() {
                     g.chat.handle_event(&event);
                 }
@@ -145,12 +147,45 @@ impl AppState {
                 | ClientViewEvent::Emote { .. }
                 | ClientViewEvent::PingResponse
                 | ClientViewEvent::BootAccount(_)
+                | ClientViewEvent::NetPulse { .. }
+                | ClientViewEvent::Disconnected
         ) && self.game_option().is_none()
         {
             return;
         }
 
         match event {
+            ClientViewEvent::NetPulse {
+                bytes_in,
+                bytes_out,
+            } => {
+                let now = std::time::Instant::now();
+                let delta_in = bytes_in.saturating_sub(self.net_stats.bytes_in);
+                let delta_out = bytes_out.saturating_sub(self.net_stats.bytes_out);
+
+                self.net_stats.bytes_in = bytes_in;
+                self.net_stats.bytes_out = bytes_out;
+                self.net_stats.last_update = Some(now);
+
+                self.net_stats.history_in.rotate_left(1);
+                if let Some(last) = self.net_stats.history_in.last_mut() {
+                    *last = delta_in;
+                }
+
+                self.net_stats.history_out.rotate_left(1);
+                if let Some(last) = self.net_stats.history_out.last_mut() {
+                    *last = delta_out;
+                }
+            }
+            ClientViewEvent::Disconnected => {
+                self.client_state = ClientState::Disconnected;
+                self.log(
+                    ChatMessageKind::Error,
+                    "Lost connection to server.".to_string(),
+                );
+                // For now, staying on the Game page lets the user see the error,
+                // but we could also transition back to selection.
+            }
             ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. } => {
                 self.handle_client_status_event(event);
             }

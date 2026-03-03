@@ -1,5 +1,5 @@
-use crate::pages::game::GameState;
 use crate::pages::game::hud::vitals::render_vitals;
+use crate::pages::game::{GameData, ViewState};
 use holtburger_common::time::*;
 use holtburger_core::RetryState;
 use ratatui::Frame;
@@ -20,7 +20,8 @@ const COMPASS_OFFSET: f32 = DEGREES_PER_POINT / 2.0; // 11.25° to center the la
 
 pub fn render_status_bar(
     f: &mut Frame,
-    game: &GameState,
+    data: &GameData,
+    view: &ViewState,
     logon_retry: &RetryState,
     enter_retry: &RetryState,
     area: Rect,
@@ -30,13 +31,14 @@ pub fn render_status_bar(
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(area);
 
-    render_vitals(f, game, chunks[0]);
-    render_status_panel(f, game, logon_retry, enter_retry, chunks[1]);
+    render_vitals(f, data, view, chunks[0]);
+    render_status_panel(f, data, view, logon_retry, enter_retry, chunks[1]);
 }
 
 fn render_status_panel(
     f: &mut Frame,
-    game: &GameState,
+    data: &GameData,
+    _view: &ViewState,
     logon_retry: &RetryState,
     enter_retry: &RetryState,
     area: Rect,
@@ -55,13 +57,12 @@ fn render_status_panel(
 
     // 1. Coords + Compass
     let retry_info = get_retry_info(logon_retry, enter_retry);
-    let pos_info = game
-        .data
+    let pos_info = data
         .player_pos
         .as_ref()
         .map(|pos| pos.to_world_coords().to_string_with_precision(2))
         .unwrap_or_else(|| "0.00N, 0.00E".to_string());
-    let compass_str = get_compass_str(game);
+    let compass_str = get_compass_str(data);
     let pos_compass_str = format!("{} 🧭 {} > {}", retry_info, pos_info, compass_str);
     f.render_widget(
         Paragraph::new(pos_compass_str).alignment(ratatui::layout::Alignment::Left),
@@ -69,7 +70,7 @@ fn render_status_panel(
     );
 
     // 2. Chronometer
-    let time_str = get_time_str(game);
+    let time_str = get_time_str(data);
     f.render_widget(
         Paragraph::new(time_str).alignment(ratatui::layout::Alignment::Right),
         status_layout[1],
@@ -105,9 +106,8 @@ fn get_retry_info(logon: &RetryState, enter: &RetryState) -> String {
     retry_info
 }
 
-fn get_compass_str(game: &GameState) -> String {
-    let heading_rad = game
-        .data
+fn get_compass_str(data: &GameData) -> String {
+    let heading_rad = data
         .player_pos
         .as_ref()
         .map(|p| p.rotation.to_heading())
@@ -119,8 +119,8 @@ fn get_compass_str(game: &GameState) -> String {
     format!("{:03.0}°{}", heading_deg, COMPASS_DIRECTIONS[dir_idx])
 }
 
-fn get_time_str(game: &GameState) -> String {
-    if let Some((st, inst)) = game.data.server_time {
+fn get_time_str(data: &GameData) -> String {
+    if let Some((st, inst)) = data.server_time {
         let current_server_time = st + inst.elapsed().as_secs_f64();
         let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);
         let ticks_per_hour_24 = DERETH_DAY_LENGTH / 24.0;

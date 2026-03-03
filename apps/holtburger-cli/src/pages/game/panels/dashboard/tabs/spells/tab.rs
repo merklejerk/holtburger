@@ -6,7 +6,9 @@ use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, ContextView, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, CommandTarget, ContextView, Interaction, TabController, UpdateResult, Verb,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct SpellsTab {
@@ -17,9 +19,7 @@ pub struct SpellsTab {
 impl SpellsTab {
     fn get_target(&self, data: &GameData) -> CommandTarget<'static> {
         let mut spells = data.player_spells.clone();
-        spells.sort_by_key(|&sid| {
-            data.spell_names.get(&sid).cloned().unwrap_or_default()
-        });
+        spells.sort_by_key(|&sid| data.spell_names.get(&sid).cloned().unwrap_or_default());
         if let Some(&sid) = spells.get(self.selected_index) {
             CommandTarget::Spell(sid)
         } else {
@@ -46,10 +46,10 @@ impl TabController for SpellsTab {
         let mut verbs = Vec::new();
         let target = self.get_target(data);
 
-        if let Some(interaction) = interaction {
-            if !matches!(interaction, Interaction::Targeting { .. }) {
-                return verbs;
-            }
+        if let Some(interaction) = interaction
+            && !matches!(interaction, Interaction::Targeting { .. })
+        {
+            return verbs;
         }
 
         if let CommandTarget::Spell(spell_id) = target {
@@ -62,9 +62,7 @@ impl TabController for SpellsTab {
                     'c',
                     "Cast (Need Caster)",
                 ));
-            } else if data.combat_mode
-                != holtburger_protocol::messages::combat::CombatMode::Magic
-            {
+            } else if data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic {
                 verbs.push(Verb::new(
                     vec![AppAction::SetCombatMode(
                         holtburger_protocol::messages::combat::CombatMode::Magic,

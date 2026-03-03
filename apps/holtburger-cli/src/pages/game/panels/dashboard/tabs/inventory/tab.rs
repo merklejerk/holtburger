@@ -54,7 +54,9 @@ impl TabController for InventoryTab {
 
             if let Some(active_interaction) = interaction {
                 match active_interaction {
-                    Interaction::Healing { item_guid: interact_guid } => {
+                    Interaction::Healing {
+                        item_guid: interact_guid,
+                    } => {
                         if cur_entity.guid == *interact_guid
                             && let Some(pguid) = player_guid
                         {
@@ -69,33 +71,33 @@ impl TabController for InventoryTab {
                         }
                         return verbs;
                     }
-                    Interaction::Combining { item_guid: interact_guid } => {
-                        if let Some(source_e) = data.entities.get(interact_guid) {
-                            if let (Some(target_type), Some(dest_item_type)) =
+                    Interaction::Combining {
+                        item_guid: interact_guid,
+                    } => {
+                        if let Some(source_e) = data.entities.get(interact_guid)
+                            && let (Some(target_type), Some(dest_item_type)) =
                                 (source_e.target_item_type(), cur_entity.item_type())
-                            {
-                                if target_type.intersects(dest_item_type) {
-                                    verbs.push(Verb::new(
-                                        vec![
-                                            AppAction::ApplyItem(*interact_guid, cur_entity.guid),
-                                            AppAction::CancelInteraction,
-                                        ],
-                                        '\r',
-                                        "Apply to target",
-                                    ));
-                                }
-                            }
+                            && target_type.intersects(dest_item_type)
+                        {
+                            verbs.push(Verb::new(
+                                vec![
+                                    AppAction::ApplyItem(*interact_guid, cur_entity.guid),
+                                    AppAction::CancelInteraction,
+                                ],
+                                '\r',
+                                "Apply to target",
+                            ));
                         }
                         return verbs;
                     }
-                    Interaction::Moving { item_guid: interact_guid } => {
+                    Interaction::Moving {
+                        item_guid: interact_guid,
+                    } => {
                         let is_self = Some(cur_entity.guid) == player_guid;
                         let is_same_item = cur_entity.guid == *interact_guid;
                         let is_in_main_pack = data.is_in_main_pack(*interact_guid);
-                        let is_container = matches!(
-                            class,
-                            EntityClass::Container | EntityClass::Chest
-                        );
+                        let is_container =
+                            matches!(class, EntityClass::Container | EntityClass::Chest);
 
                         let merge_label = data.entities.get(interact_guid).and_then(|source_e| {
                             if !is_same_item
@@ -122,7 +124,11 @@ impl TabController for InventoryTab {
                                 label = None;
                             }
                         } else if let Some(merge) = merge_label {
-                            actions.push(AppAction::StackItems(*interact_guid, cur_entity.guid, -1));
+                            actions.push(AppAction::StackItems(
+                                *interact_guid,
+                                cur_entity.guid,
+                                -1,
+                            ));
                             label = Some(merge);
                         } else if is_container {
                             actions.push(AppAction::MoveItem(*interact_guid, cur_entity.guid));
@@ -131,7 +137,9 @@ impl TabController for InventoryTab {
                             label = None;
                         };
 
-                        if let Some(label) = label && !actions.is_empty() {
+                        if let Some(label) = label
+                            && !actions.is_empty()
+                        {
                             verbs.push(Verb::new(actions, '\r', label));
                         }
                         return verbs;
@@ -140,7 +148,11 @@ impl TabController for InventoryTab {
                 }
             }
 
-            verbs.push(Verb::new(vec![AppAction::Assess(cur_entity.guid)], 'a', "Assess"));
+            verbs.push(Verb::new(
+                vec![AppAction::Assess(cur_entity.guid)],
+                'a',
+                "Assess",
+            ));
 
             match class {
                 EntityClass::Tool
@@ -159,11 +171,7 @@ impl TabController for InventoryTab {
                             "Combine",
                         ));
                     } else {
-                        verbs.push(Verb::new(
-                            vec![AppAction::Use(cur_entity.guid)],
-                            'u',
-                            "Use",
-                        ));
+                        verbs.push(Verb::new(vec![AppAction::Use(cur_entity.guid)], 'u', "Use"));
                     }
                 }
                 EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {
@@ -179,7 +187,11 @@ impl TabController for InventoryTab {
             }
 
             if !cur_entity.is_attuned_sticky() {
-                verbs.push(Verb::new(vec![AppAction::Drop(cur_entity.guid)], 'd', "Drop"));
+                verbs.push(Verb::new(
+                    vec![AppAction::Drop(cur_entity.guid)],
+                    'd',
+                    "Drop",
+                ));
             }
 
             if cur_entity.stack_size() > 1 {
@@ -193,7 +205,10 @@ impl TabController for InventoryTab {
                 ));
             }
 
-            if !cur_entity.flags.intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT) {
+            if !cur_entity
+                .flags
+                .intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
+            {
                 verbs.push(Verb::new(
                     vec![AppAction::BeginInteraction(Interaction::Moving {
                         item_guid: cur_entity.guid,
@@ -221,14 +236,14 @@ impl TabController for InventoryTab {
                         "Offer",
                     ));
                 }
-            } else if let Some(vendor) = &data.vendor {
-                if data.can_sell_to_vendor(cur_entity.guid) {
-                    verbs.push(Verb::new(
-                        vec![AppAction::SellToVendor(cur_entity.guid, vendor.vendor_guid)],
-                        's',
-                        "Sell",
-                    ));
-                }
+            } else if let Some(vendor) = &data.vendor
+                && data.can_sell_to_vendor(cur_entity.guid)
+            {
+                verbs.push(Verb::new(
+                    vec![AppAction::SellToVendor(cur_entity.guid, vendor.vendor_guid)],
+                    's',
+                    "Sell",
+                ));
             }
 
             verbs.push(Verb::new(

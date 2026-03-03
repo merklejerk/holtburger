@@ -5,16 +5,22 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
 use super::super::classification::{classify_entity, classify_vendor_item, get_entity_color};
-use crate::pages::game::{GameData, ViewState};
 use super::tab::TradeTab;
-use crate::types::TradeFocus;
+use crate::pages::game::{GameData, ViewState};
 use crate::theme;
+use crate::types::TradeFocus;
 use crate::utils::format_item_name;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
 use holtburger_common::properties::{ItemType, PropertyInt};
 use holtburger_world::context::WorldContextExt;
 
-pub fn render_trade_tab(tab: &mut TradeTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
+pub fn render_trade_tab(
+    tab: &mut TradeTab,
+    f: &mut Frame,
+    data: &GameData,
+    _view: &ViewState,
+    area: Rect,
+) {
     if let Some(trade) = &data.trade {
         let trade_focus = tab.trade_focus;
         let partner_name = data
@@ -45,8 +51,7 @@ pub fn render_trade_tab(tab: &mut TradeTab, f: &mut Frame, data: &GameData, _vie
                     emoji = class.emoji();
                     color = get_entity_color(class);
                 }
-                let is_selected =
-                    trade_focus == TradeFocus::Local && i == tab.selected_index;
+                let is_selected = trade_focus == TradeFocus::Local && i == tab.selected_index;
 
                 let text = format!("[{}] {}", emoji, display_name);
                 ListItem::new(Line::styled(text, Style::default().fg(color)))

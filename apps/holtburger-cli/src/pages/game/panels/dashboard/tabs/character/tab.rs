@@ -5,7 +5,9 @@ use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, Interaction, StatType, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, CommandTarget, Interaction, StatType, TabController, UpdateResult, Verb,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct CharacterTab {
@@ -15,8 +17,7 @@ pub struct CharacterTab {
 
 impl CharacterTab {
     fn get_target<'a>(&self, data: &'a GameData) -> CommandTarget<'a> {
-        get_command_target_at_index(data, self.selected_index)
-            .unwrap_or(CommandTarget::None)
+        get_command_target_at_index(data, self.selected_index).unwrap_or(CommandTarget::None)
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
@@ -59,11 +60,18 @@ impl TabController for CharacterTab {
 
                 if is_unassigned_xp_enough {
                     let cmd = match st.clone() {
-                        StatType::Attribute(at) => {
-                            ClientCommand::RaiseAttribute { attribute: at, xp_spent }
-                        }
-                        StatType::Vital(vt) => ClientCommand::RaiseVital { vital: vt, xp_spent },
-                        StatType::Skill(sk) => ClientCommand::RaiseSkill { skill: sk, xp_spent },
+                        StatType::Attribute(at) => ClientCommand::RaiseAttribute {
+                            attribute: at,
+                            xp_spent,
+                        },
+                        StatType::Vital(vt) => ClientCommand::RaiseVital {
+                            vital: vt,
+                            xp_spent,
+                        },
+                        StatType::Skill(sk) => ClientCommand::RaiseSkill {
+                            skill: sk,
+                            xp_spent,
+                        },
                     };
                     verbs.push(Verb::new(
                         vec![AppAction::SendCommands(vec![cmd])],
@@ -173,9 +181,12 @@ fn get_command_target_at_index(data: &GameData, index: usize) -> Option<CommandT
         CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => {
             CommandTarget::Enchantment(*e)
         }
-        CharTabLine::Stat { stat_type: Some(st), xp_cost, sp_cost, .. } => {
-            CommandTarget::Stat(st.clone(), *xp_cost, *sp_cost)
-        }
+        CharTabLine::Stat {
+            stat_type: Some(st),
+            xp_cost,
+            sp_cost,
+            ..
+        } => CommandTarget::Stat(st.clone(), *xp_cost, *sp_cost),
         _ => CommandTarget::None,
     })
 }

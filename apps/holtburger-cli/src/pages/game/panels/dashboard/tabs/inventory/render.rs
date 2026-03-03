@@ -5,8 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 
 use super::super::classification::{classify_entity, get_entity_color};
-use crate::pages::game::{GameData, ViewState};
 use super::tab::InventoryTab;
+use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::utils::format_item_name;
 use holtburger_common::Guid;
@@ -15,7 +15,13 @@ use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 use std::collections::HashMap;
 
-pub fn render_inventory_tab(tab: &mut InventoryTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
+pub fn render_inventory_tab(
+    tab: &mut InventoryTab,
+    f: &mut Frame,
+    data: &GameData,
+    _view: &ViewState,
+    area: Rect,
+) {
     let mut bottom_area = area;
 
     let counts = data.get_container_counts();

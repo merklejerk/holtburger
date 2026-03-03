@@ -1,7 +1,7 @@
+use crate::pages::game::GameState;
 use crate::pages::game::panels::chat::ChatMessageKind;
 use crate::pages::game::panels::dashboard::{assess, debug};
 use crate::pages::game::{GameData, ViewState};
-use crate::pages::game::GameState;
 use crate::pages::selection::SelectionState;
 use crossterm::event::{KeyEvent, MouseEvent};
 use holtburger_common::Guid;
@@ -11,9 +11,9 @@ use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
-use ratatui::Frame;
 use std::borrow::Cow;
 use std::time::Instant;
 
@@ -251,7 +251,12 @@ pub trait TabController {
     }
 
     /// Handles tab-specific input. Returns a list of commands to execute.
-    fn handle_input(&mut self, key: KeyEvent, data: &GameData, view: &ViewState) -> Option<UpdateResult>;
+    fn handle_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult>;
 
     /// Returns the content to be displayed in the context panel for the current selection.
     fn get_context_panel_content(&self, data: &GameData, view: &ViewState) -> Vec<Line<'static>> {

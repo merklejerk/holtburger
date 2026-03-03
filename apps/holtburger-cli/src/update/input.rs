@@ -253,7 +253,11 @@ impl GameState {
             }
             let data = &self.data;
             let view = &self.view;
-            if let Some(tab_result) = self.dashboard.active_tab_mut().handle_input(key, data, view) {
+            if let Some(tab_result) = self
+                .dashboard
+                .active_tab_mut()
+                .handle_input(key, data, view)
+            {
                 result.merge(tab_result);
                 return result;
             }
@@ -271,12 +275,8 @@ impl GameState {
                 } else {
                     1
                 };
-                self.view.focused_pane = crate::utils::get_adjacent_pane(
-                    self.view.focused_pane,
-                    width,
-                    active,
-                    delta,
-                );
+                self.view.focused_pane =
+                    crate::utils::get_adjacent_pane(self.view.focused_pane, width, active, delta);
                 result.needs_redraw = true;
             }
             KeyCode::Esc => {

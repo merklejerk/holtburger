@@ -2,42 +2,67 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use unicode_width::UnicodeWidthStr;
 
+use crate::pages::game::GameState;
+use crate::pages::game::hud::pulse::render_pulse_panel;
+use crate::pages::game::hud::status::render_status_bar;
+use crate::pages::game::layout::PULSE_PANEL_WIDTH;
+use crate::pages::game::layout::get_layout;
 use crate::pages::game::panels::chat::render_chat_pane;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::pages::game::panels::dashboard::render_dashboard_pane;
-use crate::pages::game::GameState;
-use crate::pages::game::layout::get_layout;
-use crate::pages::game::layout::PULSE_PANEL_WIDTH;
+use crate::pages::game::panels::dynamic::render_dynamic_pane;
 use crate::state::RenderContext;
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::FocusedPane;
-use crate::pages::game::hud::pulse::render_pulse_panel;
-use crate::pages::game::hud::status::render_status_bar;
-use crate::pages::game::panels::dynamic::render_dynamic_pane;
 
 impl GameState {
-    pub fn render(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        ctx: &RenderContext,
-    ) {
+    pub fn update_layout(&mut self, area: Rect) {
+        let (_chunks, main_chunks_vec, _dynamic_chunk) = get_layout(area);
+
+        let chat_area = main_chunks_vec[1];
+        // Note: the chat area rendering uses an inner margin horizontally
+        // Chat pane uses pane_block which adds 1 to all sides, so the actual text area is smaller.
+        // We'll calculate the inner bounds exactly like `pane_block().inner(area)` would.
+        let chat_inner = ratatui::layout::Rect {
+            x: chat_area.x.saturating_add(1),
+            y: chat_area.y.saturating_add(1),
+            width: chat_area.width.saturating_sub(2),
+            height: chat_area.height.saturating_sub(2),
+        };
+
+        self.chat.update_layout(chat_inner);
+    }
+
+    pub fn render(&mut self, f: &mut Frame, area: Rect, ctx: &RenderContext) {
         // The game view uses the shared status bar and the complex multi-pane layout.
         let (chunks, main_chunks_vec, dynamic_chunk) = get_layout(area);
         let chunks = &chunks;
 
         // Status Area
-        render_status_bar(f, self, ctx.logon_retry, ctx.enter_retry, chunks[0]);
+        render_status_bar(
+            f,
+            &self.data,
+            &self.view,
+            ctx.logon_retry,
+            ctx.enter_retry,
+            chunks[0],
+        );
 
         let main_chunks = &main_chunks_vec;
 
         // Dashboard Pane
-        render_dashboard_pane(f, self, main_chunks[0]);
+        render_dashboard_pane(
+            f,
+            &self.data,
+            &self.view,
+            &mut self.dashboard,
+            main_chunks[0],
+        );
 
         // Chat Pane
         render_chat_pane(
             f,
-            &mut self.chat,
+            &self.chat,
             self.view.focused_pane == FocusedPane::Chat,
             main_chunks[1],
         );
@@ -56,7 +81,7 @@ impl GameState {
         );
 
         // Dynamic Pane
-        render_dynamic_pane(f, self, ctx.account_name, dynamic_chunk);
+        render_dynamic_pane(f, &self.data, &self.view, ctx.account_name, dynamic_chunk);
 
         // Pulse Panel (Input Area)
         let input_chunks = Layout::default()

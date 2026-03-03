@@ -2,24 +2,22 @@ use crossterm::event::KeyEvent;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
+use crate::components::modal::render_modal;
 use crate::state::{AppState, RenderContext};
 use crate::types::{Page, UpdateResult};
-use crate::components::modal::render_modal;
 
 impl Page {
-    pub fn render(
-        &mut self,
-        f: &mut Frame,
-        area: Rect,
-        ctx: &RenderContext,
-    ) {
+    pub fn render(&mut self, f: &mut Frame, area: Rect, ctx: &RenderContext) {
         match self {
             Page::Selection(selection) => selection.render(f, area),
-            Page::Game(game) => game.render(
-                f,
-                area,
-                ctx,
-            ),
+            Page::Game(game) => game.render(f, area, ctx),
+        }
+    }
+
+    pub fn update_layout(&mut self, area: Rect) {
+        match self {
+            Page::Selection(_) => {}
+            Page::Game(game) => game.update_layout(area),
         }
     }
 

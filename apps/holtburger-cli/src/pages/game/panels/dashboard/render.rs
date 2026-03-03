@@ -1,13 +1,20 @@
-use crate::pages::game::GameState;
-use crate::types::{DashboardTab, FocusedPane};
+use crate::pages::game::panels::dashboard::DashboardState;
+use crate::pages::game::{GameData, ViewState};
 use crate::theme::pane_block;
+use crate::types::{DashboardTab, FocusedPane};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
-pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
-    let (focused_pane, _dashboard_tab) = (game.view.focused_pane, game.dashboard.active_tab);
+pub fn render_dashboard_pane(
+    f: &mut Frame,
+    data: &GameData,
+    view: &ViewState,
+    dashboard: &mut DashboardState,
+    area: Rect,
+) {
+    let (focused_pane, _dashboard_tab) = (view.focused_pane, dashboard.active_tab);
     let is_focused = focused_pane == FocusedPane::Dashboard;
 
     let top_tabs = [
@@ -22,10 +29,13 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
         (DashboardTab::Trade, "6", "Trade"),
     ];
 
-    let create_tab_line = |tabs: &[(DashboardTab, &str, &str)], game: &GameState| {
+    let create_tab_line = |tabs: &[(DashboardTab, &str, &str)],
+                           data: &GameData,
+                           view: &ViewState,
+                           dashboard: &DashboardState| {
         let mut spans = Vec::new();
 
-        let (_focused, active_tab) = (game.view.focused_pane, game.dashboard.active_tab);
+        let (_focused, active_tab) = (view.focused_pane, dashboard.active_tab);
 
         for (i, (tab, key, label)) in tabs.iter().enumerate() {
             if i > 0 {
@@ -33,8 +43,8 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
             }
 
             let is_active = active_tab == *tab;
-            let is_trade_active = *tab == DashboardTab::Trade
-                && (game.data.trade.is_some() || game.data.vendor.is_some());
+            let is_trade_active =
+                *tab == DashboardTab::Trade && (data.trade.is_some() || data.vendor.is_some());
 
             let mut style = Style::default();
             if is_active {
@@ -51,8 +61,8 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     };
 
     let dashboard_block = pane_block(is_focused)
-        .title(create_tab_line(&top_tabs, game))
-        .title_bottom(create_tab_line(&bottom_tabs, game));
+        .title(create_tab_line(&top_tabs, data, view, dashboard))
+        .title_bottom(create_tab_line(&bottom_tabs, data, view, dashboard));
 
     let inner_area = dashboard_block.inner(area);
 
@@ -67,10 +77,10 @@ pub fn render_dashboard_pane(f: &mut Frame, game: &mut GameState, area: Rect) {
     f.render_widget(&dashboard_block, area);
 
     // Tab-specific rendering
-    game.dashboard
+    dashboard
         .active_tab_mut()
-        .render(f, &game.data, &game.view, dashboard_inner_chunks[0]);
+        .render(f, data, view, dashboard_inner_chunks[0]);
 
-    let verb_bar = crate::utils::render_verb_bar(game);
+    let verb_bar = crate::utils::render_verb_bar(dashboard, data, view);
     f.render_widget(verb_bar, dashboard_inner_chunks[1]);
 }

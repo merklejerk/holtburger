@@ -5,8 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem};
 
 use super::super::classification::{classify_entity, get_entity_color};
-use crate::pages::game::{GameData, ViewState};
 use super::tab::EquipTab;
+use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::utils::format_item_name;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask};
@@ -18,7 +18,13 @@ pub enum EquipTabLine<'a> {
     Item(&'a Entity, bool, bool, Option<TargetSlot>),
 }
 
-pub fn render_equip_tab(tab: &mut EquipTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
+pub fn render_equip_tab(
+    tab: &mut EquipTab,
+    f: &mut Frame,
+    data: &GameData,
+    _view: &ViewState,
+    area: Rect,
+) {
     let items = get_list_items(tab.selected_index, data);
     let content_len = items.len();
 

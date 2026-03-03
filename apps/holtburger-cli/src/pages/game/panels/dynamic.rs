@@ -1,14 +1,20 @@
-use crate::pages::game::GameState;
-use crate::types::{FocusedPane, Interaction};
+use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
+use crate::types::{FocusedPane, Interaction};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, area: Rect) {
-    let (combat_color, combat_title) = match game.data.combat_mode {
+pub fn render_dynamic_pane(
+    f: &mut Frame,
+    data: &GameData,
+    view: &ViewState,
+    account_name: &str,
+    area: Rect,
+) {
+    let (combat_color, combat_title) = match data.combat_mode {
         holtburger_protocol::messages::combat::CombatMode::Melee => {
             (Some(Color::LightRed), Some(" MELEE "))
         }
@@ -21,7 +27,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
         _ => (None, None),
     };
 
-    let is_focused = game.view.focused_pane == FocusedPane::Dynamic;
+    let is_focused = view.focused_pane == FocusedPane::Dynamic;
     let mut block = pane_block(is_focused);
 
     if let Some(color) = combat_color {
@@ -29,7 +35,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
     }
 
     // Left title: Interaction Info / World Name (if needed)
-    if let Some(interaction) = game.view.active_interaction {
+    if let Some(interaction) = view.active_interaction {
         let title_text = format!(
             " {} ",
             match interaction {
@@ -72,7 +78,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
         .split(inner);
 
     // --- 1. Interaction Info / World Name ---
-    if let Some(interaction) = game.view.active_interaction {
+    if let Some(interaction) = view.active_interaction {
         let target_guid = match interaction {
             Interaction::Moving { item_guid } => item_guid,
             Interaction::Healing { item_guid } => item_guid,
@@ -81,7 +87,7 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
             Interaction::Splitting { item_guid, .. } => item_guid,
         };
 
-        let (name, guid) = if let Some(entity) = game.data.entities.get(&target_guid) {
+        let (name, guid) = if let Some(entity) = data.entities.get(&target_guid) {
             (entity.name(), entity.guid.0)
         } else {
             ("Unknown Entity", target_guid.0)
@@ -95,11 +101,11 @@ pub fn render_dynamic_pane(f: &mut Frame, game: &GameState, account_name: &str, 
 
         f.render_widget(Paragraph::new(line), chunks[0]);
     } else {
-        let current_char = game.data.character_name.as_deref().unwrap_or("In World");
-        let server = if game.data.world_name.is_empty() {
+        let current_char = data.character_name.as_deref().unwrap_or("In World");
+        let server = if data.world_name.is_empty() {
             "Unknown Server"
         } else {
-            &game.data.world_name
+            &data.world_name
         };
         let info = format!(" {}:{} on {} ", account_name, current_char, server);
         f.render_widget(Paragraph::new(info), chunks[0]);

@@ -2,7 +2,7 @@
 pub const STATUS_BAR_HEIGHT: u16 = 3;
 pub const DYNAMIC_PANEL_HEIGHT: u16 = 3;
 pub const INPUT_AREA_HEIGHT: u16 = 3;
-pub const PULSE_PANEL_WIDTH: u16 = 16;
+pub const PULSE_PANEL_WIDTH: u16 = 8;
 pub const MIN_MAIN_AREA_HEIGHT: u16 = 10;
 pub const WIDTH_BREAKPOINT: u16 = 150;
 

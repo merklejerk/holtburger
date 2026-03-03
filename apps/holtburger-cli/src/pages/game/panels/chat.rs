@@ -99,9 +99,9 @@ impl ChatState {
             ClientViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
-            ClientViewEvent::PingResponse => {
-                self.log(ChatMessageKind::System, "Pong!".to_string());
-            }
+            ClientViewEvent::PingResponse
+            | ClientViewEvent::NetPulse { .. }
+            | ClientViewEvent::Disconnected => {}
             ClientViewEvent::BootAccount(reason) => {
                 self.log(
                     ChatMessageKind::Error,

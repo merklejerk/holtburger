@@ -15,13 +15,11 @@
 
 ## 3. Phased Implementation
 
-**Phase 1: Track Bytes in Session (Complexity: Low)**
-- **Deliverables**: Modify `Session` in `crates/holtburger-session/src/lib.rs`.
-  - Add `bytes_in` and `bytes_out` counters (`u64`).
-  - Add `last_recv_time` and `last_send_time` (`Instant`).
-  - Update these values inside `recv_packet` and `send_packet_to_addr`.
-  - Expose a method to read current totals.
-- **Acceptance Criteria**: Session successfully tracks total bytes sent and received accurately, recording timestamps natively where the network operations occur.
+### Phase 1: Track Bytes in Session (Complexity: Low)
+- **Status: Completed**
+- **Decision: Added `bytes_in`, `bytes_out`, `last_recv_time`, `last_send_time` to `Session`.**
+- **Decision: Use wrapping addition for byte counters to prevent panic on very long sessions.**
+- **Decision: Imported `std::time::Instant` since we are not using tokio's mocked time in these specific structs yet.**
 
 **Phase 2: Core Ticking & Ping Dispatch (Complexity: Medium)**
 - **Deliverables**: Modify `Client::run` and `ClientViewEvent` in `crates/holtburger-core`.

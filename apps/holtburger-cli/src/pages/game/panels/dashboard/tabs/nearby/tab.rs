@@ -108,13 +108,22 @@ impl TabController for NearbyTab {
                         && let Some(cmd) = cmd
                     {
                         let actions = match cmd {
-                            ClientCommand::MoveItem { item, container, .. } => {
+                            ClientCommand::MoveItem {
+                                item, container, ..
+                            } => {
                                 vec![AppAction::MoveItem(item, container)]
                             }
-                            ClientCommand::Stack { source, destination, amount } => {
+                            ClientCommand::Stack {
+                                source,
+                                destination,
+                                amount,
+                            } => {
                                 vec![AppAction::StackItems(source, destination, amount)]
                             }
-                            _ => vec![AppAction::SendCommands(vec![cmd]), AppAction::CancelInteraction],
+                            _ => vec![
+                                AppAction::SendCommands(vec![cmd]),
+                                AppAction::CancelInteraction,
+                            ],
                         };
                         verbs.push(Verb::new(actions, '\r', label));
                     }
@@ -179,7 +188,11 @@ impl TabController for NearbyTab {
                         let dest_e = data.entities.get(&destination).unwrap();
                         let space = dest_e.max_stack_size().saturating_sub(dest_e.stack_size());
                         let amount = e.stack_size().min(space) as i32;
-                        pick_up_cmd = ClientCommand::Stack { source: e.guid, destination, amount };
+                        pick_up_cmd = ClientCommand::Stack {
+                            source: e.guid,
+                            destination,
+                            amount,
+                        };
                     }
                 } else if let EntityClass::Container = class {
                     pick_up_cmd = ClientCommand::MoveItem {
@@ -191,10 +204,16 @@ impl TabController for NearbyTab {
 
                 verbs.push(Verb::new(
                     match pick_up_cmd {
-                        ClientCommand::MoveItem { item, container, .. } => {
+                        ClientCommand::MoveItem {
+                            item, container, ..
+                        } => {
                             vec![AppAction::MoveItem(item, container)]
                         }
-                        ClientCommand::Stack { source, destination, amount } => {
+                        ClientCommand::Stack {
+                            source,
+                            destination,
+                            amount,
+                        } => {
                             vec![AppAction::StackItems(source, destination, amount)]
                         }
                         _ => vec![AppAction::SendCommands(vec![pick_up_cmd])],
@@ -207,7 +226,9 @@ impl TabController for NearbyTab {
             verbs.extend([
                 Verb::new(vec![AppAction::Assess(e.guid)], 'a', "Assess"),
                 Verb::new(
-                    vec![AppAction::BeginInteraction(Interaction::Targeting { target_guid: e.guid })],
+                    vec![AppAction::BeginInteraction(Interaction::Targeting {
+                        target_guid: e.guid,
+                    })],
                     't',
                     "Target",
                 ),
@@ -217,7 +238,9 @@ impl TabController for NearbyTab {
 
             if e.flags.intersects(ObjectDescriptionFlag::HEALER) {
                 verbs.push(Verb::new(
-                    vec![AppAction::BeginInteraction(Interaction::Healing { item_guid: e.guid })],
+                    vec![AppAction::BeginInteraction(Interaction::Healing {
+                        item_guid: e.guid,
+                    })],
                     'u',
                     "Use",
                 ));

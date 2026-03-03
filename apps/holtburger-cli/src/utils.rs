@@ -1,4 +1,3 @@
-use crate::pages::game::GameState;
 use crate::types::FocusedPane;
 use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
@@ -119,11 +118,14 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     result
 }
 
-pub fn render_verb_bar(game: &GameState) -> Paragraph<'static> {
-    let mut verbs = game
-        .dashboard
+pub fn render_verb_bar(
+    dashboard: &crate::pages::game::panels::dashboard::DashboardState,
+    data: &crate::pages::game::GameData,
+    view: &crate::pages::game::ViewState,
+) -> Paragraph<'static> {
+    let mut verbs = dashboard
         .active_tab()
-        .get_verbs(&game.data, &game.view, &game.view.active_interaction);
+        .get_verbs(data, view, &view.active_interaction);
 
     verbs.sort_by(|a, b| a.label.cmp(&b.label));
 

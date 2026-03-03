@@ -4,8 +4,8 @@ use std::time::Instant;
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
-use crate::types::{ContextView, Modal, Page};
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
+use crate::types::{ContextView, Modal, Page};
 
 use crate::pages::game::{GameState, ViewState};
 
@@ -104,7 +104,9 @@ impl AppState {
             let content = {
                 let data = &game.data;
                 let view = &game.view;
-                game.dashboard.active_tab_mut().get_context_panel_content(data, view)
+                game.dashboard
+                    .active_tab_mut()
+                    .get_context_panel_content(data, view)
             };
             game.view.context_buffer = content;
         }

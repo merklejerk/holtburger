@@ -11,10 +11,10 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::magic::get_enchantment_name;
 use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 
-use crate::pages::game::{GameData, ViewState};
 use super::tab::CharacterTab;
-use crate::types::StatType;
+use crate::pages::game::{GameData, ViewState};
 use crate::theme;
+use crate::types::StatType;
 use crate::utils::format_cost;
 
 pub enum CharTabLine {
@@ -32,7 +32,13 @@ pub enum CharTabLine {
     Spacer,
 }
 
-pub fn render_character_tab(tab: &mut CharacterTab, f: &mut Frame, data: &GameData, _view: &ViewState, area: Rect) {
+pub fn render_character_tab(
+    tab: &mut CharacterTab,
+    f: &mut Frame,
+    data: &GameData,
+    _view: &ViewState,
+    area: Rect,
+) {
     let mut bottom_area = area;
 
     if let Some(info) = &data.level_info {
@@ -507,17 +513,11 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
         let mut resists = vec![
             (PropertyFloat::ResistSlash, data.resistances.slash),
             (PropertyFloat::ResistPierce, data.resistances.pierce),
-            (
-                PropertyFloat::ResistBludgeon,
-                data.resistances.bludgeon,
-            ),
+            (PropertyFloat::ResistBludgeon, data.resistances.bludgeon),
             (PropertyFloat::ResistFire, data.resistances.fire),
             (PropertyFloat::ResistCold, data.resistances.cold),
             (PropertyFloat::ResistAcid, data.resistances.acid),
-            (
-                PropertyFloat::ResistElectric,
-                data.resistances.electric,
-            ),
+            (PropertyFloat::ResistElectric, data.resistances.electric),
             (PropertyFloat::ResistNether, data.resistances.nether),
         ];
         resists.sort_by(|a, b| a.0.to_string().cmp(&b.0.to_string()));

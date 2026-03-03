@@ -5,7 +5,9 @@ use ratatui::layout::Rect;
 
 use super::render::render_trade_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, Interaction, TabController, TradeFocus, UpdateResult, Verb};
+use crate::types::{
+    AppAction, CommandTarget, Interaction, TabController, TradeFocus, UpdateResult, Verb,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct TradeTab {
@@ -85,8 +87,16 @@ impl TabController for TradeTab {
             CommandTarget::Entity(e, _) => Some(e.guid),
             _ => None,
         } {
-            verbs.push(Verb::new(vec![AppAction::Assess(target_item)], 'a', "Assess"));
-            verbs.push(Verb::new(vec![AppAction::QueryDebugInfo(target_item)], 'g', "Debug"));
+            verbs.push(Verb::new(
+                vec![AppAction::Assess(target_item)],
+                'a',
+                "Assess",
+            ));
+            verbs.push(Verb::new(
+                vec![AppAction::QueryDebugInfo(target_item)],
+                'g',
+                "Debug",
+            ));
         }
 
         if let Some(vendor) = &data.vendor {

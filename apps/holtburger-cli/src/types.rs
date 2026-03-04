@@ -204,6 +204,29 @@ pub enum Page {
     Game(Box<GameState>),
 }
 
+impl Page {
+    pub fn handle_view_event(&mut self, event: &ClientViewEvent) -> UpdateResult {
+        match self {
+            Page::Selection(s) => s.handle_view_event(event),
+            Page::Game(g) => g.handle_view_event(event),
+        }
+    }
+
+    pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
+        match self {
+            Page::Selection(s) => s.handle_action(action),
+            Page::Game(g) => g.handle_action(action),
+        }
+    }
+
+    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
+        match self {
+            Page::Selection(s) => s.handle_tick(elapsed),
+            Page::Game(g) => g.handle_tick(elapsed),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AppAction {
     Identify(Guid),

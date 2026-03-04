@@ -50,7 +50,7 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
 
 ## 4. Phased Implementation
 
-### Phase 1: Establish Page Delegation Contracts via Enum Dispatch
+### Phase 1: Establish Page Delegation Contracts ✅ via Enum Dispatch
 - **Complexity:** Low
 - **Goal**: Expand the `impl Page` block with methods to catch bubbling events and route them to their variant's underlying structs.
 - **Files**: `src/types.rs`, `src/pages/game/state.rs`, `src/pages/selection/mod.rs`.
@@ -61,7 +61,7 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
   - Implement these matching functions on `GameState` and `SelectionState` directly (can be empty stubs initially).
 - **Acceptance Criteria**: Methods exist, successfully pattern match to the variants, and stub out fallback behavior. Project compiles.
 
-### Phase 2: Action Relocation - Internal UI State
+### Phase 2: Action Relocation - Internal UI State ✅
 - **Complexity:** Medium
 - **Goal**: Migrate the first half of `AppAction` (the ones that mutate UI state rather than generating commands) and setup the fallback routing.
 - **Files**: `src/state.rs`, `src/update/app_action.rs`, `src/pages/game/state.rs`.
@@ -71,7 +71,7 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
   - Move state-altering actions (`ChangeContextView`, `RequestDebugContext`, `BeginInteraction`, `CancelInteraction`, `ClearVendor`, `ViewDetails`) into `GameState::handle_action`.
 - **Acceptance Criteria**: `refresh_context_buffer` no longer over-renders at the global loop. UI interactions like viewing details or interactions work the exact same. Project compiles.
 
-### Phase 3: Action Relocation - Gameplay Commands
+### Phase 3: Action Relocation - Gameplay Commands 🏗️
 - **Complexity:** Medium
 - **Goal**: Complete `AppAction` migration by migrating the 25+ gameplay variants.
 - **Files**: `src/update/app_action.rs`, `src/pages/game/state.rs`.
@@ -110,8 +110,8 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
 
 ## 6. The Living Worksheet
 ### Task Checklist
-- [ ] **Phase 1 (Low)**: Define `impl Page` routing methods (`handle_view_event`, `handle_action`, `handle_tick`).
-- [ ] **Phase 2 (Medium)**: Delegate fallback routing in `app_action.rs` and migrate local UI-state actions & `refresh_context_buffer`.
+- [x] **Phase 1 (Low)**: Define `impl Page` routing methods (`handle_view_event`, `handle_action`, `handle_tick`).
+- [x] **Phase 2 (Medium)**: Delegate fallback routing in `app_action.rs` and migrate local UI-state actions & `refresh_context_buffer`.
 - [ ] **Phase 3 (Medium)**: Migrate the 25+ gameplay-command `AppAction`s to `GameState::handle_action`.
 - [ ] **Phase 4 (Medium)**: Migrate physical helper methods (`update_inventory_...`) from `AppState` to `GameState`.
 - [ ] **Phase 5 (High)**: Migrate the massive `ClientViewEvent` router block out of `world.rs`.
@@ -119,6 +119,7 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
 
 ### Decisions Log
 - **Architectural**: Opted for expanding the `impl Page` block via matching (Enum Dispatch / Option A) rather than creating a `PageController` Trait. This avoids the cost/complexity of Dynamic Dispatch on a highly constrained and known enum.
+- **Phase 1 Decision**: Stored the trait-like methods directly on the `SelectionState` and `GameState` structs to keep the `impl Page` matchers simple and readable. Verified with `cargo check`.
 
 ### Open Questions
 - None. Everything has been rigorously sourced against the codebase.

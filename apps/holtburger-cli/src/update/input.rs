@@ -71,7 +71,6 @@ impl AppState {
         }
         result.merge(page_result);
 
-        self.refresh_context_buffer();
         result
     }
 }

@@ -8,6 +8,10 @@ use holtburger_world::context::WorldContextExt;
 
 impl AppState {
     pub fn handle_app_action(&mut self, action: AppAction) -> UpdateResult {
+        if let Some(result) = self.page.handle_action(action.clone()) {
+            return result;
+        }
+
         let mut result = UpdateResult::new();
         match action {
             AppAction::Identify(guid) => {
@@ -16,7 +20,9 @@ impl AppState {
             AppAction::Assess(guid) => {
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
-                    self.handle_app_action(AppAction::ChangeContextView(ContextView::Assess(guid))),
+                    self.handle_app_action(AppAction::ChangeContextView(crate::types::ContextView::Assess(
+                        guid,
+                    ))),
                 );
             }
             AppAction::Use(guid) => {
@@ -109,12 +115,6 @@ impl AppState {
                     amount: 1, // TODO
                 });
             }
-            AppAction::BeginInteraction(interaction) => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.active_interaction = Some(interaction);
-                }
-                result.needs_redraw = true;
-            }
             AppAction::UseWith(item, target) => {
                 result
                     .commands
@@ -125,12 +125,6 @@ impl AppState {
                     .commands
                     .push(ClientCommand::QueryEntityDebugInfo(guid));
                 result.merge(self.handle_app_action(AppAction::RequestDebugContext(Some(guid))));
-            }
-            AppAction::CancelInteraction => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.active_interaction = None;
-                }
-                result.needs_redraw = true;
             }
             AppAction::CastSpell(spell_id, target) => {
                 // TODO: Auto toggle combat mode.
@@ -147,37 +141,12 @@ impl AppState {
             AppAction::SetCombatMode(mode) => {
                 result.commands.push(ClientCommand::SetCombatMode(mode));
             }
-            AppAction::ViewDetails(view) => {
-                result.merge(self.handle_app_action(AppAction::ChangeContextView(view)));
-            }
             AppAction::Log(kind, text) => {
                 self.log(kind, text);
                 result.needs_redraw = true;
             }
             AppAction::SendCommands(cmds) => {
                 result.commands.extend(cmds);
-            }
-            AppAction::ChangeContextView(view) => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.context_view = view;
-                    game.view.context_scroll_offset = 0;
-                    result.needs_redraw = true;
-                    self.refresh_context_buffer();
-                }
-            }
-            AppAction::RequestDebugContext(guid) => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.current_debug_guid = guid;
-                    game.view.context_view = ContextView::Custom;
-                    game.view.context_scroll_offset = 0;
-                    result.needs_redraw = true;
-                    self.refresh_context_buffer();
-                }
-            }
-            AppAction::ClearVendor => {
-                if let Some(game) = self.game_option_mut() {
-                    game.view.vendor = None;
-                }
             }
             AppAction::DisplayClientInfo => {
                 self.display_client_info();
@@ -217,6 +186,7 @@ impl AppState {
             AppAction::ExitTrade => {
                 result.commands.push(ClientCommand::CloseTrade);
             }
+            _ => unreachable!("AppAction should have been handled by the page: {:?}", action),
         }
         result
     }

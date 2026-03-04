@@ -154,8 +154,6 @@ async fn main() -> Result<()> {
 
     let (local_log_tx, mut local_log_rx) = mpsc::unbounded_channel::<CapturedLog>();
     let (server_cmd_tx, server_cmd_rx) = mpsc::unbounded_channel();
-    let (internal_action_tx, mut internal_action_rx) =
-        mpsc::unbounded_channel::<holtburger_cli::types::AppAction>();
 
     let _chat_log = if let Some(path) = &args.log {
         match File::create(path) {
@@ -240,7 +238,6 @@ async fn main() -> Result<()> {
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),
-        app_action_tx: internal_action_tx,
     };
 
     if args.verbose > 0 {
@@ -280,20 +277,14 @@ async fn main() -> Result<()> {
 
         // 1. Process Logger Events
         while let Ok(log) = local_log_rx.try_recv() {
-            let res = app_state.handle_app_action(holtburger_cli::types::AppAction::Log(
-                log.kind, log.text,
-            ));
+            let res = app_state
+                .handle_app_action(holtburger_cli::types::AppAction::Log(log.kind, log.text));
             update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
         }
 
         // 2. Process Network Events (Drain batch)
         while let Ok(event) = server_event_rx.try_recv() {
             let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
-            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
-        }
-
-        while let Ok(msg) = internal_action_rx.try_recv() {
-            let res = app_state.handle_app_action(msg);
             update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
         }
 

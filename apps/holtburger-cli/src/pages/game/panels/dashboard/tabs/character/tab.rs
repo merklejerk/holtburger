@@ -5,8 +5,7 @@ use ratatui::layout::Rect;
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, CommandTarget, ContextView, Interaction, StatType, TabController, UpdateResult,
-    Verb,
+    AppAction, CommandTarget, ContextView, Interaction, StatType, TabController, UpdateResult, Verb,
 };
 
 #[derive(Default, Debug, Clone)]
@@ -56,7 +55,9 @@ impl TabController for CharacterTab {
                     "Details",
                 ));
                 verbs.push(Verb::new(
-                    vec![AppAction::QueryDebugInfo(CommandTarget::Enchantment(enchant))],
+                    vec![AppAction::QueryDebugInfo(CommandTarget::Enchantment(
+                        enchant,
+                    ))],
                     'g',
                     "Debug",
                 ));

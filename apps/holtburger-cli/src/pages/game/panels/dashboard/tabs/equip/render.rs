@@ -189,7 +189,12 @@ pub fn get_lines<'a>(data: &'a GameData) -> Vec<EquipTabLine<'a>> {
                 Some(slot) => slot,
                 _ => TargetSlot::EquipMask(mask),
             };
-            lines.push(EquipTabLine::Item(item, is_here, is_elsewhere, context_slot));
+            lines.push(EquipTabLine::Item(
+                item,
+                is_here,
+                is_elsewhere,
+                context_slot,
+            ));
         }
     }
 

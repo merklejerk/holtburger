@@ -78,7 +78,9 @@ impl TabController for TradeTab {
                 "Assess",
             ));
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(CommandTarget::Entity(*target_item))],
+                vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
+                    *target_item,
+                ))],
                 'g',
                 "Debug",
             ));

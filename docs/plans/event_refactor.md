@@ -98,18 +98,14 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
 - **Acceptance Criteria**: `AppState` no longer manually unpacks `if let Page::Game(ref mut game)` purely to mutate entities.
 - **Implementation Note**: Migrated successfully. Changed `GameState::handle_view_event` signature to take ownership of `ClientViewEvent` because taking ownership is perfect for event handlers and simplifies syntax (avoids clones when we drain updates!). `world.rs` is now completely clean regarding internal game state.
 
-### Phase 6: Tick Delegation
+### Phase 6: Tick Delegation ✅
 - **Complexity:** Low
 - **Goal**: Delegate the `Tick` event to the `Page` and `GameState`.
 - **Files**: `src/update/app_event.rs`, `src/pages/game/state.rs`.
 - **Deliverables**:
   - Migrate enchantment purging and duration decrementing from `AppState::update_tick` to `GameState::handle_tick`.
 - **Acceptance Criteria**: `AppState` no longer reaches into `game.data.player_enchantments`. Project compiles.
-- **Goal**: Move local time-based updates to the respective page structurally.
-- **Files**: `src/update/app_event.rs`, `src/pages/game/state.rs`.
-- **Deliverables**:
-  - Move the `player_enchantments` tick logic into `GameState::handle_tick`.
-- **Acceptance Criteria**: Enchantment timers still expire correctly in the UI.
+- **Implementation Note**: Moved enchantment management into `GameState`. `AppState::update_tick` now calls `self.page.handle_tick(elapsed)` to delegate page-specific temporal logic. Everything is now structurally aligned!
 
 ## 5. Risks & Mitigations
 - **Risk**: Event Processing Order. If an action like `DisplayClientInfo` checks `Page` state, and the Page handles an action before it, it might read data unexpectedly.

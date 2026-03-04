@@ -124,28 +124,8 @@ impl AppState {
             }
         }
 
-        // GameState logic
-        if let Some(game) = self.game_option_mut() {
-            // Proactive enchantment purge
-            let old_count = game.data.player_enchantments.len();
-            game.data.player_enchantments.retain(|e| {
-                if e.duration < 0.0 {
-                    return true;
-                }
-                let expires_at = e.start_time + e.duration;
-                expires_at > 0.0
-            });
-            if game.data.player_enchantments.len() != old_count {
-                result.needs_redraw = true;
-            }
-
-            // Update enchantment timers locally
-            for enchant in &mut game.data.player_enchantments {
-                if enchant.duration >= 0.0 {
-                    enchant.start_time -= elapsed;
-                }
-            }
-        }
+        // Delegate Page/GameState tick logic
+        result.merge(self.page.handle_tick(elapsed));
 
         result
     }

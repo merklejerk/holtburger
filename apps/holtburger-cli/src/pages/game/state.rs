@@ -315,8 +315,30 @@ impl GameState {
         Some(result)
     }
 
-    pub fn handle_tick(&mut self, _elapsed: f64) -> UpdateResult {
-        UpdateResult::default()
+    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
+        let mut result = UpdateResult::new();
+
+        // Proactive enchantment purge
+        let old_count = self.data.player_enchantments.len();
+        self.data.player_enchantments.retain(|e| {
+            if e.duration < 0.0 {
+                return true;
+            }
+            let expires_at = e.start_time + e.duration;
+            expires_at > 0.0
+        });
+        if self.data.player_enchantments.len() != old_count {
+            result.needs_redraw = true;
+        }
+
+        // Update enchantment timers locally
+        for enchant in &mut self.data.player_enchantments {
+            if enchant.duration >= 0.0 {
+                enchant.start_time -= elapsed;
+            }
+        }
+
+        result
     }
 
     pub fn refresh_context_buffer(&mut self) {

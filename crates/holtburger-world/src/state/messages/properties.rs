@@ -114,7 +114,8 @@ impl WorldState {
                     self.player.set_property(update.clone());
                     match data.property {
                         p if p == PropertyInt64::TotalExperience as u32
-                            || p == PropertyInt64::AvailableExperience as u32 =>
+                            || p == PropertyInt64::AvailableExperience as u32
+                            || p == PropertyInt64::AvailableLuminance as u32 =>
                         {
                             self.emit_level_info(events);
                         }

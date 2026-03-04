@@ -52,22 +52,7 @@ pub fn render_character_tab(
         let top_area = summary_chunks[0];
         bottom_area = summary_chunks[1];
 
-        let text = if info.xp_for_next_level > 0 {
-            format!(
-                "{} XP to {} | {} XP unspent | {} SP",
-                format_cost(info.xp_for_next_level.saturating_sub(info.xp_into_level)),
-                info.level + 1,
-                format_cost(info.unspent_xp),
-                info.unspent_skill_points
-            )
-        } else {
-            format!(
-                "{} total | {} XP unspent | {} SP",
-                format_cost(info.current_xp),
-                format_cost(info.unspent_xp),
-                info.unspent_skill_points
-            )
-        };
+        let text = get_character_summary_text(info);
 
         let summary = Paragraph::new(Line::from(vec![Span::styled(
             text,
@@ -92,6 +77,28 @@ pub fn render_character_tab(
     crate::components::scroll::render_scrollbar(f, bottom_area, content_len, offset);
 
     let _height = bottom_area.height as usize;
+}
+
+fn get_character_summary_text(info: &holtburger_world::stats::CharacterLevelInfo) -> String {
+    let mut parts = Vec::new();
+
+    if info.xp_for_next_level > 0 {
+        parts.push(format!(
+            "{} XP to {}",
+            format_cost(info.xp_for_next_level.saturating_sub(info.xp_into_level)),
+            info.level + 1
+        ));
+    }
+
+    parts.push(format!("{} XP unspent", format_cost(info.unspent_xp)));
+
+    if info.available_luminance > 0 {
+        parts.push(format!("{} Lum", format_cost(info.available_luminance)));
+    }
+
+    parts.push(format!("{} SP", info.unspent_skill_points));
+
+    parts.join(" | ")
 }
 
 fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<'static>> {

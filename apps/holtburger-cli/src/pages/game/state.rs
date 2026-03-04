@@ -244,14 +244,35 @@ impl GameState {
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
             }
-            AppAction::QueryDebugInfo(guid) => {
-                result
-                    .commands
-                    .push(ClientCommand::QueryEntityDebugInfo(guid));
-                result.merge(
-                    self.handle_action(AppAction::RequestDebugContext(Some(guid)))
-                        .unwrap_or_default(),
-                );
+            AppAction::QueryDebugInfo(target) => {
+                match target {
+                    crate::types::CommandTarget::Entity(guid, _) => {
+                        result
+                            .commands
+                            .push(ClientCommand::QueryEntityDebugInfo(guid));
+                        result.merge(
+                            self.handle_action(AppAction::RequestDebugContext(Some(guid)))
+                                .unwrap_or_default(),
+                        );
+                    }
+                    crate::types::CommandTarget::Spell(spell_id) => {
+                        result.merge(
+                            self.handle_action(AppAction::ChangeContextView(
+                                crate::types::ContextView::DebugSpell(spell_id),
+                            ))
+                            .unwrap_or_default(),
+                        );
+                    }
+                    crate::types::CommandTarget::Enchantment(enchant) => {
+                        result.merge(
+                            self.handle_action(AppAction::ChangeContextView(
+                                crate::types::ContextView::DebugEnchantment(enchant),
+                            ))
+                            .unwrap_or_default(),
+                        );
+                    }
+                    _ => {}
+                }
             }
             AppAction::CastSpell(spell_id, target) => {
                 // TODO: Auto toggle combat mode.

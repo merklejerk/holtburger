@@ -9,7 +9,9 @@ use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
 use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, CommandTarget, Interaction, TabController, UpdateResult, Verb,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct InventoryTab {
@@ -266,7 +268,10 @@ impl TabController for InventoryTab {
             }
 
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(cur_entity.guid)],
+                vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
+                    cur_entity.guid,
+                    None,
+                ))],
                 'g',
                 "Debug",
             ));

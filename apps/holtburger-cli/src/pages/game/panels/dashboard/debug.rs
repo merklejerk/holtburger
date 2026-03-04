@@ -599,21 +599,7 @@ pub fn get_debug_info(
                 lines.push(Line::from(format!("  [X] {}", name)));
             }
 
-            let key_name = if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
-                AttributeType::from_repr(enchant.stat_mod_key).map(|a| a.to_string())
-            } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {
-                VitalType::from_id(enchant.stat_mod_key).map(|v| format!("Max {}", v))
-            } else if flags.contains(EnchantmentTypeFlags::SKILL) {
-                SkillType::from_repr(enchant.stat_mod_key).map(|s| s.to_string())
-            } else if flags.contains(EnchantmentTypeFlags::INT) {
-                PropertyInt::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
-            } else if flags.contains(EnchantmentTypeFlags::FLOAT) {
-                PropertyFloat::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
-            } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
-                Some("Armor".to_string())
-            } else {
-                None
-            };
+            let key_name = enchantment_stat_key_name(enchant, flags);
 
             let key_display = key_name.unwrap_or_else(|| format!("{}", enchant.stat_mod_key));
             lines.push(Line::from(format!("Stat Mod Key:   {}", key_display)));
@@ -673,6 +659,81 @@ pub fn get_debug_info(
     }
 
     lines
+}
+
+pub fn get_details_info(
+    _data: &GameData,
+    target: &CommandTarget,
+    spell_lookup: Option<
+        &std::collections::HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
+    >,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    match target {
+        CommandTarget::Spell(spell_id) => {
+            if let Some(info) = spell_lookup.and_then(|m| m.get(spell_id)) {
+                lines.push(Line::from(info.name.clone()));
+                lines.push(Line::from(format!("ID: {}", spell_id)));
+                lines.push(Line::from(format!("School: {:?}", info.school)));
+                lines.push(Line::from(format!("Power: {}", info.power)));
+                lines.push(Line::from(format!("Mana Cost: {}", info.base_mana)));
+
+                if !info.description.trim().is_empty() {
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(info.description.clone()));
+                }
+            } else {
+                lines.push(Line::from(format!("Spell #{}", spell_id)));
+                lines.push(Line::from("Details unavailable (spell data still loading)."));
+            }
+        }
+        CommandTarget::Enchantment(enchant) => {
+            let spell_name = spell_lookup
+                .and_then(|m| m.get(&(enchant.spell_id as u32)))
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
+
+            lines.push(Line::from(spell_name));
+            lines.push(Line::from(format!("Duration: {}", format_duration(enchant.duration))));
+
+            let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
+            if let Some(key_display) = enchantment_stat_key_name(enchant, flags) {
+                let sign = if enchant.stat_mod_value >= 0.0 { "+" } else { "" };
+                lines.push(Line::from(format!(
+                    "Effect: {}{} {}",
+                    sign, enchant.stat_mod_value, key_display
+                )));
+            }
+
+            lines.push(Line::from(format!("Layer: {}", enchant.layer)));
+            lines.push(Line::from(format!("Category: {}", enchant.spell_category)));
+        }
+        _ => {}
+    }
+
+    lines
+}
+
+fn enchantment_stat_key_name(
+    enchant: &Enchantment,
+    flags: EnchantmentTypeFlags,
+) -> Option<String> {
+    if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
+        AttributeType::from_repr(enchant.stat_mod_key).map(|a| a.to_string())
+    } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {
+        VitalType::from_id(enchant.stat_mod_key).map(|v| format!("Max {}", v))
+    } else if flags.contains(EnchantmentTypeFlags::SKILL) {
+        SkillType::from_repr(enchant.stat_mod_key).map(|s| s.to_string())
+    } else if flags.contains(EnchantmentTypeFlags::INT) {
+        PropertyInt::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
+    } else if flags.contains(EnchantmentTypeFlags::FLOAT) {
+        PropertyFloat::from_repr(enchant.stat_mod_key).map(|p| p.to_string())
+    } else if flags.contains(EnchantmentTypeFlags::BODY_ARMOR_VALUE) {
+        Some("Armor".to_string())
+    } else {
+        None
+    }
 }
 
 fn format_duration(seconds: f64) -> String {

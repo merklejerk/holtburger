@@ -93,7 +93,7 @@ impl TabController for EquipTab {
                 }
 
                 verbs.push(Verb::new(
-                    vec![AppAction::QueryDebugInfo(guid)],
+                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(guid, None))],
                     'g',
                     "Debug",
                 ));

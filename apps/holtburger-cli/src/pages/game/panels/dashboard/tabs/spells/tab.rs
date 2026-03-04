@@ -83,6 +83,11 @@ impl TabController for SpellsTab {
                 'd',
                 "Details",
             ));
+            verbs.push(Verb::new(
+                vec![AppAction::QueryDebugInfo(CommandTarget::Spell(spell_id))],
+                'g',
+                "Debug",
+            ));
         }
 
         verbs

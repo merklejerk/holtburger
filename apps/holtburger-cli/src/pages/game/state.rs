@@ -36,6 +36,16 @@ impl GameState {
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         match event {
+            ClientViewEvent::LogMessage(_)
+            | ClientViewEvent::ServerMessage { .. }
+            | ClientViewEvent::Chat { .. }
+            | ClientViewEvent::Emote { .. }
+            | ClientViewEvent::PingResponse
+            | ClientViewEvent::BootAccount(_)
+            | ClientViewEvent::NetPulse { .. }
+            | ClientViewEvent::Disconnected => {
+                self.chat.handle_event(event);
+            }
             ClientViewEvent::PlayerEnchantmentsUpdated { .. }
             | ClientViewEvent::PlayerStatsSkillsUpdated { .. }
             | ClientViewEvent::PlayerVitalsUpdated { .. }
@@ -60,11 +70,10 @@ impl GameState {
                     }
                     needs_update = true;
                 }
-                if needs_update {
-                    if let Some(entity) = self.data.entities.get(&guid).cloned() {
+                if needs_update
+                    && let Some(entity) = self.data.entities.get(&guid).cloned() {
                         self.update_inventory_and_equipment(&entity);
                     }
-                }
             }
             ClientViewEvent::EntityMoved { guid, pos } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
@@ -81,25 +90,21 @@ impl GameState {
                 let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
                 self.view.vendor = vendor;
                 // If we just opened a vendor and we initiated it, switch to Trade tab.
-                if let Some(v_guid) = vendor_guid {
-                    if let Some((last_time, target_guid)) = self.view.last_trade_initiation {
-                        if target_guid == v_guid && last_time.elapsed() < std::time::Duration::from_secs(5) {
+                if let Some(v_guid) = vendor_guid
+                    && let Some((last_time, target_guid)) = self.view.last_trade_initiation
+                        && target_guid == v_guid && last_time.elapsed() < std::time::Duration::from_secs(5) {
                             self.dashboard.active_tab = crate::types::DashboardTab::Trade;
                         }
-                    }
-                }
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
                 let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
                 self.data.trade = trade;
                 // If we just opened a trade and we initiated it, switch to Trade tab.
-                if let Some(p_guid) = partner_guid {
-                    if let Some((last_time, target_guid)) = self.view.last_trade_initiation {
-                        if target_guid == p_guid && last_time.elapsed() < std::time::Duration::from_secs(5) {
+                if let Some(p_guid) = partner_guid
+                    && let Some((last_time, target_guid)) = self.view.last_trade_initiation
+                        && target_guid == p_guid && last_time.elapsed() < std::time::Duration::from_secs(5) {
                             self.dashboard.active_tab = crate::types::DashboardTab::Trade;
                         }
-                    }
-                }
             }
             ClientViewEvent::EntityIdentified { entity } => {
                 let entity_ref = entity.as_ref();

@@ -7,12 +7,10 @@ use crossterm::{
 };
 use directories::ProjectDirs;
 use holtburger_cli::pages;
-use holtburger_cli::pages::game::panels::chat::ChatMessageKind;
 use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
-use holtburger_cli::types::AppEvent;
-use holtburger_cli::types::Page;
+use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
 use holtburger_core::{Client, ClientCommand, ClientState, ClientViewEvent, RetryState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;

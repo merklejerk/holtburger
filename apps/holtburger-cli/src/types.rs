@@ -1,5 +1,4 @@
 use crate::pages::game::GameState;
-use crate::pages::game::panels::chat::ChatMessageKind;
 use crate::pages::game::panels::dashboard::{assess, debug};
 use crate::pages::game::{GameData, ViewState};
 use crate::pages::selection::SelectionState;
@@ -104,6 +103,18 @@ pub enum TradeFocus {
     #[default]
     Local,
     Partner,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatMessageKind {
+    Info,
+    System,
+    Chat,
+    Tell,
+    Emote,
+    Error,
+    Warning,
+    Debug,
 }
 
 #[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, Default)]

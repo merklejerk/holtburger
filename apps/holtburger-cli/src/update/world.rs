@@ -1,8 +1,6 @@
-use crate::pages::game::panels::chat::ChatMessageKind;
 use crate::pages::{game::GameState, selection::SelectionState};
 use crate::state::AppState;
-use crate::types::Page;
-use crate::types::{ContextView, DashboardTab};
+use crate::types::{ChatMessageKind, ContextView, DashboardTab, Page};
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, ClientViewEvent, ErrorReason};
 use holtburger_protocol::errors::CharacterError;

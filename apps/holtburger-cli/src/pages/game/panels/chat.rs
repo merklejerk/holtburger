@@ -10,22 +10,11 @@ use std::io::Write;
 use std::sync::Mutex;
 
 use crate::theme::{pane_block, pane_title_style};
+use crate::types::ChatMessageKind;
 use crate::utils::wrap_text;
 
 pub const CHAT_HISTORY_WINDOW_SIZE: usize = 2000;
 const MAX_CHAT: usize = 4000;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChatMessageKind {
-    Info,
-    System,
-    Chat,
-    Tell,
-    Emote,
-    Error,
-    Warning,
-    Debug,
-}
 
 #[derive(Debug, Clone)]
 pub struct ChatMessage {

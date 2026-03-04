@@ -361,7 +361,7 @@ impl GameState {
                             let source = parts[1].strip_prefix("0x").unwrap_or(parts[1]);
                             let dest = parts[2].strip_prefix("0x").unwrap_or(parts[2]);
                             let amount = if parts.len() > 3 {
-                                parts[3].parse::<i32>().unwrap_or(1)
+                                parts[3].parse::<u32>().unwrap_or(1)
                             } else {
                                 1
                             };
@@ -386,7 +386,7 @@ impl GameState {
                         let parts: Vec<&str> = command.split_whitespace().collect();
                         if parts.len() >= 3 {
                             let item_str = parts[1].strip_prefix("0x").unwrap_or(parts[1]);
-                            let amount = parts[2].parse::<i32>().unwrap_or(1);
+                            let amount = parts[2].parse::<u32>().unwrap_or(1);
 
                             if let Ok(item) = u32::from_str_radix(item_str, 16)
                                 && let Some(player_guid) = self.data.player_guid

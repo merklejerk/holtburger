@@ -9,6 +9,7 @@ use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, CommandTarget, ContextView, Interaction, TabController, UpdateResult, Verb,
 };
+use holtburger_protocol::messages::combat::CombatMode;
 
 #[derive(Default, Debug, Clone)]
 pub struct SpellsTab {
@@ -46,43 +47,31 @@ impl TabController for SpellsTab {
         let mut verbs = Vec::new();
         let target = self.get_target(data);
 
-        if let Some(interaction) = interaction
-            && !matches!(interaction, Interaction::Targeting { .. })
-        {
-            return verbs;
+        match interaction {
+            Some(Interaction::Targeting { target_guid }) => {
+                if let CommandTarget::Spell(spell_id) = target {
+                    verbs.push(Verb::new(
+                        vec![
+                            AppAction::CastSpell(
+                                spell_id,
+                                Some(*target_guid),
+                            ),
+                        ],
+                        'c',
+                        "Cast on target",
+                    ));
+                }
+                return verbs;
+            }
+            Some(_) => {
+                // No actions when there's an active interaction other than targeting
+                return verbs;
+            }
+            _ => {}
         }
 
         if let CommandTarget::Spell(spell_id) = target {
-            if !data.is_wielding_caster() {
-                verbs.push(Verb::new(
-                    vec![AppAction::Log(
-                        crate::pages::game::panels::chat::ChatMessageKind::Error,
-                        "You must be wielding a caster to cast spells!".to_string(),
-                    )],
-                    'c',
-                    "Cast (Need Caster)",
-                ));
-            } else if data.combat_mode != holtburger_protocol::messages::combat::CombatMode::Magic {
-                verbs.push(Verb::new(
-                    vec![AppAction::SetCombatMode(
-                        holtburger_protocol::messages::combat::CombatMode::Magic,
-                    )],
-                    'c',
-                    "Switch to Magic",
-                ));
-            } else if let Some(Interaction::Targeting { target_guid }) = interaction {
-                verbs.push(Verb::new(
-                    vec![
-                        AppAction::SendCommands(vec![ClientCommand::CastTargetedSpell {
-                            spell_id,
-                            target: *target_guid,
-                        }]),
-                        AppAction::CancelInteraction,
-                    ],
-                    'c',
-                    "Cast on target",
-                ));
-            } else if let Some(player_guid) = data.player_guid {
+            if let Some(player_guid) = data.player_guid {
                 verbs.push(Verb::new(
                     vec![AppAction::CastSpell(spell_id, Some(player_guid))],
                     'c',

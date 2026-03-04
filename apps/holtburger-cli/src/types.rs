@@ -209,11 +209,10 @@ pub enum AppAction {
     Close(Guid),
     OpenTrade(Guid),
     AddToTrade(Guid),
-    SellToVendor(Guid, Guid), // item, vendor
     MoveItem(Guid, Guid),
-    StackItems(Guid, Guid, i32), // source, destination, amount
+    StackItems(Guid, Guid, u32), // source, destination, amount
     SplitItem(Guid, Guid),
-    ApplyItem(Guid, Guid), // item, target (e.g. healing kit, tool)
+    UseWith(Guid, Guid), // item, target (e.g. healing kit, tool)
     QueryDebugInfo(Guid),
     CastSpell(u32, Option<Guid>), // spell_id, target (None for untargeted)
     SetCombatMode(CombatMode),
@@ -227,6 +226,10 @@ pub enum AppAction {
     ClearVendor,
     DisplayClientInfo,
     Sequence(Vec<AppAction>),
+    Pickup(Guid),
+    Give(Guid, Guid, u32), // item, recipient, amount
+    BuyFromVendor(Guid, Guid, u32), // Vendor, item, amount
+    SellToVendor(Guid, Guid, u32), // Vendor, item, amount
 }
 
 impl From<Vec<AppAction>> for AppAction {

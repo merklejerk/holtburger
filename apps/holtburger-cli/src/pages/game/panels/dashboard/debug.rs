@@ -203,11 +203,11 @@ pub fn get_debug_info(
                         e.max_structure().unwrap_or(0)
                     )));
                 }
-                if e.stack_size() > 1 || e.max_stack_size() > 1 {
+                if e.stack_size() > 1 || e.max_stack_size().unwrap_or(0) > 1 {
                     lines.push(Line::from(format!(
                         "  Stack:     {}/{}",
                         e.stack_size(),
-                        e.max_stack_size()
+                        e.max_stack_size().unwrap_or(0)
                     )));
                 }
                 let valid = e.valid_locations();

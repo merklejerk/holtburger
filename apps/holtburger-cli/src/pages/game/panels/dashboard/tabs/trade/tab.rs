@@ -64,22 +64,8 @@ impl TabController for TradeTab {
         let mut verbs = Vec::new();
         let target = self.get_target(data, view);
 
-        if let Some(interaction) = interaction {
-            if let CommandTarget::Entity(_e, _) = &target {
-                match interaction {
-                    Interaction::Targeting { .. } => {}
-                    _ => {
-                        return verbs;
-                    }
-                }
-            }
-            if !matches!(interaction, Interaction::Targeting { .. }) {
-                verbs.push(Verb::new(
-                    vec![AppAction::CancelInteraction],
-                    '\x1b',
-                    "Cancel",
-                ));
-            }
+        if let Some(_) = interaction {
+            return verbs;
         }
 
         if let Some(target_item) = match &target {
@@ -103,31 +89,19 @@ impl TabController for TradeTab {
             match target {
                 CommandTarget::VendorItem(v) => {
                     verbs.push(Verb::new(
-                        vec![AppAction::SendCommands(vec![ClientCommand::Buy {
-                            vendor: vendor.vendor_guid,
-                            items: vec![
-                                holtburger_protocol::messages::trade::actions::ItemProfileActionData {
-                                    object_guid: v.guid,
-                                    amount: 1,
-                                },
-                            ],
-                        }])],
+                        vec![AppAction::BuyFromVendor(vendor.vendor_guid, v.guid, 1)],
                         'b',
                         "Buy",
                     ));
                 }
-                CommandTarget::Entity(e, _) => {
-                    verbs.push(Verb::new(
-                        vec![AppAction::SellToVendor(e.guid, vendor.vendor_guid)],
-                        's',
-                        "Sell",
-                    ));
-                }
                 _ => {}
             }
-        }
-
-        if let Some(trade) = &data.trade {
+            verbs.push(Verb::new(
+                vec![AppAction::ClearVendor],
+                'x',
+                "Exit",
+            ));
+        } else if let Some(trade) = &data.trade {
             if trade.self_side.accepted {
                 verbs.push(Verb::new(
                     vec![AppAction::SendCommands(vec![ClientCommand::DeclineTrade])],
@@ -141,22 +115,19 @@ impl TabController for TradeTab {
                     "Accept",
                 ));
             }
-            verbs.push(Verb::new(
-                vec![AppAction::SendCommands(vec![ClientCommand::ResetTrade])],
-                'r',
-                "Reset",
-            ));
+            verbs.extend_from_slice(&[
+                Verb::new(
+                    vec![AppAction::SendCommands(vec![ClientCommand::ResetTrade])],
+                    'r',
+                    "Reset",
+                ),
+                Verb::new(
+                    vec![AppAction::SendCommands(vec![ClientCommand::CloseTrade])],
+                    'x',
+                    "Exit",
+                ),
+            ]);
         }
-
-        if data.trade.is_some() || view.vendor.is_some() {
-            let action = if data.trade.is_some() {
-                vec![AppAction::SendCommands(vec![ClientCommand::CloseTrade])]
-            } else {
-                vec![AppAction::ClearVendor]
-            };
-            verbs.push(Verb::new(action, 'x', "Exit"));
-        }
-
         verbs
     }
 

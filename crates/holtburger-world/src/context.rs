@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use crate::entity::Entity;
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
@@ -11,6 +13,7 @@ pub trait WorldContext {
     fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_;
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_;
+    fn is_open_container(&self, guid: Guid) -> bool;
 }
 
 /// Common game logic shared across all clients.
@@ -27,7 +30,7 @@ pub trait WorldContextExt: WorldContext {
             .sum()
     }
 
-    fn get_container_counts(&self) -> std::collections::HashMap<Guid, usize> {
+    fn get_container_counts(&self) -> std::collections::HashMap<Guid, u32> {
         let mut counts = std::collections::HashMap::new();
         for e in self.iter_entities() {
             if let Some(cid) = e.container_id() {
@@ -37,13 +40,31 @@ pub trait WorldContextExt: WorldContext {
         counts
     }
 
-    fn get_container_id(&self, guid: Guid) -> Option<Guid> {
-        self.get_entity(guid)?.container_id()
+    fn get_container_count(&self, container_id: Guid) -> u32 {
+        let mut count = 0;
+        for e in self.iter_entities() {
+            if let Some(cid) = e.container_id()  && cid == container_id {
+                count += 1;
+            }
+        }
+        count
+    }
+
+    fn container_space_left(&self, container_id: Guid) -> u32 {
+        let Some(entity) = self.get_entity(container_id) else {
+            return 0;
+        };
+
+        let capacity = entity.items_capacity().unwrap_or(0);
+        let current = self.get_container_count(container_id);
+        capacity.saturating_sub(current)
     }
 
     fn is_in_main_pack(&self, guid: Guid) -> bool {
         if let Some(player_guid) = self.get_player_guid() {
-            self.get_container_id(guid) == Some(player_guid)
+            self.get_entity(guid)
+                .and_then(|e| e.container_id())
+                .map_or(false, |cid| cid == player_guid)
         } else {
             false
         }
@@ -74,26 +95,12 @@ pub trait WorldContextExt: WorldContext {
         false
     }
 
-    fn is_container_empty(&self, guid: Guid) -> bool {
-        let e = match self.get_entity(guid) {
+    fn is_container_empty(&self, container_id: Guid) -> bool {
+        let e = match self.get_entity(container_id) {
             Some(e) => e,
             None => return true,
         };
-        if !e
-            .item_type()
-            .unwrap_or_default()
-            .intersects(ItemType::CONTAINER)
-        {
-            return true;
-        }
-        for other_guid in self.iter_inventory() {
-            if let Some(other) = self.get_entity(other_guid)
-                && other.container_id() == Some(guid)
-            {
-                return false;
-            }
-        }
-        true
+        self.container_space_left(container_id) == e.items_capacity().unwrap_or(0)
     }
 
     fn can_sell_to_vendor(&self, guid: Guid, vendor: Option<&VendorState>) -> bool {
@@ -119,7 +126,8 @@ pub trait WorldContextExt: WorldContext {
             return false;
         }
 
-        true
+        // Check for active pet
+        !e.has_active_pet()
     }
 
     fn can_add_to_trade(&self, guid: Guid) -> bool {
@@ -138,13 +146,7 @@ pub trait WorldContextExt: WorldContext {
         }
 
         // Check for active pet
-        if let Some(pet_guid) = e.get_instance_prop(PropertyInstanceId::Pet)
-            && !pet_guid.is_null()
-        {
-            return false;
-        }
-
-        true
+        !e.has_active_pet()
     }
 
     fn get_suggested_combat_mode(&self) -> CombatMode {
@@ -166,6 +168,85 @@ pub trait WorldContextExt: WorldContext {
 
     fn is_wielding_caster(&self) -> bool {
         self.get_suggested_combat_mode() == CombatMode::Magic
+    }
+
+    /// Finds a non-full container in the player's possession.
+    /// If preferred_container_id is given, it is checked first.
+    /// Then the player itself (main pack), then all items in the inventory that are containers.
+    fn find_non_full_pack(&self, preferred_container_id: Option<Guid>) -> Option<Guid> {
+        let player_guid = self.get_player_guid()?;
+
+        let is_valid_container = |guid: Guid| -> bool {
+            self.container_space_left(guid) > 0
+        };
+
+        // 1. Check preferred first
+        if let Some(pref) = preferred_container_id && is_valid_container(pref) {
+            return Some(pref);
+        }
+
+        // 2. Check player (main pack)
+        if is_valid_container(player_guid) {
+            return Some(player_guid);
+        }
+
+        // 3. Check all items in inventory
+        for item_guid in self.iter_inventory() {
+            // Avoid double-checking player or preferred
+            if Some(item_guid) == preferred_container_id || item_guid == player_guid {
+                continue;
+            }
+
+            if is_valid_container(item_guid) {
+                return Some(item_guid);
+            }
+        }
+
+        None
+    }
+
+    // Find the effective stack count that can be merged from src_guid into dst_guid.
+    fn resolve_merge_stack_amount(&self, src_guid: Guid, dst_guid: Guid, max_src_amount: Option<u32>) -> Option<u32> {
+        let src = self.get_entity(src_guid)?;
+        let dst = self.get_entity(dst_guid)?;
+
+        if src.wcid != dst.wcid {
+            return None;
+        }
+
+        let max_stack_size = dst.max_stack_size()?;
+        let src_count = src.stack_size().min(max_src_amount.unwrap_or(u32::MAX));
+        let dst_count = dst.stack_size();
+        Some(src_count.min(max_stack_size.saturating_sub(dst_count)))
+    }
+
+    fn can_move_item_into_container(&self, item_guid: Guid, container_id: Guid) -> bool {
+        if self.get_player_guid() != Some(container_id) {
+            if !self.is_in_main_pack(container_id) && !self.is_open_container(container_id) {
+                return false;
+            }
+        }
+        if self.container_space_left(container_id) == 0 {
+            return false;
+        }
+        let item = match self.get_entity(item_guid) {
+            Some(e) => e,
+            None => return false,
+        };
+        // Check for active pet
+        !item.has_active_pet()
+    }
+
+    fn can_use_with(&self, item_guid: Guid, target_guid: Guid) -> bool {
+        let item = match self.get_entity(item_guid) {
+            Some(e) => e,
+            None => return false,
+        };
+        let target = match self.get_entity(target_guid) {
+            Some(e) => e,
+            None => return false,
+        };
+        item.target_item_type().is_some_and(|t| target.item_type().unwrap_or_default().intersects(t))
     }
 }
 

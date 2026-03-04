@@ -223,12 +223,12 @@ pub enum ClientCommand {
     Stack {
         source: Guid,
         destination: Guid,
-        amount: i32,
+        amount: u32,
     },
     Split {
         item: Guid,
         container: Guid,
-        amount: i32,
+        amount: u32,
     },
     MoveItem {
         item: Guid,
@@ -274,7 +274,7 @@ pub enum ClientCommand {
     GiveObjectRequest {
         target: Guid,
         item: Guid,
-        amount: i32,
+        amount: u32,
     },
     Buy {
         vendor: Guid,

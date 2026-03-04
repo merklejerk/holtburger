@@ -62,7 +62,7 @@ impl TabController for InventoryTab {
                         {
                             verbs.push(Verb::new(
                                 vec![
-                                    AppAction::ApplyItem(*interact_guid, pguid),
+                                    AppAction::UseWith(*interact_guid, pguid),
                                     AppAction::CancelInteraction,
                                 ],
                                 '\r',
@@ -74,18 +74,15 @@ impl TabController for InventoryTab {
                     Interaction::Combining {
                         item_guid: interact_guid,
                     } => {
-                        if let Some(source_e) = data.entities.get(interact_guid)
-                            && let (Some(target_type), Some(dest_item_type)) =
-                                (source_e.target_item_type(), cur_entity.item_type())
-                            && target_type.intersects(dest_item_type)
-                        {
+                        if cur_entity.guid != *interact_guid
+                            && data.can_use_with(*interact_guid, cur_entity.guid) {
                             verbs.push(Verb::new(
                                 vec![
-                                    AppAction::ApplyItem(*interact_guid, cur_entity.guid),
+                                    AppAction::UseWith(*interact_guid, cur_entity.guid),
                                     AppAction::CancelInteraction,
                                 ],
                                 '\r',
-                                "Apply to target",
+                                "Use with target",
                             ));
                         }
                         return verbs;
@@ -95,59 +92,45 @@ impl TabController for InventoryTab {
                     } => {
                         let is_self = Some(cur_entity.guid) == player_guid;
                         let is_same_item = cur_entity.guid == *interact_guid;
-                        let is_in_main_pack = data.is_in_main_pack(*interact_guid);
-                        let is_container =
-                            matches!(class, EntityClass::Container | EntityClass::Chest);
+                        let is_in_main_pack = data.is_in_main_pack(cur_entity.guid);
 
-                        let merge_label = data.entities.get(interact_guid).and_then(|source_e| {
-                            if !is_same_item
-                                && source_e.is_stackable()
-                                && source_e.wcid == cur_entity.wcid
-                                && cur_entity.stack_size() < cur_entity.max_stack_size()
-                            {
-                                Some("Merge")
-                            } else {
-                                None
-                            }
-                        });
-
-                        let label;
-                        let mut actions = Vec::new();
-
-                        if is_self || is_same_item {
+                        // Stop if already inside the current item.
+                        if data.entities.get(interact_guid).and_then(|e| e.container_id()) == Some(cur_entity.guid) {
+                            return verbs;
+                        }
+                        // If selecting interaction item, allow moving it to main pack if it's not already there.
+                        if is_same_item {
                             if !is_in_main_pack {
-                                if let Some(p) = player_guid {
-                                    actions.extend_from_slice(&[
-                                        AppAction::MoveItem(*interact_guid, p),
+                                verbs.push(Verb::new(
+                                    vec![
+                                        AppAction::MoveItem(*interact_guid, player_guid.unwrap_or_default()),
                                         AppAction::CancelInteraction,
-                                    ]);
-                                }
-                                label = Some("Move to main pack");
-                            } else {
-                                label = None;
+                                    ],
+                                    '\r',
+                                    "Move to main pack",
+                                ));
                             }
-                        } else if let Some(merge) = merge_label {
-                            actions.push(AppAction::StackItems(
-                                *interact_guid,
-                                cur_entity.guid,
-                                -1,
+                            return verbs;
+                        }
+                        if data.can_move_item_into_container(*interact_guid, cur_entity.guid) {
+                            verbs.push(Verb::new(
+                                vec![AppAction::MoveItem(*interact_guid, cur_entity.guid)],
+                                '\r',
+                                "Move into container",
                             ));
-                            actions.push(AppAction::CancelInteraction);
-                            label = Some(merge);
-                        } else if is_container {
-                            actions.extend_from_slice(&[
-                                AppAction::MoveItem(*interact_guid, cur_entity.guid),
-                                AppAction::CancelInteraction,
-                            ]);
-                            label = Some("Move to container");
-                        } else {
-                            label = None;
-                        };
-
-                        if let Some(label) = label
-                            && !actions.is_empty()
-                        {
-                            verbs.push(Verb::new(actions, '\r', label));
+                            return verbs;
+                        }
+                        // If can merge with current item, show merge option.
+                        if let Some(merge_amount) = data.resolve_merge_stack_amount(*interact_guid, cur_entity.guid, None) && merge_amount > 0 {
+                            verbs.push(Verb::new(
+                                vec![
+                                    AppAction::StackItems(*interact_guid, cur_entity.guid, merge_amount),
+                                    AppAction::CancelInteraction,
+                                ],
+                                '\r',
+                                "Merge",
+                            ));
+                            return verbs;
                         }
                         return verbs;
                     }
@@ -256,7 +239,7 @@ impl TabController for InventoryTab {
                 && data.can_sell_to_vendor(cur_entity.guid, view.vendor.as_ref())
             {
                 verbs.push(Verb::new(
-                    vec![AppAction::SellToVendor(cur_entity.guid, vendor.vendor_guid)],
+                    vec![AppAction::SellToVendor(vendor.vendor_guid, cur_entity.guid, 1)],
                     's',
                     "Sell",
                 ));

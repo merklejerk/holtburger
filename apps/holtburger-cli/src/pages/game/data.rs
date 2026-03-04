@@ -159,4 +159,8 @@ impl WorldContext for GameData {
     fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
         self.entities.values()
     }
+
+    fn is_open_container(&self, guid: Guid) -> bool {
+        self.open_containers.contains(&guid)
+    }
 }

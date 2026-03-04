@@ -1,5 +1,4 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_core::client::types::ClientCommand;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -72,22 +71,8 @@ impl TabController for CharacterTab {
                     >= xp_cost;
 
                 if is_unassigned_xp_enough {
-                    let cmd = match st.clone() {
-                        StatType::Attribute(at) => ClientCommand::RaiseAttribute {
-                            attribute: at,
-                            xp_spent,
-                        },
-                        StatType::Vital(vt) => ClientCommand::RaiseVital {
-                            vital: vt,
-                            xp_spent,
-                        },
-                        StatType::Skill(sk) => ClientCommand::RaiseSkill {
-                            skill: sk,
-                            xp_spent,
-                        },
-                    };
                     verbs.push(Verb::new(
-                        vec![AppAction::SendCommands(vec![cmd])],
+                        vec![AppAction::LevelUpStat(st.clone(), xp_spent)],
                         'l',
                         "Level Up",
                     ));
@@ -102,10 +87,7 @@ impl TabController for CharacterTab {
                         >= credits_cost;
                     if is_skill_credits_enough {
                         verbs.push(Verb::new(
-                            vec![AppAction::SendCommands(vec![ClientCommand::TrainSkill {
-                                skill,
-                                credits: credits_cost,
-                            }])],
+                            vec![AppAction::TrainSkill(skill, credits_cost)],
                             'n',
                             "Train",
                         ));
@@ -121,10 +103,7 @@ impl TabController for CharacterTab {
                     >= credits_cost;
                 if is_skill_credits_enough {
                     verbs.push(Verb::new(
-                        vec![AppAction::SendCommands(vec![ClientCommand::TrainSkill {
-                            skill,
-                            credits: credits_cost,
-                        }])],
+                        vec![AppAction::TrainSkill(skill, credits_cost)],
                         'n',
                         "Train",
                     ));

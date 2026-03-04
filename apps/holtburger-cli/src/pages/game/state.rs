@@ -176,12 +176,25 @@ impl GameState {
                     slot: None,
                 });
             }
-            AppAction::Unequip(guid) => {
-                result.commands.push(ClientCommand::MoveItem {
+            AppAction::EquipInSlot(guid, slot) => {
+                result.commands.push(ClientCommand::GetAndWield {
                     item: guid,
-                    container: Guid::NULL,
-                    placement: 0,
+                    slot: Some(slot),
                 });
+            }
+            AppAction::Unequip(guid) => {
+                if let Some(container) = self.data.find_non_full_pack(None) {
+                    result.commands.push(ClientCommand::MoveItem {
+                        item: guid,
+                        container,
+                        placement: 0,
+                    });
+                } else {
+                    result.actions.push(AppAction::Log(
+                        ChatMessageKind::System,
+                        "No available inventory space to unequip item.".to_string(),
+                    ));
+                }
             }
             AppAction::TalkTo(guid) => {
                 result.commands.push(ClientCommand::Use(guid));
@@ -289,6 +302,30 @@ impl GameState {
             }
             AppAction::SetCombatMode(mode) => {
                 result.commands.push(ClientCommand::SetCombatMode(mode));
+            }
+            AppAction::LevelUpStat(stat, xp_spent) => {
+                match stat {
+                    crate::types::StatType::Attribute(attribute) => {
+                        result
+                            .commands
+                            .push(ClientCommand::RaiseAttribute { attribute, xp_spent });
+                    }
+                    crate::types::StatType::Vital(vital) => {
+                        result
+                            .commands
+                            .push(ClientCommand::RaiseVital { vital, xp_spent });
+                    }
+                    crate::types::StatType::Skill(skill) => {
+                        result
+                            .commands
+                            .push(ClientCommand::RaiseSkill { skill, xp_spent });
+                    }
+                }
+            }
+            AppAction::TrainSkill(skill, credits) => {
+                result
+                    .commands
+                    .push(ClientCommand::TrainSkill { skill, credits });
             }
             AppAction::Pickup(guid) => {
                 if let Some(container_id) = self.data.find_non_full_pack(None) {

@@ -93,23 +93,6 @@ impl AppState {
         }
     }
 
-    pub fn refresh_context_buffer(&mut self) {
-        if let Some(game) = self.game_option_mut() {
-            if game.view.context_view == ContextView::Default {
-                game.view.context_buffer.clear();
-                return;
-            }
-            let content = {
-                let data = &game.data;
-                let view = &game.view;
-                game.dashboard
-                    .active_tab_mut()
-                    .get_context_panel_content(data, view)
-            };
-            game.view.context_buffer = content;
-        }
-    }
-
     pub fn display_client_info(&mut self) {
         let mut logs = Vec::new();
         logs.push((

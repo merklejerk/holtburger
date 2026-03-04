@@ -1,4 +1,5 @@
 use holtburger_common::Guid;
+use holtburger_core::ClientViewEvent;
 use ratatui::text::Line;
 use std::time::Instant;
 
@@ -6,7 +7,7 @@ use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
-use crate::types::{ContextView, FocusedPane, Interaction};
+use crate::types::{AppAction, ContextView, FocusedPane, Interaction, UpdateResult};
 
 #[derive(Default)]
 pub struct GameState {
@@ -26,6 +27,65 @@ impl GameState {
             chat: ChatState::default(),
             chat_input: ChatInputState::default(),
         }
+    }
+
+    pub fn handle_view_event(&mut self, _event: &ClientViewEvent) -> UpdateResult {
+        UpdateResult::default()
+    }
+
+    pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
+        let mut result = UpdateResult::new();
+        match action {
+            AppAction::ChangeContextView(view) => {
+                self.view.context_view = view;
+                self.view.context_scroll_offset = 0;
+                result.needs_redraw = true;
+                self.refresh_context_buffer();
+            }
+            AppAction::RequestDebugContext(guid) => {
+                self.view.current_debug_guid = guid;
+                self.view.context_view = crate::types::ContextView::Custom;
+                self.view.context_scroll_offset = 0;
+                result.needs_redraw = true;
+                self.refresh_context_buffer();
+            }
+            AppAction::BeginInteraction(interaction) => {
+                self.view.active_interaction = Some(interaction);
+                result.needs_redraw = true;
+            }
+            AppAction::CancelInteraction => {
+                self.view.active_interaction = None;
+                result.needs_redraw = true;
+            }
+            AppAction::ClearVendor => {
+                self.view.vendor = None;
+                result.needs_redraw = true;
+            }
+            AppAction::ViewDetails(view) => {
+                return self.handle_action(AppAction::ChangeContextView(view));
+            }
+            _ => return None,
+        }
+        Some(result)
+    }
+
+    pub fn handle_tick(&mut self, _elapsed: f64) -> UpdateResult {
+        UpdateResult::default()
+    }
+
+    pub fn refresh_context_buffer(&mut self) {
+        if self.view.context_view == crate::types::ContextView::Default {
+            self.view.context_buffer.clear();
+            return;
+        }
+        let content = {
+            let data = &self.data;
+            let view = &self.view;
+            self.dashboard
+                .active_tab_mut()
+                .get_context_panel_content(data, view)
+        };
+        self.view.context_buffer = content;
     }
 }
 

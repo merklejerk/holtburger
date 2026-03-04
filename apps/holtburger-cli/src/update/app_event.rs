@@ -21,10 +21,12 @@ impl AppState {
             AppEvent::ReceivedViewEvent(event) => {
                 let should_redraw =
                     !matches!(event, holtburger_core::ClientViewEvent::LogMessage(_));
-                self.handle_client_view_event(event);
-                if should_redraw {
-                    self.refresh_context_buffer();
-                }
+
+                // Global routing must happen first for character lists/login
+                self.handle_client_view_event(event.clone());
+
+                let view_result = self.page.handle_view_event(&event);
+                result.merge(view_result);
                 result.needs_redraw = should_redraw;
             }
         }

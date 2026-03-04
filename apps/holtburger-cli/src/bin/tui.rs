@@ -235,8 +235,6 @@ async fn main() -> Result<()> {
         app_action_tx,
     };
 
-    app_state.refresh_context_buffer();
-
     if args.verbose > 0 {
         app_state.log(
             ChatMessageKind::System,

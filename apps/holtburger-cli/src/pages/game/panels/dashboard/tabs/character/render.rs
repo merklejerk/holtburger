@@ -24,6 +24,8 @@ pub enum CharTabLine {
         value: String,
         xp_cost: Option<u64>,
         sp_cost: Option<u32>,
+        has_xp: bool,
+        has_sp: bool,
         stat_type: Option<StatType>,
         training: Option<TrainingLevel>,
     },
@@ -127,6 +129,8 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 value,
                 xp_cost,
                 sp_cost,
+                has_xp,
+                has_sp,
                 stat_type: _,
                 training,
             } => {
@@ -161,14 +165,14 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
                         format_cost(*c),
-                        Style::default().fg(theme::MONEY_FG),
+                        Style::default().fg(if *has_xp { Color::Green } else { Color::Yellow }),
                     ));
                     spans.push(Span::raw(" XP)"));
                 } else if let Some(c) = sp_cost {
                     spans.push(Span::raw(" ("));
                     spans.push(Span::styled(
                         c.to_string(),
-                        Style::default().fg(Color::Green),
+                        Style::default().fg(if *has_sp { Color::Green } else { Color::Yellow }),
                     ));
                     spans.push(Span::raw(" SP)"));
                 }
@@ -366,6 +370,8 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             value: format!("{:.0}%", penalty_pct),
             xp_cost: None,
             sp_cost: None,
+            has_xp: false,
+            has_sp: false,
             stat_type: None,
             training: None,
         });
@@ -382,11 +388,19 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             .next_rank_xp
             .map(|next| next.saturating_sub(v.spent_xp) as u64);
 
+        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
+            info.unspent_xp >= cost
+        } else {
+            false
+        };
+
         lines.push(CharTabLine::Stat {
             label: v.vital_type.to_string(),
             value: val,
             xp_cost,
             sp_cost: None,
+            has_xp,
+            has_sp: false,
             stat_type: Some(StatType::Vital(v.vital_type)),
             training: None,
         });
@@ -412,11 +426,19 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             .next_rank_xp
             .map(|next| next.saturating_sub(a.spent_xp) as u64);
 
+        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
+            info.unspent_xp >= cost
+        } else {
+            false
+        };
+
         lines.push(CharTabLine::Stat {
             label: a.attr_type.to_string(),
             value: val,
             xp_cost,
             sp_cost: None,
+            has_xp,
+            has_sp: false,
             stat_type: Some(StatType::Attribute(a.attr_type)),
             training: None,
         });
@@ -474,11 +496,25 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             }
         }
 
+        let has_xp = if let (Some(info), Some(cost)) = (&data.level_info, xp_cost) {
+            info.unspent_xp >= cost
+        } else {
+            false
+        };
+
+        let has_sp = if let (Some(info), Some(cost)) = (&data.level_info, sp_cost) {
+            info.unspent_skill_points >= cost
+        } else {
+            false
+        };
+
         lines.push(CharTabLine::Stat {
             label: s.skill_type.to_string(),
             value: val,
             xp_cost,
             sp_cost,
+            has_xp,
+            has_sp,
             stat_type: Some(StatType::Skill(s.skill_type)),
             training: Some(s.training),
         });
@@ -499,6 +535,8 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
             value: data.armor.to_string(),
             xp_cost: None,
             sp_cost: None,
+            has_xp: false,
+            has_sp: false,
             stat_type: None,
             training: None,
         });
@@ -524,6 +562,8 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
                 value: format!("{:.2}", val),
                 xp_cost: None,
                 sp_cost: None,
+                has_xp: false,
+                has_sp: false,
                 stat_type: None,
                 training: None,
             });

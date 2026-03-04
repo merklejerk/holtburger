@@ -78,22 +78,6 @@ impl TabController for CharacterTab {
                         "Level Up",
                     ));
                 }
-
-                if let (Some(credits_cost), StatType::Skill(skill)) = (sp_cost, st) {
-                    let is_skill_credits_enough = data
-                        .level_info
-                        .as_ref()
-                        .map(|info| info.unspent_skill_points)
-                        .unwrap_or(0)
-                        >= credits_cost;
-                    if is_skill_credits_enough {
-                        verbs.push(Verb::new(
-                            vec![AppAction::TrainSkill(skill, credits_cost)],
-                            'n',
-                            "Train",
-                        ));
-                    }
-                }
             }
             CommandTarget::Stat(StatType::Skill(skill), None, Some(credits_cost)) => {
                 let is_skill_credits_enough = data
@@ -105,7 +89,7 @@ impl TabController for CharacterTab {
                 if is_skill_credits_enough {
                     verbs.push(Verb::new(
                         vec![AppAction::TrainSkill(skill, credits_cost)],
-                        'n',
+                        't',
                         "Train",
                     ));
                 }

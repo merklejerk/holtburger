@@ -139,6 +139,7 @@
 - [x] Spell debug output is weird.
 - [x] World clock takes some time to show up.
 - [x] Assess takes 2 tries to show up.
+- [x] Skill training not available.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -154,14 +155,13 @@
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
-- [ ] Should split into the same container.
-- [ ] Precise splitting.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
+- [ ] Should split into the same container.
+- [ ] Precise splitting.
 - [ ] Splitting is broken.
-- [ ] Skill training not available.
 - [ ] Should auto-switch to trade tab when initiating trade/vendor.
 
 ### Critical

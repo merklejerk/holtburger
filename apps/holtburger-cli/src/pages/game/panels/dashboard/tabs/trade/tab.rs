@@ -25,7 +25,7 @@ impl TradeTab {
             if let Some(&guid) = items.get(self.selected_index)
                 && let Some(entity) = data.entities.get(&guid)
             {
-                return CommandTarget::Entity(entity.guid, None);
+                return CommandTarget::Entity(entity.guid);
             }
         } else if let Some(vendor) = &view.vendor
             && let Some(m) = vendor.items.get(self.selected_index)
@@ -69,7 +69,7 @@ impl TabController for TradeTab {
 
         if let Some(target_item) = match &target {
             CommandTarget::VendorItem(guid) => Some(guid),
-            CommandTarget::Entity(guid, _) => Some(guid),
+            CommandTarget::Entity(guid) => Some(guid),
             _ => None,
         } {
             verbs.push(Verb::new(
@@ -78,10 +78,7 @@ impl TabController for TradeTab {
                 "Assess",
             ));
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
-                    *target_item,
-                    None,
-                ))],
+                vec![AppAction::QueryDebugInfo(CommandTarget::Entity(*target_item))],
                 'g',
                 "Debug",
             ));

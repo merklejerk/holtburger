@@ -17,7 +17,7 @@ impl EquipTab {
     fn get_target(&self, data: &GameData) -> CommandTarget {
         let lines = get_lines(data);
         match lines.get(self.selected_index) {
-            Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::Entity(e.guid, *slot),
+            Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::EntityWithSlot(e.guid, *slot),
             _ => CommandTarget::None,
         }
     }
@@ -43,7 +43,7 @@ impl TabController for EquipTab {
         let mut verbs = Vec::new();
 
         if let Some(interaction) = interaction
-            && let CommandTarget::Entity(_guid, _) = &target
+            && matches!(&target, CommandTarget::EntityWithSlot(_, _))
         {
             match interaction {
                 Interaction::Targeting { .. } => {}
@@ -54,7 +54,7 @@ impl TabController for EquipTab {
         }
 
         match target {
-            CommandTarget::Entity(guid, slot) => {
+            CommandTarget::EntityWithSlot(guid, slot) => {
                 let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) =
                     lines.get(self.selected_index)
                 {
@@ -81,7 +81,8 @@ impl TabController for EquipTab {
                     if let Some(_pguid) = data.player_guid {
                         verbs.push(Verb::new(vec![AppAction::Unequip(guid)], 'q', "Unequip"));
                     }
-                } else if let Some(s) = slot {
+                } else {
+                    let s = slot;
                     verbs.push(Verb::new(
                         vec![AppAction::SendCommands(vec![ClientCommand::GetAndWield {
                             item: guid,
@@ -93,7 +94,7 @@ impl TabController for EquipTab {
                 }
 
                 verbs.push(Verb::new(
-                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(guid, None))],
+                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(guid))],
                     'g',
                     "Debug",
                 ));

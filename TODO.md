@@ -136,6 +136,7 @@
 - [x] Cast verb is clearing target interaction.
 - [x] Trade tab lets you add item already being traded. 
 - [x] Merge stacks broken?
+- [x] Spell debug output is weird.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -159,7 +160,6 @@
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Splitting is broken.
 - [ ] Skill training not available.
-- [x] Spell debug output is weird.
 - [ ] Assess takes 2 tries to show up.
 
 ### Critical

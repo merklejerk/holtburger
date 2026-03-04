@@ -57,7 +57,7 @@ pub fn get_debug_info(
             lines.push(Line::from(format!("Value:  {}", value)));
             lines.push(Line::from(format!("WCID:   {}", v.wcid)));
         }
-        CommandTarget::Entity(guid, _) => {
+        CommandTarget::Entity(guid) | CommandTarget::EntityWithSlot(guid, _) => {
             let Some(e) = data.entities.get(guid) else {
                 return lines;
             };

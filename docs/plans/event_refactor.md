@@ -71,7 +71,7 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
   - Move state-altering actions (`ChangeContextView`, `RequestDebugContext`, `BeginInteraction`, `CancelInteraction`, `ClearVendor`, `ViewDetails`) into `GameState::handle_action`.
 - **Acceptance Criteria**: `refresh_context_buffer` no longer over-renders at the global loop. UI interactions like viewing details or interactions work the exact same. Project compiles.
 
-### Phase 3: Action Relocation - Gameplay Commands 🏗️
+### Phase 3: Action Relocation - Gameplay Commands ✅
 - **Complexity:** Medium
 - **Goal**: Complete `AppAction` migration by migrating the 25+ gameplay variants.
 - **Files**: `src/update/app_action.rs`, `src/pages/game/state.rs`.
@@ -79,15 +79,16 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
   - Move ALL remaining mapped `AppAction` variants (`Identify`, `Assess`, `Drop`, `CastSpell`, etc.) into `GameState::handle_action`.
 - **Acceptance Criteria**: `update/app_action.rs` shrinks significantly and only processes `Log`, `DisplayClientInfo`, `SendCommands`, and `Sequence`. Using items/spells still sends the appropriate `ClientCommand`.
 
-### Phase 4: Event Relocation - Helper Methods
+### Phase 4: Event Relocation - Helper Methods ✅
 - **Complexity:** Medium
 - **Goal**: Relocate all the private methods on `AppState` that modify `game.data` internally (preparing for Phase 5 to avoid circular borrow/dependency issues).
 - **Files**: `src/update/world.rs`, `src/pages/game/state.rs`.
 - **Deliverables**:
   - Move `update_inventory_and_equipment`, `handle_entity_identified`, `handle_entity_removed`, `handle_navigation_event`, `handle_player_event`, and `update_inventory_recursive` from `AppState` to `GameState`.
 - **Acceptance Criteria**: Project compiles. The global `match` block in `world.rs` now correctly calls `game.update_inventory_and_equipment(...)` instead of `self.update_inventory_and_equipment(...)`.
+- **Progress Note**: All helper methods migrated to `GameState`. `AppState::update_inventory_recursive` deleted. `world.rs` refactored to delegate to `GameState` methods.
 
-### Phase 5: Event Relocation - The Match Router (`ClientViewEvent`)
+### Phase 5: Event Relocation - The Match Router (`ClientViewEvent`) ✅
 - **Complexity:** High
 - **Goal**: Evict `GameData` manipulations from `update/world.rs` entirely.
 - **Files**: `src/update/world.rs`, `src/pages/game/state.rs`.
@@ -95,9 +96,15 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
   - Migrate all the world/game state events (`EntitySpawned`, `PlayerStatsSkillsUpdated`, etc.) from `world.rs` into `GameState::handle_view_event`.
   - Keep Lifecycle events in `AppState::handle_client_view_event`. Pass down bubbling events (`NetPulse`, `Disconnected`).
 - **Acceptance Criteria**: `AppState` no longer manually unpacks `if let Page::Game(ref mut game)` purely to mutate entities.
+- **Implementation Note**: Migrated successfully. Changed `GameState::handle_view_event` signature to take ownership of `ClientViewEvent` because taking ownership is perfect for event handlers and simplifies syntax (avoids clones when we drain updates!). `world.rs` is now completely clean regarding internal game state.
 
 ### Phase 6: Tick Delegation
 - **Complexity:** Low
+- **Goal**: Delegate the `Tick` event to the `Page` and `GameState`.
+- **Files**: `src/update/app_event.rs`, `src/pages/game/state.rs`.
+- **Deliverables**:
+  - Migrate enchantment purging and duration decrementing from `AppState::update_tick` to `GameState::handle_tick`.
+- **Acceptance Criteria**: `AppState` no longer reaches into `game.data.player_enchantments`. Project compiles.
 - **Goal**: Move local time-based updates to the respective page structurally.
 - **Files**: `src/update/app_event.rs`, `src/pages/game/state.rs`.
 - **Deliverables**:
@@ -112,9 +119,9 @@ By inspecting the codebase, we've identified the exact reasons *why* events and 
 ### Task Checklist
 - [x] **Phase 1 (Low)**: Define `impl Page` routing methods (`handle_view_event`, `handle_action`, `handle_tick`).
 - [x] **Phase 2 (Medium)**: Delegate fallback routing in `app_action.rs` and migrate local UI-state actions & `refresh_context_buffer`.
-- [ ] **Phase 3 (Medium)**: Migrate the 25+ gameplay-command `AppAction`s to `GameState::handle_action`.
-- [ ] **Phase 4 (Medium)**: Migrate physical helper methods (`update_inventory_...`) from `AppState` to `GameState`.
-- [ ] **Phase 5 (High)**: Migrate the massive `ClientViewEvent` router block out of `world.rs`.
+- [x] **Phase 3 (Medium)**: Migrate the 25+ gameplay-command `AppAction`s to `GameState::handle_action`.
+- [x] **Phase 4 (Medium)**: Migrate physical helper methods (`update_inventory_...`) from `AppState` to `GameState`.
+- [x] **Phase 5 (High)**: Migrate the massive `ClientViewEvent` router block out of `world.rs`.
 - [ ] **Phase 6 (Low)**: Move `AppEvent::Tick` game loop logic to `GameState`.
 
 ### Decisions Log

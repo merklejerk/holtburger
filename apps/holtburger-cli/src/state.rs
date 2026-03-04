@@ -5,7 +5,7 @@ use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
-use crate::types::{ChatMessageKind, ContextView, Modal, Page};
+use crate::types::{ChatMessageKind, Modal, Page};
 
 use crate::pages::game::{GameState, ViewState};
 
@@ -183,29 +183,6 @@ impl AppState {
 }
 
 impl AppState {
-    pub(crate) fn update_inventory_recursive(&mut self, root: Guid, owned: bool) {
-        if let Page::Game(ref mut game) = self.page {
-            let mut stack = vec![root];
-            while let Some(current) = stack.pop() {
-                if owned {
-                    game.data.inventory.insert(current);
-                } else {
-                    game.data.inventory.remove(&current);
-                    game.data.equipment.remove(&current);
-                }
-
-                // Find children in game.data.entities
-                let mut children = Vec::new();
-                for (&guid, entity) in &game.data.entities {
-                    if entity.container_id() == Some(current) {
-                        children.push(guid);
-                    }
-                }
-                stack.extend(children);
-            }
-        }
-    }
-
     pub fn log(&mut self, kind: ChatMessageKind, msg: impl Into<String>) {
         if let Some(game) = self.game_option_mut() {
             game.chat.log(kind, msg.into());

@@ -205,7 +205,7 @@ pub enum Page {
 }
 
 impl Page {
-    pub fn handle_view_event(&mut self, event: &ClientViewEvent) -> UpdateResult {
+    pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         match self {
             Page::Selection(s) => s.handle_view_event(event),
             Page::Game(g) => g.handle_view_event(event),

@@ -23,9 +23,7 @@ impl AppState {
                     !matches!(event, holtburger_core::ClientViewEvent::LogMessage(_));
 
                 // Global routing must happen first for character lists/login
-                self.handle_client_view_event(event.clone());
-
-                let view_result = self.page.handle_view_event(&event);
+                let view_result = self.handle_client_view_event(event);
                 result.merge(view_result);
                 result.needs_redraw = should_redraw;
             }

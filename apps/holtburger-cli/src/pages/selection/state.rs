@@ -12,7 +12,7 @@ pub struct SelectionState {
 }
 
 impl SelectionState {
-    pub fn handle_view_event(&mut self, _event: &ClientViewEvent) -> UpdateResult {
+    pub fn handle_view_event(&mut self, _event: ClientViewEvent) -> UpdateResult {
         UpdateResult::default()
     }
 

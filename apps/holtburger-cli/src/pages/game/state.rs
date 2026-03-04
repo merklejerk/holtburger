@@ -455,7 +455,7 @@ impl GameState {
     }
 
     pub(crate) fn handle_entity_removed(&mut self, guid: Guid) {
-        self.update_inventory_recursive(guid, false);
+        self.data.update_inventory_recursive(guid, false);
         self.data.entities.remove(&guid);
         self.data.equipment.remove(&guid);
         if self.view.current_debug_guid == Some(guid) {
@@ -476,26 +476,6 @@ impl GameState {
         result
     }
 
-    pub(crate) fn update_inventory_recursive(&mut self, root: Guid, owned: bool) {
-        let mut stack = vec![root];
-        while let Some(current) = stack.pop() {
-            if owned {
-                self.data.inventory.insert(current);
-            } else {
-                self.data.inventory.remove(&current);
-                self.data.equipment.remove(&current);
-            }
-
-            // Find children in game.data.entities
-            let mut children = Vec::new();
-            for (&guid, entity) in &self.data.entities {
-                if entity.container_id() == Some(current) {
-                    children.push(guid);
-                }
-            }
-            stack.extend(children);
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

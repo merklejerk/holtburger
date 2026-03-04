@@ -227,9 +227,13 @@ pub enum AppAction {
     DisplayClientInfo,
     Sequence(Vec<AppAction>),
     Pickup(Guid),
-    Give(Guid, Guid, u32), // item, recipient, amount
+    Give(Guid, Guid, u32),          // item, recipient, amount
     BuyFromVendor(Guid, Guid, u32), // Vendor, item, amount
-    SellToVendor(Guid, Guid, u32), // Vendor, item, amount
+    SellToVendor(Guid, Guid, u32),  // Vendor, item, amount
+    AcceptTrade,
+    DeclineTrade,
+    ResetTrade,
+    ExitTrade,
 }
 
 impl From<Vec<AppAction>> for AppAction {

@@ -35,9 +35,9 @@ pub fn filter_entities<'a>(
                     false
                 };
 
-                ((e.position.landblock_id != Guid::NULL
-                        || (e.wielder_id().is_some() && is_combat_implement)
-                        || e.physics_parent_id.is_some()))
+                (e.position.landblock_id != Guid::NULL
+                    || (e.wielder_id().is_some() && is_combat_implement)
+                    || e.physics_parent_id.is_some())
                     || in_open_container
             }
             EntityFilter::Inventory => {

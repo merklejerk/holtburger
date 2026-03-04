@@ -1,7 +1,7 @@
 use crate::state::AppState;
 use crate::types::AppAction;
 use crate::types::{ContextView, UpdateResult};
-use holtburger_common::{Guid, guid};
+use holtburger_common::Guid;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_world::context::WorldContextExt;
@@ -188,18 +188,34 @@ impl AppState {
                 }
             }
             AppAction::Pickup(guid) => {
-                if let Some(game) = self.game_option_mut() {
-                    if let Some(container_id) = game.data.find_non_full_pack(None) {
-                        result.commands.push(ClientCommand::MoveItem {
-                            item: guid,
-                            container: container_id,
-                            placement: 0,
-                        });
-                    }
+                if let Some(game) = self.game_option_mut()
+                    && let Some(container_id) = game.data.find_non_full_pack(None)
+                {
+                    result.commands.push(ClientCommand::MoveItem {
+                        item: guid,
+                        container: container_id,
+                        placement: 0,
+                    });
                 }
             }
             AppAction::Give(item, recipient, amount) => {
-                result.commands.push(ClientCommand::GiveObjectRequest { target: recipient, item, amount });
+                result.commands.push(ClientCommand::GiveObjectRequest {
+                    target: recipient,
+                    item,
+                    amount,
+                });
+            }
+            AppAction::AcceptTrade => {
+                result.commands.push(ClientCommand::AcceptTrade);
+            }
+            AppAction::DeclineTrade => {
+                result.commands.push(ClientCommand::DeclineTrade);
+            }
+            AppAction::ResetTrade => {
+                result.commands.push(ClientCommand::ResetTrade);
+            }
+            AppAction::ExitTrade => {
+                result.commands.push(ClientCommand::CloseTrade);
             }
         }
         result

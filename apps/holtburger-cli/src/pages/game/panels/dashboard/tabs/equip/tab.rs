@@ -55,17 +55,6 @@ impl TabController for EquipTab {
 
         match target {
             CommandTarget::Entity(e, slot) => {
-                verbs.extend([
-                    Verb::new(vec![AppAction::Assess(e.guid)], 'a', "Assess"),
-                    Verb::new(
-                        vec![AppAction::BeginInteraction(Interaction::Targeting {
-                            target_guid: e.guid,
-                        })],
-                        't',
-                        "Target",
-                    ),
-                ]);
-
                 let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) =
                     lines.get(self.selected_index)
                 {
@@ -73,6 +62,20 @@ impl TabController for EquipTab {
                 } else {
                     false
                 };
+
+                verbs.push(Verb::new(vec![AppAction::Assess(e.guid)], 'a', "Assess"));
+
+                if interaction.is_none()
+                    || matches!(interaction, Some(Interaction::Targeting { target_guid }) if *target_guid != e.guid)
+                {
+                    verbs.push(Verb::new(
+                        vec![AppAction::BeginInteraction(Interaction::Targeting {
+                            target_guid: e.guid,
+                        })],
+                        't',
+                        "Target",
+                    ));
+                }
 
                 if is_here {
                     if let Some(_pguid) = data.player_guid {

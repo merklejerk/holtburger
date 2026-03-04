@@ -1,9 +1,7 @@
-use std::num::NonZeroU32;
-
 use crate::entity::Entity;
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
-use holtburger_common::properties::{ItemType, PropertyInstanceId, WorldObjectPropertyAccessors};
+use holtburger_common::properties::ItemType;
 use holtburger_protocol::messages::combat::CombatMode;
 
 /// Provides access to the world state for common logic.
@@ -43,7 +41,9 @@ pub trait WorldContextExt: WorldContext {
     fn get_container_count(&self, container_id: Guid) -> u32 {
         let mut count = 0;
         for e in self.iter_entities() {
-            if let Some(cid) = e.container_id()  && cid == container_id {
+            if let Some(cid) = e.container_id()
+                && cid == container_id
+            {
                 count += 1;
             }
         }
@@ -62,9 +62,7 @@ pub trait WorldContextExt: WorldContext {
 
     fn is_in_main_pack(&self, guid: Guid) -> bool {
         if let Some(player_guid) = self.get_player_guid() {
-            self.get_entity(guid)
-                .and_then(|e| e.container_id())
-                .map_or(false, |cid| cid == player_guid)
+            self.get_entity(guid).and_then(|e| e.container_id()) == Some(player_guid)
         } else {
             false
         }
@@ -176,12 +174,12 @@ pub trait WorldContextExt: WorldContext {
     fn find_non_full_pack(&self, preferred_container_id: Option<Guid>) -> Option<Guid> {
         let player_guid = self.get_player_guid()?;
 
-        let is_valid_container = |guid: Guid| -> bool {
-            self.container_space_left(guid) > 0
-        };
+        let is_valid_container = |guid: Guid| -> bool { self.container_space_left(guid) > 0 };
 
         // 1. Check preferred first
-        if let Some(pref) = preferred_container_id && is_valid_container(pref) {
+        if let Some(pref) = preferred_container_id
+            && is_valid_container(pref)
+        {
             return Some(pref);
         }
 
@@ -206,7 +204,12 @@ pub trait WorldContextExt: WorldContext {
     }
 
     // Find the effective stack count that can be merged from src_guid into dst_guid.
-    fn resolve_merge_stack_amount(&self, src_guid: Guid, dst_guid: Guid, max_src_amount: Option<u32>) -> Option<u32> {
+    fn resolve_merge_stack_amount(
+        &self,
+        src_guid: Guid,
+        dst_guid: Guid,
+        max_src_amount: Option<u32>,
+    ) -> Option<u32> {
         let src = self.get_entity(src_guid)?;
         let dst = self.get_entity(dst_guid)?;
 
@@ -221,10 +224,11 @@ pub trait WorldContextExt: WorldContext {
     }
 
     fn can_move_item_into_container(&self, item_guid: Guid, container_id: Guid) -> bool {
-        if self.get_player_guid() != Some(container_id) {
-            if !self.is_in_main_pack(container_id) && !self.is_open_container(container_id) {
-                return false;
-            }
+        if self.get_player_guid() != Some(container_id)
+            && !self.is_in_main_pack(container_id)
+            && !self.is_open_container(container_id)
+        {
+            return false;
         }
         if self.container_space_left(container_id) == 0 {
             return false;
@@ -246,7 +250,8 @@ pub trait WorldContextExt: WorldContext {
             Some(e) => e,
             None => return false,
         };
-        item.target_item_type().is_some_and(|t| target.item_type().unwrap_or_default().intersects(t))
+        item.target_item_type()
+            .is_some_and(|t| target.item_type().unwrap_or_default().intersects(t))
     }
 }
 

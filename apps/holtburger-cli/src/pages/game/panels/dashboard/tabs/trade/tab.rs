@@ -1,5 +1,4 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_core::client::types::ClientCommand;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -64,7 +63,7 @@ impl TabController for TradeTab {
         let mut verbs = Vec::new();
         let target = self.get_target(data, view);
 
-        if let Some(_) = interaction {
+        if interaction.is_some() {
             return verbs;
         }
 
@@ -86,46 +85,23 @@ impl TabController for TradeTab {
         }
 
         if let Some(vendor) = &view.vendor {
-            match target {
-                CommandTarget::VendorItem(v) => {
-                    verbs.push(Verb::new(
-                        vec![AppAction::BuyFromVendor(vendor.vendor_guid, v.guid, 1)],
-                        'b',
-                        "Buy",
-                    ));
-                }
-                _ => {}
+            if let CommandTarget::VendorItem(v) = target {
+                verbs.push(Verb::new(
+                    vec![AppAction::BuyFromVendor(vendor.vendor_guid, v.guid, 1)],
+                    'b',
+                    "Buy",
+                ));
             }
-            verbs.push(Verb::new(
-                vec![AppAction::ClearVendor],
-                'x',
-                "Exit",
-            ));
+            verbs.push(Verb::new(vec![AppAction::ClearVendor], 'x', "Exit"));
         } else if let Some(trade) = &data.trade {
             if trade.self_side.accepted {
-                verbs.push(Verb::new(
-                    vec![AppAction::SendCommands(vec![ClientCommand::DeclineTrade])],
-                    'd',
-                    "Decline",
-                ));
+                verbs.push(Verb::new(vec![AppAction::DeclineTrade], 'd', "Decline"));
             } else {
-                verbs.push(Verb::new(
-                    vec![AppAction::SendCommands(vec![ClientCommand::AcceptTrade])],
-                    'c',
-                    "Accept",
-                ));
+                verbs.push(Verb::new(vec![AppAction::AcceptTrade], 'c', "Accept"));
             }
-            verbs.extend_from_slice(&[
-                Verb::new(
-                    vec![AppAction::SendCommands(vec![ClientCommand::ResetTrade])],
-                    'r',
-                    "Reset",
-                ),
-                Verb::new(
-                    vec![AppAction::SendCommands(vec![ClientCommand::CloseTrade])],
-                    'x',
-                    "Exit",
-                ),
+            verbs.extend([
+                Verb::new(vec![AppAction::ResetTrade], 'r', "Reset"),
+                Verb::new(vec![AppAction::ExitTrade], 'x', "Exit"),
             ]);
         }
         verbs

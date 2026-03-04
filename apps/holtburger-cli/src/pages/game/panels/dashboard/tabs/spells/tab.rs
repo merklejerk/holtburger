@@ -1,6 +1,4 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_core::client::types::ClientCommand;
-use holtburger_world::context::WorldContextExt;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -9,7 +7,6 @@ use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, CommandTarget, ContextView, Interaction, TabController, UpdateResult, Verb,
 };
-use holtburger_protocol::messages::combat::CombatMode;
 
 #[derive(Default, Debug, Clone)]
 pub struct SpellsTab {
@@ -51,12 +48,7 @@ impl TabController for SpellsTab {
             Some(Interaction::Targeting { target_guid }) => {
                 if let CommandTarget::Spell(spell_id) = target {
                     verbs.push(Verb::new(
-                        vec![
-                            AppAction::CastSpell(
-                                spell_id,
-                                Some(*target_guid),
-                            ),
-                        ],
+                        vec![AppAction::CastSpell(spell_id, Some(*target_guid))],
                         'c',
                         "Cast on target",
                     ));
@@ -71,6 +63,7 @@ impl TabController for SpellsTab {
         }
 
         if let CommandTarget::Spell(spell_id) = target {
+            // TODO: Always cast on self for ring spells and never cast on self for wall spells.
             if let Some(player_guid) = data.player_guid {
                 verbs.push(Verb::new(
                     vec![AppAction::CastSpell(spell_id, Some(player_guid))],

@@ -75,7 +75,8 @@ impl TabController for InventoryTab {
                         item_guid: interact_guid,
                     } => {
                         if cur_entity.guid != *interact_guid
-                            && data.can_use_with(*interact_guid, cur_entity.guid) {
+                            && data.can_use_with(*interact_guid, cur_entity.guid)
+                        {
                             verbs.push(Verb::new(
                                 vec![
                                     AppAction::UseWith(*interact_guid, cur_entity.guid),
@@ -90,12 +91,17 @@ impl TabController for InventoryTab {
                     Interaction::Moving {
                         item_guid: interact_guid,
                     } => {
-                        let is_self = Some(cur_entity.guid) == player_guid;
+                        let _is_self = Some(cur_entity.guid) == player_guid;
                         let is_same_item = cur_entity.guid == *interact_guid;
                         let is_in_main_pack = data.is_in_main_pack(cur_entity.guid);
 
                         // Stop if already inside the current item.
-                        if data.entities.get(interact_guid).and_then(|e| e.container_id()) == Some(cur_entity.guid) {
+                        if data
+                            .entities
+                            .get(interact_guid)
+                            .and_then(|e| e.container_id())
+                            == Some(cur_entity.guid)
+                        {
                             return verbs;
                         }
                         // If selecting interaction item, allow moving it to main pack if it's not already there.
@@ -103,7 +109,10 @@ impl TabController for InventoryTab {
                             if !is_in_main_pack {
                                 verbs.push(Verb::new(
                                     vec![
-                                        AppAction::MoveItem(*interact_guid, player_guid.unwrap_or_default()),
+                                        AppAction::MoveItem(
+                                            *interact_guid,
+                                            player_guid.unwrap_or_default(),
+                                        ),
                                         AppAction::CancelInteraction,
                                     ],
                                     '\r',
@@ -121,10 +130,17 @@ impl TabController for InventoryTab {
                             return verbs;
                         }
                         // If can merge with current item, show merge option.
-                        if let Some(merge_amount) = data.resolve_merge_stack_amount(*interact_guid, cur_entity.guid, None) && merge_amount > 0 {
+                        if let Some(merge_amount) =
+                            data.resolve_merge_stack_amount(*interact_guid, cur_entity.guid, None)
+                            && merge_amount > 0
+                        {
                             verbs.push(Verb::new(
                                 vec![
-                                    AppAction::StackItems(*interact_guid, cur_entity.guid, merge_amount),
+                                    AppAction::StackItems(
+                                        *interact_guid,
+                                        cur_entity.guid,
+                                        merge_amount,
+                                    ),
                                     AppAction::CancelInteraction,
                                 ],
                                 '\r',
@@ -239,7 +255,11 @@ impl TabController for InventoryTab {
                 && data.can_sell_to_vendor(cur_entity.guid, view.vendor.as_ref())
             {
                 verbs.push(Verb::new(
-                    vec![AppAction::SellToVendor(vendor.vendor_guid, cur_entity.guid, 1)],
+                    vec![AppAction::SellToVendor(
+                        vendor.vendor_guid,
+                        cur_entity.guid,
+                        1,
+                    )],
                     's',
                     "Sell",
                 ));

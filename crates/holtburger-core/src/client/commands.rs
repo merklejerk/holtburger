@@ -218,7 +218,7 @@ impl Client {
                     GiveObjectRequestActionData {
                         target_guid: target,
                         item_guid: item,
-                        amount,
+                        amount: amount as i32,
                     },
                 )))
                 .await
@@ -333,7 +333,7 @@ impl Client {
                     StackableMergeActionData {
                         merge_from_guid: source,
                         merge_to_guid: destination,
-                        amount,
+                        amount: amount as i32,
                     },
                 )))
                 .await
@@ -354,7 +354,7 @@ impl Client {
                         stack_guid: item,
                         container_guid: container,
                         place: 0, // Auto-placement
-                        amount,
+                        amount: amount as i32,
                     },
                 )))
                 .await

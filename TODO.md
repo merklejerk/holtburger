@@ -158,6 +158,7 @@
 - [ ] Cast verb is clearing target interaction.
 - [ ] Trade tab lets you add item already being traded. 
 - [ ] Merge stacks broken?
+- [ ] Skill training not available.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -66,7 +66,7 @@ fn render_nearby_item(
     dist: Option<f32>,
     depth: usize,
     highlight: bool,
-    container_count: Option<usize>,
+    container_count: Option<u32>,
     is_open: bool,
 ) -> ListItem<'static> {
     let class = classify_entity(e);

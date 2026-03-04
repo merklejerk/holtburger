@@ -1,9 +1,10 @@
 use crate::state::AppState;
 use crate::types::AppAction;
 use crate::types::{ContextView, UpdateResult};
-use holtburger_common::Guid;
+use holtburger_common::{Guid, guid};
 use holtburger_core::client::types::ClientCommand;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
+use holtburger_world::context::WorldContextExt;
 
 impl AppState {
     pub fn handle_app_action(&mut self, action: AppAction) -> UpdateResult {
@@ -69,12 +70,21 @@ impl AppState {
                     .commands
                     .push(ClientCommand::AddToTrade { item: guid });
             }
-            AppAction::SellToVendor(item, vendor) => {
+            AppAction::SellToVendor(vendor, item, amount) => {
                 result.commands.push(ClientCommand::Sell {
                     vendor,
                     items: vec![ItemProfileActionData {
                         object_guid: item,
-                        amount: 1,
+                        amount: amount as i32,
+                    }],
+                });
+            }
+            AppAction::BuyFromVendor(vendor, item, amount) => {
+                result.commands.push(ClientCommand::Buy {
+                    vendor,
+                    items: vec![ItemProfileActionData {
+                        object_guid: item,
+                        amount: amount as i32,
                     }],
                 });
             }
@@ -105,7 +115,7 @@ impl AppState {
                 }
                 result.needs_redraw = true;
             }
-            AppAction::ApplyItem(item, target) => {
+            AppAction::UseWith(item, target) => {
                 result
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
@@ -123,6 +133,7 @@ impl AppState {
                 result.needs_redraw = true;
             }
             AppAction::CastSpell(spell_id, target) => {
+                // TODO: Auto toggle combat mode.
                 if let Some(target) = target {
                     result
                         .commands
@@ -175,6 +186,20 @@ impl AppState {
                 for sub in actions {
                     result.merge(self.handle_app_action(sub));
                 }
+            }
+            AppAction::Pickup(guid) => {
+                if let Some(game) = self.game_option_mut() {
+                    if let Some(container_id) = game.data.find_non_full_pack(None) {
+                        result.commands.push(ClientCommand::MoveItem {
+                            item: guid,
+                            container: container_id,
+                            placement: 0,
+                        });
+                    }
+                }
+            }
+            AppAction::Give(item, recipient, amount) => {
+                result.commands.push(ClientCommand::GiveObjectRequest { target: recipient, item, amount });
             }
         }
         result

@@ -70,7 +70,7 @@ pub fn render_inventory_tab(
 fn get_list_items(
     selected_index: usize,
     data: &GameData,
-    container_counts: &HashMap<Guid, usize>,
+    container_counts: &HashMap<Guid, u32>,
 ) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(data);
     let mut list_items = Vec::new();
@@ -107,7 +107,7 @@ fn render_inventory_item(
     highlight: bool,
     is_equipped: bool,
     is_offered: bool,
-    container_count: Option<usize>,
+    container_count: Option<u32>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
     let color = get_entity_color(class);

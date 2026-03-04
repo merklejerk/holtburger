@@ -5,11 +5,9 @@ use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
-use crate::types::{ContextView, Modal, Page};
+use crate::types::{ChatMessageKind, ContextView, Modal, Page};
 
 use crate::pages::game::{GameState, ViewState};
-
-use crate::pages::game::panels::chat::ChatMessageKind;
 
 pub struct NetStats {
     pub bytes_in: u64,

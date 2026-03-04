@@ -414,7 +414,7 @@ impl GameState {
                         return result.with_redraw(true);
                     }
                     if command == "/help" {
-                        use crate::pages::game::panels::chat::ChatMessageKind;
+                        use crate::types::ChatMessageKind;
                         self.chat.log(
                             ChatMessageKind::System,
                             "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>, /stack <src> <dst> [amount], /split <item> <amount>".to_string()

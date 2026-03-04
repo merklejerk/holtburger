@@ -47,6 +47,7 @@ pub fn render_app(f: &mut Frame, state: &mut AppState) {
         is_modal_active: state.modal.is_some(),
         logon_retry: &state.logon_retry,
         enter_retry: &state.enter_retry,
+        server_time: state.server_time,
     };
 
     // We break the borrow cycle by borrowing disjoint fields from state.

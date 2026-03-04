@@ -38,6 +38,7 @@ pub struct AppState {
     pub client_state: ClientState,
     pub net_stats: NetStats,
     pub world_name: String,
+    pub server_time: Option<(f64, Instant)>,
     pub verbosity: u8,
 }
 
@@ -48,9 +49,23 @@ pub struct RenderContext<'a> {
     pub is_modal_active: bool,
     pub logon_retry: &'a RetryState,
     pub enter_retry: &'a RetryState,
+    pub server_time: Option<(f64, Instant)>,
 }
 
 impl AppState {
+    pub fn current_server_time(&self) -> f64 {
+        match self.server_time {
+            Some((server_val, local_then)) => {
+                let elapsed = local_then.elapsed().as_secs_f64();
+                server_val + elapsed
+            }
+            None => std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64(),
+        }
+    }
+
     pub fn game_option(&self) -> Option<&GameState> {
         match &self.page {
             Page::Game(game) => Some(game),

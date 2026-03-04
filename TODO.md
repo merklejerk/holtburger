@@ -137,6 +137,7 @@
 - [x] Trade tab lets you add item already being traded. 
 - [x] Merge stacks broken?
 - [x] Spell debug output is weird.
+- [x] World clock takes some time to show up.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -161,7 +162,6 @@
 - [ ] Splitting is broken.
 - [ ] Skill training not available.
 - [ ] Assess takes 2 tries to show up.
-- [ ] World clock takes some time to show up.
 - [ ] Should auto-switch to trade tab when initiating trade/vendor.
 
 ### Critical

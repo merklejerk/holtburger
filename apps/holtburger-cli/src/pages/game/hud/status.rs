@@ -5,6 +5,7 @@ use holtburger_core::RetryState;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use std::time::Instant;
 
 const CHRONO_WIDTH: u16 = 9;
 
@@ -24,6 +25,7 @@ pub fn render_status_bar(
     view: &ViewState,
     logon_retry: &RetryState,
     enter_retry: &RetryState,
+    server_time: Option<(f64, Instant)>,
     area: Rect,
 ) {
     let chunks = Layout::default()
@@ -32,7 +34,7 @@ pub fn render_status_bar(
         .split(area);
 
     render_vitals(f, data, view, chunks[0]);
-    render_status_panel(f, data, view, logon_retry, enter_retry, chunks[1]);
+    render_status_panel(f, data, view, logon_retry, enter_retry, server_time, chunks[1]);
 }
 
 fn render_status_panel(
@@ -41,6 +43,7 @@ fn render_status_panel(
     _view: &ViewState,
     logon_retry: &RetryState,
     enter_retry: &RetryState,
+    server_time: Option<(f64, Instant)>,
     area: Rect,
 ) {
     let status_block = Block::default().borders(Borders::ALL).title("Status");
@@ -70,7 +73,7 @@ fn render_status_panel(
     );
 
     // 2. Chronometer
-    let time_str = get_time_str(data);
+    let time_str = get_time_str(server_time);
     f.render_widget(
         Paragraph::new(time_str).alignment(ratatui::layout::Alignment::Right),
         status_layout[1],
@@ -119,8 +122,8 @@ fn get_compass_str(data: &GameData) -> String {
     format!("{:03.0}°{}", heading_deg, COMPASS_DIRECTIONS[dir_idx])
 }
 
-fn get_time_str(data: &GameData) -> String {
-    if let Some((st, inst)) = data.server_time {
+fn get_time_str(server_time: Option<(f64, Instant)>) -> String {
+    if let Some((st, inst)) = server_time {
         let current_server_time = st + inst.elapsed().as_secs_f64();
         let chrono_ticks = (current_server_time + DERETH_TIME_OFFSET).rem_euclid(DERETH_DAY_LENGTH);
         let ticks_per_hour_24 = DERETH_DAY_LENGTH / 24.0;

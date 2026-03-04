@@ -6,7 +6,8 @@ use ratatui::layout::Rect;
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, CommandTarget, Interaction, StatType, TabController, UpdateResult, Verb,
+    AppAction, CommandTarget, ContextView, Interaction, StatType, TabController, UpdateResult,
+    Verb,
 };
 
 #[derive(Default, Debug, Clone)]
@@ -49,6 +50,18 @@ impl TabController for CharacterTab {
         }
 
         match target {
+            CommandTarget::Enchantment(enchant) => {
+                verbs.push(Verb::new(
+                    vec![AppAction::ViewDetails(ContextView::Enchantment(enchant))],
+                    'd',
+                    "Details",
+                ));
+                verbs.push(Verb::new(
+                    vec![AppAction::QueryDebugInfo(CommandTarget::Enchantment(enchant))],
+                    'g',
+                    "Debug",
+                ));
+            }
             CommandTarget::Stat(st, Some(xp_cost), sp_cost) => {
                 let xp_spent = xp_cost as u32;
                 let is_unassigned_xp_enough = data

@@ -150,7 +150,13 @@ impl TabController for NearbyTab {
                     't',
                     "Target",
                 ),
-                Verb::new(vec![AppAction::QueryDebugInfo(e.guid)], 'g', "Debug"),
+                Verb::new(
+                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
+                        e.guid, None,
+                    ))],
+                    'g',
+                    "Debug",
+                ),
                 Verb::new(vec![AppAction::Approach(e.guid)], 'r', "Approach"),
             ]);
 

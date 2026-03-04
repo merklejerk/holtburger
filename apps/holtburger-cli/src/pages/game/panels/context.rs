@@ -39,6 +39,8 @@ pub fn render_context_pane(
         ContextView::Assess(_) => "Object Appraisal",
         ContextView::Spell(_) => "Spell Details",
         ContextView::Enchantment(_) => "Enchantment Details",
+        ContextView::DebugSpell(_) => "Debug Information",
+        ContextView::DebugEnchantment(_) => "Debug Information",
     };
 
     let ctx_title = if total_ctx > height {

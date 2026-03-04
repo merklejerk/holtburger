@@ -143,6 +143,8 @@ pub enum ContextView {
     Assess(Guid),
     Spell(u32),
     Enchantment(Enchantment),
+    DebugSpell(u32),
+    DebugEnchantment(Enchantment),
 }
 
 #[derive(Debug)]
@@ -246,7 +248,7 @@ pub enum AppAction {
     StackItems(Guid, Guid, u32), // source, destination, amount
     SplitItem(Guid, Guid),
     UseWith(Guid, Guid), // item, target (e.g. healing kit, tool)
-    QueryDebugInfo(Guid),
+    QueryDebugInfo(CommandTarget),
     CastSpell(u32, Option<Guid>), // spell_id, target (None for untargeted)
     SetCombatMode(CombatMode),
     ViewDetails(ContextView),
@@ -348,25 +350,27 @@ pub trait TabController {
             }
             ContextView::Spell(spell_id) => {
                 let target = CommandTarget::Spell(spell_id);
-                debug::get_debug_info(
+                debug::get_details_info(
                     data,
-                    Some(view),
                     &target,
-                    |_| None,
                     Some(&data.spell_info),
-                    None,
                 )
             }
             ContextView::Enchantment(enchant) => {
                 let target = CommandTarget::Enchantment(enchant);
-                debug::get_debug_info(
+                debug::get_details_info(
                     data,
-                    Some(view),
                     &target,
-                    |_| None,
                     Some(&data.spell_info),
-                    None,
                 )
+            }
+            ContextView::DebugSpell(spell_id) => {
+                let target = CommandTarget::Spell(spell_id);
+                debug::get_debug_info(data, Some(view), &target, |_| None, Some(&data.spell_info), None)
+            }
+            ContextView::DebugEnchantment(enchant) => {
+                let target = CommandTarget::Enchantment(enchant);
+                debug::get_debug_info(data, Some(view), &target, |_| None, Some(&data.spell_info), None)
             }
             _ => vec![],
         }

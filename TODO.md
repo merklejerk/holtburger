@@ -159,7 +159,8 @@
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Splitting is broken.
 - [ ] Skill training not available.
-- [ ] Spell debug output is weird.
+- [x] Spell debug output is weird.
+- [ ] Assess takes 2 tries to show up.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

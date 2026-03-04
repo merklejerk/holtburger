@@ -60,7 +60,7 @@ impl TabController for NearbyTab {
         let player_guid = data.player_guid;
 
         if let (Some(interaction), CommandTarget::Entity(guid, _)) = (interaction, &target) {
-            let e = data.entities.get(&guid).unwrap();
+            let e = data.entities.get(guid).unwrap();
             let class = classification::classify_entity(e);
             let is_self = Some(e.guid) == player_guid;
 

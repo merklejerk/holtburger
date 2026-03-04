@@ -25,7 +25,10 @@ impl AppState {
                     result.merge(self.handle_app_action(sub));
                 }
             }
-            _ => unreachable!("AppAction should have been handled by the page: {:?}", action),
+            _ => unreachable!(
+                "AppAction should have been handled by the page: {:?}",
+                action
+            ),
         }
         result
     }

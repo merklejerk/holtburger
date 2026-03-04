@@ -193,7 +193,8 @@ impl Entity {
     }
 
     pub fn max_stack_size(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::MaxStackSize).map(|v| v as u32)
+        self.get_int_prop(PropertyInt::MaxStackSize)
+            .map(|v| v as u32)
     }
 
     pub fn priority(&self) -> Option<u32> {
@@ -442,10 +443,11 @@ impl Entity {
 
     pub fn can_hold_items(&self) -> bool {
         self.items_capacity().unwrap_or(0) > 0
-    } 
+    }
 
     pub fn has_active_pet(&self) -> bool {
-        self.get_instance_prop(PropertyInstanceId::Pet).is_some_and(|id| id != Guid::NULL)
+        self.get_instance_prop(PropertyInstanceId::Pet)
+            .is_some_and(|id| id != Guid::NULL)
     }
 }
 

@@ -1,5 +1,4 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_core::client::types::ClientCommand;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
@@ -82,12 +81,8 @@ impl TabController for EquipTab {
                         verbs.push(Verb::new(vec![AppAction::Unequip(guid)], 'q', "Unequip"));
                     }
                 } else {
-                    let s = slot;
                     verbs.push(Verb::new(
-                        vec![AppAction::SendCommands(vec![ClientCommand::GetAndWield {
-                            item: guid,
-                            slot: Some(s),
-                        }])],
+                        vec![AppAction::EquipInSlot(guid, slot)],
                         'e',
                         "Equip",
                     ));

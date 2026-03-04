@@ -5,29 +5,31 @@ use holtburger_core::client::types::ClientCommand;
 
 impl AppState {
     pub fn handle_app_event(&mut self, action: AppEvent) -> UpdateResult {
-        let mut result = UpdateResult::new();
-        match action {
-            AppEvent::Tick(elapsed) => {
-                result = self.update_tick(elapsed);
-            }
+        let mut result = match action {
+            AppEvent::Tick(elapsed) => self.update_tick(elapsed),
             AppEvent::KeyPress(key, width) => {
-                result = self.handle_key_press(key, width);
-                result.needs_redraw = true; // Input always redraws
+                let mut res = self.handle_key_press(key, width);
+                res.needs_redraw = true; // Input always redraws
+                res
             }
             AppEvent::Mouse(mouse) => {
-                result = self.handle_mouse_event(mouse);
-                result.needs_redraw = true;
+                let mut res = self.handle_mouse_event(mouse);
+                res.needs_redraw = true;
+                res
             }
             AppEvent::ReceivedViewEvent(event) => {
                 let should_redraw =
                     !matches!(event, holtburger_core::ClientViewEvent::LogMessage(_));
 
                 // Global routing must happen first for character lists/login
-                let view_result = self.handle_client_view_event(event);
-                result.merge(view_result);
-                result.needs_redraw = should_redraw;
+                let mut res = self.handle_client_view_event(event);
+                res.needs_redraw = should_redraw;
+                res
             }
-        }
+        };
+
+        // Standardized action draining across all event types
+        self.drain_actions(&mut result);
 
         // Track bytes_out for commands
         for _cmd in &result.commands {

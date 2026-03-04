@@ -239,6 +239,7 @@ pub enum AppAction {
     PickUp(Guid),
     Drop(Guid),
     Equip(Guid),
+    EquipInSlot(Guid, TargetSlot),
     Unequip(Guid),
     TalkTo(Guid),
     Open(Guid),
@@ -252,6 +253,8 @@ pub enum AppAction {
     QueryDebugInfo(CommandTarget),
     CastSpell(u32, Option<Guid>), // spell_id, target (None for untargeted)
     SetCombatMode(CombatMode),
+    LevelUpStat(StatType, u32),
+    TrainSkill(SkillType, u32),
     ViewDetails(ContextView),
     Log(ChatMessageKind, String),
     BeginInteraction(Interaction),

@@ -6,6 +6,8 @@ use holtburger_common::properties::{
 };
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
+use crate::pages::game::GameData;
+use crate::pages::game::ViewState;
 use ratatui::text::Line;
 use std::collections::HashMap;
 
@@ -18,6 +20,8 @@ pub struct PlayerDebugInfo<'a> {
 
 /// Generates a list of strings representing the debug information for a target.
 pub fn get_debug_info(
+    data: &GameData,
+    view: Option<&ViewState>,
     target: &CommandTarget,
     name_lookup: impl Fn(Guid) -> Option<String>,
     spell_lookup: Option<
@@ -28,7 +32,8 @@ pub fn get_debug_info(
     let mut lines = Vec::new();
 
     match target {
-        CommandTarget::VendorItem(v) => {
+        CommandTarget::VendorItem(guid) => {
+            let Some(v) = view.and_then(|v| v.vendor.as_ref()).and_then(|vendor| vendor.items.iter().find(|i| i.guid == *guid)) else { return lines; };
             let name = v
                 .properties
                 .strings
@@ -47,7 +52,8 @@ pub fn get_debug_info(
             lines.push(Line::from(format!("Value:  {}", value)));
             lines.push(Line::from(format!("WCID:   {}", v.wcid)));
         }
-        CommandTarget::Entity(e, _) => {
+        CommandTarget::Entity(guid, _) => {
+            let Some(e) = data.entities.get(guid) else { return lines; };
             lines.push(Line::from(format!("DEBUG INFO: {}", e.name())));
             lines.push(Line::from(format!("GUID:   {:08X}", e.guid)));
             let class = classification::classify_entity(e);

@@ -16,7 +16,7 @@ pub struct TradeTab {
 }
 
 impl TradeTab {
-    fn get_target<'a>(&self, data: &'a GameData, view: &'a ViewState) -> CommandTarget<'a> {
+    fn get_target(&self, data: &GameData, view: &ViewState) -> CommandTarget {
         if let Some(trade) = &data.trade {
             let items = match self.trade_focus {
                 TradeFocus::Local => &trade.self_side.items,
@@ -25,12 +25,12 @@ impl TradeTab {
             if let Some(&guid) = items.get(self.selected_index)
                 && let Some(entity) = data.entities.get(&guid)
             {
-                return CommandTarget::Entity(entity, None);
+                return CommandTarget::Entity(entity.guid, None);
             }
         } else if let Some(vendor) = &view.vendor
             && let Some(m) = vendor.items.get(self.selected_index)
         {
-            return CommandTarget::VendorItem(m);
+            return CommandTarget::VendorItem(m.guid);
         }
         CommandTarget::None
     }
@@ -68,26 +68,26 @@ impl TabController for TradeTab {
         }
 
         if let Some(target_item) = match &target {
-            CommandTarget::VendorItem(v) => Some(v.guid),
-            CommandTarget::Entity(e, _) => Some(e.guid),
+            CommandTarget::VendorItem(guid) => Some(guid),
+            CommandTarget::Entity(guid, _) => Some(guid),
             _ => None,
         } {
             verbs.push(Verb::new(
-                vec![AppAction::Assess(target_item)],
+                vec![AppAction::Assess(*target_item)],
                 'a',
                 "Assess",
             ));
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(target_item)],
+                vec![AppAction::QueryDebugInfo(*target_item)],
                 'g',
                 "Debug",
             ));
         }
 
         if let Some(vendor) = &view.vendor {
-            if let CommandTarget::VendorItem(v) = target {
+            if let CommandTarget::VendorItem(guid) = target {
                 verbs.push(Verb::new(
-                    vec![AppAction::BuyFromVendor(vendor.vendor_guid, v.guid, 1)],
+                    vec![AppAction::BuyFromVendor(vendor.vendor_guid, guid, 1)],
                     'b',
                     "Buy",
                 ));

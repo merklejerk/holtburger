@@ -16,7 +16,7 @@ pub struct CharacterTab {
 }
 
 impl CharacterTab {
-    fn get_target<'a>(&self, data: &'a GameData) -> CommandTarget<'a> {
+    fn get_target(&self, data: &GameData) -> CommandTarget {
         get_command_target_at_index(data, self.selected_index).unwrap_or(CommandTarget::None)
     }
 
@@ -175,7 +175,7 @@ impl TabController for CharacterTab {
     }
 }
 
-fn get_command_target_at_index(data: &GameData, index: usize) -> Option<CommandTarget<'_>> {
+fn get_command_target_at_index(data: &GameData, index: usize) -> Option<CommandTarget> {
     let lines = get_char_tab_lines(data);
     lines.get(index).map(|line| match line {
         CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => {

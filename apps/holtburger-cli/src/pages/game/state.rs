@@ -11,7 +11,9 @@ use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
-use crate::types::{AppAction, ChatMessageKind, ContextView, FocusedPane, Interaction, UpdateResult};
+use crate::types::{
+    AppAction, ChatMessageKind, ContextView, FocusedPane, Interaction, UpdateResult,
+};
 
 #[derive(Default)]
 pub struct GameState {
@@ -55,11 +57,15 @@ impl GameState {
             }
             ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
                 let entity_ref = entity.as_ref();
-                self.data.entities.insert(entity_ref.guid, entity_ref.clone());
+                self.data
+                    .entities
+                    .insert(entity_ref.guid, entity_ref.clone());
             }
             ClientViewEvent::EntitySpawned { entity } => {
                 let entity_ref = entity.as_ref();
-                self.data.entities.insert(entity_ref.guid, entity_ref.clone());
+                self.data
+                    .entities
+                    .insert(entity_ref.guid, entity_ref.clone());
                 self.update_inventory_and_equipment(entity_ref);
             }
             ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
@@ -70,10 +76,9 @@ impl GameState {
                     }
                     needs_update = true;
                 }
-                if needs_update
-                    && let Some(entity) = self.data.entities.get(&guid).cloned() {
-                        self.update_inventory_and_equipment(&entity);
-                    }
+                if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
+                    self.update_inventory_and_equipment(&entity);
+                }
             }
             ClientViewEvent::EntityMoved { guid, pos } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
@@ -92,9 +97,11 @@ impl GameState {
                 // If we just opened a vendor and we initiated it, switch to Trade tab.
                 if let Some(v_guid) = vendor_guid
                     && let Some((last_time, target_guid)) = self.view.last_trade_initiation
-                        && target_guid == v_guid && last_time.elapsed() < std::time::Duration::from_secs(5) {
-                            self.dashboard.active_tab = crate::types::DashboardTab::Trade;
-                        }
+                    && target_guid == v_guid
+                    && last_time.elapsed() < std::time::Duration::from_secs(5)
+                {
+                    self.dashboard.active_tab = crate::types::DashboardTab::Trade;
+                }
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
                 let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
@@ -102,9 +109,11 @@ impl GameState {
                 // If we just opened a trade and we initiated it, switch to Trade tab.
                 if let Some(p_guid) = partner_guid
                     && let Some((last_time, target_guid)) = self.view.last_trade_initiation
-                        && target_guid == p_guid && last_time.elapsed() < std::time::Duration::from_secs(5) {
-                            self.dashboard.active_tab = crate::types::DashboardTab::Trade;
-                        }
+                    && target_guid == p_guid
+                    && last_time.elapsed() < std::time::Duration::from_secs(5)
+                {
+                    self.dashboard.active_tab = crate::types::DashboardTab::Trade;
+                }
             }
             ClientViewEvent::EntityIdentified { entity } => {
                 let entity_ref = entity.as_ref();
@@ -134,9 +143,9 @@ impl GameState {
             AppAction::Assess(guid) => {
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
-                    self.handle_action(AppAction::ChangeContextView(crate::types::ContextView::Assess(
-                        guid,
-                    )))
+                    self.handle_action(AppAction::ChangeContextView(
+                        crate::types::ContextView::Assess(guid),
+                    ))
                     .unwrap_or_default(),
                 );
             }
@@ -475,7 +484,6 @@ impl GameState {
         }
         result
     }
-
 }
 
 #[derive(Debug, Clone)]

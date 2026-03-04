@@ -1,4 +1,3 @@
-
 use std::time::Instant;
 
 use holtburger_common::Guid;

@@ -166,7 +166,10 @@ impl AppState {
                 }
 
                 // Bubble down the event so chat/logs can still get network pings if needed
-                result.merge(self.page.handle_view_event(ClientViewEvent::NetPulse { bytes_in, bytes_out }));
+                result.merge(self.page.handle_view_event(ClientViewEvent::NetPulse {
+                    bytes_in,
+                    bytes_out,
+                }));
             }
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;

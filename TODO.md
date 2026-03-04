@@ -161,6 +161,8 @@
 - [ ] Splitting is broken.
 - [ ] Skill training not available.
 - [ ] Assess takes 2 tries to show up.
+- [ ] World clock takes some time to show up.
+- [ ] Should auto-switch to trade tab when initiating trade/vendor.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

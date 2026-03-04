@@ -354,27 +354,33 @@ pub trait TabController {
             }
             ContextView::Spell(spell_id) => {
                 let target = CommandTarget::Spell(spell_id);
-                debug::get_details_info(
-                    data,
-                    &target,
-                    Some(&data.spell_info),
-                )
+                debug::get_details_info(data, &target, Some(&data.spell_info))
             }
             ContextView::Enchantment(enchant) => {
                 let target = CommandTarget::Enchantment(enchant);
-                debug::get_details_info(
-                    data,
-                    &target,
-                    Some(&data.spell_info),
-                )
+                debug::get_details_info(data, &target, Some(&data.spell_info))
             }
             ContextView::DebugSpell(spell_id) => {
                 let target = CommandTarget::Spell(spell_id);
-                debug::get_debug_info(data, Some(view), &target, |_| None, Some(&data.spell_info), None)
+                debug::get_debug_info(
+                    data,
+                    Some(view),
+                    &target,
+                    |_| None,
+                    Some(&data.spell_info),
+                    None,
+                )
             }
             ContextView::DebugEnchantment(enchant) => {
                 let target = CommandTarget::Enchantment(enchant);
-                debug::get_debug_info(data, Some(view), &target, |_| None, Some(&data.spell_info), None)
+                debug::get_debug_info(
+                    data,
+                    Some(view),
+                    &target,
+                    |_| None,
+                    Some(&data.spell_info),
+                    None,
+                )
             }
             _ => vec![],
         }

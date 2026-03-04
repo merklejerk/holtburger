@@ -39,7 +39,6 @@ pub struct AppState {
     pub net_stats: NetStats,
     pub world_name: String,
     pub verbosity: u8,
-    pub app_action_tx: tokio::sync::mpsc::UnboundedSender<crate::types::AppAction>,
 }
 
 pub struct RenderContext<'a> {

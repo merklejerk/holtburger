@@ -257,37 +257,35 @@ impl GameState {
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
             }
-            AppAction::QueryDebugInfo(target) => {
-                match target {
-                    crate::types::CommandTarget::Entity(guid)
-                    | crate::types::CommandTarget::EntityWithSlot(guid, _) => {
-                        result
-                            .commands
-                            .push(ClientCommand::QueryEntityDebugInfo(guid));
-                        result.merge(
-                            self.handle_action(AppAction::RequestDebugContext(Some(guid)))
-                                .unwrap_or_default(),
-                        );
-                    }
-                    crate::types::CommandTarget::Spell(spell_id) => {
-                        result.merge(
-                            self.handle_action(AppAction::ChangeContextView(
-                                crate::types::ContextView::DebugSpell(spell_id),
-                            ))
+            AppAction::QueryDebugInfo(target) => match target {
+                crate::types::CommandTarget::Entity(guid)
+                | crate::types::CommandTarget::EntityWithSlot(guid, _) => {
+                    result
+                        .commands
+                        .push(ClientCommand::QueryEntityDebugInfo(guid));
+                    result.merge(
+                        self.handle_action(AppAction::RequestDebugContext(Some(guid)))
                             .unwrap_or_default(),
-                        );
-                    }
-                    crate::types::CommandTarget::Enchantment(enchant) => {
-                        result.merge(
-                            self.handle_action(AppAction::ChangeContextView(
-                                crate::types::ContextView::DebugEnchantment(enchant),
-                            ))
-                            .unwrap_or_default(),
-                        );
-                    }
-                    _ => {}
+                    );
                 }
-            }
+                crate::types::CommandTarget::Spell(spell_id) => {
+                    result.merge(
+                        self.handle_action(AppAction::ChangeContextView(
+                            crate::types::ContextView::DebugSpell(spell_id),
+                        ))
+                        .unwrap_or_default(),
+                    );
+                }
+                crate::types::CommandTarget::Enchantment(enchant) => {
+                    result.merge(
+                        self.handle_action(AppAction::ChangeContextView(
+                            crate::types::ContextView::DebugEnchantment(enchant),
+                        ))
+                        .unwrap_or_default(),
+                    );
+                }
+                _ => {}
+            },
             AppAction::CastSpell(spell_id, target) => {
                 // TODO: Auto toggle combat mode.
                 if let Some(target) = target {
@@ -303,25 +301,24 @@ impl GameState {
             AppAction::SetCombatMode(mode) => {
                 result.commands.push(ClientCommand::SetCombatMode(mode));
             }
-            AppAction::LevelUpStat(stat, xp_spent) => {
-                match stat {
-                    crate::types::StatType::Attribute(attribute) => {
-                        result
-                            .commands
-                            .push(ClientCommand::RaiseAttribute { attribute, xp_spent });
-                    }
-                    crate::types::StatType::Vital(vital) => {
-                        result
-                            .commands
-                            .push(ClientCommand::RaiseVital { vital, xp_spent });
-                    }
-                    crate::types::StatType::Skill(skill) => {
-                        result
-                            .commands
-                            .push(ClientCommand::RaiseSkill { skill, xp_spent });
-                    }
+            AppAction::LevelUpStat(stat, xp_spent) => match stat {
+                crate::types::StatType::Attribute(attribute) => {
+                    result.commands.push(ClientCommand::RaiseAttribute {
+                        attribute,
+                        xp_spent,
+                    });
                 }
-            }
+                crate::types::StatType::Vital(vital) => {
+                    result
+                        .commands
+                        .push(ClientCommand::RaiseVital { vital, xp_spent });
+                }
+                crate::types::StatType::Skill(skill) => {
+                    result
+                        .commands
+                        .push(ClientCommand::RaiseSkill { skill, xp_spent });
+                }
+            },
             AppAction::TrainSkill(skill, credits) => {
                 result
                     .commands

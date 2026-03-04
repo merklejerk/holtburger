@@ -685,7 +685,9 @@ pub fn get_details_info(
                 }
             } else {
                 lines.push(Line::from(format!("Spell #{}", spell_id)));
-                lines.push(Line::from("Details unavailable (spell data still loading)."));
+                lines.push(Line::from(
+                    "Details unavailable (spell data still loading).",
+                ));
             }
         }
         CommandTarget::Enchantment(enchant) => {
@@ -695,11 +697,18 @@ pub fn get_details_info(
                 .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
 
             lines.push(Line::from(spell_name));
-            lines.push(Line::from(format!("Duration: {}", format_duration(enchant.duration))));
+            lines.push(Line::from(format!(
+                "Duration: {}",
+                format_duration(enchant.duration)
+            )));
 
             let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
             if let Some(key_display) = enchantment_stat_key_name(enchant, flags) {
-                let sign = if enchant.stat_mod_value >= 0.0 { "+" } else { "" };
+                let sign = if enchant.stat_mod_value >= 0.0 {
+                    "+"
+                } else {
+                    ""
+                };
                 lines.push(Line::from(format!(
                     "Effect: {}{} {}",
                     sign, enchant.stat_mod_value, key_display
@@ -715,10 +724,7 @@ pub fn get_details_info(
     lines
 }
 
-fn enchantment_stat_key_name(
-    enchant: &Enchantment,
-    flags: EnchantmentTypeFlags,
-) -> Option<String> {
+fn enchantment_stat_key_name(enchant: &Enchantment, flags: EnchantmentTypeFlags) -> Option<String> {
     if flags.contains(EnchantmentTypeFlags::ATTRIBUTE) {
         AttributeType::from_repr(enchant.stat_mod_key).map(|a| a.to_string())
     } else if flags.contains(EnchantmentTypeFlags::SECOND_ATT) {

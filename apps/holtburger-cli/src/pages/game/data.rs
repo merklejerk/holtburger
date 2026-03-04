@@ -41,8 +41,6 @@ pub struct GameData {
     pub spell_names: HashMap<u32, String>,
     /// Details about spell effects.
     pub spell_info: HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
-    /// Master skill system table.
-    pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
     /// Server name (e.g. "Morningthaw").
@@ -78,7 +76,6 @@ impl Default for GameData {
             player_spells: Vec::new(),
             spell_names: HashMap::new(),
             spell_info: HashMap::new(),
-            skill_table: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,

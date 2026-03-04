@@ -11,10 +11,12 @@ impl WorldState {
         let mut events = Vec::new();
 
         // Delegate player-specific messages first
-        if self
-            .player
-            .handle_message(msg, &mut events, self.xp_table.as_ref())
-        {
+        if self.player.handle_message(
+            msg,
+            &mut events,
+            self.xp_table.as_ref(),
+            self.skill_table.as_deref(),
+        ) {
             for ev in &mut events {
                 match ev {
                     StateEvent::SpellUpdated { spell_id, name } if name.is_none() => {

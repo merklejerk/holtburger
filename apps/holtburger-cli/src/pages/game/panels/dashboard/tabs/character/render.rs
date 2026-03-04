@@ -468,14 +468,10 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
                 .map(|next| next.saturating_sub(s.spent_xp) as u64);
         } else if s.training == TrainingLevel::Untrained {
             // Check if we can train it
-            sp_cost = data
-                .skill_table
-                .as_ref()
-                .and_then(|st| st.skill_base_hash.get(&(s.skill_type as u32)))
-                .and_then(|base| {
-                    let cost = base.trained_cost;
-                    if cost > 0 { Some(cost as u32) } else { None }
-                });
+            let cost = s.trained_cost;
+            if cost > 0 {
+                sp_cost = Some(cost);
+            }
         }
 
         lines.push(CharTabLine::Stat {

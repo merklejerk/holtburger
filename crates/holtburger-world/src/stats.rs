@@ -243,6 +243,10 @@ pub struct Skill {
     pub base: u32,
     pub current: u32,
     pub training: TrainingLevel,
+    /// The cost to train this skill from Untrained to Trained.
+    pub trained_cost: u32,
+    /// The cost to train this skill from Trained to Specialized.
+    pub specialized_cost: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]

@@ -16,6 +16,7 @@ impl PlayerState {
         msg: &GameMessage,
         events: &mut Vec<StateEvent>,
         xp_table: Option<&holtburger_dat::file_type::XpTable>,
+        skill_table: Option<&holtburger_dat::file_type::SkillTable>,
     ) -> bool {
         match msg {
             GameMessage::ObjectCreate(data) => {
@@ -179,6 +180,11 @@ impl PlayerState {
                     let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
                     let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
 
+                    let (trained_cost, specialized_cost) = skill_table
+                        .and_then(|t| t.skill_base_hash.get(&(skill_type as u32)))
+                        .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
+                        .unwrap_or((0, 0));
+
                     let skill_obj = stats::Skill {
                         skill_type,
                         ranks: *ranks,
@@ -193,6 +199,8 @@ impl PlayerState {
                         base: base_val,
                         current: current_val,
                         training,
+                        trained_cost,
+                        specialized_cost,
                     };
 
                     self.skills.insert(skill_type, skill_obj.clone());
@@ -231,6 +239,11 @@ impl PlayerState {
                     let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
                     let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
 
+                    let (trained_cost, specialized_cost) = skill_table
+                        .and_then(|t| t.skill_base_hash.get(&(skill_type as u32)))
+                        .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
+                        .unwrap_or((0, 0));
+
                     let skill_obj = stats::Skill {
                         skill_type,
                         ranks: *ranks,
@@ -245,6 +258,8 @@ impl PlayerState {
                         base: base_val,
                         current: current_val,
                         training,
+                        trained_cost,
+                        specialized_cost,
                     };
 
                     self.skills.insert(skill_type, skill_obj.clone());
@@ -435,6 +450,12 @@ impl PlayerState {
 
                                 let base_val =
                                     self.derive_skill_value(skill_type, s.ranks, s.init, false);
+
+                                let (trained_cost, specialized_cost) = skill_table
+                                    .and_then(|t| t.skill_base_hash.get(&(skill_type as u32)))
+                                    .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
+                                    .unwrap_or((0, 0));
+
                                 let skill = stats::Skill {
                                     skill_type,
                                     ranks: s.ranks,
@@ -449,6 +470,8 @@ impl PlayerState {
                                     base: base_val,
                                     current: base_val,
                                     training,
+                                    trained_cost,
+                                    specialized_cost,
                                 };
                                 self.skills.insert(skill_type, skill);
                             }

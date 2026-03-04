@@ -238,6 +238,7 @@ async fn main() -> Result<()> {
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),
+        server_time: None,
     };
 
     if args.verbose > 0 {

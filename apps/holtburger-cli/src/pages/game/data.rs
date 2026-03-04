@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::time::Instant;
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
@@ -46,8 +45,6 @@ pub struct GameData {
     pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
-    /// Current estimated server time and when it was last synced.
-    pub server_time: Option<(f64, Instant)>,
     /// Server name (e.g. "Morningthaw").
     pub world_name: String,
     /// Current combat stances.
@@ -83,7 +80,6 @@ impl Default for GameData {
             spell_info: HashMap::new(),
             skill_table: None,
             entities: HashMap::new(),
-            server_time: None,
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
             noclip: false,
@@ -122,19 +118,6 @@ impl GameData {
                 }
             }
             stack.extend(children);
-        }
-    }
-
-    pub fn current_server_time(&self) -> f64 {
-        match self.server_time {
-            Some((server_val, local_then)) => {
-                let elapsed = local_then.elapsed().as_secs_f64();
-                server_val + elapsed
-            }
-            None => std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs_f64(),
         }
     }
 }

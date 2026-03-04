@@ -27,18 +27,11 @@ impl AppState {
                     game.data.player_guid = Some(*guid);
                     game.data.character_name = Some(name.clone());
                     game.data.world_name = self.world_name.clone();
-                } else {
-                    self.page = Page::Game(Box::new(GameState::new(
-                        *guid,
-                        name.clone(),
-                        self.world_name.clone(),
-                    )));
                 }
             }
             ClientViewEvent::ServerTimeUpdated { time } => {
-                if let Some(game) = self.game_option_mut() {
-                    game.data.server_time = Some((*time, std::time::Instant::now()));
-                }
+                let value = Some((*time, std::time::Instant::now()));
+                self.server_time = value;
             }
             _ => {}
         }
@@ -58,12 +51,12 @@ impl AppState {
                     && sel.selected_character_index < sel.characters.len()
                 {
                     let char_info = &sel.characters[sel.selected_character_index];
-                    self.page =
-                        crate::types::Page::Game(Box::new(crate::pages::game::GameState::new(
-                            char_info.guid,
-                            char_info.name.clone(),
-                            self.world_name.clone(),
-                        )));
+                    let game = GameState::new(
+                        char_info.guid,
+                        char_info.name.clone(),
+                        self.world_name.clone(),
+                    );
+                    self.page = crate::types::Page::Game(Box::new(game));
                 }
             }
             ClientViewEvent::ErrorRaised {

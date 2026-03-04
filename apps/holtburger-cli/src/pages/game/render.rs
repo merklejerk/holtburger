@@ -53,6 +53,7 @@ impl GameState {
             &self.view,
             ctx.logon_retry,
             ctx.enter_retry,
+            ctx.server_time,
             chunks[0],
         );
 

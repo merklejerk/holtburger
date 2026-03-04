@@ -246,7 +246,8 @@ impl GameState {
             }
             AppAction::QueryDebugInfo(target) => {
                 match target {
-                    crate::types::CommandTarget::Entity(guid, _) => {
+                    crate::types::CommandTarget::Entity(guid)
+                    | crate::types::CommandTarget::EntityWithSlot(guid, _) => {
                         result
                             .commands
                             .push(ClientCommand::QueryEntityDebugInfo(guid));

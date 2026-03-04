@@ -75,7 +75,8 @@ pub enum StatType {
 
 #[derive(Debug, Clone)]
 pub enum CommandTarget {
-    Entity(Guid, Option<TargetSlot>),
+    Entity(Guid),
+    EntityWithSlot(Guid, TargetSlot),
     VendorItem(Guid),
     Enchantment(Enchantment),
     Stat(StatType, Option<u64>, Option<u32>),
@@ -314,7 +315,7 @@ pub trait TabController {
 
                 if let Some(e) = target_guid.and_then(|guid| data.entities.get(&guid)) {
                     let guid = e.guid;
-                    let target = CommandTarget::Entity(guid, None);
+                    let target = CommandTarget::Entity(guid);
                     let player_info = if Some(guid) == player_guid {
                         Some(debug::PlayerDebugInfo {
                             attributes: &data.attributes,

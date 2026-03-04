@@ -270,7 +270,6 @@ impl TabController for InventoryTab {
             verbs.push(Verb::new(
                 vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
                     cur_entity.guid,
-                    None,
                 ))],
                 'g',
                 "Debug",

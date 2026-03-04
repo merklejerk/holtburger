@@ -33,7 +33,7 @@ impl NearbyTab {
     fn get_target(&self, data: &GameData) -> CommandTarget {
         let entities = get_entities(data);
         if let Some((e, _, _)) = entities.get(self.selected_index) {
-            CommandTarget::Entity(e.guid, None)
+            CommandTarget::Entity(e.guid)
         } else {
             CommandTarget::None
         }
@@ -59,7 +59,7 @@ impl TabController for NearbyTab {
         let target = self.get_target(data);
         let player_guid = data.player_guid;
 
-        if let (Some(interaction), CommandTarget::Entity(guid, _)) = (interaction, &target) {
+        if let (Some(interaction), CommandTarget::Entity(guid)) = (interaction, &target) {
             let e = data.entities.get(guid).unwrap();
             let class = classification::classify_entity(e);
             let is_self = Some(e.guid) == player_guid;
@@ -128,7 +128,7 @@ impl TabController for NearbyTab {
             }
         }
 
-        if let CommandTarget::Entity(guid, _) = target {
+        if let CommandTarget::Entity(guid) = target {
             let e = data.entities.get(&guid).unwrap();
             let class = classification::classify_entity(e);
             let is_open_container = data.open_containers.contains(&e.guid);
@@ -151,9 +151,7 @@ impl TabController for NearbyTab {
                     "Target",
                 ),
                 Verb::new(
-                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
-                        e.guid, None,
-                    ))],
+                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(e.guid))],
                     'g',
                     "Debug",
                 ),

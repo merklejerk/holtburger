@@ -15,7 +15,7 @@ use holtburger_world::entity::Entity;
 
 pub enum EquipTabLine<'a> {
     Header(String, bool),
-    Item(&'a Entity, bool, bool, Option<TargetSlot>),
+    Item(&'a Entity, bool, bool, TargetSlot),
 }
 
 pub fn render_equip_tab(
@@ -186,15 +186,10 @@ pub fn get_lines<'a>(data: &'a GameData) -> Vec<EquipTabLine<'a>> {
         for (item, is_here, is_elsewhere) in items_in_slot {
             // Map back to the specific TargetSlot if applicable, otherwise a generic mask
             let context_slot = match target_slot {
-                Some(slot) => Some(slot),
-                _ => Some(TargetSlot::EquipMask(mask)),
+                Some(slot) => slot,
+                _ => TargetSlot::EquipMask(mask),
             };
-            lines.push(EquipTabLine::Item(
-                item,
-                is_here,
-                is_elsewhere,
-                context_slot,
-            ));
+            lines.push(EquipTabLine::Item(item, is_here, is_elsewhere, context_slot));
         }
     }
 

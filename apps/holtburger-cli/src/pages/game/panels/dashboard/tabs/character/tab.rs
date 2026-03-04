@@ -62,7 +62,7 @@ impl TabController for CharacterTab {
                     "Debug",
                 ));
             }
-            CommandTarget::Stat(st, Some(xp_cost), sp_cost) => {
+            CommandTarget::Stat(st, Some(xp_cost), _sp_cost) => {
                 let xp_spent = xp_cost as u32;
                 let is_unassigned_xp_enough = data
                     .level_info

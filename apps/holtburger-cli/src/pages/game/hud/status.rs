@@ -34,7 +34,15 @@ pub fn render_status_bar(
         .split(area);
 
     render_vitals(f, data, view, chunks[0]);
-    render_status_panel(f, data, view, logon_retry, enter_retry, server_time, chunks[1]);
+    render_status_panel(
+        f,
+        data,
+        view,
+        logon_retry,
+        enter_retry,
+        server_time,
+        chunks[1],
+    );
 }
 
 fn render_status_panel(

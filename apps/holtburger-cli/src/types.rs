@@ -8,7 +8,6 @@ use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_world::entity::Entity;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -75,9 +74,9 @@ pub enum StatType {
 }
 
 #[derive(Debug, Clone)]
-pub enum CommandTarget<'a> {
-    Entity(&'a Entity, Option<TargetSlot>),
-    VendorItem(&'a holtburger_world::vendor::CoreVendorItem),
+pub enum CommandTarget {
+    Entity(Guid, Option<TargetSlot>),
+    VendorItem(Guid),
     Enchantment(Enchantment),
     Stat(StatType, Option<u64>, Option<u32>),
     Spell(u32),
@@ -313,7 +312,7 @@ pub trait TabController {
 
                 if let Some(e) = target_guid.and_then(|guid| data.entities.get(&guid)) {
                     let guid = e.guid;
-                    let target = CommandTarget::Entity(e, None);
+                    let target = CommandTarget::Entity(guid, None);
                     let player_info = if Some(guid) == player_guid {
                         Some(debug::PlayerDebugInfo {
                             attributes: &data.attributes,
@@ -326,6 +325,8 @@ pub trait TabController {
                     };
 
                     return debug::get_debug_info(
+                        data,
+                        Some(view),
                         &target,
                         |id| {
                             data.entities
@@ -347,11 +348,11 @@ pub trait TabController {
             }
             ContextView::Spell(spell_id) => {
                 let target = CommandTarget::Spell(spell_id);
-                debug::get_debug_info(&target, |_| None, Some(&data.spell_info), None)
+                debug::get_debug_info(data, Some(view), &target, |_| None, Some(&data.spell_info), None)
             }
             ContextView::Enchantment(enchant) => {
                 let target = CommandTarget::Enchantment(enchant);
-                debug::get_debug_info(&target, |_| None, Some(&data.spell_info), None)
+                debug::get_debug_info(data, Some(view), &target, |_| None, Some(&data.spell_info), None)
             }
             _ => vec![],
         }

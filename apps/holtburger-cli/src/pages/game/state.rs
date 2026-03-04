@@ -119,6 +119,7 @@ impl GameState {
                 let entity_ref = entity.as_ref();
                 self.update_inventory_and_equipment(entity_ref);
                 self.handle_entity_identified(entity_ref);
+                result.needs_redraw = true;
             }
             ClientViewEvent::NoClipUpdated { .. } => {
                 result.merge(self.handle_navigation_event(event));
@@ -475,6 +476,7 @@ impl GameState {
         let guid = entity.guid;
         self.data.entities.insert(guid, entity.clone());
         self.view.context_view = ContextView::Assess(guid);
+        self.refresh_context_buffer();
     }
 
     pub(crate) fn update_inventory_and_equipment(&mut self, entity: &Entity) {

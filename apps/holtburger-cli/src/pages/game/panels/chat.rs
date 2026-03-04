@@ -52,7 +52,7 @@ impl ChatState {
         }
     }
 
-    pub fn handle_event(&mut self, event: &holtburger_core::ClientViewEvent) {
+    pub fn handle_event(&mut self, event: holtburger_core::ClientViewEvent) {
         use holtburger_core::ClientViewEvent;
         use holtburger_protocol::messages::ChatMessageType;
         match event {
@@ -68,10 +68,10 @@ impl ChatState {
                 } else {
                     ChatMessageKind::System
                 };
-                self.log(kind, msg.clone());
+                self.log(kind, msg);
             }
             ClientViewEvent::ServerMessage { message, chat_type } => {
-                let kind = match ChatMessageType::from_repr(*chat_type) {
+                let kind = match ChatMessageType::from_repr(chat_type) {
                     Some(ChatMessageType::Error) => ChatMessageKind::Error,
                     Some(ChatMessageType::Warning) => ChatMessageKind::Warning,
                     Some(ChatMessageType::Broadcast)
@@ -81,7 +81,7 @@ impl ChatState {
                     | Some(ChatMessageType::DirectSpeech) => ChatMessageKind::Info,
                     _ => ChatMessageKind::System,
                 };
-                self.log(kind, message.clone());
+                self.log(kind, message);
             }
             ClientViewEvent::Chat { sender, message } => {
                 self.log(ChatMessageKind::Chat, format!("{}: {}", sender, message));

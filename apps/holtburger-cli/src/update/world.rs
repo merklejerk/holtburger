@@ -116,18 +116,7 @@ impl AppState {
             | ClientViewEvent::WorldNameUpdated(_) => {
                 self.handle_setup_event(&event);
             }
-            ClientViewEvent::LogMessage(_)
-            | ClientViewEvent::ServerMessage { .. }
-            | ClientViewEvent::Chat { .. }
-            | ClientViewEvent::Emote { .. }
-            | ClientViewEvent::PingResponse
-            | ClientViewEvent::BootAccount(_)
-            | ClientViewEvent::NetPulse { .. }
-            | ClientViewEvent::Disconnected => {
-                if let Some(g) = self.game_option_mut() {
-                    g.chat.handle_event(&event);
-                }
-            }
+
             _ => {}
         }
 

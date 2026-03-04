@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+
 use std::time::Instant;
 
 use holtburger_common::Guid;
@@ -7,7 +7,7 @@ use holtburger_core::{ClientState, RetryState};
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
 use crate::types::{ChatMessageKind, Modal, Page};
 
-use crate::pages::game::{GameState, ViewState};
+use crate::pages::game::GameState;
 
 pub struct NetStats {
     pub bytes_in: u64,
@@ -53,32 +53,6 @@ pub struct RenderContext<'a> {
 }
 
 impl AppState {
-    pub fn game_view(&self) -> &ViewState {
-        match &self.page {
-            Page::Game(game) => &game.view,
-            _ => panic!("Accessing ViewState from non-game page!"),
-        }
-    }
-
-    pub fn game_view_mut(&mut self) -> &mut ViewState {
-        match &mut self.page {
-            Page::Game(game) => &mut game.view,
-            _ => panic!("Accessing ViewState from non-game page!"),
-        }
-    }
-
-    pub fn get_container_counts(&self) -> HashMap<Guid, usize> {
-        let mut counts = HashMap::new();
-        if let Page::Game(game) = &self.page {
-            for e in game.data.entities.values() {
-                if let Some(cid) = e.container_id() {
-                    *counts.entry(cid).or_default() += 1;
-                }
-            }
-        }
-        counts
-    }
-
     pub fn game_option(&self) -> Option<&GameState> {
         match &self.page {
             Page::Game(game) => Some(game),

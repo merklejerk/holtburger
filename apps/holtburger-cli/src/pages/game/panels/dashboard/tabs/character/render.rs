@@ -54,7 +54,7 @@ pub fn render_character_tab(
 
         let text = if info.xp_for_next_level > 0 {
             format!(
-                "{} XP until {} | {} XP unspent | {} SP",
+                "{} XP to {} | {} XP unspent | {} SP",
                 format_cost(info.xp_for_next_level.saturating_sub(info.xp_into_level)),
                 info.level + 1,
                 format_cost(info.unspent_xp),

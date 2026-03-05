@@ -84,6 +84,7 @@
 - [ ] Label unlocked chests in nearby tab.
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
+- [ ] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 
 ### High
 - [x] Fail when spell/attack distance is too far.

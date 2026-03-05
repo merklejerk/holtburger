@@ -252,9 +252,10 @@ impl GameState {
                 result.needs_redraw = true;
             }
             KeyCode::Esc => {
-                self.view.active_interaction = None;
                 if self.view.focused_pane == FocusedPane::Input {
                     self.view.focused_pane = self.view.previous_focused_pane;
+                } else if self.view.active_interaction.is_some() {
+                    self.view.active_interaction = None;
                 }
                 result.needs_redraw = true;
             }

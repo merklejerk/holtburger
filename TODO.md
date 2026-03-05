@@ -66,6 +66,7 @@
 - [x] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [x] Move interaction should clear interaction on confirm.
 - [x] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
+- [x] Use enum structs instead of tuples for `AppAction`.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -86,7 +87,6 @@
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
 - [ ] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
-- [ ] Use enum structs instead of tuples for `AppAction`.
 
 ### High
 - [x] Fail when spell/attack distance is too far.

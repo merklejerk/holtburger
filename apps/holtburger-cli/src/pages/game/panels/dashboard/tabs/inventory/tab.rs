@@ -74,10 +74,10 @@ impl InventoryTab {
                 input: VerbInputState::quantity("Split amount", 1, max_amount),
             });
         } else {
-            return Some(UpdateResult::new().with_action(AppAction::Log(
-                ChatMessageKind::System,
-                "Unable to split item: player inventory container is unavailable.".to_string(),
-            )));
+            return Some(UpdateResult::new().with_action(AppAction::Log {
+                kind: ChatMessageKind::System,
+                message: "Unable to split item: player inventory container is unavailable.".to_string(),
+            }));
         }
     
         Some(UpdateResult::new().with_redraw(true))
@@ -112,7 +112,10 @@ impl TabController for InventoryTab {
                         {
                             verbs.push(Verb::new(
                                 vec![
-                                    AppAction::UseWith(*interact_guid, pguid),
+                                    AppAction::UseWith {
+                                        item: *interact_guid,
+                                        target: pguid,
+                                    },
                                     AppAction::CancelInteraction,
                                 ],
                                 '\r',
@@ -129,7 +132,10 @@ impl TabController for InventoryTab {
                         {
                             verbs.push(Verb::new(
                                 vec![
-                                    AppAction::UseWith(*interact_guid, cur_entity.guid),
+                                    AppAction::UseWith {
+                                        item: *interact_guid,
+                                        target: cur_entity.guid,
+                                    },
                                     AppAction::CancelInteraction,
                                 ],
                                 '\r',
@@ -159,10 +165,10 @@ impl TabController for InventoryTab {
                             if !is_in_main_pack {
                                 verbs.push(Verb::new(
                                     vec![
-                                        AppAction::MoveItem(
-                                            *interact_guid,
-                                            player_guid.unwrap_or_default(),
-                                        ),
+                                        AppAction::MoveItem {
+                                            item: *interact_guid,
+                                            container: player_guid.unwrap_or_default(),
+                                        },
                                         AppAction::CancelInteraction,
                                     ],
                                     '\r',
@@ -173,7 +179,10 @@ impl TabController for InventoryTab {
                         }
                         if data.can_move_item_into_container(*interact_guid, cur_entity.guid) {
                             verbs.push(Verb::new(
-                                vec![AppAction::MoveItem(*interact_guid, cur_entity.guid)],
+                                vec![AppAction::MoveItem {
+                                    item: *interact_guid,
+                                    container: cur_entity.guid,
+                                }],
                                 '\r',
                                 "Move into container",
                             ));
@@ -186,11 +195,11 @@ impl TabController for InventoryTab {
                         {
                             verbs.push(Verb::new(
                                 vec![
-                                    AppAction::StackItems(
-                                        *interact_guid,
-                                        cur_entity.guid,
-                                        merge_amount,
-                                    ),
+                                    AppAction::StackItems {
+                                        source: *interact_guid,
+                                        destination: cur_entity.guid,
+                                        amount: merge_amount,
+                                    },
                                     AppAction::CancelInteraction,
                                 ],
                                 '\r',
@@ -205,7 +214,9 @@ impl TabController for InventoryTab {
             }
 
             verbs.push(Verb::new(
-                vec![AppAction::Assess(cur_entity.guid)],
+                vec![AppAction::Assess {
+                    guid: cur_entity.guid,
+                }],
                 'a',
                 "Assess",
             ));
@@ -221,30 +232,42 @@ impl TabController for InventoryTab {
                     let is_gem = cur_entity.item_type().is_some_and(|t| t == ItemType::GEM);
                     if !is_gem && cur_entity.target_item_type().is_some() {
                         verbs.push(Verb::new(
-                            vec![AppAction::BeginInteraction(Interaction::Combining {
-                                item_guid: cur_entity.guid,
-                            })],
+                            vec![AppAction::BeginInteraction {
+                                interaction: Interaction::Combining {
+                                    item_guid: cur_entity.guid,
+                                },
+                            }],
                             'c',
                             "Combine",
                         ));
                     } else {
-                        verbs.push(Verb::new(vec![AppAction::Use(cur_entity.guid)], 'u', "Use"));
+                        verbs.push(Verb::new(
+                            vec![AppAction::Use {
+                                guid: cur_entity.guid,
+                            }],
+                            'u',
+                            "Use",
+                        ));
                     }
                 }
                 EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {
                     verbs.push(Verb::new(
-                        vec![AppAction::BeginInteraction(Interaction::Targeting {
-                            target_guid: cur_entity.guid,
-                        })],
+                        vec![AppAction::BeginInteraction {
+                            interaction: Interaction::Targeting {
+                                target_guid: cur_entity.guid,
+                            },
+                        }],
                         't',
                         "Target",
                     ));
                 }
                 EntityClass::HealingKit => {
                     verbs.push(Verb::new(
-                        vec![AppAction::BeginInteraction(Interaction::Healing {
-                            item_guid: cur_entity.guid,
-                        })],
+                        vec![AppAction::BeginInteraction {
+                            interaction: Interaction::Healing {
+                                item_guid: cur_entity.guid,
+                            },
+                        }],
                         'h',
                         "Heal",
                     ));
@@ -254,7 +277,7 @@ impl TabController for InventoryTab {
 
             if !cur_entity.is_attuned_sticky() {
                 verbs.push(Verb::new(
-                    vec![AppAction::Drop(cur_entity.guid)],
+                    vec![AppAction::Drop { guid: cur_entity.guid }],
                     'd',
                     "Drop",
                 ));
@@ -262,10 +285,12 @@ impl TabController for InventoryTab {
 
             if cur_entity.stack_size() > 1 {
                 verbs.push(Verb::new(
-                    AppAction::UiAction(AppUiAction::InventoryBeginSplitInput {
-                        item_guid: cur_entity.guid,
-                        max_amount: cur_entity.stack_size(),
-                    }),
+                    AppAction::UiAction {
+                        action: AppUiAction::InventoryBeginSplitInput {
+                            item_guid: cur_entity.guid,
+                            max_amount: cur_entity.stack_size(),
+                        },
+                    },
                     'p',
                     "Split",
                 ));
@@ -276,9 +301,11 @@ impl TabController for InventoryTab {
                 .intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
             {
                 verbs.push(Verb::new(
-                    vec![AppAction::BeginInteraction(Interaction::Moving {
-                        item_guid: cur_entity.guid,
-                    })],
+                    vec![AppAction::BeginInteraction {
+                        interaction: Interaction::Moving {
+                            item_guid: cur_entity.guid,
+                        },
+                    }],
                     'm',
                     "Move",
                 ));
@@ -297,7 +324,7 @@ impl TabController for InventoryTab {
                     && data.can_add_to_trade(cur_entity.guid)
                 {
                     verbs.push(Verb::new(
-                        vec![AppAction::AddToTrade(cur_entity.guid)],
+                        vec![AppAction::AddToTrade { guid: cur_entity.guid }],
                         'o',
                         "Offer",
                     ));
@@ -306,20 +333,20 @@ impl TabController for InventoryTab {
                 && data.can_sell_to_vendor(cur_entity.guid, view.vendor.as_ref())
             {
                 verbs.push(Verb::new(
-                    vec![AppAction::SellToVendor(
-                        vendor.vendor_guid,
-                        cur_entity.guid,
-                        1,
-                    )],
+                    vec![AppAction::SellToVendor {
+                        vendor: vendor.vendor_guid,
+                        item: cur_entity.guid,
+                        amount: 1,
+                    }],
                     's',
                     "Sell",
                 ));
             }
 
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
-                    cur_entity.guid,
-                ))],
+                vec![AppAction::QueryDebugInfo {
+                    target: CommandTarget::Entity(cur_entity.guid),
+                }],
                 'g',
                 "Debug",
             ));
@@ -420,7 +447,10 @@ impl TabController for InventoryTab {
             VerbInputEvent::Invalid(err) => Some(
                 UpdateResult::new()
                     .with_redraw(true)
-                    .with_action(AppAction::Log(ChatMessageKind::System, err.message())),
+                    .with_action(AppAction::Log {
+                        kind: ChatMessageKind::System,
+                        message: err.message(),
+                    }),
             ),
             VerbInputEvent::Submitted(amount) => {
                 let item = session.item_guid;

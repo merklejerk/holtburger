@@ -62,15 +62,19 @@ impl TabController for EquipTab {
                     false
                 };
 
-                verbs.push(Verb::new(vec![AppAction::Assess(guid)], 'a', "Assess"));
+                verbs.push(Verb::new(
+                    vec![AppAction::Assess { guid }],
+                    'a',
+                    "Assess",
+                ));
 
                 if interaction.is_none()
                     || matches!(interaction, Some(Interaction::Targeting { target_guid }) if *target_guid != guid)
                 {
                     verbs.push(Verb::new(
-                        vec![AppAction::BeginInteraction(Interaction::Targeting {
-                            target_guid: guid,
-                        })],
+                        vec![AppAction::BeginInteraction {
+                            interaction: Interaction::Targeting { target_guid: guid },
+                        }],
                         't',
                         "Target",
                     ));
@@ -78,18 +82,24 @@ impl TabController for EquipTab {
 
                 if is_here {
                     if let Some(_pguid) = data.player_guid {
-                        verbs.push(Verb::new(vec![AppAction::Unequip(guid)], 'q', "Unequip"));
+                        verbs.push(Verb::new(
+                            vec![AppAction::Unequip { guid }],
+                            'q',
+                            "Unequip",
+                        ));
                     }
                 } else {
                     verbs.push(Verb::new(
-                        vec![AppAction::EquipInSlot(guid, slot)],
+                        vec![AppAction::EquipInSlot { guid, slot }],
                         'e',
                         "Equip",
                     ));
                 }
 
                 verbs.push(Verb::new(
-                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(guid))],
+                    vec![AppAction::QueryDebugInfo {
+                        target: CommandTarget::Entity(guid),
+                    }],
                     'g',
                     "Debug",
                 ));

@@ -48,7 +48,10 @@ impl TabController for SpellsTab {
             Some(Interaction::Targeting { target_guid }) => {
                 if let CommandTarget::Spell(spell_id) = target {
                     verbs.push(Verb::new(
-                        vec![AppAction::CastSpell(spell_id, Some(*target_guid))],
+                        vec![AppAction::CastSpell {
+                            spell_id,
+                            target: Some(*target_guid),
+                        }],
                         'c',
                         "Cast on target",
                     ));
@@ -66,25 +69,35 @@ impl TabController for SpellsTab {
             // TODO: Always cast on self for ring spells and never cast on self for wall spells.
             if let Some(player_guid) = data.player_guid {
                 verbs.push(Verb::new(
-                    vec![AppAction::CastSpell(spell_id, Some(player_guid))],
+                    vec![AppAction::CastSpell {
+                        spell_id,
+                        target: Some(player_guid),
+                    }],
                     'c',
                     "Cast on self",
                 ));
             } else {
                 verbs.push(Verb::new(
-                    vec![AppAction::CastSpell(spell_id, None)],
+                    vec![AppAction::CastSpell {
+                        spell_id,
+                        target: None,
+                    }],
                     'c',
                     "Cast",
                 ));
             }
 
             verbs.push(Verb::new(
-                vec![AppAction::ViewDetails(ContextView::Spell(spell_id))],
+                vec![AppAction::ViewDetails {
+                    view: ContextView::Spell(spell_id),
+                }],
                 'd',
                 "Details",
             ));
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(CommandTarget::Spell(spell_id))],
+                vec![AppAction::QueryDebugInfo {
+                    target: CommandTarget::Spell(spell_id),
+                }],
                 'g',
                 "Debug",
             ));

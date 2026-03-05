@@ -333,63 +333,148 @@ impl Page {
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
-    Identify(Guid),
-    Assess(Guid),
-    Use(Guid),
-    UseOn(Guid, Guid),
-    Approach(Guid),
-    Drop(Guid),
-    Equip(Guid),
-    EquipInSlot(Guid, TargetSlot),
-    Unequip(Guid),
-    TalkTo(Guid),
-    Open(Guid),
-    Close(Guid),
-    OpenTrade(Guid),
-    AddToTrade(Guid),
-    MoveItem(Guid, Guid),
-    StackItems(Guid, Guid, u32), // source, destination, amount
+    Identify {
+        guid: Guid,
+    },
+    Assess {
+        guid: Guid,
+    },
+    Use {
+        guid: Guid,
+    },
+    UseOn {
+        item: Guid,
+        target: Guid,
+    },
+    Approach {
+        guid: Guid,
+    },
+    Drop {
+        guid: Guid,
+    },
+    Equip {
+        guid: Guid,
+    },
+    EquipInSlot {
+        guid: Guid,
+        slot: TargetSlot,
+    },
+    Unequip {
+        guid: Guid,
+    },
+    TalkTo {
+        guid: Guid,
+    },
+    Open {
+        guid: Guid,
+    },
+    Close {
+        guid: Guid,
+    },
+    OpenTrade {
+        guid: Guid,
+    },
+    AddToTrade {
+        guid: Guid,
+    },
+    MoveItem {
+        item: Guid,
+        container: Guid,
+    },
+    StackItems {
+        source: Guid,
+        destination: Guid,
+        amount: u32,
+    },
     SplitItem {
         item: Guid,
         container: Guid,
         amount: u32,
     },
-    UseWith(Guid, Guid), // item, target (e.g. healing kit, tool)
-    QueryDebugInfo(CommandTarget),
-    CastSpell(u32, Option<Guid>), // spell_id, target (None for untargeted)
-    SetCombatMode(CombatMode),
-    LevelUpStat(StatType, u32),
-    TrainSkill(SkillType, u32),
-    ViewDetails(ContextView),
-    Log(ChatMessageKind, String),
-    BeginInteraction(Interaction),
+    UseWith {
+        item: Guid,
+        target: Guid,
+    },
+    QueryDebugInfo {
+        target: CommandTarget,
+    },
+    CastSpell {
+        spell_id: u32,
+        target: Option<Guid>,
+    },
+    SetCombatMode {
+        mode: CombatMode,
+    },
+    LevelUpStat {
+        stat: StatType,
+        amount: u32,
+    },
+    TrainSkill {
+        skill: SkillType,
+        amount: u32,
+    },
+    ViewDetails {
+        view: ContextView,
+    },
+    Log {
+        kind: ChatMessageKind,
+        message: String,
+    },
+    BeginInteraction {
+        interaction: Interaction,
+    },
     CancelInteraction,
-    SendCommands(Vec<ClientCommand>),
-    ChangeContextView(ContextView),
-    RequestDebugContext(Option<Guid>),
+    SendCommands {
+        commands: Vec<ClientCommand>,
+    },
+    ChangeContextView {
+        view: ContextView,
+    },
+    RequestDebugContext {
+        guid: Option<Guid>,
+    },
     ClearVendor,
     DisplayClientInfo,
-    Sequence(Vec<AppAction>),
-    PickUp(Guid, Option<Guid>),
-    Give(Guid, Guid, u32),          // item, recipient, amount
-    BuyFromVendor(Guid, Guid, u32), // Vendor, item, amount
-    SellToVendor(Guid, Guid, u32),  // Vendor, item, amount
+    Sequence {
+        actions: Vec<AppAction>,
+    },
+    PickUp {
+        item: Guid,
+        container: Option<Guid>,
+    },
+    Give {
+        item: Guid,
+        recipient: Guid,
+        amount: u32,
+    },
+    BuyFromVendor {
+        vendor: Guid,
+        item: Guid,
+        amount: u32,
+    },
+    SellToVendor {
+        vendor: Guid,
+        item: Guid,
+        amount: u32,
+    },
     AcceptTrade,
     DeclineTrade,
     ResetTrade,
     ExitTrade,
-    UiAction(AppUiAction),
+    UiAction {
+        action: AppUiAction,
+    },
 }
 
 impl From<Vec<AppAction>> for AppAction {
     fn from(actions: Vec<AppAction>) -> Self {
-        AppAction::Sequence(actions)
+        AppAction::Sequence { actions }
     }
 }
 
 impl From<AppUiAction> for AppAction {
     fn from(action: AppUiAction) -> Self {
-        AppAction::UiAction(action)
+        AppAction::UiAction { action }
     }
 }
 

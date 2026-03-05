@@ -72,7 +72,10 @@ impl TabController for NearbyTab {
                     if data.can_move_item_into_container(item_guid, e.guid) {
                         verbs.push(Verb::new(
                             vec![
-                                AppAction::MoveItem(item_guid, e.guid),
+                                AppAction::MoveItem {
+                                    item: item_guid,
+                                    container: e.guid,
+                                },
                                 AppAction::CancelInteraction,
                             ],
                             '\r',
@@ -87,7 +90,11 @@ impl TabController for NearbyTab {
                     if is_givable_creature {
                         verbs.push(Verb::new(
                             vec![
-                                AppAction::Give(item_guid, e.guid, e.stack_size().max(1)),
+                                AppAction::Give {
+                                    item: item_guid,
+                                    recipient: e.guid,
+                                    amount: e.stack_size().max(1),
+                                },
                                 AppAction::CancelInteraction,
                             ],
                             '\r',
@@ -107,7 +114,10 @@ impl TabController for NearbyTab {
                             "Heal target".to_string()
                         };
                         verbs.push(Verb::new(
-                            vec![AppAction::UseWith(item_guid, e.guid)],
+                            vec![AppAction::UseWith {
+                                item: item_guid,
+                                target: e.guid,
+                            }],
                             '\r',
                             label,
                         ));
@@ -117,7 +127,10 @@ impl TabController for NearbyTab {
                 Interaction::Combining { item_guid } => {
                     if data.can_use_with(item_guid, e.guid) {
                         verbs.push(Verb::new(
-                            vec![AppAction::UseWith(item_guid, e.guid)],
+                            vec![AppAction::UseWith {
+                                item: item_guid,
+                                target: e.guid,
+                            }],
                             '\r',
                             "Apply to target",
                         ));
@@ -134,40 +147,65 @@ impl TabController for NearbyTab {
             let is_open_container = data.open_containers.contains(&e.guid);
 
             if is_open_container {
-                verbs.push(Verb::new(vec![AppAction::Close(e.guid)], 'x', "Close"));
+                verbs.push(Verb::new(
+                    vec![AppAction::Close { guid: e.guid }],
+                    'x',
+                    "Close",
+                ));
             }
 
             if !e.is_stuck() && e.is_root() {
                 verbs.push(Verb::new(
-                    vec![AppAction::PickUp(e.guid, None)],
+                    vec![AppAction::PickUp {
+                        item: e.guid,
+                        container: None,
+                    }],
                     'p',
                     "Pick Up",
                 ));
             }
 
             verbs.extend([
-                Verb::new(vec![AppAction::Assess(e.guid)], 'a', "Assess"),
                 Verb::new(
-                    vec![AppAction::BeginInteraction(Interaction::Targeting {
-                        target_guid: e.guid,
-                    })],
+                    vec![AppAction::Assess { guid: e.guid }],
+                    'a',
+                    "Assess",
+                ),
+                Verb::new(
+                    vec![AppAction::BeginInteraction {
+                        interaction: Interaction::Targeting { target_guid: e.guid },
+                    }],
                     't',
                     "Target",
                 ),
                 Verb::new(
-                    vec![AppAction::QueryDebugInfo(CommandTarget::Entity(e.guid))],
+                    vec![AppAction::QueryDebugInfo {
+                        target: CommandTarget::Entity(e.guid),
+                    }],
                     'g',
                     "Debug",
                 ),
-                Verb::new(vec![AppAction::Approach(e.guid)], 'r', "Approach"),
+                Verb::new(
+                    vec![AppAction::Approach { guid: e.guid }],
+                    'r',
+                    "Approach",
+                ),
             ]);
 
             match class {
                 EntityClass::Vendor => {
-                    verbs.push(Verb::new(vec![AppAction::Use(e.guid)], 's', "Shop"));
+                    verbs.push(Verb::new(
+                        vec![AppAction::Use { guid: e.guid }],
+                        's',
+                        "Shop",
+                    ));
                 }
                 EntityClass::Npc => {
-                    verbs.push(Verb::new(vec![AppAction::Use(e.guid)], 'k', "Talk"));
+                    verbs.push(Verb::new(
+                        vec![AppAction::Use { guid: e.guid }],
+                        'k',
+                        "Talk",
+                    ));
                 }
                 EntityClass::Portal
                 | EntityClass::Door
@@ -178,23 +216,39 @@ impl TabController for NearbyTab {
                 | EntityClass::Writable
                 | EntityClass::Money
                 | EntityClass::Item => {
-                    verbs.push(Verb::new(vec![AppAction::Use(e.guid)], 'u', "Use"));
+                    verbs.push(Verb::new(
+                        vec![AppAction::Use { guid: e.guid }],
+                        'u',
+                        "Use",
+                    ));
                 }
                 EntityClass::Chest | EntityClass::Container => {
                     if data.open_containers.contains(&e.guid) {
-                        verbs.push(Verb::new(vec![AppAction::Close(e.guid)], 'o', "Close"));
+                        verbs.push(Verb::new(
+                            vec![AppAction::Close { guid: e.guid }],
+                            'o',
+                            "Close",
+                        ));
                     } else {
-                        verbs.push(Verb::new(vec![AppAction::Use(e.guid)], 'o', "Open"));
+                        verbs.push(Verb::new(
+                            vec![AppAction::Use { guid: e.guid }],
+                            'o',
+                            "Open",
+                        ));
                     }
                 }
                 EntityClass::Player => {
-                    verbs.push(Verb::new(vec![AppAction::OpenTrade(e.guid)], 'd', "Trade"));
+                    verbs.push(Verb::new(
+                        vec![AppAction::OpenTrade { guid: e.guid }],
+                        'd',
+                        "Trade",
+                    ));
                 }
                 EntityClass::HealingKit => {
                     verbs.push(Verb::new(
-                        vec![AppAction::BeginInteraction(Interaction::Healing {
-                            item_guid: e.guid,
-                        })],
+                        vec![AppAction::BeginInteraction {
+                            interaction: Interaction::Healing { item_guid: e.guid },
+                        }],
                         'u',
                         "Use",
                     ));

@@ -103,9 +103,9 @@ impl GameState {
                 {
                     result
                         .actions
-                        .push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
-                            DashboardTab::Trade,
-                        )));
+                        .push(AppAction::UiAction {
+                            action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
+                        });
                 }
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
@@ -119,9 +119,9 @@ impl GameState {
                 {
                     result
                         .actions
-                        .push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
-                            DashboardTab::Trade,
-                        )));
+                        .push(AppAction::UiAction {
+                            action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
+                        });
                 }
             }
             ClientViewEvent::EntityIdentified { entity } => {
@@ -147,45 +147,45 @@ impl GameState {
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = UpdateResult::new();
         match action {
-            AppAction::Identify(guid) => {
+            AppAction::Identify { guid } => {
                 result.commands.push(ClientCommand::Identify(guid));
             }
-            AppAction::Assess(guid) => {
+            AppAction::Assess { guid } => {
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
-                    self.handle_action(AppAction::ChangeContextView(
-                        crate::types::ContextView::Assess(guid),
-                    ))
+                    self.handle_action(AppAction::ChangeContextView {
+                        view: crate::types::ContextView::Assess(guid),
+                    })
                     .unwrap_or_default(),
                 );
             }
-            AppAction::Use(guid) => {
+            AppAction::Use { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
             }
-            AppAction::UseOn(item, target) => {
+            AppAction::UseOn { item, target } => {
                 result
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
             }
-            AppAction::Approach(guid) => {
+            AppAction::Approach { guid } => {
                 result.commands.push(ClientCommand::MoveTo { target: guid });
             }
-            AppAction::Drop(guid) => {
+            AppAction::Drop { guid } => {
                 result.commands.push(ClientCommand::Drop(guid));
             }
-            AppAction::Equip(guid) => {
+            AppAction::Equip { guid } => {
                 result.commands.push(ClientCommand::GetAndWield {
                     item: guid,
                     slot: None,
                 });
             }
-            AppAction::EquipInSlot(guid, slot) => {
+            AppAction::EquipInSlot { guid, slot } => {
                 result.commands.push(ClientCommand::GetAndWield {
                     item: guid,
                     slot: Some(slot),
                 });
             }
-            AppAction::Unequip(guid) => {
+            AppAction::Unequip { guid } => {
                 if let Some(container) = self.data.find_non_full_pack(None) {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
@@ -193,30 +193,34 @@ impl GameState {
                         placement: 0,
                     });
                 } else {
-                    result.actions.push(AppAction::Log(
-                        ChatMessageKind::System,
-                        "No available inventory space to unequip item.".to_string(),
-                    ));
+                    result.actions.push(AppAction::Log {
+                        kind: ChatMessageKind::System,
+                        message: "No available inventory space to unequip item.".to_string(),
+                    });
                 }
             }
-            AppAction::TalkTo(guid) => {
+            AppAction::TalkTo { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
             }
-            AppAction::Open(guid) => {
+            AppAction::Open { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
             }
-            AppAction::Close(guid) => {
+            AppAction::Close { guid } => {
                 result.commands.push(ClientCommand::CloseContainer(guid));
             }
-            AppAction::OpenTrade(guid) => {
+            AppAction::OpenTrade { guid } => {
                 result.commands.push(ClientCommand::OpenTrade(guid));
             }
-            AppAction::AddToTrade(guid) => {
+            AppAction::AddToTrade { guid } => {
                 result
                     .commands
                     .push(ClientCommand::AddToTrade { item: guid });
             }
-            AppAction::SellToVendor(vendor, item, amount) => {
+            AppAction::SellToVendor {
+                vendor,
+                item,
+                amount,
+            } => {
                 result.commands.push(ClientCommand::Sell {
                     vendor,
                     items: vec![ItemProfileActionData {
@@ -225,7 +229,11 @@ impl GameState {
                     }],
                 });
             }
-            AppAction::BuyFromVendor(vendor, item, amount) => {
+            AppAction::BuyFromVendor {
+                vendor,
+                item,
+                amount,
+            } => {
                 result.commands.push(ClientCommand::Buy {
                     vendor,
                     items: vec![ItemProfileActionData {
@@ -234,7 +242,7 @@ impl GameState {
                     }],
                 });
             }
-            AppAction::MoveItem(item, container) => {
+            AppAction::MoveItem { item, container } => {
                 result.commands.push(ClientCommand::MoveItem {
                     item,
                     container,
@@ -242,7 +250,11 @@ impl GameState {
                 });
                 self.view.active_interaction = None;
             }
-            AppAction::StackItems(source, destination, amount) => {
+            AppAction::StackItems {
+                source,
+                destination,
+                amount,
+            } => {
                 result.commands.push(ClientCommand::Stack {
                     source,
                     destination,
@@ -260,41 +272,41 @@ impl GameState {
                     amount,
                 });
             }
-            AppAction::UseWith(item, target) => {
+            AppAction::UseWith { item, target } => {
                 result
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
             }
-            AppAction::QueryDebugInfo(target) => match target {
+            AppAction::QueryDebugInfo { target } => match target {
                 crate::types::CommandTarget::Entity(guid)
                 | crate::types::CommandTarget::EntityWithSlot(guid, _) => {
                     result
                         .commands
                         .push(ClientCommand::QueryEntityDebugInfo(guid));
                     result.merge(
-                        self.handle_action(AppAction::RequestDebugContext(Some(guid)))
+                        self.handle_action(AppAction::RequestDebugContext { guid: Some(guid) })
                             .unwrap_or_default(),
                     );
                 }
                 crate::types::CommandTarget::Spell(spell_id) => {
                     result.merge(
-                        self.handle_action(AppAction::ChangeContextView(
-                            crate::types::ContextView::DebugSpell(spell_id),
-                        ))
+                        self.handle_action(AppAction::ChangeContextView {
+                            view: crate::types::ContextView::DebugSpell(spell_id),
+                        })
                         .unwrap_or_default(),
                     );
                 }
                 crate::types::CommandTarget::Enchantment(enchant) => {
                     result.merge(
-                        self.handle_action(AppAction::ChangeContextView(
-                            crate::types::ContextView::DebugEnchantment(enchant),
-                        ))
+                        self.handle_action(AppAction::ChangeContextView {
+                            view: crate::types::ContextView::DebugEnchantment(enchant),
+                        })
                         .unwrap_or_default(),
                     );
                 }
                 _ => {}
             },
-            AppAction::CastSpell(spell_id, target) => {
+            AppAction::CastSpell { spell_id, target } => {
                 // TODO: Auto toggle combat mode.
                 if let Some(target) = target {
                     result
@@ -306,10 +318,10 @@ impl GameState {
                         .push(ClientCommand::CastUntargetedSpell { spell_id });
                 }
             }
-            AppAction::SetCombatMode(mode) => {
+            AppAction::SetCombatMode { mode } => {
                 result.commands.push(ClientCommand::SetCombatMode(mode));
             }
-            AppAction::LevelUpStat(stat, xp_spent) => match stat {
+            AppAction::LevelUpStat { stat, amount: xp_spent } => match stat {
                 crate::types::StatType::Attribute(attribute) => {
                     result.commands.push(ClientCommand::RaiseAttribute {
                         attribute,
@@ -327,12 +339,12 @@ impl GameState {
                         .push(ClientCommand::RaiseSkill { skill, xp_spent });
                 }
             },
-            AppAction::TrainSkill(skill, credits) => {
+            AppAction::TrainSkill { skill, amount: credits } => {
                 result
                     .commands
                     .push(ClientCommand::TrainSkill { skill, credits });
             }
-            AppAction::PickUp(guid, preferred_container_id) => {
+            AppAction::PickUp { item: guid, container: preferred_container_id } => {
                 if let Some(container_id) = self.data.find_non_full_pack(preferred_container_id) {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
@@ -340,13 +352,13 @@ impl GameState {
                         placement: 0,
                     });
                 } else {
-                    result.actions.push(AppAction::Log(
-                        ChatMessageKind::System,
-                        "No space left.".to_string(),
-                    ));
+                    result.actions.push(AppAction::Log {
+                        kind: ChatMessageKind::System,
+                        message: "No space left.".to_string(),
+                    });
                 }
             }
-            AppAction::Give(item, recipient, amount) => {
+            AppAction::Give { item, recipient, amount } => {
                 result.commands.push(ClientCommand::GiveObjectRequest {
                     target: recipient,
                     item,
@@ -365,20 +377,20 @@ impl GameState {
             AppAction::ExitTrade => {
                 result.commands.push(ClientCommand::CloseTrade);
             }
-            AppAction::ChangeContextView(view) => {
+            AppAction::ChangeContextView { view } => {
                 self.view.context_view = view;
                 self.view.context_scroll_offset = 0;
                 result.needs_redraw = true;
                 self.refresh_context_buffer();
             }
-            AppAction::RequestDebugContext(guid) => {
+            AppAction::RequestDebugContext { guid } => {
                 self.view.current_debug_guid = guid;
                 self.view.context_view = crate::types::ContextView::Custom;
                 self.view.context_scroll_offset = 0;
                 result.needs_redraw = true;
                 self.refresh_context_buffer();
             }
-            AppAction::BeginInteraction(interaction) => {
+            AppAction::BeginInteraction { interaction } => {
                 self.view.active_interaction = Some(interaction);
                 result.needs_redraw = true;
             }
@@ -390,11 +402,18 @@ impl GameState {
                 self.view.vendor = None;
                 result.needs_redraw = true;
             }
-            AppAction::ViewDetails(view) => {
-                return self.handle_action(AppAction::ChangeContextView(view));
+            AppAction::ViewDetails { view } => {
+                return self.handle_action(AppAction::ChangeContextView { view });
             }
-            AppAction::UiAction(action) => {
+            AppAction::UiAction { action } => {
                 return Some(self.handle_ui_action(action));
+            }
+            AppAction::Sequence { actions } => {
+                for inner_action in actions {
+                    if let Some(inner_result) = self.handle_action(inner_action) {
+                        result.merge(inner_result);
+                    }
+                }
             }
             _ => return None,
         }
@@ -556,10 +575,10 @@ impl GameState {
         if let ClientViewEvent::NoClipUpdated { enabled } = event {
             self.data.noclip = enabled;
             let status = if enabled { "ENABLED" } else { "DISABLED" };
-            result.actions.push(AppAction::Log(
-                ChatMessageKind::System,
-                format!(">> NoClip is now {}", status),
-            ));
+            result.actions.push(AppAction::Log {
+                kind: ChatMessageKind::System,
+                message: format!(">> NoClip is now {}", status),
+            });
         }
         result
     }

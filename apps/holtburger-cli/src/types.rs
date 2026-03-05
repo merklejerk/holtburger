@@ -248,7 +248,11 @@ pub enum AppAction {
     AddToTrade(Guid),
     MoveItem(Guid, Guid),
     StackItems(Guid, Guid, u32), // source, destination, amount
-    SplitItem(Guid, Guid),
+    SplitItem {
+        item: Guid,
+        container: Guid,
+        amount: u32,
+    },
     UseWith(Guid, Guid), // item, target (e.g. healing kit, tool)
     QueryDebugInfo(CommandTarget),
     CastSpell(u32, Option<Guid>), // spell_id, target (None for untargeted)

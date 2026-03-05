@@ -246,11 +246,15 @@ impl GameState {
                     amount,
                 });
             }
-            AppAction::SplitItem(item, container) => {
+            AppAction::SplitItem {
+                item,
+                container,
+                amount,
+            } => {
                 result.commands.push(ClientCommand::Split {
                     item,
                     container,
-                    amount: 1, // TODO
+                    amount,
                 });
             }
             AppAction::UseWith(item, target) => {

@@ -138,7 +138,11 @@ impl TabController for NearbyTab {
             }
 
             if !e.is_stuck() && e.is_root() {
-                verbs.push(Verb::new(vec![AppAction::PickUp(e.guid)], 'p', "Pick Up"));
+                verbs.push(Verb::new(
+                    vec![AppAction::PickUp(e.guid, None)],
+                    'p',
+                    "Pick Up",
+                ));
             }
 
             verbs.extend([

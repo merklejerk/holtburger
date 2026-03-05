@@ -170,13 +170,6 @@ impl GameState {
             AppAction::Approach(guid) => {
                 result.commands.push(ClientCommand::MoveTo { target: guid });
             }
-            AppAction::PickUp(guid) => {
-                result.commands.push(ClientCommand::MoveItem {
-                    item: guid,
-                    container: Guid::NULL,
-                    placement: 0,
-                });
-            }
             AppAction::Drop(guid) => {
                 result.commands.push(ClientCommand::Drop(guid));
             }
@@ -338,13 +331,18 @@ impl GameState {
                     .commands
                     .push(ClientCommand::TrainSkill { skill, credits });
             }
-            AppAction::Pickup(guid) => {
-                if let Some(container_id) = self.data.find_non_full_pack(None) {
+            AppAction::PickUp(guid, preferred_container_id) => {
+                if let Some(container_id) = self.data.find_non_full_pack(preferred_container_id) {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
                         container: container_id,
                         placement: 0,
                     });
+                } else {
+                    result.actions.push(AppAction::Log(
+                        ChatMessageKind::System,
+                        "No space left.".to_string(),
+                    ));
                 }
             }
             AppAction::Give(item, recipient, amount) => {

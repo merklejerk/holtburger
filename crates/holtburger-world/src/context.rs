@@ -174,17 +174,15 @@ pub trait WorldContextExt: WorldContext {
     fn find_non_full_pack(&self, preferred_container_id: Option<Guid>) -> Option<Guid> {
         let player_guid = self.get_player_guid()?;
 
-        let is_valid_container = |guid: Guid| -> bool { self.container_space_left(guid) > 0 };
-
         // 1. Check preferred first
         if let Some(pref) = preferred_container_id
-            && is_valid_container(pref)
+            && self.container_space_left(pref) > 0
         {
             return Some(pref);
         }
 
         // 2. Check player (main pack)
-        if is_valid_container(player_guid) {
+        if self.container_space_left(player_guid) > 0 {
             return Some(player_guid);
         }
 
@@ -195,7 +193,7 @@ pub trait WorldContextExt: WorldContext {
                 continue;
             }
 
-            if is_valid_container(item_guid) {
+            if self.container_space_left(item_guid) > 0 {
                 return Some(item_guid);
             }
         }

@@ -65,6 +65,7 @@
 - [x] HATE `world/state.rs`
 - [x] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
 - [x] Move interaction should clear interaction on confirm.
+- [x] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -74,7 +75,6 @@
 - [ ] Use sibling files for tests.
 - [ ] Auto-follow.
 - [ ] Add a movable cursor to the chat input.
-- [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
 - [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
@@ -149,6 +149,7 @@
 - [x] Should split into the same container.
 - [x] Need to special case `ItemType::Gem` to show Use verb instead of Combine. They have a `TargetType` property but should be ignored.
 - [~] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
+- [x] Chat buffer should not autoscroll when not bottomed out.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -168,7 +169,6 @@
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Should auto-switch to trade tab when initiating trade/vendor.
-- [ ] Chat buffer should not autoscroll when not bottomed out.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

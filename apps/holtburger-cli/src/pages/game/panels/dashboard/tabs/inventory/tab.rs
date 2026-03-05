@@ -11,7 +11,7 @@ use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entitie
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, ChatMessageKind, CommandTarget, Interaction, TabController, UpdateResult, Verb,
-    VerbInputEvent, VerbInputState,
+    TabUiAction, VerbInputEvent, VerbInputState,
 };
 
 #[derive(Debug, Clone)]
@@ -44,15 +44,18 @@ impl InventoryTab {
         get_entities(data).len()
     }
 
-    fn maybe_begin_split_session(&mut self, data: &GameData, view: &ViewState) -> Option<UpdateResult> {
+    fn begin_split_session(
+        &mut self,
+        item_guid: holtburger_common::Guid,
+        max_amount: u32,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
         if self.split_session.is_some() || view.active_interaction.is_some() {
             return None;
         }
 
-        let entities = get_entities(data);
-        let (entity, _, _) = entities.get(self.selected_index)?;
-        let stack_size = entity.stack_size();
-        if stack_size <= 1 {
+        if max_amount <= 1 {
             return None;
         }
 
@@ -64,9 +67,9 @@ impl InventoryTab {
         };
 
         self.split_session = Some(SplitSession {
-            item_guid: entity.guid,
+            item_guid,
             container_guid,
-            input: VerbInputState::quantity("Split amount", 1, stack_size),
+            input: VerbInputState::quantity("Split amount", 1, max_amount),
         });
 
         Some(UpdateResult::new().with_redraw(true))
@@ -249,8 +252,11 @@ impl TabController for InventoryTab {
             }
 
             if cur_entity.stack_size() > 1 {
-                verbs.push(Verb::new(
-                    vec![],
+                verbs.push(Verb::ui(
+                    TabUiAction::BeginSplitInput {
+                        item_guid: cur_entity.guid,
+                        max_amount: cur_entity.stack_size(),
+                    },
                     'p',
                     "Split",
                 ));
@@ -319,13 +325,6 @@ impl TabController for InventoryTab {
         data: &GameData,
         view: &ViewState,
     ) -> Option<UpdateResult> {
-        if let KeyCode::Char(c) = key.code
-            && c.eq_ignore_ascii_case(&'p')
-            && let Some(result) = self.maybe_begin_split_session(data, view)
-        {
-            return Some(result);
-        }
-
         let count = self.item_count(data, view);
         match key.code {
             KeyCode::Down => {
@@ -366,9 +365,23 @@ impl TabController for InventoryTab {
                 };
                 let verbs = self.get_verbs(data, view, &view.active_interaction);
                 let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
-                Some(UpdateResult::new().with_action(verb.action))
+                self.dispatch_verb_action(verb.action, data, view)
             }
             _ => None,
+        }
+    }
+
+    fn handle_ui_action(
+        &mut self,
+        action: TabUiAction,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        match action {
+            TabUiAction::BeginSplitInput {
+                item_guid,
+                max_amount,
+            } => self.begin_split_session(item_guid, max_amount, data, view),
         }
     }
 

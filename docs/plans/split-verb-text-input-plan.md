@@ -221,6 +221,59 @@ Inventory split verb should:
 - Existing `InventoryTab` already owns `selected_index` and entity lookup, so binding `max_amount` to current selection is straightforward.
 - Must define behavior if selected item changes while input mode is active (recommendation: lock the target item at mode entry).
 
+## Phase 4.5: Verb Trigger Routing Refactor (Complexity: Medium)
+**Deliverables**
+- Remove split-specific key special-casing from `InventoryTab::handle_input`.
+- Introduce a UI-layer action lane for tab-local transitions (for example `UIAction` / `TabUIAction`) so verb shortcuts are defined once in `get_verbs` and dispatched uniformly.
+- Add a tab-level handler (for example `handle_ui_action(...)`) on `TabController` with a safe default implementation.
+- Convert split trigger to this lane (`Split` verb emits UI action to start split session), preserving existing behavior.
+
+**Files**
+- `apps/holtburger-cli/src/types.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/character/tab.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/equip/tab.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/tab.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/trade/tab.rs`
+
+**Acceptance Criteria**
+- `InventoryTab::handle_input` no longer contains hardcoded split shortcut branching.
+- Split shortcut is declared once through normal verb definitions and resolved via uniform dispatch.
+- No message-bus overreach: scope remains tab/UI routing only (no global architecture rewrite).
+
+**Dry-run notes**
+- This phase addresses the current code smell (shortcut duplication + deviation in `handle_input`) without introducing a heavy component bus.
+- Keep separation sharp: `UIAction` for local UI state transitions, `AppAction` for domain/server commands.
+
+## Phase 4.75: App-Level UI Orchestration Lane (Complexity: Medium-High)
+**Deliverables**
+- Introduce `AppAction::UiAction(AppUiAction)` so verbs emit `AppAction` only.
+- Add explicit handling path in app/page update loop so UI actions bubble to root and are reduced, then routed down via `handle_ui_action(...)` on owned components.
+- Add `handle_ui_action(...)` propagation through component ownership layers (app/page → dashboard/view/chat → tab).
+- Deprecate and remove local `TabUiAction` once equivalent `AppUiAction` targets are in place.
+- Migrate at least one concrete cross-component path from direct component mutation to this lane (recommended candidates: trade/vendor-driven tab switch behavior or context/focus coordination).
+
+**Files**
+- `apps/holtburger-cli/src/types.rs`
+- `apps/holtburger-cli/src/update/app_action.rs`
+- `apps/holtburger-cli/src/pages/game/state.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/state.rs`
+- `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/*/tab.rs`
+- `apps/holtburger-cli/src/update/input.rs` (if dispatch path needs extension)
+
+**Acceptance Criteria**
+- Verbs produce `AppAction` only (no separate verb-local action type in `Verb`).
+- App-level UI orchestration paths no longer require direct reach-through mutations when crossing component boundaries.
+- `AppAction::UiAction(AppUiAction)` supports both local-targeted and cross-component UI transitions via typed variants.
+- `handle_ui_action(...)` exists at component boundaries and dispatches only owned concerns.
+- No global message-bus overreach: explicit, typed actions only.
+
+**Dry-run notes**
+- This phase targets the abstraction-leak concern around root-level coordination and prepares a scalable pattern for future cross-component UX flows.
+- Prefer incremental adoption (one migrated orchestration path first) to keep risk bounded.
+- Keep strict ownership boundaries to avoid turning root reducers into god handlers.
+
 ## Phase 5: Cleanup + Guardrails (Complexity: Low-Medium)
 **Deliverables**
 - Remove obsolete `Interaction::Splitting` references from global interaction flows (if no remaining consumers).
@@ -291,6 +344,8 @@ Inventory split verb should:
 - [x] Phase 3B complete
 - [x] Phase 3C complete
 - [x] Phase 4 complete
+- [x] Phase 4.5 complete
+- [ ] Phase 4.75 complete
 - [ ] Phase 5 complete
 
 ### Decisions Log
@@ -304,11 +359,19 @@ Inventory split verb should:
 - [x] Decide split destination container resolution strategy: use player main pack (`data.player_guid`) to match existing `/split` semantics.
 - [x] Decide invalid-input UX: keep split input mode open, log validation error, and preserve typed value for correction.
 - [x] Implement inventory split flow using tab-local `SplitSession` (`InventoryTab`), with item GUID and max split amount locked at mode entry.
+- [x] Add lightweight UI action lane: `TabUiAction` + `VerbAction` in `types.rs` (no global message bus).
+- [x] Add generic `TabController::handle_ui_action(...)` and `dispatch_verb_action(...)` for uniform verb dispatch.
+- [x] Refactor split trigger to `Verb::ui(TabUiAction::BeginSplitInput { ... })`, removing hardcoded split shortcut special-casing from `InventoryTab::handle_input`.
+- [ ] Decide and codify `AppUiAction` ownership map (which component handles which variants) and remove `TabUiAction`.
+- [ ] Select first cross-component orchestration path to migrate into app-level UI action handling.
 
 ### Verification Log
 - ✅ `cargo check -p holtburger-cli` passed after Phase 2 changes.
 - ✅ `cargo check -p holtburger-cli` passed after Phase 3A/3B/3C integration.
 - ✅ `cargo check -p holtburger-cli` passed after Phase 4 inventory split integration.
+- ✅ `cargo check -p holtburger-cli` passed after Phase 4.5 verb trigger routing refactor.
 
 ### Open Questions
 1. Should tab-local verb-input mode block dashboard tab-switch keys (`1..6`) while input mode is active? (Current implementation: yes, keys are captured by footer input handler.)
+2. Which concrete cross-component path should be the first migration target for app-level UI orchestration (`VendorStateUpdated`/`TradeStateUpdated` tab switching, or context/focus coordination)?
+3. Should we model `AppUiAction` as namespaced variants by owner (`Dashboard(...)`, `View(...)`, `Tab(...)`) to keep dispatch explicit and prevent root-level coupling?

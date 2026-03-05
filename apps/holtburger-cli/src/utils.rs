@@ -1,6 +1,7 @@
 use crate::types::FocusedPane;
 use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -138,6 +139,26 @@ pub fn render_verb_bar(
     }
 
     Paragraph::new(Line::from(spans))
+        .block(Block::default().borders(Borders::TOP))
+        .wrap(ratatui::widgets::Wrap { trim: true })
+}
+
+pub fn render_footer_text_input(input: &crate::types::VerbInputState) -> Paragraph<'static> {
+    let prompt = input.prompt.to_string();
+    let value = if input.input.is_empty() {
+        "_".to_string()
+    } else {
+        input.input.clone()
+    };
+
+    let line = Line::from(vec![
+        Span::raw(format!("{}: ", prompt)),
+        Span::styled(value, Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw(format!("  [{}-{}]", input.min, input.max)),
+        Span::raw("  [ENTER] Submit  [ESC] Cancel"),
+    ]);
+
+    Paragraph::new(line)
         .block(Block::default().borders(Borders::TOP))
         .wrap(ratatui::widgets::Wrap { trim: true })
 }

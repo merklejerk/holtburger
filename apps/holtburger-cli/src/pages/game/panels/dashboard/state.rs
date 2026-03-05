@@ -1,6 +1,6 @@
 use super::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{DashboardTab, TabController, UpdateResult, VerbInputState};
+use crate::types::{AppUiAction, DashboardTab, TabController, UpdateResult, VerbInputState};
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, Default)]
@@ -82,6 +82,45 @@ impl DashboardState {
                 Some(UpdateResult::redraw())
             }
             _ => None,
+        }
+    }
+
+    pub fn handle_ui_action(
+        &mut self,
+        action: AppUiAction,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let mut result = UpdateResult::new();
+
+        if let AppUiAction::SetDashboardActiveTab(tab) = action {
+                self.active_tab = tab;
+                result.needs_redraw = true;
+        }
+
+        if let Some(tab_result) = self.nearby.handle_ui_action(&action, data, view) {
+            result.merge(tab_result);
+        }
+        if let Some(tab_result) = self.inventory.handle_ui_action(&action, data, view) {
+            result.merge(tab_result);
+        }
+        if let Some(tab_result) = self.character.handle_ui_action(&action, data, view) {
+            result.merge(tab_result);
+        }
+        if let Some(tab_result) = self.spells.handle_ui_action(&action, data, view) {
+            result.merge(tab_result);
+        }
+        if let Some(tab_result) = self.equip.handle_ui_action(&action, data, view) {
+            result.merge(tab_result);
+        }
+        if let Some(tab_result) = self.trade.handle_ui_action(&action, data, view) {
+            result.merge(tab_result);
+        }
+
+        if result.needs_redraw || !result.actions.is_empty() || !result.commands.is_empty() {
+            Some(result)
+        } else {
+            None
         }
     }
 }

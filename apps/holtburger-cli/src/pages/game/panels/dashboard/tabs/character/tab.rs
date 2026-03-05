@@ -145,7 +145,7 @@ impl TabController for CharacterTab {
                 };
                 let verbs = self.get_verbs(data, view, &view.active_interaction);
                 let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
-                self.dispatch_verb_action(verb.action, data, view)
+                Some(UpdateResult::new().with_action(verb.action))
             }
             _ => None,
         }

@@ -224,9 +224,9 @@ Inventory split verb should:
 ## Phase 4.5: Verb Trigger Routing Refactor (Complexity: Medium)
 **Deliverables**
 - Remove split-specific key special-casing from `InventoryTab::handle_input`.
-- Introduce a UI-layer action lane for tab-local transitions (for example `UIAction` / `TabUIAction`) so verb shortcuts are defined once in `get_verbs` and dispatched uniformly.
-- Add a tab-level handler (for example `handle_ui_action(...)`) on `TabController` with a safe default implementation.
-- Convert split trigger to this lane (`Split` verb emits UI action to start split session), preserving existing behavior.
+- Introduce uniform verb dispatch so shortcut definitions live in `get_verbs` and are dispatched through one path.
+- Convert split trigger to typed UI action dispatch instead of a key-special-case branch.
+- Preserve existing split behavior while preparing for app-level UI orchestration.
 
 **Files**
 - `apps/holtburger-cli/src/types.rs`
@@ -244,7 +244,7 @@ Inventory split verb should:
 
 **Dry-run notes**
 - This phase addresses the current code smell (shortcut duplication + deviation in `handle_input`) without introducing a heavy component bus.
-- Keep separation sharp: `UIAction` for local UI state transitions, `AppAction` for domain/server commands.
+- This phase is now fully subsumed by Phase 4.75's `AppAction::UiAction(AppUiAction)` model.
 
 ## Phase 4.75: App-Level UI Orchestration Lane (Complexity: Medium-High)
 **Deliverables**
@@ -345,7 +345,7 @@ Inventory split verb should:
 - [x] Phase 3C complete
 - [x] Phase 4 complete
 - [x] Phase 4.5 complete
-- [ ] Phase 4.75 complete
+- [x] Phase 4.75 complete
 - [ ] Phase 5 complete
 
 ### Decisions Log
@@ -362,16 +362,18 @@ Inventory split verb should:
 - [x] Add lightweight UI action lane: `TabUiAction` + `VerbAction` in `types.rs` (no global message bus).
 - [x] Add generic `TabController::handle_ui_action(...)` and `dispatch_verb_action(...)` for uniform verb dispatch.
 - [x] Refactor split trigger to `Verb::ui(TabUiAction::BeginSplitInput { ... })`, removing hardcoded split shortcut special-casing from `InventoryTab::handle_input`.
-- [ ] Decide and codify `AppUiAction` ownership map (which component handles which variants) and remove `TabUiAction`.
-- [ ] Select first cross-component orchestration path to migrate into app-level UI action handling.
+- [x] Replace local `TabUiAction`/`VerbAction` lane with `AppAction::UiAction(AppUiAction)` so verbs emit `AppAction` only.
+- [x] Codify ownership map: `GameState::handle_ui_action` routes `AppUiAction::Dashboard(...)`; `DashboardState::handle_ui_action` routes dashboard-owned variants and inventory UI actions.
+- [x] Add component-level `handle_ui_action(...)` propagation (`GameState` → `DashboardState` → `InventoryTab`).
+- [x] Migrate first cross-component orchestration path: vendor/trade-driven tab switching now dispatches `AppAction::UiAction(AppUiAction::Dashboard(DashboardUiAction::SetActiveTab(...)))` instead of direct dashboard mutation.
 
 ### Verification Log
 - ✅ `cargo check -p holtburger-cli` passed after Phase 2 changes.
 - ✅ `cargo check -p holtburger-cli` passed after Phase 3A/3B/3C integration.
 - ✅ `cargo check -p holtburger-cli` passed after Phase 4 inventory split integration.
 - ✅ `cargo check -p holtburger-cli` passed after Phase 4.5 verb trigger routing refactor.
+- ✅ `cargo check -p holtburger-cli` passed after Phase 4.75 `AppAction::UiAction(AppUiAction)` migration.
 
 ### Open Questions
 1. Should tab-local verb-input mode block dashboard tab-switch keys (`1..6`) while input mode is active? (Current implementation: yes, keys are captured by footer input handler.)
-2. Which concrete cross-component path should be the first migration target for app-level UI orchestration (`VendorStateUpdated`/`TradeStateUpdated` tab switching, or context/focus coordination)?
-3. Should we model `AppUiAction` as namespaced variants by owner (`Dashboard(...)`, `View(...)`, `Tab(...)`) to keep dispatch explicit and prevent root-level coupling?
+2. Should we expand `AppUiAction` ownership namespaces beyond `Dashboard(...)` now (for example `View(...)`, `Chat(...)`) or wait for the next concrete cross-component use case?

@@ -404,6 +404,19 @@ pub trait TabController {
         view: &ViewState,
     ) -> Option<UpdateResult>;
 
+    fn footer_input(&self) -> Option<&VerbInputState> {
+        None
+    }
+
+    fn handle_footer_input(
+        &mut self,
+        _key: KeyEvent,
+        _data: &GameData,
+        _view: &ViewState,
+    ) -> Option<UpdateResult> {
+        None
+    }
+
     /// Returns the content to be displayed in the context panel for the current selection.
     fn get_context_panel_content(&self, data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
         match view.context_view {

@@ -1,9 +1,6 @@
 use crate::types::FocusedPane;
 use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 /// Formats an item's display name, including stack size and structure/durability if present.
@@ -117,50 +114,6 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
         }
     }
     result
-}
-
-pub fn render_verb_bar(
-    dashboard: &crate::pages::game::panels::dashboard::DashboardState,
-    data: &crate::pages::game::GameData,
-    view: &crate::pages::game::ViewState,
-) -> Paragraph<'static> {
-    let mut verbs = dashboard
-        .active_tab()
-        .get_verbs(data, view, &view.active_interaction);
-
-    verbs.sort_by(|a, b| a.label.cmp(&b.label));
-
-    let mut spans = Vec::new();
-    for (i, verb) in verbs.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::raw("   "));
-        }
-        spans.push(Span::raw(verb.display_label().to_string()));
-    }
-
-    Paragraph::new(Line::from(spans))
-        .block(Block::default().borders(Borders::TOP))
-        .wrap(ratatui::widgets::Wrap { trim: true })
-}
-
-pub fn render_footer_text_input(input: &crate::types::VerbInputState) -> Paragraph<'static> {
-    let prompt = input.prompt.to_string();
-    let value = if input.input.is_empty() {
-        "_".to_string()
-    } else {
-        input.input.clone()
-    };
-
-    let line = Line::from(vec![
-        Span::raw(format!("{}: ", prompt)),
-        Span::styled(value, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(format!("  [{}-{}]", input.min, input.max)),
-        Span::raw("  [ENTER] Submit  [ESC] Cancel"),
-    ]);
-
-    Paragraph::new(line)
-        .block(Block::default().borders(Borders::TOP))
-        .wrap(ratatui::widgets::Wrap { trim: true })
 }
 
 pub fn get_adjacent_pane(

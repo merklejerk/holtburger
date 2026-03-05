@@ -163,6 +163,7 @@
 - [ ] Precise splitting.
 - [ ] Splitting is broken.
 - [ ] Should auto-switch to trade tab when initiating trade/vendor.
+- [ ] Pickup verb is broken.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

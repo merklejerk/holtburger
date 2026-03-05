@@ -60,7 +60,7 @@ impl GameState {
         let main_chunks = &main_chunks_vec;
 
         // Dashboard Pane
-        render_dashboard_pane(
+        let dashboard_cursor = render_dashboard_pane(
             f,
             &self.data,
             &self.view,
@@ -127,9 +127,13 @@ impl GameState {
         // Pulse Panel
         render_pulse_panel(f, ctx.client_state, ctx.net_stats, input_chunks[1]);
 
-        if !ctx.is_modal_active && focused_pane == FocusedPane::Input {
-            let display_width = UnicodeWidthStr::width(display_input) as u16;
-            f.set_cursor(input_chunks[0].x + 1 + display_width, input_chunks[0].y + 1);
+        if !ctx.is_modal_active {
+            if let Some((x, y)) = dashboard_cursor {
+                f.set_cursor(x, y);
+            } else if focused_pane == FocusedPane::Input {
+                let display_width = UnicodeWidthStr::width(display_input) as u16;
+                f.set_cursor(input_chunks[0].x + 1 + display_width, input_chunks[0].y + 1);
+            }
         }
     }
 }

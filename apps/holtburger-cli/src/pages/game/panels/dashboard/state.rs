@@ -1,5 +1,6 @@
 use super::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
-use crate::types::{DashboardTab, TabController, UpdateResult};
+use crate::pages::game::{GameData, ViewState};
+use crate::types::{DashboardTab, TabController, UpdateResult, VerbInputState};
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, Default)]
@@ -39,6 +40,19 @@ impl DashboardState {
             DashboardTab::Equip => &self.equip,
             DashboardTab::Trade => &self.trade,
         }
+    }
+
+    pub fn active_tab_footer_input(&self) -> Option<&VerbInputState> {
+        self.active_tab().footer_input()
+    }
+
+    pub fn handle_active_tab_footer_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        self.active_tab_mut().handle_footer_input(key, data, view)
     }
 
     pub fn handle_input(&mut self, key: KeyEvent) -> Option<UpdateResult> {

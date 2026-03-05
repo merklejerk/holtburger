@@ -287,9 +287,9 @@ Inventory split verb should:
 ### Task Checklist
 - [x] Phase 1 complete
 - [x] Phase 2 complete
-- [ ] Phase 3A complete
-- [ ] Phase 3B complete
-- [ ] Phase 3C complete
+- [x] Phase 3A complete
+- [x] Phase 3B complete
+- [x] Phase 3C complete
 - [ ] Phase 4 complete
 - [ ] Phase 5 complete
 
@@ -298,11 +298,15 @@ Inventory split verb should:
 - [x] Standardize tab-scoped verb input primitive in `types.rs`: `VerbInputState`, `VerbInputKind`, `VerbInputEvent`, and `VerbInputError`.
 - [x] Centralize numeric-only input behavior in `VerbInputState::handle_key` (digits/backspace/enter/esc) with range validation in `parse_value`.
 - [x] Add reusable footer input renderer in `utils.rs`: `render_footer_text_input(...)` (generic, not split-specific).
+- [x] Route precedence implemented in `GameState::handle_input`: tab-local footer input captures keys before focused-pane dashboard/global handlers.
+- [x] Footer rendering contract implemented generically via `TabController::footer_input` and `TabController::handle_footer_input` defaults (no split-specific trait leakage).
+- [x] Cursor ownership unified: dashboard footer cursor takes precedence when active; chat input cursor remains fallback.
 - [ ] Decide split destination container resolution strategy (main pack vs current container).
 - [ ] Decide invalid-input UX: keep mode active with message vs auto-cancel.
 
 ### Verification Log
 - ✅ `cargo check -p holtburger-cli` passed after Phase 2 changes.
+- ✅ `cargo check -p holtburger-cli` passed after Phase 3A/3B/3C integration.
 
 ### Open Questions
 1. For split destination container, should we always target player main pack (matching `/split`) or preserve original container when possible?

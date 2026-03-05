@@ -206,6 +206,18 @@ impl GameState {
         let mut result = UpdateResult::new();
         let main_chunks = std::rc::Rc::clone(&self.view.layout_cache.main_chunks);
 
+        if self.dashboard.active_tab_footer_input().is_some() {
+            let data = &self.data;
+            let view = &self.view;
+            if let Some(tab_result) = self
+                .dashboard
+                .handle_active_tab_footer_input(key, data, view)
+            {
+                result.merge(tab_result);
+            }
+            return result;
+        }
+
         if self.view.focused_pane == FocusedPane::Dashboard {
             if let Some(tab_result) = self.dashboard.handle_input(key) {
                 result.merge(tab_result);

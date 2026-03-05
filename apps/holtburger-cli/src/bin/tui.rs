@@ -6,10 +6,12 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use directories::ProjectDirs;
-use holtburger_cli::ui::{
-    self, AppState, ChatMessageKind, ChatState, NetStats, Page, SelectionState,
-};
-use holtburger_core::{Client, ClientCommand, ClientState, ClientViewEvent, RetryState};
+use holtburger_cli::pages;
+use holtburger_cli::pages::selection::SelectionState;
+use holtburger_cli::state::AppState;
+use holtburger_cli::state::NetStats;
+use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
+use holtburger_core::{Client, ClientCommand, ClientState, RetryState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -17,8 +19,13 @@ use std::sync::Mutex;
 use std::time::Instant;
 use tokio::sync::mpsc;
 
+struct CapturedLog {
+    kind: ChatMessageKind,
+    text: String,
+}
+
 struct TuiLogger {
-    tx: mpsc::UnboundedSender<holtburger_core::ClientViewEvent>,
+    tx: mpsc::UnboundedSender<CapturedLog>,
     file: Option<Mutex<File>>,
     verbosity: u8,
 }
@@ -57,7 +64,10 @@ impl log::Log for TuiLogger {
             };
 
             if should_send {
-                let _ = self.tx.send(ClientViewEvent::LogMessage(log_msg));
+                let _ = self.tx.send(CapturedLog {
+                    kind: ChatMessageKind::System,
+                    text: log_msg,
+                });
             }
         }
     }
@@ -142,10 +152,10 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|| local_dats)
         });
 
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
-    let (command_tx, command_rx) = mpsc::unbounded_channel();
+    let (local_log_tx, mut local_log_rx) = mpsc::unbounded_channel::<CapturedLog>();
+    let (server_cmd_tx, server_cmd_rx) = mpsc::unbounded_channel();
 
-    let chat_log = if let Some(path) = &args.log {
+    let _chat_log = if let Some(path) = &args.log {
         match File::create(path) {
             Ok(f) => Some(Mutex::new(f)),
             Err(e) => {
@@ -171,7 +181,7 @@ async fn main() -> Result<()> {
         };
 
         let logger = TuiLogger {
-            tx: event_tx.clone(),
+            tx: local_log_tx.clone(),
             file: log_file,
             verbosity: args.verbose,
         };
@@ -208,8 +218,8 @@ async fn main() -> Result<()> {
         let _ = client.session.set_capture(&capture_path);
     }
 
-    client.set_command_rx(command_rx);
-    let mut view_event_rx = client.subscribe_client_view_events();
+    client.set_command_rx(server_cmd_rx);
+    let mut server_event_rx = client.subscribe_client_view_events();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -222,22 +232,17 @@ async fn main() -> Result<()> {
         account_password: args.password.clone(),
         page: Page::Selection(SelectionState::default()),
         modal: None,
-        chat: ChatState::new(chat_log),
-        input: String::new(),
-        input_history: Vec::new(),
-        history_index: None,
         logon_retry: RetryState::new(5),
         enter_retry: RetryState::new(5),
-        core_state: ClientState::Connected,
+        client_state: ClientState::Connected,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),
+        server_time: None,
     };
 
-    app_state.refresh_context_buffer();
-
     if args.verbose > 0 {
-        app_state.chat.log(
+        app_state.log(
             ChatMessageKind::System,
             format!("Verbosity level {} enabled.", args.verbose),
         );
@@ -247,7 +252,7 @@ async fn main() -> Result<()> {
         let _ = client.run().await;
     });
 
-    let _ = command_tx.send(ClientCommand::Login(args.password.clone()));
+    let _ = server_cmd_tx.send(ClientCommand::Login(args.password.clone()));
 
     let mut last_tick = Instant::now();
     let tick_rate = std::time::Duration::from_millis(100);
@@ -255,26 +260,38 @@ async fn main() -> Result<()> {
     let mut last_draw = Instant::now();
     let mut needs_redraw = true;
 
+    let update_state = |res: holtburger_cli::types::UpdateResult,
+                        needs_redraw: &mut bool,
+                        server_cmd_tx: &mpsc::UnboundedSender<ClientCommand>,
+                        should_quit: &mut bool| {
+        *needs_redraw |= res.needs_redraw;
+        for cmd in res.commands {
+            if let ClientCommand::Quit = cmd {
+                *should_quit = true;
+            }
+            let _ = server_cmd_tx.send(cmd);
+        }
+    };
+
     loop {
-        // 1. Process Network Events (Drain batch)
-        while let Ok(event) = event_rx.try_recv() {
-            let res = app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
-            needs_redraw |= res.needs_redraw;
-            for cmd in res.commands {
-                let _ = command_tx.send(cmd);
-            }
-        }
-
-        while let Ok(event) = view_event_rx.try_recv() {
-            let res = app_state.handle_action(ui::AppAction::ReceivedViewEvent(event));
-            needs_redraw |= res.needs_redraw;
-            for cmd in res.commands {
-                let _ = command_tx.send(cmd);
-            }
-        }
-
-        // 2. Poll Input (Short timeout, drain batch)
         let mut should_quit = false;
+
+        // 1. Process Logger Events
+        while let Ok(log) = local_log_rx.try_recv() {
+            let res = app_state.handle_app_action(holtburger_cli::types::AppAction::Log {
+                kind: log.kind,
+                message: log.text,
+            });
+            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+        }
+
+        // 2. Process Network Events (Drain batch)
+        while let Ok(event) = server_event_rx.try_recv() {
+            let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+        }
+
+        // 3. Poll Input (Short timeout, drain batch)
         let poll_timeout = if needs_redraw {
             frame_rate.saturating_sub(last_draw.elapsed())
         } else {
@@ -290,35 +307,12 @@ async fn main() -> Result<()> {
                         }
 
                         let size = terminal.size()?;
-                        let (_, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                        let res = app_state.handle_action(ui::AppAction::KeyPress(
-                            key,
-                            size.width,
-                            size.height,
-                            main_chunks,
-                            dynamic_chunk,
-                        ));
-                        needs_redraw |= res.needs_redraw;
-                        for cmd in res.commands {
-                            if let ClientCommand::Quit = cmd {
-                                should_quit = true;
-                            }
-                            let _ = command_tx.send(cmd);
-                        }
+                        let res = app_state.handle_app_event(AppEvent::KeyPress(key, size.width));
+                        update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
                     }
                     Event::Mouse(mouse) => {
-                        let size = terminal.size()?;
-                        let (chunks, main_chunks, dynamic_chunk) = ui::get_layout(size);
-                        let res = app_state.handle_action(ui::AppAction::Mouse(
-                            mouse,
-                            chunks.to_vec(),
-                            main_chunks.to_vec(),
-                            dynamic_chunk,
-                        ));
-                        needs_redraw |= res.needs_redraw;
-                        for cmd in res.commands {
-                            let _ = command_tx.send(cmd);
-                        }
+                        let res = app_state.handle_app_event(AppEvent::Mouse(mouse));
+                        update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
                     }
                     _ => {}
                 }
@@ -328,14 +322,11 @@ async fn main() -> Result<()> {
             break;
         }
 
-        // 3. Tick
+        // 4. Tick
         let elapsed = last_tick.elapsed().as_secs_f64();
         if last_tick.elapsed() >= tick_rate {
-            let res = app_state.handle_action(ui::AppAction::Tick(elapsed));
-            needs_redraw |= res.needs_redraw;
-            for cmd in res.commands {
-                let _ = command_tx.send(cmd);
-            }
+            let res = app_state.handle_app_event(AppEvent::Tick(elapsed));
+            update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
             last_tick = Instant::now();
         }
 
@@ -343,7 +334,9 @@ async fn main() -> Result<()> {
         if needs_redraw {
             let now = Instant::now();
             if now.duration_since(last_draw) >= frame_rate {
-                terminal.draw(|f| ui::ui(f, &mut app_state))?;
+                let size = terminal.size()?;
+                app_state.page.update_layout(size);
+                terminal.draw(|f| pages::render_app(f, &mut app_state))?;
                 last_draw = now;
                 needs_redraw = false;
             }

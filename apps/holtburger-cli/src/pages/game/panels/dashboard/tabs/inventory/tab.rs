@@ -1,0 +1,540 @@
+use std::collections::{HashMap, HashSet};
+
+use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_common::Guid;
+use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
+use holtburger_world::context::{WorldContext, WorldContextExt};
+use holtburger_world::entity::Entity;
+use ratatui::Frame;
+use ratatui::layout::Rect;
+
+use super::super::classification::{EntityClass, classify_entity};
+use super::render::render_inventory_tab;
+use crate::pages::game::{GameData, ViewState};
+use crate::types::{
+    AppAction, AppUiAction, ChatMessageKind, CommandTarget, Interaction, TabController,
+    UpdateResult, Verb, VerbInputEvent, VerbInputState,
+};
+
+#[derive(Debug, Clone)]
+struct SplitSession {
+    item_guid: Guid,
+    container_guid: Guid,
+    input: VerbInputState,
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct InventoryTab {
+    pub selected_index: usize,
+    pub list_state: ratatui::widgets::ListState,
+    split_session: Option<SplitSession>,
+}
+
+pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
+    let entities = &data.entities;
+    let inventory = &data.inventory;
+    let equipment = &data.equipment;
+    let player_pos = data.player_pos.as_ref();
+
+    let candidates: Vec<_> = entities
+        .values()
+        .filter(|e| {
+            (inventory.contains(&e.guid) || equipment.contains_key(&e.guid)) && !e.name().is_empty()
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    // Build parent-child mapping for the subset
+    let mut children_map: HashMap<Guid, Vec<Guid>> = HashMap::new();
+    let mut roots = Vec::new();
+
+    let candidate_guids: HashSet<Guid> = candidates.iter().map(|e| e.guid).collect();
+
+    for e in &candidates {
+        let parent_id = e.container_id();
+
+        let is_root = if let Some(pid) = parent_id {
+            !candidate_guids.contains(&pid)
+        } else {
+            true
+        };
+
+        if is_root {
+            roots.push(e.guid);
+        } else {
+            children_map
+                .entry(parent_id.unwrap())
+                .or_default()
+                .push(e.guid);
+        }
+    }
+
+    // Sort roots by name for Inventory
+    roots.sort_by(|&a, &b| {
+        let ea = &entities[&a];
+        let eb = &entities[&b];
+        ea.name().cmp(eb.name())
+    });
+
+    // Flatten with depth using DFS
+    let mut result = Vec::new();
+    let mut stack: Vec<(Guid, usize)> = roots.into_iter().rev().map(|id| (id, 0)).collect();
+
+    while let Some((guid, depth)) = stack.pop() {
+        let e = &entities[&guid];
+        let dist = if let Some(p) = player_pos {
+            e.position.distance_to(p)
+        } else {
+            0.0
+        };
+        result.push((e, dist, depth));
+
+        if let Some(mut children) = children_map.remove(&guid) {
+            children.sort_by(|&a, &b| entities[&a].name().cmp(entities[&b].name()));
+            for child_guid in children.into_iter().rev() {
+                stack.push((child_guid, depth + 1));
+            }
+        }
+    }
+
+    result
+}
+
+impl InventoryTab {
+    fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
+        get_entities(data).len()
+    }
+
+    fn begin_split_session(
+        &mut self,
+        item_guid: Guid,
+        max_amount: u32,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        if self.split_session.is_some() || view.active_interaction.is_some() {
+            return None;
+        }
+
+        if max_amount <= 1 {
+            return None;
+        }
+
+        let container_id = if let Some(item) = data.get_entity(item_guid)
+            && let Some(container_id) = data.find_non_full_pack(item.container_id())
+        {
+            Some(container_id)
+        } else {
+            None
+        };
+
+        if let Some(container_id) = container_id {
+            self.split_session = Some(SplitSession {
+                item_guid,
+                container_guid: container_id,
+                input: VerbInputState::quantity("Split amount", 1, max_amount),
+            });
+        } else {
+            return Some(UpdateResult::new().with_action(AppAction::Log {
+                kind: ChatMessageKind::System,
+                message:
+                    "Unable to split item: player inventory container is unavailable.".to_string(),
+            }));
+        }
+
+        Some(UpdateResult::new().with_redraw(true))
+    }
+}
+
+impl TabController for InventoryTab {
+    fn render(&mut self, f: &mut Frame, data: &GameData, view: &ViewState, area: Rect) {
+        render_inventory_tab(self, f, data, view, area);
+    }
+
+    fn get_verbs(
+        &self,
+        data: &GameData,
+        view: &ViewState,
+        interaction: &Option<Interaction>,
+    ) -> Vec<Verb> {
+        let entities = get_entities(data);
+        let mut verbs = Vec::new();
+
+        if let Some((cur_entity, _, _)) = entities.get(self.selected_index) {
+            let class = classify_entity(cur_entity);
+            let player_guid = data.player_guid;
+
+            if let Some(active_interaction) = interaction {
+                match active_interaction {
+                    Interaction::Healing {
+                        item_guid: interact_guid,
+                    } => {
+                        if cur_entity.guid == *interact_guid
+                            && let Some(pguid) = player_guid
+                        {
+                            verbs.push(Verb::new(
+                                vec![
+                                    AppAction::UseWith {
+                                        item: *interact_guid,
+                                        target: pguid,
+                                    },
+                                    AppAction::CancelInteraction,
+                                ],
+                                '\r',
+                                "Heal yourself",
+                            ));
+                        }
+                        return verbs;
+                    }
+                    Interaction::Combining {
+                        item_guid: interact_guid,
+                    } => {
+                        if cur_entity.guid != *interact_guid
+                            && data.can_use_with(*interact_guid, cur_entity.guid)
+                        {
+                            verbs.push(Verb::new(
+                                vec![
+                                    AppAction::UseWith {
+                                        item: *interact_guid,
+                                        target: cur_entity.guid,
+                                    },
+                                    AppAction::CancelInteraction,
+                                ],
+                                '\r',
+                                "Use with target",
+                            ));
+                        }
+                        return verbs;
+                    }
+                    Interaction::Moving {
+                        item_guid: interact_guid,
+                    } => {
+                        let _is_self = Some(cur_entity.guid) == player_guid;
+                        let is_same_item = cur_entity.guid == *interact_guid;
+                        let is_in_main_pack = data.is_in_main_pack(cur_entity.guid);
+
+                        // Stop if already inside the current item.
+                        if data
+                            .entities
+                            .get(interact_guid)
+                            .and_then(|e| e.container_id())
+                            == Some(cur_entity.guid)
+                        {
+                            return verbs;
+                        }
+                        // If selecting interaction item, allow moving it to main pack if it's not already there.
+                        if is_same_item {
+                            if !is_in_main_pack {
+                                verbs.push(Verb::new(
+                                    vec![
+                                        AppAction::MoveItem {
+                                            item: *interact_guid,
+                                            container: player_guid.unwrap_or_default(),
+                                        },
+                                        AppAction::CancelInteraction,
+                                    ],
+                                    '\r',
+                                    "Move to main pack",
+                                ));
+                            }
+                            return verbs;
+                        }
+                        if data.can_move_item_into_container(*interact_guid, cur_entity.guid) {
+                            verbs.push(Verb::new(
+                                vec![AppAction::MoveItem {
+                                    item: *interact_guid,
+                                    container: cur_entity.guid,
+                                }],
+                                '\r',
+                                "Move into container",
+                            ));
+                            return verbs;
+                        }
+                        // If can merge with current item, show merge option.
+                        if let Some(merge_amount) =
+                            data.resolve_merge_stack_amount(*interact_guid, cur_entity.guid, None)
+                            && merge_amount > 0
+                        {
+                            verbs.push(Verb::new(
+                                vec![
+                                    AppAction::StackItems {
+                                        source: *interact_guid,
+                                        destination: cur_entity.guid,
+                                        amount: merge_amount,
+                                    },
+                                    AppAction::CancelInteraction,
+                                ],
+                                '\r',
+                                "Merge",
+                            ));
+                            return verbs;
+                        }
+                        return verbs;
+                    }
+                    _ => {}
+                }
+            }
+
+            verbs.push(Verb::new(
+                vec![AppAction::Assess {
+                    guid: cur_entity.guid,
+                }],
+                'a',
+                "Assess",
+            ));
+
+            match class {
+                EntityClass::Tool
+                | EntityClass::Container
+                | EntityClass::Consumable
+                | EntityClass::Key
+                | EntityClass::Writable
+                | EntityClass::Money
+                | EntityClass::Item => {
+                    let is_gem = cur_entity.item_type().is_some_and(|t| t == ItemType::GEM);
+                    if !is_gem && cur_entity.target_item_type().is_some() {
+                        verbs.push(Verb::new(
+                            vec![AppAction::BeginInteraction {
+                                interaction: Interaction::Combining {
+                                    item_guid: cur_entity.guid,
+                                },
+                            }],
+                            'c',
+                            "Combine",
+                        ));
+                    } else {
+                        verbs.push(Verb::new(
+                            vec![AppAction::Use {
+                                guid: cur_entity.guid,
+                            }],
+                            'u',
+                            "Use",
+                        ));
+                    }
+                }
+                EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {
+                    verbs.push(Verb::new(
+                        vec![AppAction::BeginInteraction {
+                            interaction: Interaction::Targeting {
+                                target_guid: cur_entity.guid,
+                            },
+                        }],
+                        't',
+                        "Target",
+                    ));
+                }
+                EntityClass::HealingKit => {
+                    verbs.push(Verb::new(
+                        vec![AppAction::BeginInteraction {
+                            interaction: Interaction::Healing {
+                                item_guid: cur_entity.guid,
+                            },
+                        }],
+                        'h',
+                        "Heal",
+                    ));
+                }
+                _ => {}
+            }
+
+            if !cur_entity.is_attuned_sticky() {
+                verbs.push(Verb::new(
+                    vec![AppAction::Drop {
+                        guid: cur_entity.guid,
+                    }],
+                    'd',
+                    "Drop",
+                ));
+            }
+
+            if cur_entity.stack_size() > 1 {
+                verbs.push(Verb::new(
+                    AppAction::UiAction {
+                        action: AppUiAction::InventoryBeginSplitInput {
+                            item_guid: cur_entity.guid,
+                            max_amount: cur_entity.stack_size(),
+                        },
+                    },
+                    'p',
+                    "Split",
+                ));
+            }
+
+            if !cur_entity
+                .flags
+                .intersects(ObjectDescriptionFlag::REQUIRES_PACK_SLOT)
+            {
+                verbs.push(Verb::new(
+                    vec![AppAction::BeginInteraction {
+                        interaction: Interaction::Moving {
+                            item_guid: cur_entity.guid,
+                        },
+                    }],
+                    'm',
+                    "Move",
+                ));
+            }
+
+            let is_equipped =
+                if let (Some(pguid), Some(wielder)) = (player_guid, cur_entity.wielder_id()) {
+                    pguid == wielder
+                } else {
+                    false
+                };
+
+            if let Some(trade) = &data.trade {
+                if !is_equipped
+                    && !trade.self_side.items.contains(&cur_entity.guid)
+                    && data.can_add_to_trade(cur_entity.guid)
+                {
+                    verbs.push(Verb::new(
+                        vec![AppAction::AddToTrade {
+                            guid: cur_entity.guid,
+                        }],
+                        'o',
+                        "Offer",
+                    ));
+                }
+            } else if let Some(vendor) = &view.vendor
+                && data.can_sell_to_vendor(cur_entity.guid, view.vendor.as_ref())
+            {
+                verbs.push(Verb::new(
+                    vec![AppAction::SellToVendor {
+                        vendor: vendor.vendor_guid,
+                        item: cur_entity.guid,
+                        amount: 1,
+                    }],
+                    's',
+                    "Sell",
+                ));
+            }
+
+            verbs.push(Verb::new(
+                vec![AppAction::QueryDebugInfo {
+                    target: CommandTarget::Entity(cur_entity.guid),
+                }],
+                'g',
+                "Debug",
+            ));
+        }
+
+        verbs
+    }
+
+    fn handle_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let count = self.item_count(data, view);
+        match key.code {
+            KeyCode::Down => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 1).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Up => {
+                self.selected_index = self.selected_index.saturating_sub(1);
+                Some(UpdateResult::new())
+            }
+            KeyCode::Home => {
+                self.selected_index = 0;
+                Some(UpdateResult::new())
+            }
+            KeyCode::End => {
+                if count > 0 {
+                    self.selected_index = count - 1;
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageUp => {
+                self.selected_index = self.selected_index.saturating_sub(10);
+                Some(UpdateResult::new())
+            }
+            KeyCode::PageDown => {
+                if count > 0 {
+                    self.selected_index = (self.selected_index + 10).min(count - 1);
+                }
+                Some(UpdateResult::new())
+            }
+            KeyCode::Enter | KeyCode::Char(_) => {
+                let shortcut = match key.code {
+                    KeyCode::Enter => '\r',
+                    KeyCode::Char(c) => c,
+                    _ => return None,
+                };
+                let verbs = self.get_verbs(data, view, &view.active_interaction);
+                let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
+                Some(UpdateResult::new().with_action(verb.action))
+            }
+            _ => None,
+        }
+    }
+
+    fn footer_input(&self) -> Option<&VerbInputState> {
+        self.split_session.as_ref().map(|session| &session.input)
+    }
+
+    fn handle_ui_action(
+        &mut self,
+        action: &AppUiAction,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        match action {
+            AppUiAction::InventoryBeginSplitInput {
+                item_guid,
+                max_amount,
+            } => self.begin_split_session(*item_guid, *max_amount, data, view),
+            _ => None,
+        }
+    }
+
+    fn handle_footer_input(
+        &mut self,
+        key: KeyEvent,
+        _data: &GameData,
+        _view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let session = self.split_session.as_mut()?;
+
+        let event = session.input.handle_key(key);
+
+        match event {
+            VerbInputEvent::Changed | VerbInputEvent::Ignored => {
+                Some(UpdateResult::new().with_redraw(true))
+            }
+            VerbInputEvent::Cancelled => {
+                self.split_session = None;
+                Some(UpdateResult::new().with_redraw(true))
+            }
+            VerbInputEvent::Invalid(err) => Some(
+                UpdateResult::new()
+                    .with_redraw(true)
+                    .with_action(AppAction::Log {
+                        kind: ChatMessageKind::System,
+                        message: err.message(),
+                    }),
+            ),
+            VerbInputEvent::Submitted(amount) => {
+                let item = session.item_guid;
+                let container = session.container_guid;
+                self.split_session = None;
+                Some(
+                    UpdateResult::new()
+                        .with_redraw(true)
+                        .with_action(AppAction::SplitItem {
+                            item,
+                            container,
+                            amount,
+                        }),
+                )
+            }
+        }
+    }
+}

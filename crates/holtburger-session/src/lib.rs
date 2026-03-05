@@ -14,6 +14,7 @@ use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::Instant;
 use tokio::net::UdpSocket;
 
 #[async_trait]
@@ -73,6 +74,10 @@ pub struct Session {
     pub fragment_reassembler: HashMap<u32, PendingMessage>,
     pub capture: Option<CaptureWriter>,
     pub game_action_sequence: u32,
+    pub bytes_in: u64,
+    pub bytes_out: u64,
+    pub last_recv_time: Instant,
+    pub last_send_time: Instant,
 }
 
 impl Session {
@@ -92,6 +97,10 @@ impl Session {
             fragment_reassembler: HashMap::new(),
             capture: None,
             game_action_sequence: 0,
+            bytes_in: 0,
+            bytes_out: 0,
+            last_recv_time: Instant::now(),
+            last_send_time: Instant::now(),
         })
     }
 
@@ -114,6 +123,10 @@ impl Session {
             fragment_reassembler: HashMap::new(),
             capture: None,
             game_action_sequence: 0,
+            bytes_in: 0,
+            bytes_out: 0,
+            last_recv_time: Instant::now(),
+            last_send_time: Instant::now(),
         })
     }
 
@@ -137,6 +150,10 @@ impl Session {
             has_server_seq: false,
             capture: None,
             game_action_sequence: 0,
+            bytes_in: 0,
+            bytes_out: 0,
+            last_recv_time: Instant::now(),
+            last_send_time: Instant::now(),
         }
     }
 
@@ -259,6 +276,8 @@ impl Session {
             let _ = capture.write_entry(Direction::Outbound, addr, &packet);
         }
 
+        self.bytes_out = self.bytes_out.wrapping_add(packet.len() as u64);
+        self.last_send_time = Instant::now();
         self.transport.send_to(&packet, addr).await?;
         Ok(())
     }
@@ -371,6 +390,9 @@ impl Session {
         if len < HEADER_SIZE {
             return Err(anyhow!("Packet too short"));
         }
+
+        self.bytes_in = self.bytes_in.wrapping_add(len as u64);
+        self.last_recv_time = Instant::now();
 
         if let Some(ref mut capture) = self.capture {
             let _ = capture.write_entry(Direction::Inbound, addr, &buf[..len]);

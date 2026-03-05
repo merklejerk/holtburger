@@ -2,7 +2,7 @@ use crate::pages::game::GameState;
 use crate::pages::game::panels::dashboard::{assess, debug};
 use crate::pages::game::{GameData, ViewState};
 use crate::pages::selection::SelectionState;
-use crossterm::event::{KeyEvent, MouseEvent};
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
@@ -24,6 +24,103 @@ pub struct Verb {
     pub action: AppAction,
     pub shortcut: char,
     pub label: Cow<'static, str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerbInputKind {
+    Quantity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerbInputError {
+    Empty,
+    InvalidNumber,
+    OutOfRange { value: u32, min: u32, max: u32 },
+}
+
+impl VerbInputError {
+    pub fn message(&self) -> String {
+        match self {
+            VerbInputError::Empty => "Enter a value before submitting.".to_string(),
+            VerbInputError::InvalidNumber => "Value must be a positive whole number.".to_string(),
+            VerbInputError::OutOfRange { value, min, max } => {
+                format!("{} is out of range. Expected {}-{}.", value, min, max)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerbInputEvent {
+    Changed,
+    Submitted(u32),
+    Cancelled,
+    Invalid(VerbInputError),
+    Ignored,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerbInputState {
+    pub kind: VerbInputKind,
+    pub prompt: Cow<'static, str>,
+    pub input: String,
+    pub min: u32,
+    pub max: u32,
+}
+
+impl VerbInputState {
+    pub fn quantity(prompt: impl Into<Cow<'static, str>>, min: u32, max: u32) -> Self {
+        Self {
+            kind: VerbInputKind::Quantity,
+            prompt: prompt.into(),
+            input: String::new(),
+            min,
+            max,
+        }
+    }
+
+    pub fn parse_value(&self) -> Result<u32, VerbInputError> {
+        if self.input.is_empty() {
+            return Err(VerbInputError::Empty);
+        }
+
+        let value = self
+            .input
+            .parse::<u32>()
+            .map_err(|_| VerbInputError::InvalidNumber)?;
+
+        if value < self.min || value > self.max {
+            return Err(VerbInputError::OutOfRange {
+                value,
+                min: self.min,
+                max: self.max,
+            });
+        }
+
+        Ok(value)
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) -> VerbInputEvent {
+        match key.code {
+            KeyCode::Esc => VerbInputEvent::Cancelled,
+            KeyCode::Enter => match self.parse_value() {
+                Ok(value) => VerbInputEvent::Submitted(value),
+                Err(err) => VerbInputEvent::Invalid(err),
+            },
+            KeyCode::Backspace => {
+                if self.input.pop().is_some() {
+                    VerbInputEvent::Changed
+                } else {
+                    VerbInputEvent::Ignored
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                self.input.push(c);
+                VerbInputEvent::Changed
+            }
+            _ => VerbInputEvent::Ignored,
+        }
+    }
 }
 
 impl Verb {

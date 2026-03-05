@@ -286,7 +286,7 @@ Inventory split verb should:
 
 ### Task Checklist
 - [x] Phase 1 complete
-- [ ] Phase 2 complete
+- [x] Phase 2 complete
 - [ ] Phase 3A complete
 - [ ] Phase 3B complete
 - [ ] Phase 3C complete
@@ -295,11 +295,14 @@ Inventory split verb should:
 
 ### Decisions Log
 - [x] Decide `AppAction::SplitItem` final shape: Named fields `SplitItem { item: Guid, container: Guid, amount: u32 }` for clarity and consistency with `ClientCommand::Split`.
+- [x] Standardize tab-scoped verb input primitive in `types.rs`: `VerbInputState`, `VerbInputKind`, `VerbInputEvent`, and `VerbInputError`.
+- [x] Centralize numeric-only input behavior in `VerbInputState::handle_key` (digits/backspace/enter/esc) with range validation in `parse_value`.
+- [x] Add reusable footer input renderer in `utils.rs`: `render_footer_text_input(...)` (generic, not split-specific).
 - [ ] Decide split destination container resolution strategy (main pack vs current container).
 - [ ] Decide invalid-input UX: keep mode active with message vs auto-cancel.
 
 ### Verification Log
-- Pending implementation.
+- ✅ `cargo check -p holtburger-cli` passed after Phase 2 changes.
 
 ### Open Questions
 1. For split destination container, should we always target player main pack (matching `/split`) or preserve original container when possible?

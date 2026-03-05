@@ -64,6 +64,7 @@
 - [x] Active panel needs to be much more obvious.
 - [x] HATE `world/state.rs`
 - [x] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
+- [x] Move interaction should clear interaction on confirm.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -85,6 +86,7 @@
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
 - [ ] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
+- [ ] Use enum structs instead of tuples for `AppAction`.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -144,6 +146,9 @@
 - [x] Precise splitting.
 - [x] Splitting is broken.
 - [x] Pickup verb is broken.
+- [x] Should split into the same container.
+- [x] Need to special case `ItemType::Gem` to show Use verb instead of Combine. They have a `TargetType` property but should be ignored.
+- [~] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -161,11 +166,9 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
-- [ ] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
-- [ ] Should split into the same container.
 - [ ] Should auto-switch to trade tab when initiating trade/vendor.
-- [ ] Need to special case `ItemType::Gem` to show Use verb instead of Combine. They have a `TargetType` property but should be ignored.
+- [ ] Chat buffer should not autoscroll when not bottomed out.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -1,9 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_common::properties::ObjectDescriptionFlag;
-use holtburger_world::context::WorldContextExt;
+use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
+use holtburger_world::context::{WorldContext, WorldContextExt};
 use holtburger_world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use holtburger_common::Guid;
 
 use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
@@ -16,8 +17,8 @@ use crate::types::{
 
 #[derive(Debug, Clone)]
 struct SplitSession {
-    item_guid: holtburger_common::Guid,
-    container_guid: holtburger_common::Guid,
+    item_guid: Guid,
+    container_guid: Guid,
     input: VerbInputState,
 }
 
@@ -46,7 +47,7 @@ impl InventoryTab {
 
     fn begin_split_session(
         &mut self,
-        item_guid: holtburger_common::Guid,
+        item_guid: Guid,
         max_amount: u32,
         data: &GameData,
         view: &ViewState,
@@ -59,19 +60,26 @@ impl InventoryTab {
             return None;
         }
 
-        let Some(container_guid) = data.player_guid else {
+        let container_id = if let Some(item) = data.get_entity(item_guid) &&
+            let Some(container_id) = data.find_non_full_pack(item.container_id()) {
+            Some(container_id)
+        } else {
+            None
+        };
+
+        if let Some(container_id) = container_id {
+            self.split_session = Some(SplitSession {
+                item_guid,
+                container_guid: container_id,
+                input: VerbInputState::quantity("Split amount", 1, max_amount),
+            });
+        } else {
             return Some(UpdateResult::new().with_action(AppAction::Log(
                 ChatMessageKind::System,
                 "Unable to split item: player inventory container is unavailable.".to_string(),
             )));
-        };
-
-        self.split_session = Some(SplitSession {
-            item_guid,
-            container_guid,
-            input: VerbInputState::quantity("Split amount", 1, max_amount),
-        });
-
+        }
+    
         Some(UpdateResult::new().with_redraw(true))
     }
 }
@@ -210,7 +218,8 @@ impl TabController for InventoryTab {
                 | EntityClass::Writable
                 | EntityClass::Money
                 | EntityClass::Item => {
-                    if cur_entity.target_item_type().is_some() {
+                    let is_gem = cur_entity.item_type().is_some_and(|t| t == ItemType::GEM);
+                    if !is_gem && cur_entity.target_item_type().is_some() {
                         verbs.push(Verb::new(
                             vec![AppAction::BeginInteraction(Interaction::Combining {
                                 item_guid: cur_entity.guid,

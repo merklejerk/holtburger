@@ -10,8 +10,9 @@ use super::render::render_inventory_tab;
 use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, ChatMessageKind, CommandTarget, Interaction, TabController, UpdateResult, Verb,
-    TabUiAction, VerbInputEvent, VerbInputState,
+    AppAction, AppUiAction, ChatMessageKind, CommandTarget, Interaction, TabController,
+    UpdateResult, Verb, VerbInputEvent,
+    VerbInputState,
 };
 
 #[derive(Debug, Clone)]
@@ -74,6 +75,7 @@ impl InventoryTab {
 
         Some(UpdateResult::new().with_redraw(true))
     }
+
 }
 
 impl TabController for InventoryTab {
@@ -252,11 +254,11 @@ impl TabController for InventoryTab {
             }
 
             if cur_entity.stack_size() > 1 {
-                verbs.push(Verb::ui(
-                    TabUiAction::BeginSplitInput {
+                verbs.push(Verb::new(
+                    AppAction::UiAction(AppUiAction::InventoryBeginSplitInput {
                         item_guid: cur_entity.guid,
                         max_amount: cur_entity.stack_size(),
-                    },
+                    }),
                     'p',
                     "Split",
                 ));
@@ -365,28 +367,29 @@ impl TabController for InventoryTab {
                 };
                 let verbs = self.get_verbs(data, view, &view.active_interaction);
                 let verb = verbs.into_iter().find(|v| v.shortcut == shortcut)?;
-                self.dispatch_verb_action(verb.action, data, view)
+                Some(UpdateResult::new().with_action(verb.action))
             }
             _ => None,
         }
     }
 
+    fn footer_input(&self) -> Option<&VerbInputState> {
+        self.split_session.as_ref().map(|session| &session.input)
+    }
+
     fn handle_ui_action(
         &mut self,
-        action: TabUiAction,
+        action: &AppUiAction,
         data: &GameData,
         view: &ViewState,
     ) -> Option<UpdateResult> {
         match action {
-            TabUiAction::BeginSplitInput {
+            AppUiAction::InventoryBeginSplitInput {
                 item_guid,
                 max_amount,
-            } => self.begin_split_session(item_guid, max_amount, data, view),
+            } => self.begin_split_session(*item_guid, *max_amount, data, view),
+            _ => None,
         }
-    }
-
-    fn footer_input(&self) -> Option<&VerbInputState> {
-        self.split_session.as_ref().map(|session| &session.input)
     }
 
     fn handle_footer_input(

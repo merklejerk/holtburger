@@ -20,19 +20,14 @@ pub const SCROLL_STEP: usize = 3;
 pub type VerbSet = Vec<Verb>;
 
 #[derive(Debug, Clone)]
-pub enum TabUiAction {
-    BeginSplitInput { item_guid: Guid, max_amount: u32 },
-}
-
-#[derive(Debug, Clone)]
-pub enum VerbAction {
-    App(AppAction),
-    Ui(TabUiAction),
+pub enum AppUiAction {
+    SetDashboardActiveTab(DashboardTab),
+    InventoryBeginSplitInput { item_guid: Guid, max_amount: u32 },
 }
 
 #[derive(Debug, Clone)]
 pub struct Verb {
-    pub action: VerbAction,
+    pub action: AppAction,
     pub shortcut: char,
     pub label: Cow<'static, str>,
 }
@@ -136,7 +131,7 @@ impl VerbInputState {
 
 impl Verb {
     pub fn new(
-        action: impl Into<VerbAction>,
+        action: impl Into<AppAction>,
         shortcut: char,
         label: impl Into<Cow<'static, str>>,
     ) -> Self {
@@ -145,10 +140,6 @@ impl Verb {
             shortcut,
             label: label.into(),
         }
-    }
-
-    pub fn ui(action: TabUiAction, shortcut: char, label: impl Into<Cow<'static, str>>) -> Self {
-        Self::new(action, shortcut, label)
     }
 
     pub fn display_label(&self) -> String {
@@ -389,6 +380,7 @@ pub enum AppAction {
     DeclineTrade,
     ResetTrade,
     ExitTrade,
+    UiAction(AppUiAction),
 }
 
 impl From<Vec<AppAction>> for AppAction {
@@ -397,21 +389,9 @@ impl From<Vec<AppAction>> for AppAction {
     }
 }
 
-impl From<AppAction> for VerbAction {
-    fn from(action: AppAction) -> Self {
-        VerbAction::App(action)
-    }
-}
-
-impl From<Vec<AppAction>> for VerbAction {
-    fn from(actions: Vec<AppAction>) -> Self {
-        VerbAction::App(actions.into())
-    }
-}
-
-impl From<TabUiAction> for VerbAction {
-    fn from(action: TabUiAction) -> Self {
-        VerbAction::Ui(action)
+impl From<AppUiAction> for AppAction {
+    fn from(action: AppUiAction) -> Self {
+        AppAction::UiAction(action)
     }
 }
 
@@ -439,23 +419,11 @@ pub trait TabController {
 
     fn handle_ui_action(
         &mut self,
-        _action: TabUiAction,
+        _action: &AppUiAction,
         _data: &GameData,
         _view: &ViewState,
     ) -> Option<UpdateResult> {
         None
-    }
-
-    fn dispatch_verb_action(
-        &mut self,
-        action: VerbAction,
-        data: &GameData,
-        view: &ViewState,
-    ) -> Option<UpdateResult> {
-        match action {
-            VerbAction::App(action) => Some(UpdateResult::new().with_action(action)),
-            VerbAction::Ui(action) => self.handle_ui_action(action, data, view),
-        }
     }
 
     fn footer_input(&self) -> Option<&VerbInputState> {

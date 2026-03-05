@@ -12,7 +12,8 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::types::{
-    AppAction, ChatMessageKind, ContextView, FocusedPane, Interaction, UpdateResult,
+    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Interaction,
+    UpdateResult,
 };
 
 #[derive(Default)]
@@ -100,7 +101,9 @@ impl GameState {
                     && target_guid == v_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
-                    self.dashboard.active_tab = crate::types::DashboardTab::Trade;
+                    result.actions.push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
+                        DashboardTab::Trade,
+                    )));
                 }
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
@@ -112,7 +115,9 @@ impl GameState {
                     && target_guid == p_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
-                    self.dashboard.active_tab = crate::types::DashboardTab::Trade;
+                    result.actions.push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
+                        DashboardTab::Trade,
+                    )));
                 }
             }
             ClientViewEvent::EntityIdentified { entity } => {
@@ -385,9 +390,18 @@ impl GameState {
             AppAction::ViewDetails(view) => {
                 return self.handle_action(AppAction::ChangeContextView(view));
             }
+            AppAction::UiAction(action) => {
+                return Some(self.handle_ui_action(action));
+            }
             _ => return None,
         }
         Some(result)
+    }
+
+    pub fn handle_ui_action(&mut self, action: AppUiAction) -> UpdateResult {
+        self.dashboard
+            .handle_ui_action(action, &self.data, &self.view)
+            .unwrap_or_default()
     }
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {

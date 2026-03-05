@@ -1,0 +1,603 @@
+use crate::pages::game::GameState;
+use crate::pages::game::panels::dashboard::{assess, debug};
+use crate::pages::game::{GameData, ViewState};
+use crate::pages::selection::SelectionState;
+use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use holtburger_common::Guid;
+use holtburger_core::client::types::TargetSlot;
+use holtburger_core::{ClientCommand, ClientViewEvent};
+use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::stats::{AttributeType, SkillType, VitalType};
+use ratatui::Frame;
+use ratatui::layout::Rect;
+use ratatui::text::Line;
+use std::borrow::Cow;
+use std::time::Instant;
+
+pub const SCROLL_STEP: usize = 3;
+
+pub type VerbSet = Vec<Verb>;
+
+#[derive(Debug, Clone)]
+pub enum AppUiAction {
+    SetDashboardActiveTab(DashboardTab),
+    InventoryBeginSplitInput { item_guid: Guid, max_amount: u32 },
+}
+
+#[derive(Debug, Clone)]
+pub struct Verb {
+    pub action: AppAction,
+    pub shortcut: char,
+    pub label: Cow<'static, str>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerbInputKind {
+    Quantity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerbInputError {
+    Empty,
+    InvalidNumber,
+    OutOfRange { value: u32, min: u32, max: u32 },
+}
+
+impl VerbInputError {
+    pub fn message(&self) -> String {
+        match self {
+            VerbInputError::Empty => "Enter a value before submitting.".to_string(),
+            VerbInputError::InvalidNumber => "Value must be a positive whole number.".to_string(),
+            VerbInputError::OutOfRange { value, min, max } => {
+                format!("{} is out of range. Expected {}-{}.", value, min, max)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VerbInputEvent {
+    Changed,
+    Submitted(u32),
+    Cancelled,
+    Invalid(VerbInputError),
+    Ignored,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerbInputState {
+    pub kind: VerbInputKind,
+    pub prompt: Cow<'static, str>,
+    pub input: String,
+    pub min: u32,
+    pub max: u32,
+}
+
+impl VerbInputState {
+    pub fn quantity(prompt: impl Into<Cow<'static, str>>, min: u32, max: u32) -> Self {
+        Self {
+            kind: VerbInputKind::Quantity,
+            prompt: prompt.into(),
+            input: String::new(),
+            min,
+            max,
+        }
+    }
+
+    pub fn parse_value(&self) -> Result<u32, VerbInputError> {
+        if self.input.is_empty() {
+            return Err(VerbInputError::Empty);
+        }
+
+        let value = self
+            .input
+            .parse::<u32>()
+            .map_err(|_| VerbInputError::InvalidNumber)?;
+
+        if value < self.min || value > self.max {
+            return Err(VerbInputError::OutOfRange {
+                value,
+                min: self.min,
+                max: self.max,
+            });
+        }
+
+        Ok(value)
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) -> VerbInputEvent {
+        match key.code {
+            KeyCode::Esc => VerbInputEvent::Cancelled,
+            KeyCode::Enter => match self.parse_value() {
+                Ok(value) => VerbInputEvent::Submitted(value),
+                Err(err) => VerbInputEvent::Invalid(err),
+            },
+            KeyCode::Backspace => {
+                if self.input.pop().is_some() {
+                    VerbInputEvent::Changed
+                } else {
+                    VerbInputEvent::Ignored
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() => {
+                self.input.push(c);
+                VerbInputEvent::Changed
+            }
+            _ => VerbInputEvent::Ignored,
+        }
+    }
+}
+
+impl Verb {
+    pub fn new(
+        action: impl Into<AppAction>,
+        shortcut: char,
+        label: impl Into<Cow<'static, str>>,
+    ) -> Self {
+        Self {
+            action: action.into(),
+            shortcut,
+            label: label.into(),
+        }
+    }
+
+    pub fn display_label(&self) -> String {
+        let label = &self.label;
+        let shortcut = self.shortcut;
+
+        if shortcut == '\x1b' {
+            return format!("[ESC] {}", label);
+        }
+
+        if shortcut == '\r' {
+            return format!("[ENTER] {}", label);
+        }
+
+        let shortcut_lower = shortcut.to_ascii_lowercase();
+        let shortcut_upper = shortcut.to_ascii_uppercase();
+
+        if let Some(pos) = label.find([shortcut_lower, shortcut_upper]) {
+            let (before, rest) = label.split_at(pos);
+            let mut iter = rest.chars();
+            let actual_char = iter.next().unwrap();
+            let after = iter.as_str();
+            format!("{}[{}]{}", before, actual_char, after)
+        } else {
+            format!("[{}] {}", shortcut_upper, label)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum StatType {
+    Attribute(AttributeType),
+    Vital(VitalType),
+    Skill(SkillType),
+}
+
+#[derive(Debug, Clone)]
+pub enum CommandTarget {
+    Entity(Guid),
+    EntityWithSlot(Guid, TargetSlot),
+    VendorItem(Guid),
+    Enchantment(Enchantment),
+    Stat(StatType, Option<u64>, Option<u32>),
+    Spell(u32),
+    None,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Modal {
+    Retry { message: String, end_time: Instant },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interaction {
+    Moving { item_guid: Guid },
+    Healing { item_guid: Guid },
+    Targeting { target_guid: Guid },
+    Combining { item_guid: Guid },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TradeFocus {
+    #[default]
+    Local,
+    Partner,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatMessageKind {
+    Info,
+    System,
+    Chat,
+    Tell,
+    Emote,
+    Error,
+    Warning,
+    Debug,
+}
+
+#[derive(PartialEq, Eq, Hash, Debug, Clone, Copy, Default)]
+pub enum DashboardTab {
+    #[default]
+    Nearby,
+    Inventory,
+    Character,
+    Spells,
+    Equip,
+    Trade,
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum FocusedPane {
+    Chat,
+    Context,
+    Input,
+    Dashboard,
+    Dynamic,
+}
+
+#[derive(PartialEq, Debug, Clone, Copy)]
+pub enum ContextView {
+    Default,
+    Custom,
+    Assess(Guid),
+    Spell(u32),
+    Enchantment(Enchantment),
+    DebugSpell(u32),
+    DebugEnchantment(Enchantment),
+}
+
+#[derive(Debug)]
+pub enum AppEvent {
+    Tick(f64),
+    KeyPress(KeyEvent, u16), // key, width
+    Mouse(MouseEvent),       // mouse
+    ReceivedViewEvent(ClientViewEvent),
+}
+
+#[derive(Debug, Default)]
+pub struct UpdateResult {
+    pub commands: Vec<ClientCommand>,
+    pub actions: Vec<AppAction>,
+    pub needs_redraw: bool,
+}
+
+impl UpdateResult {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_redraw(mut self, needs_redraw: bool) -> Self {
+        self.needs_redraw = needs_redraw;
+        self
+    }
+
+    pub fn with_action(mut self, action: AppAction) -> Self {
+        self.actions.push(action);
+        self
+    }
+
+    pub fn redraw() -> Self {
+        Self {
+            commands: Vec::new(),
+            actions: Vec::new(),
+            needs_redraw: true,
+        }
+    }
+
+    pub fn commands(commands: Vec<ClientCommand>) -> Self {
+        Self {
+            commands,
+            actions: Vec::new(),
+            needs_redraw: false,
+        }
+    }
+
+    pub fn merge(&mut self, other: UpdateResult) {
+        self.commands.extend(other.commands);
+        self.actions.extend(other.actions);
+        self.needs_redraw |= other.needs_redraw;
+    }
+}
+
+pub enum Page {
+    Selection(SelectionState),
+    Game(Box<GameState>),
+}
+
+impl Page {
+    pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
+        match self {
+            Page::Selection(s) => s.handle_view_event(event),
+            Page::Game(g) => g.handle_view_event(event),
+        }
+    }
+
+    pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
+        match self {
+            Page::Selection(s) => s.handle_action(action),
+            Page::Game(g) => g.handle_action(action),
+        }
+    }
+
+    pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
+        match self {
+            Page::Selection(s) => s.handle_tick(elapsed),
+            Page::Game(g) => g.handle_tick(elapsed),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum AppAction {
+    Assess {
+        guid: Guid,
+    },
+    Use {
+        guid: Guid,
+    },
+    Approach {
+        guid: Guid,
+    },
+    Drop {
+        guid: Guid,
+    },
+    Equip {
+        guid: Guid,
+    },
+    EquipInSlot {
+        guid: Guid,
+        slot: TargetSlot,
+    },
+    Unequip {
+        guid: Guid,
+    },
+    TalkTo {
+        guid: Guid,
+    },
+    Open {
+        guid: Guid,
+    },
+    Close {
+        guid: Guid,
+    },
+    OpenTrade {
+        guid: Guid,
+    },
+    AddToTrade {
+        guid: Guid,
+    },
+    MoveItem {
+        item: Guid,
+        container: Guid,
+    },
+    StackItems {
+        source: Guid,
+        destination: Guid,
+        amount: u32,
+    },
+    SplitItem {
+        item: Guid,
+        container: Guid,
+        amount: u32,
+    },
+    UseWith {
+        item: Guid,
+        target: Guid,
+    },
+    QueryDebugInfo {
+        target: CommandTarget,
+    },
+    CastSpell {
+        spell_id: u32,
+        target: Option<Guid>,
+    },
+    SetCombatMode {
+        mode: CombatMode,
+    },
+    LevelUpStat {
+        stat: StatType,
+        amount: u32,
+    },
+    TrainSkill {
+        skill: SkillType,
+        amount: u32,
+    },
+    ViewDetails {
+        view: ContextView,
+    },
+    Log {
+        kind: ChatMessageKind,
+        message: String,
+    },
+    BeginInteraction {
+        interaction: Interaction,
+    },
+    CancelInteraction,
+    SendCommands {
+        commands: Vec<ClientCommand>,
+    },
+    ChangeContextView {
+        view: ContextView,
+    },
+    RequestDebugContext {
+        guid: Option<Guid>,
+    },
+    ClearVendor,
+    DisplayClientInfo,
+    Sequence {
+        actions: Vec<AppAction>,
+    },
+    PickUp {
+        item: Guid,
+        container: Option<Guid>,
+    },
+    Give {
+        item: Guid,
+        recipient: Guid,
+        amount: u32,
+    },
+    OpenShop {
+        vendor: Guid,
+    },
+    BuyFromVendor {
+        vendor: Guid,
+        item: Guid,
+        amount: u32,
+    },
+    SellToVendor {
+        vendor: Guid,
+        item: Guid,
+        amount: u32,
+    },
+    AcceptTrade,
+    DeclineTrade,
+    ResetTrade,
+    ExitTrade,
+    UiAction {
+        action: AppUiAction,
+    },
+}
+
+impl From<Vec<AppAction>> for AppAction {
+    fn from(actions: Vec<AppAction>) -> Self {
+        AppAction::Sequence { actions }
+    }
+}
+
+impl From<AppUiAction> for AppAction {
+    fn from(action: AppUiAction) -> Self {
+        AppAction::UiAction { action }
+    }
+}
+
+pub trait TabController {
+    /// Renders the tab's content into the given area.
+    fn render(&mut self, f: &mut Frame, data: &GameData, view: &ViewState, area: Rect);
+
+    /// Returns the list of available verbs based on the tab's current internal selection.
+    fn get_verbs(
+        &self,
+        _data: &GameData,
+        _view: &ViewState,
+        _interaction: &Option<Interaction>,
+    ) -> Vec<Verb> {
+        vec![]
+    }
+
+    /// Handles tab-specific input. Returns a list of commands to execute.
+    fn handle_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult>;
+
+    fn handle_ui_action(
+        &mut self,
+        _action: &AppUiAction,
+        _data: &GameData,
+        _view: &ViewState,
+    ) -> Option<UpdateResult> {
+        None
+    }
+
+    fn footer_input(&self) -> Option<&VerbInputState> {
+        None
+    }
+
+    fn handle_footer_input(
+        &mut self,
+        _key: KeyEvent,
+        _data: &GameData,
+        _view: &ViewState,
+    ) -> Option<UpdateResult> {
+        None
+    }
+
+    /// Returns the content to be displayed in the context panel for the current selection.
+    fn get_context_panel_content(&self, data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
+        match view.context_view {
+            ContextView::Assess(guid) => {
+                if let Some(e) = data.entities.get(&guid) {
+                    return assess::get_assess_info(e);
+                }
+                vec![]
+            }
+            ContextView::Custom => {
+                let player_guid = data.player_guid;
+                let target_guid = view.current_debug_guid.or(player_guid);
+
+                if let Some(e) = target_guid.and_then(|guid| data.entities.get(&guid)) {
+                    let guid = e.guid;
+                    let target = CommandTarget::Entity(guid);
+                    let player_info = if Some(guid) == player_guid {
+                        Some(debug::PlayerDebugInfo {
+                            attributes: &data.attributes,
+                            vitals: &data.vitals,
+                            skills: &data.skills,
+                            enchantments: &data.player_enchantments,
+                        })
+                    } else {
+                        None
+                    };
+
+                    return debug::get_debug_info(
+                        data,
+                        Some(view),
+                        &target,
+                        |id| {
+                            data.entities
+                                .get(&id)
+                                .map(|e| e.name().to_string())
+                                .or_else(|| {
+                                    if Some(id) == player_guid {
+                                        Some("You".to_string())
+                                    } else {
+                                        None
+                                    }
+                                })
+                        },
+                        Some(&data.spell_info),
+                        player_info,
+                    );
+                }
+                vec![]
+            }
+            ContextView::Spell(spell_id) => {
+                let target = CommandTarget::Spell(spell_id);
+                debug::get_details_info(data, &target, Some(&data.spell_info))
+            }
+            ContextView::Enchantment(enchant) => {
+                let target = CommandTarget::Enchantment(enchant);
+                debug::get_details_info(data, &target, Some(&data.spell_info))
+            }
+            ContextView::DebugSpell(spell_id) => {
+                let target = CommandTarget::Spell(spell_id);
+                debug::get_debug_info(
+                    data,
+                    Some(view),
+                    &target,
+                    |_| None,
+                    Some(&data.spell_info),
+                    None,
+                )
+            }
+            ContextView::DebugEnchantment(enchant) => {
+                let target = CommandTarget::Enchantment(enchant);
+                debug::get_debug_info(
+                    data,
+                    Some(view),
+                    &target,
+                    |_| None,
+                    Some(&data.spell_info),
+                    None,
+                )
+            }
+            _ => vec![],
+        }
+    }
+}

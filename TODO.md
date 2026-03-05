@@ -25,6 +25,7 @@
 - [ ] Show enchantment source (caster) in enchantment debug.
 - [ ] Don't show Give verb on items that are attuned/sticky.
 - [ ] Replace context panel header with entity name.
+- [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -61,6 +62,13 @@
 - [x] Actions and `handle_base_action()` don't belong in `common.rs`.
 - [x] Just get rid of verbs.rs and move the fn into the tab controller.
 - [x] Active panel needs to be much more obvious.
+- [x] HATE `world/state.rs`
+- [x] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
+- [x] Move interaction should clear interaction on confirm.
+- [x] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
+- [x] Use enum structs instead of tuples for `AppAction`.
+- [x] Label locked chests and doors in nearby tab.
+- [x] Exit combat mode when trying to trade.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -70,18 +78,15 @@
 - [ ] Use sibling files for tests.
 - [ ] Auto-follow.
 - [ ] Add a movable cursor to the chat input.
-- [ ] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [ ] `/set [CHARACTER_OPTION] ...` command.
-- [ ] `handle_base_action()` handles a lot of actions that should be handled by the tab impl.
+- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
-- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
-- [ ] HATE `world/state.rs`
 - [ ] Resolve Spellbook entries in debug info.
-- [ ] Exit combat mode when trying to trade.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
-- [ ] Label unlocked chests in nearby tab.
-- [ ] Server messages being printed twice in chat, colored as errors, even though they aren't all errors.
+- [ ] Server messages being colored as errors, even though they aren't all errors.
+- [ ] Some echantments duplicated in char tab.
+- [ ] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -127,7 +132,27 @@
 - [x] Crafting.
 - [x] Show charges/uses/etc for items.
 - [x] Useful errors also appear in ServerMessage.
-- [ ] DC detection + /reconnect command.
+- [x] Dashboard and tabs should own their own state.
+- [x] Netstats is broken (not showing incoming activity).
+- [x] DC detection + /reconnect command. (/reconnect punted)
+- [x] Heal verb/interaction is missing/broken.
+- [x] Cast verb is clearing target interaction.
+- [x] Trade tab lets you add item already being traded. 
+- [x] Merge stacks broken?
+- [x] Spell debug output is weird.
+- [x] World clock takes some time to show up.
+- [x] Assess takes 2 tries to show up.
+- [x] Skill training not available.
+- [x] Precise splitting.
+- [x] Splitting is broken.
+- [x] Pickup verb is broken.
+- [x] Should split into the same container.
+- [x] Need to special case `ItemType::Gem` to show Use verb instead of Combine. They have a `TargetType` property but should be ignored.
+- [~] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
+- [x] Chat buffer should not autoscroll when not bottomed out.
+- [x] Should auto-switch to trade tab when initiating trade/vendor.
+- [x] Spell casting should auto combat.
+- [x] Nearby tab lists things in inventory sub-packs.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -143,16 +168,19 @@
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
-- [ ] Should split into the same container.
-- [ ] Precise splitting.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
+- [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
+- [ ] Slash-commands should use `AppAction`s.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
 - [x] Server only takes IP?
 - [x] flags and weenie flags should also be converted to properties!
 - [x] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows D>efender by attempting to run it once, hit "Learn More" and then select "Run anyway".
+- [ ] Not pruning entities!
+    - When they go out of range/teleported.
+    - When a trade is closed?
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.
@@ -160,9 +188,5 @@
 ### Investigate
 - [x] Max vitals caculation is wrong (63/127/132 vs 60/125/121)... sometimes? (when buffed)
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
-- [ ] Do we prune entities?
-    - When they go out of range.
-    - When they are explicitly deleted.
-    - When a trade is closed.
+- [x] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
-- [ ] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?

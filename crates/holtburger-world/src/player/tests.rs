@@ -345,7 +345,7 @@ fn test_vector_update_routing() {
 
     let msg = GameMessage::VectorUpdate(Box::new(data));
     let mut events = Vec::new();
-    let handled = player.handle_message(&msg, &mut events, None);
+    let handled = player.handle_message(&msg, &mut events, None, None);
 
     assert!(handled);
     assert_eq!(events.len(), 1);
@@ -419,7 +419,7 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     }));
 
     let mut events = Vec::new();
-    let handled = player.handle_message(&msg, &mut events, None);
+    let handled = player.handle_message(&msg, &mut events, None, None);
 
     assert!(handled);
     assert!(player.enchantments.iter().any(|e| e.spell_id == 100));
@@ -495,8 +495,8 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
     }));
 
     let mut events = Vec::new();
-    assert!(player.handle_message(&update_msg, &mut events, None));
-    assert!(player.handle_message(&purge_msg, &mut events, None));
+    assert!(player.handle_message(&update_msg, &mut events, None, None));
+    assert!(player.handle_message(&purge_msg, &mut events, None, None));
 
     assert!(!player.enchantments.iter().any(|e| e.spell_id == 100));
     assert!(player.enchantments.iter().any(|e| e.spell_id == 666));
@@ -530,7 +530,7 @@ fn test_heal_command_updates() {
             xp: 0,
             current: 50,
         }));
-        player.handle_message(&msg, &mut Vec::new(), None);
+        player.handle_message(&msg, &mut Vec::new(), None, None);
     }
 
     // Verify they are in the map
@@ -548,7 +548,7 @@ fn test_heal_command_updates() {
             current: val,
         }));
         let mut events = Vec::new();
-        let handled = player.handle_message(&msg, &mut events, None);
+        let handled = player.handle_message(&msg, &mut events, None, None);
         assert!(handled, "Failed to handle vital update for ID {}", id);
         assert_eq!(events.len(), 1);
     }

@@ -90,6 +90,10 @@ impl Entity {
         self.set_iid_prop(PropertyInstanceId::Wielder, val.unwrap_or(Guid::NULL))
     }
 
+    pub fn is_root(&self) -> bool {
+        self.container_id().is_none() && self.wielder_id().is_none()
+    }
+
     pub fn item_value(&self) -> u32 {
         self.get_int_prop(PropertyInt::Value).unwrap_or(0) as u32
     }
@@ -188,8 +192,9 @@ impl Entity {
             .map(|v| v as u32)
     }
 
-    pub fn max_stack_size(&self) -> u32 {
-        self.get_int_prop(PropertyInt::MaxStackSize).unwrap_or(1) as u32
+    pub fn max_stack_size(&self) -> Option<u32> {
+        self.get_int_prop(PropertyInt::MaxStackSize)
+            .map(|v| v as u32)
     }
 
     pub fn priority(&self) -> Option<u32> {
@@ -309,6 +314,14 @@ impl Entity {
         }
     }
 
+    pub fn is_stuck(&self) -> bool {
+        self.get_bool_prop(PropertyBool::Stuck)
+    }
+
+    pub fn is_locked(&self) -> bool {
+        self.get_bool_prop(PropertyBool::Locked)
+    }
+
     pub fn is_attuned_sticky(&self) -> bool {
         self.attuned_status() != AttunedStatus::Normal
     }
@@ -426,6 +439,15 @@ impl Entity {
     pub fn name(&self) -> &str {
         self.get_string_prop(PropertyString::Name)
             .unwrap_or("Unknown")
+    }
+
+    pub fn can_hold_items(&self) -> bool {
+        self.items_capacity().unwrap_or(0) > 0
+    }
+
+    pub fn has_active_pet(&self) -> bool {
+        self.get_instance_prop(PropertyInstanceId::Pet)
+            .is_some_and(|id| id != Guid::NULL)
     }
 }
 

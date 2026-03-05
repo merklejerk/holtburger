@@ -243,6 +243,10 @@ pub struct Skill {
     pub base: u32,
     pub current: u32,
     pub training: TrainingLevel,
+    /// The cost to train this skill from Untrained to Trained.
+    pub trained_cost: u32,
+    /// The cost to train this skill from Trained to Specialized.
+    pub specialized_cost: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -263,6 +267,7 @@ pub struct CharacterLevelInfo {
     pub current_xp: u64,
     pub unspent_xp: u64,
     pub unspent_skill_points: u32,
+    pub available_luminance: u64,
     pub next_level_xp: u64,
     pub xp_into_level: u64,
     pub xp_for_next_level: u64,

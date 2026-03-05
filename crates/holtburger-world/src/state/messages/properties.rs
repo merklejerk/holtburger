@@ -16,13 +16,12 @@ impl WorldState {
                     ));
                     entity.set_property(PropertyUpdate::Int(PropertyInt::Value, data.value as i32));
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid,
-                    update: PropertyUpdate::Int(PropertyInt::StackSize, data.stack_size as i32),
-                });
-                events.push(StateEvent::PropertyUpdated {
-                    guid,
-                    update: PropertyUpdate::Int(PropertyInt::Value, data.value as i32),
+                    updates: vec![
+                        PropertyUpdate::Int(PropertyInt::StackSize, data.stack_size as i32),
+                        PropertyUpdate::Int(PropertyInt::Value, data.value as i32),
+                    ],
                 });
             }
             GameMessage::PrivateUpdatePropertyInt(data) => {
@@ -59,9 +58,9 @@ impl WorldState {
                 {
                     item.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyInt(data) => {
@@ -92,9 +91,9 @@ impl WorldState {
                     }
                     self.player.emit_derived_stats(events);
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyInt64(data) => {
@@ -115,16 +114,17 @@ impl WorldState {
                     self.player.set_property(update.clone());
                     match data.property {
                         p if p == PropertyInt64::TotalExperience as u32
-                            || p == PropertyInt64::AvailableExperience as u32 =>
+                            || p == PropertyInt64::AvailableExperience as u32
+                            || p == PropertyInt64::AvailableLuminance as u32 =>
                         {
                             self.emit_level_info(events);
                         }
                         _ => {}
                     }
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyInt64(data) => {
@@ -141,9 +141,9 @@ impl WorldState {
                 {
                     item.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyBool(data) => {
@@ -163,9 +163,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyBool(data) => {
@@ -185,9 +185,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyFloat(data) => {
@@ -204,9 +204,9 @@ impl WorldState {
                     self.player.set_property(update.clone());
                     self.player.emit_derived_stats(events);
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyFloat(data) => {
@@ -223,9 +223,9 @@ impl WorldState {
                     self.player.set_property(update.clone());
                     self.player.emit_derived_stats(events);
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyString(data) => {
@@ -241,9 +241,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyString(data) => {
@@ -263,9 +263,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyDataId(data) => {
@@ -281,9 +281,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyDataId(data) => {
@@ -299,9 +299,9 @@ impl WorldState {
                 if target_guid == self.player.guid {
                     self.player.set_property(update.clone());
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyInstanceId(data) => {
@@ -345,9 +345,9 @@ impl WorldState {
                         }
                     }
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyInstanceId(data) => {
@@ -391,9 +391,9 @@ impl WorldState {
                         }
                     }
                 }
-                events.push(StateEvent::PropertyUpdated {
+                events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
-                    update,
+                    updates: vec![update],
                 });
             }
             GameMessage::SetState(data) => {

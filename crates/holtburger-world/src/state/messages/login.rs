@@ -32,7 +32,6 @@ impl WorldState {
                     enchantments: self.player.enchantments.clone(),
                     spells: self.player.spells.keys().cloned().collect(),
                     vitae: self.player.vitae(),
-                    skill_table: self.skill_table.clone(),
                     spell_names: self.get_player_spell_names(),
                     inventory: self.player.inventory.clone(),
                     equipment: self.player.equipment.clone(),

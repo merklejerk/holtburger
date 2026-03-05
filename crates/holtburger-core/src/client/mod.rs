@@ -276,12 +276,12 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityDespawned { guid: *guid });
             }
-            StateEvent::PropertyUpdated { guid, update } => {
+            StateEvent::PropertiesUpdated { guid, updates } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::EntityPropertyUpdated {
+                    .send(ClientViewEvent::EntityPropertiesUpdated {
                         guid: *guid,
-                        update: update.clone(),
+                        updates: updates.clone(),
                     });
             }
             StateEvent::EntityMoved { guid, pos } => {
@@ -341,6 +341,7 @@ impl Client {
         self.send_status_event();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
+        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
         let mut last_physics_time = Instant::now();
 
         loop {
@@ -349,6 +350,30 @@ impl Client {
             }
 
             tokio::select! {
+                _ = net_tick.tick() => {
+                    let now = Instant::now();
+
+                    // 1. Broadcast NetPulse
+                    let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
+                        bytes_in: self.session.bytes_in,
+                        bytes_out: self.session.bytes_out,
+                    });
+
+                    // 2. Disconnect Detection (15s timeout)
+                    if now.duration_since(self.session.last_recv_time) > Duration::from_secs(15) {
+                        log::warn!("Connection timed out (no data for 15s)");
+                        self.state = ClientState::Disconnected;
+                        let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);
+                        self.send_status_event();
+                        break;
+                    }
+
+                    // 3. Keep-alive Heartbeat (5s idle)
+                    if now.duration_since(self.session.last_send_time) > Duration::from_secs(5) {
+                        use holtburger_protocol::messages::misc::actions::PingRequestActionData;
+                        self.session.send_action(holtburger_protocol::messages::GameAction::PingRequest(Box::new(PingRequestActionData))).await?;
+                    }
+                }
                 res = self.session.recv_message() => {
                     use holtburger_session::SessionEvent;
                     match res {

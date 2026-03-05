@@ -101,9 +101,11 @@ impl GameState {
                     && target_guid == v_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
-                    result.actions.push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
-                        DashboardTab::Trade,
-                    )));
+                    result
+                        .actions
+                        .push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
+                            DashboardTab::Trade,
+                        )));
                 }
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
@@ -115,9 +117,11 @@ impl GameState {
                     && target_guid == p_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
-                    result.actions.push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
-                        DashboardTab::Trade,
-                    )));
+                    result
+                        .actions
+                        .push(AppAction::UiAction(AppUiAction::SetDashboardActiveTab(
+                            DashboardTab::Trade,
+                        )));
                 }
             }
             ClientViewEvent::EntityIdentified { entity } => {

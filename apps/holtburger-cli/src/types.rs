@@ -198,7 +198,6 @@ pub enum Interaction {
     Healing { item_guid: Guid },
     Targeting { target_guid: Guid },
     Combining { item_guid: Guid },
-    Splitting { item_guid: Guid, max_amount: i32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

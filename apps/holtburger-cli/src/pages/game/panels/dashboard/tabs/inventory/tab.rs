@@ -11,8 +11,7 @@ use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entitie
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, CommandTarget, Interaction, TabController,
-    UpdateResult, Verb, VerbInputEvent,
-    VerbInputState,
+    UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
 
 #[derive(Debug, Clone)]
@@ -75,7 +74,6 @@ impl InventoryTab {
 
         Some(UpdateResult::new().with_redraw(true))
     }
-
 }
 
 impl TabController for InventoryTab {
@@ -401,8 +399,11 @@ impl TabController for InventoryTab {
         let session = self.split_session.as_mut()?;
 
         let event = session.input.handle_key(key);
-        let result = match event {
-            VerbInputEvent::Changed | VerbInputEvent::Ignored => Some(UpdateResult::new().with_redraw(true)),
+
+        match event {
+            VerbInputEvent::Changed | VerbInputEvent::Ignored => {
+                Some(UpdateResult::new().with_redraw(true))
+            }
             VerbInputEvent::Cancelled => {
                 self.split_session = None;
                 Some(UpdateResult::new().with_redraw(true))
@@ -426,8 +427,6 @@ impl TabController for InventoryTab {
                         }),
                 )
             }
-        };
-
-        result
+        }
     }
 }

@@ -209,8 +209,16 @@ impl GameState {
                 result.commands.push(ClientCommand::CloseContainer(guid));
             }
             AppAction::OpenTrade { guid } => {
-                self.view.last_trade_initiation = Some((Instant::now(), guid));
-                result.commands.push(ClientCommand::OpenTrade(guid));
+                match self.try_enter_combat_mode(CombatMode::NonCombat) {
+                    EnterCombatModeResult::Failed(res) => {
+                        result.merge(res);
+                    }
+                    EnterCombatModeResult::Success(res) => {
+                        result.merge(res);
+                        self.view.last_trade_initiation = Some((Instant::now(), guid));
+                        result.commands.push(ClientCommand::OpenTrade(guid));
+                    }
+                }
             }
             AppAction::AddToTrade { guid } => {
                 result
@@ -549,8 +557,7 @@ impl GameState {
             }
             ClientViewEvent::CombatModeUpdated { mode } => {
                 if mode != CombatMode::NonCombat {
-                    // Clear vendor and active trade.
-                    self.view.vendor = None;
+                    // Clear active p2p trade. Vendoring in combat is allowed!
                     self.data.trade = None;
                 }
                 self.data.combat_mode = mode;
@@ -565,7 +572,7 @@ impl GameState {
             // Already in desired mode, do nothing.
             return EnterCombatModeResult::Success(result);
         }
-        if self.data.get_suggested_combat_mode() != mode {
+        if mode != CombatMode::NonCombat && self.data.get_suggested_combat_mode() != mode {
             result.actions.push(AppAction::Log {
                 kind: ChatMessageKind::Warning,
                 message: "Wrong weapon equipped!".to_string(),

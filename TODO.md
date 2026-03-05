@@ -67,6 +67,8 @@
 - [x] Move interaction should clear interaction on confirm.
 - [x] Scrollbars bottom out too early. The actual bar seems too large for the scrollable content?
 - [x] Use enum structs instead of tuples for `AppAction`.
+- [x] Label locked chests and doors in nearby tab.
+- [x] Exit combat mode when trying to trade.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -81,9 +83,7 @@
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Resolve Spellbook entries in debug info.
-- [ ] Exit combat mode when trying to trade.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
-- [ ] Label locked chests and doors in nearby tab.
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
 - [ ] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
@@ -178,6 +178,9 @@
 - [x] Server only takes IP?
 - [x] flags and weenie flags should also be converted to properties!
 - [x] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows D>efender by attempting to run it once, hit "Learn More" and then select "Run anyway".
+- [ ] Not pruning entities!
+    - When they go out of range/teleported.
+    - When a trade is closed?
 
 ### Stretch
 - [ ] Integrate `deno-core` for scripting.
@@ -187,7 +190,3 @@
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
 - [x] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
-- [ ] Do we prune entities?
-    - When they go out of range.
-    - When they are explicitly deleted.
-    - When a trade is closed.

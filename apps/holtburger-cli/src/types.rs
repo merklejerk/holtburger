@@ -333,18 +333,11 @@ impl Page {
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
-    Identify {
-        guid: Guid,
-    },
     Assess {
         guid: Guid,
     },
     Use {
         guid: Guid,
-    },
-    UseOn {
-        item: Guid,
-        target: Guid,
     },
     Approach {
         guid: Guid,

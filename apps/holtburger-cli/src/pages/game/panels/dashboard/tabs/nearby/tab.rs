@@ -1,14 +1,16 @@
+use std::collections::{HashMap, HashSet};
 use std::vec;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use holtburger_world::context::WorldContextExt;
+use holtburger_common::Guid;
+use holtburger_common::properties::PseudoEquipMask;
+use holtburger_world::context::{WorldContext, WorldContextExt};
 use holtburger_world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
-use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{AppAction, CommandTarget, Interaction, TabController, UpdateResult, Verb};
 
@@ -19,14 +21,101 @@ pub struct NearbyTab {
 }
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
-    filter_entities(
-        &data.entities,
-        &data.inventory,
-        &data.equipment,
-        data.player_pos.as_ref(),
-        Some(&data.open_containers),
-        EntityFilter::World,
-    )
+    let entities = &data.entities;
+    let player_pos = data.player_pos.as_ref();
+    let open_containers = &data.open_containers;
+
+    let candidates: Vec<_> = entities
+        .values()
+        .filter(|e| {
+            let loc = e.valid_locations();
+            let is_combat_implement = (loc.bits() & PseudoEquipMask::COMBAT_IMPLEMENTS.bits()) != 0;
+
+            let in_open_container = if let Some(cid) = e.container_id() {
+                // Container must be in world (not one of our pack slots).
+                open_containers.contains(&cid)
+                    && data
+                        .get_entity(cid)
+                        .is_some_and(|container| container.position.landblock_id != Guid::NULL)
+            } else {
+                false
+            };
+
+            (e.position.landblock_id != Guid::NULL
+                || (e.wielder_id().is_some() && is_combat_implement)
+                || e.physics_parent_id.is_some())
+                || in_open_container
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    // Build parent-child mapping for the subset
+    let mut children_map: HashMap<Guid, Vec<Guid>> = HashMap::new();
+    let mut roots = Vec::new();
+
+    let candidate_guids: HashSet<Guid> = candidates.iter().map(|e| e.guid).collect();
+
+    for e in &candidates {
+        let parent_id = e.container_id().or(e.wielder_id()).or(e.physics_parent_id);
+
+        let is_root = if let Some(pid) = parent_id {
+            !candidate_guids.contains(&pid)
+        } else {
+            true
+        };
+
+        if is_root {
+            roots.push(e.guid);
+        } else {
+            children_map
+                .entry(parent_id.unwrap())
+                .or_default()
+                .push(e.guid);
+        }
+    }
+
+    // Sort roots by distance
+    roots.sort_by(|&a, &b| {
+        let ea = &entities[&a];
+        let eb = &entities[&b];
+        let da = if let Some(p) = player_pos {
+            ea.position.distance_to(p)
+        } else {
+            999.0
+        };
+        let db = if let Some(p) = player_pos {
+            eb.position.distance_to(p)
+        } else {
+            999.0
+        };
+        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Flatten with depth using DFS
+    let mut result = Vec::new();
+    let mut stack: Vec<(Guid, usize)> = roots.into_iter().rev().map(|id| (id, 0)).collect();
+
+    while let Some((guid, depth)) = stack.pop() {
+        let e = &entities[&guid];
+        let dist = if let Some(p) = player_pos {
+            e.position.distance_to(p)
+        } else {
+            0.0
+        };
+        result.push((e, dist, depth));
+
+        if let Some(mut children) = children_map.remove(&guid) {
+            children.sort_by(|&a, &b| entities[&a].name().cmp(entities[&b].name()));
+            for child_guid in children.into_iter().rev() {
+                stack.push((child_guid, depth + 1));
+            }
+        }
+    }
+
+    result
 }
 
 impl NearbyTab {

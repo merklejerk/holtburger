@@ -152,6 +152,7 @@
 - [x] Chat buffer should not autoscroll when not bottomed out.
 - [x] Should auto-switch to trade tab when initiating trade/vendor.
 - [x] Spell casting should auto combat.
+- [x] Nearby tab lists things in inventory sub-packs.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -171,7 +172,6 @@
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] Nearby tab lists things in inventory sub-packs.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

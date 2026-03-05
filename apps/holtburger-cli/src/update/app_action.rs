@@ -9,17 +9,17 @@ impl AppState {
         } else {
             let mut result = UpdateResult::new();
             match action {
-                AppAction::Log(kind, text) => {
+                AppAction::Log { kind, message: text } => {
                     self.log(kind, text);
                     result.needs_redraw = true;
                 }
-                AppAction::SendCommands(cmds) => {
+                AppAction::SendCommands { commands: cmds } => {
                     result.commands.extend(cmds);
                 }
                 AppAction::DisplayClientInfo => {
                     self.display_client_info();
                 }
-                AppAction::Sequence(actions) => {
+                AppAction::Sequence { actions } => {
                     for sub in actions {
                         result.merge(self.handle_app_action(sub));
                     }

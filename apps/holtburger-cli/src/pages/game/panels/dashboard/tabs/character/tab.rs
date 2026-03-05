@@ -50,14 +50,16 @@ impl TabController for CharacterTab {
         match target {
             CommandTarget::Enchantment(enchant) => {
                 verbs.push(Verb::new(
-                    vec![AppAction::ViewDetails(ContextView::Enchantment(enchant))],
+                    vec![AppAction::ViewDetails {
+                        view: ContextView::Enchantment(enchant),
+                    }],
                     'd',
                     "Details",
                 ));
                 verbs.push(Verb::new(
-                    vec![AppAction::QueryDebugInfo(CommandTarget::Enchantment(
-                        enchant,
-                    ))],
+                    vec![AppAction::QueryDebugInfo {
+                        target: CommandTarget::Enchantment(enchant),
+                    }],
                     'g',
                     "Debug",
                 ));
@@ -73,7 +75,10 @@ impl TabController for CharacterTab {
 
                 if is_unassigned_xp_enough {
                     verbs.push(Verb::new(
-                        vec![AppAction::LevelUpStat(st.clone(), xp_spent)],
+                        vec![AppAction::LevelUpStat {
+                            stat: st.clone(),
+                            amount: xp_spent,
+                        }],
                         'l',
                         "Level Up",
                     ));
@@ -88,7 +93,10 @@ impl TabController for CharacterTab {
                     >= credits_cost;
                 if is_skill_credits_enough {
                     verbs.push(Verb::new(
-                        vec![AppAction::TrainSkill(skill, credits_cost)],
+                        vec![AppAction::TrainSkill {
+                            skill,
+                            amount: credits_cost,
+                        }],
                         't',
                         "Train",
                     ));

@@ -279,7 +279,10 @@ async fn main() -> Result<()> {
         // 1. Process Logger Events
         while let Ok(log) = local_log_rx.try_recv() {
             let res = app_state
-                .handle_app_action(holtburger_cli::types::AppAction::Log(log.kind, log.text));
+                .handle_app_action(holtburger_cli::types::AppAction::Log {
+                    kind: log.kind,
+                    message: log.text,
+                });
             update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
         }
 

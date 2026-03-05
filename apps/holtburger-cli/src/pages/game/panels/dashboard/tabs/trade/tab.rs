@@ -73,14 +73,14 @@ impl TabController for TradeTab {
             _ => None,
         } {
             verbs.push(Verb::new(
-                vec![AppAction::Assess(*target_item)],
+                vec![AppAction::Assess { guid: *target_item }],
                 'a',
                 "Assess",
             ));
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo(CommandTarget::Entity(
-                    *target_item,
-                ))],
+                vec![AppAction::QueryDebugInfo {
+                    target: CommandTarget::Entity(*target_item),
+                }],
                 'g',
                 "Debug",
             ));
@@ -89,7 +89,11 @@ impl TabController for TradeTab {
         if let Some(vendor) = &view.vendor {
             if let CommandTarget::VendorItem(guid) = target {
                 verbs.push(Verb::new(
-                    vec![AppAction::BuyFromVendor(vendor.vendor_guid, guid, 1)],
+                    vec![AppAction::BuyFromVendor {
+                        vendor: vendor.vendor_guid,
+                        item: guid,
+                        amount: 1,
+                    }],
                     'b',
                     "Buy",
                 ));

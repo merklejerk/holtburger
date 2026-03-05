@@ -43,7 +43,6 @@ pub fn render_dynamic_pane(
                 Interaction::Healing { .. } => "Healing",
                 Interaction::Moving { .. } => "Moving",
                 Interaction::Combining { .. } => "Combining",
-                Interaction::Splitting { .. } => "Splitting",
             }
         );
 
@@ -84,7 +83,6 @@ pub fn render_dynamic_pane(
             Interaction::Healing { item_guid } => item_guid,
             Interaction::Targeting { target_guid } => target_guid,
             Interaction::Combining { item_guid } => item_guid,
-            Interaction::Splitting { item_guid, .. } => item_guid,
         };
 
         let (name, guid) = if let Some(entity) = data.entities.get(&target_guid) {

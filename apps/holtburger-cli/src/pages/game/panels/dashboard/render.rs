@@ -87,7 +87,8 @@ pub fn render_dashboard_pane(
         let input_widget = render_footer_text_input(input_state);
         f.render_widget(input_widget, dashboard_inner_chunks[1]);
 
-        let cursor_x = dashboard_inner_chunks[1].x + 1 + footer_text_input_cursor_offset(input_state);
+        let cursor_x =
+            dashboard_inner_chunks[1].x + 1 + footer_text_input_cursor_offset(input_state);
         let cursor_y = dashboard_inner_chunks[1].y + 1;
         Some((cursor_x, cursor_y))
     } else {

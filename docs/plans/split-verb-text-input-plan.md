@@ -346,7 +346,7 @@ Inventory split verb should:
 - [x] Phase 4 complete
 - [x] Phase 4.5 complete
 - [x] Phase 4.75 complete
-- [ ] Phase 5 complete
+- [x] Phase 5 complete
 
 ### Decisions Log
 - [x] Decide `AppAction::SplitItem` final shape: Named fields `SplitItem { item: Guid, container: Guid, amount: u32 }` for clarity and consistency with `ClientCommand::Split`.
@@ -359,13 +359,15 @@ Inventory split verb should:
 - [x] Decide split destination container resolution strategy: use player main pack (`data.player_guid`) to match existing `/split` semantics.
 - [x] Decide invalid-input UX: keep split input mode open, log validation error, and preserve typed value for correction.
 - [x] Implement inventory split flow using tab-local `SplitSession` (`InventoryTab`), with item GUID and max split amount locked at mode entry.
-- [x] Add lightweight UI action lane: `TabUiAction` + `VerbAction` in `types.rs` (no global message bus).
-- [x] Add generic `TabController::handle_ui_action(...)` and `dispatch_verb_action(...)` for uniform verb dispatch.
-- [x] Refactor split trigger to `Verb::ui(TabUiAction::BeginSplitInput { ... })`, removing hardcoded split shortcut special-casing from `InventoryTab::handle_input`.
-- [x] Replace local `TabUiAction`/`VerbAction` lane with `AppAction::UiAction(AppUiAction)` so verbs emit `AppAction` only.
-- [x] Codify ownership map: `GameState::handle_ui_action` routes `AppUiAction::Dashboard(...)`; `DashboardState::handle_ui_action` routes dashboard-owned variants and inventory UI actions.
+- [x] Add lightweight UI action lane (`TabUiAction`/`VerbAction`) to remove shortcut special-casing, then supersede it in Phase 4.75.
+- [x] Add generic `TabController::handle_ui_action(...)` dispatch hook for uniform tab UI handling.
+- [x] Refactor split trigger to typed UI action dispatch, removing hardcoded split shortcut special-casing from `InventoryTab::handle_input`.
+- [x] Replace local UI-action lane with `AppAction::UiAction(AppUiAction)` so verbs emit `AppAction` only.
+- [x] Codify ownership map: `GameState::handle_ui_action` forwards app UI actions; `DashboardState::handle_ui_action` applies dashboard-owned variants and broadcasts to tabs.
 - [x] Add component-level `handle_ui_action(...)` propagation (`GameState` → `DashboardState` → `InventoryTab`).
-- [x] Migrate first cross-component orchestration path: vendor/trade-driven tab switching now dispatches `AppAction::UiAction(AppUiAction::Dashboard(DashboardUiAction::SetActiveTab(...)))` instead of direct dashboard mutation.
+- [x] Migrate first cross-component orchestration path: vendor/trade-driven tab switching now dispatches `AppAction::UiAction(AppUiAction::SetDashboardActiveTab(...))` instead of direct dashboard mutation.
+- [x] Flatten UI action shape to a single `AppUiAction` enum and broadcast routed UI actions to dashboard tabs.
+- [x] Remove obsolete global split interaction branch: deleted `Interaction::Splitting` and dynamic-pane split title/target handling.
 
 ### Verification Log
 - ✅ `cargo check -p holtburger-cli` passed after Phase 2 changes.
@@ -373,7 +375,8 @@ Inventory split verb should:
 - ✅ `cargo check -p holtburger-cli` passed after Phase 4 inventory split integration.
 - ✅ `cargo check -p holtburger-cli` passed after Phase 4.5 verb trigger routing refactor.
 - ✅ `cargo check -p holtburger-cli` passed after Phase 4.75 `AppAction::UiAction(AppUiAction)` migration.
+- ✅ `cargo check -p holtburger-cli` passed after Phase 5 cleanup (`Interaction::Splitting` removal).
 
 ### Open Questions
 1. Should tab-local verb-input mode block dashboard tab-switch keys (`1..6`) while input mode is active? (Current implementation: yes, keys are captured by footer input handler.)
-2. Should we expand `AppUiAction` ownership namespaces beyond `Dashboard(...)` now (for example `View(...)`, `Chat(...)`) or wait for the next concrete cross-component use case?
+2. Should we expand the flattened `AppUiAction` surface beyond dashboard/inventory variants now (for example `View` or `Chat` transitions) or wait for the next concrete cross-component use case?

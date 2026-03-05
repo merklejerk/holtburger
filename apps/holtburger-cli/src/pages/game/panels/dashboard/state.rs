@@ -94,8 +94,8 @@ impl DashboardState {
         let mut result = UpdateResult::new();
 
         if let AppUiAction::SetDashboardActiveTab(tab) = action {
-                self.active_tab = tab;
-                result.needs_redraw = true;
+            self.active_tab = tab;
+            result.needs_redraw = true;
         }
 
         if let Some(tab_result) = self.nearby.handle_ui_action(&action, data, view) {

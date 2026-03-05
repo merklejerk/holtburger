@@ -285,7 +285,7 @@ Inventory split verb should:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1 complete
+- [x] Phase 1 complete
 - [ ] Phase 2 complete
 - [ ] Phase 3A complete
 - [ ] Phase 3B complete
@@ -294,7 +294,7 @@ Inventory split verb should:
 - [ ] Phase 5 complete
 
 ### Decisions Log
-- [ ] Decide `AppAction::SplitItem` final shape (`tuple` vs `struct` variant).
+- [x] Decide `AppAction::SplitItem` final shape: Named fields `SplitItem { item: Guid, container: Guid, amount: u32 }` for clarity and consistency with `ClientCommand::Split`.
 - [ ] Decide split destination container resolution strategy (main pack vs current container).
 - [ ] Decide invalid-input UX: keep mode active with message vs auto-cancel.
 

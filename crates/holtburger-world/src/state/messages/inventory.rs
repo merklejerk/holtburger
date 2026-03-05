@@ -146,12 +146,19 @@ impl WorldState {
                         || self.player.inventory.contains(&data.container_guid);
                     self.update_player_inventory_recursive(data.item_guid, is_owned);
 
-                    events.push(StateEvent::PropertyUpdated {
+                    events.push(StateEvent::PropertiesUpdated {
                         guid: data.item_guid,
-                        update: PropertyUpdate::InstanceId(
-                            PropertyInstanceId::Container,
-                            data.container_guid,
-                        ),
+                        updates: vec![
+                            PropertyUpdate::InstanceId(
+                                PropertyInstanceId::Container,
+                                data.container_guid,
+                            ),
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
+                            PropertyUpdate::Int(
+                                PropertyInt::CurrentWieldedLocation,
+                                EquipMask::NONE.bits() as i32,
+                            ),
+                        ],
                     });
                 }
             }
@@ -170,12 +177,16 @@ impl WorldState {
                     // Recursively remove from inventory tracking
                     self.update_player_inventory_recursive(data.object_guid, false);
 
-                    events.push(StateEvent::PropertyUpdated {
+                    events.push(StateEvent::PropertiesUpdated {
                         guid: data.object_guid,
-                        update: PropertyUpdate::InstanceId(
-                            PropertyInstanceId::Container,
-                            Guid::NULL,
-                        ),
+                        updates: vec![
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
+                            PropertyUpdate::Int(
+                                PropertyInt::CurrentWieldedLocation,
+                                EquipMask::NONE.bits() as i32,
+                            ),
+                        ],
                     });
                 }
             }
@@ -204,12 +215,12 @@ impl WorldState {
                                 self.scene.remove_entity(guid, old_lb);
                             }
 
-                            events.push(StateEvent::PropertyUpdated {
+                            events.push(StateEvent::PropertiesUpdated {
                                 guid,
-                                update: PropertyUpdate::InstanceId(
+                                updates: vec![PropertyUpdate::InstanceId(
                                     PropertyInstanceId::Container,
                                     data.container,
-                                ),
+                                )],
                             });
                         }
                     }
@@ -269,9 +280,16 @@ impl WorldState {
                         self.player.wield_item(data.object_guid, data.equip_mask);
                     }
 
-                    events.push(StateEvent::PropertyUpdated {
+                    events.push(StateEvent::PropertiesUpdated {
                         guid: data.object_guid,
-                        update: PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, ev.target),
+                        updates: vec![
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, ev.target),
+                            PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
+                            PropertyUpdate::Int(
+                                PropertyInt::CurrentWieldedLocation,
+                                data.equip_mask.bits() as i32,
+                            ),
+                        ],
                     });
                 }
             }

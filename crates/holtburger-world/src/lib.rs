@@ -26,7 +26,6 @@ pub struct PlayerInfoData {
     pub enchantments: Vec<Enchantment>,
     pub spells: Vec<u32>,
     pub vitae: f32,
-    pub skill_table: Option<std::sync::Arc<holtburger_dat::file_type::skill_table::SkillTable>>,
     pub spell_names: std::collections::HashMap<u32, String>,
     pub inventory: std::collections::HashSet<Guid>,
     pub equipment: std::collections::HashMap<Guid, holtburger_protocol::messages::EquipMask>,
@@ -60,9 +59,9 @@ pub enum StateEvent {
     AttributeUpdated(stats::Attribute),
     SkillUpdated(stats::Skill),
     LevelInfoUpdated(stats::CharacterLevelInfo),
-    PropertyUpdated {
+    PropertiesUpdated {
         guid: Guid,
-        update: PropertyUpdate,
+        updates: Vec<PropertyUpdate>,
     },
     PlayerInfo(Box<PlayerInfoData>),
     PlayerEnchantmentsUpdated {

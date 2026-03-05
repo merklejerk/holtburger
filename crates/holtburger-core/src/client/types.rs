@@ -137,9 +137,9 @@ pub enum ClientViewEvent {
     EntityIdentified {
         entity: Box<Entity>,
     },
-    EntityPropertyUpdated {
+    EntityPropertiesUpdated {
         guid: Guid,
-        update: holtburger_common::properties::PropertyUpdate,
+        updates: Vec<holtburger_common::properties::PropertyUpdate>,
     },
     EntityMoved {
         guid: Guid,
@@ -197,6 +197,11 @@ pub enum ClientViewEvent {
     EntityDebugInfoSnapshot {
         entity: Box<Entity>,
     },
+    NetPulse {
+        bytes_in: u64,
+        bytes_out: u64,
+    },
+    Disconnected,
 }
 
 #[derive(Debug, Clone)]
@@ -218,12 +223,12 @@ pub enum ClientCommand {
     Stack {
         source: Guid,
         destination: Guid,
-        amount: i32,
+        amount: u32,
     },
     Split {
         item: Guid,
         container: Guid,
-        amount: i32,
+        amount: u32,
     },
     MoveItem {
         item: Guid,
@@ -269,7 +274,7 @@ pub enum ClientCommand {
     GiveObjectRequest {
         target: Guid,
         item: Guid,
-        amount: i32,
+        amount: u32,
     },
     Buy {
         vendor: Guid,

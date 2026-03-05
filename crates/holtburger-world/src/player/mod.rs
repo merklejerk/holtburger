@@ -128,6 +128,11 @@ impl PlayerState {
         self.get_int_prop_default(PropertyInt::AvailableSkillCredits) as u32
     }
 
+    pub fn available_luminance(&self) -> u64 {
+        self.get_int64_prop(PropertyInt64::AvailableLuminance)
+            .unwrap_or(0) as u64
+    }
+
     pub fn combat_mode(&self) -> CombatMode {
         let val = self.get_int_prop_default(PropertyInt::CombatMode);
         CombatMode::from_repr(val as u32).unwrap_or(CombatMode::NonCombat)

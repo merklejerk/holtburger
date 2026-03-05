@@ -240,6 +240,7 @@ impl GameState {
                     container,
                     placement: 0,
                 });
+                self.view.active_interaction = None;
             }
             AppAction::StackItems(source, destination, amount) => {
                 result.commands.push(ClientCommand::Stack {

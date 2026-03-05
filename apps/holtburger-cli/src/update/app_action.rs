@@ -9,7 +9,10 @@ impl AppState {
         } else {
             let mut result = UpdateResult::new();
             match action {
-                AppAction::Log { kind, message: text } => {
+                AppAction::Log {
+                    kind,
+                    message: text,
+                } => {
                     self.log(kind, text);
                     result.needs_redraw = true;
                 }

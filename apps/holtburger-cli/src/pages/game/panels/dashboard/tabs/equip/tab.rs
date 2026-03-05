@@ -62,11 +62,7 @@ impl TabController for EquipTab {
                     false
                 };
 
-                verbs.push(Verb::new(
-                    vec![AppAction::Assess { guid }],
-                    'a',
-                    "Assess",
-                ));
+                verbs.push(Verb::new(vec![AppAction::Assess { guid }], 'a', "Assess"));
 
                 if interaction.is_none()
                     || matches!(interaction, Some(Interaction::Targeting { target_guid }) if *target_guid != guid)
@@ -82,11 +78,7 @@ impl TabController for EquipTab {
 
                 if is_here {
                     if let Some(_pguid) = data.player_guid {
-                        verbs.push(Verb::new(
-                            vec![AppAction::Unequip { guid }],
-                            'q',
-                            "Unequip",
-                        ));
+                        verbs.push(Verb::new(vec![AppAction::Unequip { guid }], 'q', "Unequip"));
                     }
                 } else {
                     verbs.push(Verb::new(

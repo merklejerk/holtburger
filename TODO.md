@@ -140,6 +140,9 @@
 - [x] World clock takes some time to show up.
 - [x] Assess takes 2 tries to show up.
 - [x] Skill training not available.
+- [x] Precise splitting.
+- [x] Splitting is broken.
+- [x] Pickup verb is broken.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -160,10 +163,8 @@
 - [ ] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Should split into the same container.
-- [ ] Precise splitting.
-- [ ] Splitting is broken.
 - [ ] Should auto-switch to trade tab when initiating trade/vendor.
-- [ ] Pickup verb is broken.
+- [ ] Need to special case `ItemType::Gem` to show Use verb instead of Combine. They have a `TargetType` property but should be ignored.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

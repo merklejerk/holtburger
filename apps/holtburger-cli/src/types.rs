@@ -338,7 +338,6 @@ pub enum AppAction {
     Use(Guid),
     UseOn(Guid, Guid),
     Approach(Guid),
-    PickUp(Guid),
     Drop(Guid),
     Equip(Guid),
     EquipInSlot(Guid, TargetSlot),
@@ -371,7 +370,7 @@ pub enum AppAction {
     ClearVendor,
     DisplayClientInfo,
     Sequence(Vec<AppAction>),
-    Pickup(Guid),
+    PickUp(Guid, Option<Guid>),
     Give(Guid, Guid, u32),          // item, recipient, amount
     BuyFromVendor(Guid, Guid, u32), // Vendor, item, amount
     SellToVendor(Guid, Guid, u32),  // Vendor, item, amount

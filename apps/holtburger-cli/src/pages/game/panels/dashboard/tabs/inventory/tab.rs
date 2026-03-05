@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
@@ -8,7 +10,6 @@ use ratatui::layout::Rect;
 
 use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
-use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, CommandTarget, Interaction, TabController,
@@ -30,14 +31,76 @@ pub struct InventoryTab {
 }
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
-    filter_entities(
-        &data.entities,
-        &data.inventory,
-        &data.equipment,
-        data.player_pos.as_ref(),
-        Some(&data.open_containers),
-        EntityFilter::Inventory,
-    )
+    let entities = &data.entities;
+    let inventory = &data.inventory;
+    let equipment = &data.equipment;
+    let player_pos = data.player_pos.as_ref();
+
+    let candidates: Vec<_> = entities
+        .values()
+        .filter(|e| {
+            (inventory.contains(&e.guid) || equipment.contains_key(&e.guid)) && !e.name().is_empty()
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    // Build parent-child mapping for the subset
+    let mut children_map: HashMap<Guid, Vec<Guid>> = HashMap::new();
+    let mut roots = Vec::new();
+
+    let candidate_guids: HashSet<Guid> = candidates.iter().map(|e| e.guid).collect();
+
+    for e in &candidates {
+        let parent_id = e.container_id();
+
+        let is_root = if let Some(pid) = parent_id {
+            !candidate_guids.contains(&pid)
+        } else {
+            true
+        };
+
+        if is_root {
+            roots.push(e.guid);
+        } else {
+            children_map
+                .entry(parent_id.unwrap())
+                .or_default()
+                .push(e.guid);
+        }
+    }
+
+    // Sort roots by name for Inventory
+    roots.sort_by(|&a, &b| {
+        let ea = &entities[&a];
+        let eb = &entities[&b];
+        ea.name().cmp(eb.name())
+    });
+
+    // Flatten with depth using DFS
+    let mut result = Vec::new();
+    let mut stack: Vec<(Guid, usize)> = roots.into_iter().rev().map(|id| (id, 0)).collect();
+
+    while let Some((guid, depth)) = stack.pop() {
+        let e = &entities[&guid];
+        let dist = if let Some(p) = player_pos {
+            e.position.distance_to(p)
+        } else {
+            0.0
+        };
+        result.push((e, dist, depth));
+
+        if let Some(mut children) = children_map.remove(&guid) {
+            children.sort_by(|&a, &b| entities[&a].name().cmp(entities[&b].name()));
+            for child_guid in children.into_iter().rev() {
+                stack.push((child_guid, depth + 1));
+            }
+        }
+    }
+
+    result
 }
 
 impl InventoryTab {

@@ -4,7 +4,6 @@ pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab,
 
 pub mod assess;
 pub mod debug;
-pub mod filter;
 pub mod render;
 pub mod state;
 

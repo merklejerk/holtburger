@@ -164,13 +164,24 @@ impl ChatState {
             }
         }
 
+        let old_total_lines = self.total_lines;
         let window_start = m_len.saturating_sub(window_size);
         self.total_lines = self.wrapped_chat_cache[window_start..]
             .iter()
             .map(|v| v.len())
             .sum();
 
-        // Bounds check scroll_offset
+        // If we were at the bottom (scroll_offset == 0) and new lines were added,
+        // we stay at the bottom by default.
+        // If we were scrolled up, we increment scroll_offset to maintain the relative position.
+        if self.scroll_offset > 0 && self.total_lines > old_total_lines {
+            self.scroll_offset += self.total_lines - old_total_lines;
+        }
+
+        self.clamp_scroll(height);
+    }
+
+    fn clamp_scroll(&mut self, height: usize) {
         let max_scroll = self.total_lines.saturating_sub(height);
         self.scroll_offset = self.scroll_offset.min(max_scroll);
     }
@@ -180,8 +191,7 @@ impl ChatState {
         match key.code {
             KeyCode::Up => {
                 self.scroll_offset = self.scroll_offset.saturating_add(1);
-                let max_scroll = self.total_lines.saturating_sub(h);
-                self.scroll_offset = self.scroll_offset.min(max_scroll);
+                self.clamp_scroll(h);
                 needs_redraw = true;
             }
             KeyCode::Down => {
@@ -191,8 +201,7 @@ impl ChatState {
             KeyCode::PageUp => {
                 let step = (h / 2) + 1;
                 self.scroll_offset = self.scroll_offset.saturating_add(step);
-                let max_scroll = self.total_lines.saturating_sub(h);
-                self.scroll_offset = self.scroll_offset.min(max_scroll);
+                self.clamp_scroll(h);
                 needs_redraw = true;
             }
             KeyCode::PageDown => {

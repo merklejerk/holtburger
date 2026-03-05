@@ -447,6 +447,9 @@ pub enum AppAction {
         recipient: Guid,
         amount: u32,
     },
+    OpenShop {
+        vendor: Guid,
+    },
     BuyFromVendor {
         vendor: Guid,
         item: Guid,

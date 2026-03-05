@@ -150,6 +150,7 @@
 - [x] Need to special case `ItemType::Gem` to show Use verb instead of Combine. They have a `TargetType` property but should be ignored.
 - [~] Luminance count. Just make the sticky line in Char tab be `{TOTAL_LUM} Lum | {UNSPENT_XP} XP Unspent | {SKILL_CREDITS} SP`, dropping lum field if zero.
 - [x] Chat buffer should not autoscroll when not bottomed out.
+- [x] Should auto-switch to trade tab when initiating trade/vendor.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -168,7 +169,6 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
-- [ ] Should auto-switch to trade tab when initiating trade/vendor.
 - [ ] Spell casting should auto combat.
 
 ### Critical

@@ -93,6 +93,10 @@ impl GameState {
                 self.handle_entity_removed(guid);
             }
             ClientViewEvent::VendorStateUpdated { vendor } => {
+                if self.data.trade.is_some() {
+                    // If we're in a trade, ignore vendor sessions.
+                    return result;
+                }
                 let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
                 self.view.vendor = vendor;
                 // If we just opened a vendor and we initiated it, switch to Trade tab.
@@ -101,15 +105,15 @@ impl GameState {
                     && target_guid == v_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
-                    result
-                        .actions
-                        .push(AppAction::UiAction {
-                            action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
-                        });
+                    result.actions.push(AppAction::UiAction {
+                        action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
+                    });
                 }
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
                 let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
+                // Cancel vendor session.
+                self.view.vendor = None;
                 self.data.trade = trade;
                 // If we just opened a trade and we initiated it, switch to Trade tab.
                 if let Some(p_guid) = partner_guid
@@ -117,11 +121,9 @@ impl GameState {
                     && target_guid == p_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
-                    result
-                        .actions
-                        .push(AppAction::UiAction {
-                            action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
-                        });
+                    result.actions.push(AppAction::UiAction {
+                        action: AppUiAction::SetDashboardActiveTab(DashboardTab::Trade),
+                    });
                 }
             }
             ClientViewEvent::EntityIdentified { entity } => {
@@ -209,12 +211,25 @@ impl GameState {
                 result.commands.push(ClientCommand::CloseContainer(guid));
             }
             AppAction::OpenTrade { guid } => {
+                self.view.last_trade_initiation = Some((Instant::now(), guid));
                 result.commands.push(ClientCommand::OpenTrade(guid));
             }
             AppAction::AddToTrade { guid } => {
                 result
                     .commands
                     .push(ClientCommand::AddToTrade { item: guid });
+            }
+            AppAction::OpenShop { vendor } => {
+                if self.data.trade.is_some() {
+                    // If we're in a trade, do not initiate vendor sessions.
+                    result.actions.push(AppAction::Log {
+                        kind: ChatMessageKind::Warning,
+                        message: "You are currently in a trade.".to_string(),
+                    });
+                } else {
+                    self.view.last_trade_initiation = Some((Instant::now(), vendor));
+                    result.commands.push(ClientCommand::Use(vendor));
+                }
             }
             AppAction::SellToVendor {
                 vendor,
@@ -321,7 +336,10 @@ impl GameState {
             AppAction::SetCombatMode { mode } => {
                 result.commands.push(ClientCommand::SetCombatMode(mode));
             }
-            AppAction::LevelUpStat { stat, amount: xp_spent } => match stat {
+            AppAction::LevelUpStat {
+                stat,
+                amount: xp_spent,
+            } => match stat {
                 crate::types::StatType::Attribute(attribute) => {
                     result.commands.push(ClientCommand::RaiseAttribute {
                         attribute,
@@ -339,12 +357,18 @@ impl GameState {
                         .push(ClientCommand::RaiseSkill { skill, xp_spent });
                 }
             },
-            AppAction::TrainSkill { skill, amount: credits } => {
+            AppAction::TrainSkill {
+                skill,
+                amount: credits,
+            } => {
                 result
                     .commands
                     .push(ClientCommand::TrainSkill { skill, credits });
             }
-            AppAction::PickUp { item: guid, container: preferred_container_id } => {
+            AppAction::PickUp {
+                item: guid,
+                container: preferred_container_id,
+            } => {
                 if let Some(container_id) = self.data.find_non_full_pack(preferred_container_id) {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
@@ -358,7 +382,11 @@ impl GameState {
                     });
                 }
             }
-            AppAction::Give { item, recipient, amount } => {
+            AppAction::Give {
+                item,
+                recipient,
+                amount,
+            } => {
                 result.commands.push(ClientCommand::GiveObjectRequest {
                     target: recipient,
                     item,

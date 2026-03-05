@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
 use holtburger_world::context::{WorldContext, WorldContextExt};
 use holtburger_world::entity::Entity;
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use holtburger_common::Guid;
 
 use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
@@ -60,8 +60,9 @@ impl InventoryTab {
             return None;
         }
 
-        let container_id = if let Some(item) = data.get_entity(item_guid) &&
-            let Some(container_id) = data.find_non_full_pack(item.container_id()) {
+        let container_id = if let Some(item) = data.get_entity(item_guid)
+            && let Some(container_id) = data.find_non_full_pack(item.container_id())
+        {
             Some(container_id)
         } else {
             None
@@ -76,10 +77,11 @@ impl InventoryTab {
         } else {
             return Some(UpdateResult::new().with_action(AppAction::Log {
                 kind: ChatMessageKind::System,
-                message: "Unable to split item: player inventory container is unavailable.".to_string(),
+                message:
+                    "Unable to split item: player inventory container is unavailable.".to_string(),
             }));
         }
-    
+
         Some(UpdateResult::new().with_redraw(true))
     }
 }
@@ -277,7 +279,9 @@ impl TabController for InventoryTab {
 
             if !cur_entity.is_attuned_sticky() {
                 verbs.push(Verb::new(
-                    vec![AppAction::Drop { guid: cur_entity.guid }],
+                    vec![AppAction::Drop {
+                        guid: cur_entity.guid,
+                    }],
                     'd',
                     "Drop",
                 ));
@@ -324,7 +328,9 @@ impl TabController for InventoryTab {
                     && data.can_add_to_trade(cur_entity.guid)
                 {
                     verbs.push(Verb::new(
-                        vec![AppAction::AddToTrade { guid: cur_entity.guid }],
+                        vec![AppAction::AddToTrade {
+                            guid: cur_entity.guid,
+                        }],
                         'o',
                         "Offer",
                     ));

@@ -166,14 +166,12 @@ impl TabController for NearbyTab {
             }
 
             verbs.extend([
-                Verb::new(
-                    vec![AppAction::Assess { guid: e.guid }],
-                    'a',
-                    "Assess",
-                ),
+                Verb::new(vec![AppAction::Assess { guid: e.guid }], 'a', "Assess"),
                 Verb::new(
                     vec![AppAction::BeginInteraction {
-                        interaction: Interaction::Targeting { target_guid: e.guid },
+                        interaction: Interaction::Targeting {
+                            target_guid: e.guid,
+                        },
                     }],
                     't',
                     "Target",
@@ -185,17 +183,13 @@ impl TabController for NearbyTab {
                     'g',
                     "Debug",
                 ),
-                Verb::new(
-                    vec![AppAction::Approach { guid: e.guid }],
-                    'r',
-                    "Approach",
-                ),
+                Verb::new(vec![AppAction::Approach { guid: e.guid }], 'r', "Approach"),
             ]);
 
             match class {
                 EntityClass::Vendor => {
                     verbs.push(Verb::new(
-                        vec![AppAction::Use { guid: e.guid }],
+                        vec![AppAction::OpenShop { vendor: e.guid }],
                         's',
                         "Shop",
                     ));
@@ -216,11 +210,7 @@ impl TabController for NearbyTab {
                 | EntityClass::Writable
                 | EntityClass::Money
                 | EntityClass::Item => {
-                    verbs.push(Verb::new(
-                        vec![AppAction::Use { guid: e.guid }],
-                        'u',
-                        "Use",
-                    ));
+                    verbs.push(Verb::new(vec![AppAction::Use { guid: e.guid }], 'u', "Use"));
                 }
                 EntityClass::Chest | EntityClass::Container => {
                     if data.open_containers.contains(&e.guid) {

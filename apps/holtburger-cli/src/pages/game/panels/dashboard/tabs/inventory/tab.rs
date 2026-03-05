@@ -9,12 +9,23 @@ use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
 use crate::pages::game::panels::dashboard::filter::{EntityFilter, filter_entities};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, ChatMessageKind, CommandTarget, Interaction, TabController, UpdateResult, Verb,
+    VerbInputEvent, VerbInputState,
+};
+
+#[derive(Debug, Clone)]
+struct SplitSession {
+    item_guid: holtburger_common::Guid,
+    container_guid: holtburger_common::Guid,
+    input: VerbInputState,
+}
 
 #[derive(Default, Debug, Clone)]
 pub struct InventoryTab {
     pub selected_index: usize,
     pub list_state: ratatui::widgets::ListState,
+    split_session: Option<SplitSession>,
 }
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
@@ -31,6 +42,34 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
 impl InventoryTab {
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
         get_entities(data).len()
+    }
+
+    fn maybe_begin_split_session(&mut self, data: &GameData, view: &ViewState) -> Option<UpdateResult> {
+        if self.split_session.is_some() || view.active_interaction.is_some() {
+            return None;
+        }
+
+        let entities = get_entities(data);
+        let (entity, _, _) = entities.get(self.selected_index)?;
+        let stack_size = entity.stack_size();
+        if stack_size <= 1 {
+            return None;
+        }
+
+        let Some(container_guid) = data.player_guid else {
+            return Some(UpdateResult::new().with_action(AppAction::Log(
+                ChatMessageKind::System,
+                "Unable to split item: player inventory container is unavailable.".to_string(),
+            )));
+        };
+
+        self.split_session = Some(SplitSession {
+            item_guid: entity.guid,
+            container_guid,
+            input: VerbInputState::quantity("Split amount", 1, stack_size),
+        });
+
+        Some(UpdateResult::new().with_redraw(true))
     }
 }
 
@@ -211,10 +250,7 @@ impl TabController for InventoryTab {
 
             if cur_entity.stack_size() > 1 {
                 verbs.push(Verb::new(
-                    vec![AppAction::BeginInteraction(Interaction::Splitting {
-                        item_guid: cur_entity.guid,
-                        max_amount: cur_entity.stack_size() as i32,
-                    })],
+                    vec![],
                     'p',
                     "Split",
                 ));
@@ -283,6 +319,13 @@ impl TabController for InventoryTab {
         data: &GameData,
         view: &ViewState,
     ) -> Option<UpdateResult> {
+        if let KeyCode::Char(c) = key.code
+            && c.eq_ignore_ascii_case(&'p')
+            && let Some(result) = self.maybe_begin_split_session(data, view)
+        {
+            return Some(result);
+        }
+
         let count = self.item_count(data, view);
         match key.code {
             KeyCode::Down => {
@@ -327,5 +370,48 @@ impl TabController for InventoryTab {
             }
             _ => None,
         }
+    }
+
+    fn footer_input(&self) -> Option<&VerbInputState> {
+        self.split_session.as_ref().map(|session| &session.input)
+    }
+
+    fn handle_footer_input(
+        &mut self,
+        key: KeyEvent,
+        _data: &GameData,
+        _view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let session = self.split_session.as_mut()?;
+
+        let event = session.input.handle_key(key);
+        let result = match event {
+            VerbInputEvent::Changed | VerbInputEvent::Ignored => Some(UpdateResult::new().with_redraw(true)),
+            VerbInputEvent::Cancelled => {
+                self.split_session = None;
+                Some(UpdateResult::new().with_redraw(true))
+            }
+            VerbInputEvent::Invalid(err) => Some(
+                UpdateResult::new()
+                    .with_redraw(true)
+                    .with_action(AppAction::Log(ChatMessageKind::System, err.message())),
+            ),
+            VerbInputEvent::Submitted(amount) => {
+                let item = session.item_guid;
+                let container = session.container_guid;
+                self.split_session = None;
+                Some(
+                    UpdateResult::new()
+                        .with_redraw(true)
+                        .with_action(AppAction::SplitItem {
+                            item,
+                            container,
+                            amount,
+                        }),
+                )
+            }
+        };
+
+        result
     }
 }

@@ -66,7 +66,6 @@ impl TabController for SpellsTab {
         }
 
         if let CommandTarget::Spell(spell_id) = target {
-            // TODO: Always cast on self for ring spells and never cast on self for wall spells.
             if let Some(player_guid) = data.player_guid {
                 verbs.push(Verb::new(
                     vec![AppAction::CastSpell {

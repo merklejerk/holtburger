@@ -1,6 +1,7 @@
 use holtburger_common::Guid;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
+use holtburger_protocol::messages::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
@@ -23,6 +24,11 @@ pub struct GameState {
     pub view: ViewState,
     pub chat: ChatState,
     pub chat_input: ChatInputState,
+}
+
+enum EnterCombatModeResult {
+    Success(UpdateResult),
+    Failed(UpdateResult),
 }
 
 impl GameState {
@@ -322,15 +328,23 @@ impl GameState {
                 _ => {}
             },
             AppAction::CastSpell { spell_id, target } => {
-                // TODO: Auto toggle combat mode.
-                if let Some(target) = target {
-                    result
-                        .commands
-                        .push(ClientCommand::CastTargetedSpell { spell_id, target });
-                } else {
-                    result
-                        .commands
-                        .push(ClientCommand::CastUntargetedSpell { spell_id });
+                match self.try_enter_combat_mode(CombatMode::Magic) {
+                    EnterCombatModeResult::Failed(res) => {
+                        result.merge(res);
+                    }
+                    EnterCombatModeResult::Success(res) => {
+                        result.merge(res);
+                        // TODO: Always cast on self for ring spells and never cast on self for wall spells.
+                        if let Some(target) = target {
+                            result
+                                .commands
+                                .push(ClientCommand::CastTargetedSpell { spell_id, target });
+                        } else {
+                            result
+                                .commands
+                                .push(ClientCommand::CastUntargetedSpell { spell_id });
+                        }
+                    }
                 }
             }
             AppAction::SetCombatMode { mode } => {
@@ -534,20 +548,42 @@ impl GameState {
                 }
             }
             ClientViewEvent::CombatModeUpdated { mode } => {
+                if mode != CombatMode::NonCombat {
+                    // Clear vendor and active trade.
+                    self.view.vendor = None;
+                    self.data.trade = None;
+                }
                 self.data.combat_mode = mode;
             }
             _ => {}
         }
     }
 
-    pub(crate) fn handle_entity_identified(&mut self, entity: &Entity) {
+    fn try_enter_combat_mode(&mut self, mode: CombatMode) -> EnterCombatModeResult {
+        let mut result = UpdateResult::new();
+        if self.data.combat_mode == mode {
+            // Already in desired mode, do nothing.
+            return EnterCombatModeResult::Success(result);
+        }
+        if self.data.get_suggested_combat_mode() != mode {
+            result.actions.push(AppAction::Log {
+                kind: ChatMessageKind::Warning,
+                message: "Wrong weapon equipped!".to_string(),
+            });
+            return EnterCombatModeResult::Failed(result);
+        }
+        result.commands.push(ClientCommand::SetCombatMode(mode));
+        EnterCombatModeResult::Success(result)
+    }
+
+    fn handle_entity_identified(&mut self, entity: &Entity) {
         let guid = entity.guid;
         self.data.entities.insert(guid, entity.clone());
         self.view.context_view = ContextView::Assess(guid);
         self.refresh_context_buffer();
     }
 
-    pub(crate) fn update_inventory_and_equipment(&mut self, entity: &Entity) {
+    fn update_inventory_and_equipment(&mut self, entity: &Entity) {
         let guid = entity.guid;
         let pguid = self.data.player_guid;
 
@@ -589,7 +625,7 @@ impl GameState {
         self.data.entities.insert(entity.guid, entity.clone());
     }
 
-    pub(crate) fn handle_entity_removed(&mut self, guid: Guid) {
+    fn handle_entity_removed(&mut self, guid: Guid) {
         self.data.update_inventory_recursive(guid, false);
         self.data.entities.remove(&guid);
         self.data.equipment.remove(&guid);
@@ -598,7 +634,7 @@ impl GameState {
         }
     }
 
-    pub(crate) fn handle_navigation_event(&mut self, event: ClientViewEvent) -> UpdateResult {
+    fn handle_navigation_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         if let ClientViewEvent::NoClipUpdated { enabled } = event {
             self.data.noclip = enabled;

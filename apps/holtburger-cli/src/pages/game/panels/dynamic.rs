@@ -59,7 +59,7 @@ pub fn render_dynamic_pane(
     if let Some(title_text) = combat_title {
         block = block.title(
             ratatui::widgets::block::Title::from(Span::styled(
-                title_text,
+                format!("Combat: {}", title_text),
                 Style::default().add_modifier(Modifier::BOLD),
             ))
             .alignment(ratatui::layout::Alignment::Right),

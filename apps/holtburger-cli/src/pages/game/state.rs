@@ -155,9 +155,6 @@ impl GameState {
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = UpdateResult::new();
         match action {
-            AppAction::Identify { guid } => {
-                result.commands.push(ClientCommand::Identify(guid));
-            }
             AppAction::Assess { guid } => {
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
@@ -169,11 +166,6 @@ impl GameState {
             }
             AppAction::Use { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
-            }
-            AppAction::UseOn { item, target } => {
-                result
-                    .commands
-                    .push(ClientCommand::UseWithTarget { item, target });
             }
             AppAction::Approach { guid } => {
                 result.commands.push(ClientCommand::MoveTo { target: guid });
@@ -297,6 +289,14 @@ impl GameState {
                 result
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
+                // If we were combining with this item, cancel the interaction after using it.
+                if let Some(Interaction::Combining {
+                    item_guid: interact_guid,
+                }) = self.view.active_interaction
+                    && interact_guid == item
+                {
+                    self.view.active_interaction = None;
+                }
             }
             AppAction::QueryDebugInfo { target } => match target {
                 crate::types::CommandTarget::Entity(guid)

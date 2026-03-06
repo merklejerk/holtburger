@@ -2,6 +2,7 @@ use crate::pages::game::GameState;
 use crate::pages::game::panels::dashboard::{assess, debug};
 use crate::pages::game::{GameData, ViewState};
 use crate::pages::selection::SelectionState;
+use crate::state::RenderContext;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
 use holtburger_core::client::types::TargetSlot;
@@ -309,6 +310,34 @@ pub enum Page {
 }
 
 impl Page {
+    pub fn render(&mut self, f: &mut Frame, area: Rect, ctx: &RenderContext) {
+        match self {
+            Page::Selection(selection) => selection.render(f, area, ctx),
+            Page::Game(game) => game.render(f, area, ctx),
+        }
+    }
+
+    pub fn update_layout(&mut self, area: Rect) {
+        match self {
+            Page::Selection(_) => {}
+            Page::Game(game) => game.update_layout(area),
+        }
+    }
+
+    pub fn handle_input(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
+        match self {
+            Page::Selection(selection) => selection.handle_input(key, width),
+            Page::Game(game) => game.handle_input(key, width),
+        }
+    }
+
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
+        match self {
+            Page::Selection(selection) => selection.handle_mouse(mouse),
+            Page::Game(game) => game.handle_mouse(mouse),
+        }
+    }
+
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         match self {
             Page::Selection(s) => s.handle_view_event(event),

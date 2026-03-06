@@ -17,7 +17,7 @@ impl SelectionState {
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         match event {
             ClientViewEvent::CharacterList(_) => {
-                if let Some(pref) = self.character_preference.take() {
+                if let Some(pref) = self.character_preference.as_ref() {
                     let maybe_guid = if let Ok(idx) = pref.parse::<usize>() {
                         if idx > 0 && idx <= self.characters.len() {
                             Some((self.characters[idx - 1].guid, idx - 1))
@@ -25,20 +25,27 @@ impl SelectionState {
                             None
                         }
                     } else {
+                        let pref_lower = pref.to_lowercase();
                         self.characters
                             .iter()
                             .enumerate()
-                            .find(|(_, c)| c.name.to_lowercase() == pref.to_lowercase())
+                            .find(|(_, c)| c.name.to_lowercase() == pref_lower)
                             .map(|(i, c)| (c.guid, i))
                     };
 
                     if let Some((guid, char_index)) = maybe_guid {
                         self.selected_character_index = char_index;
+                        self.character_preference = None;
                         let mut result = UpdateResult::new();
                         result.commands.push(ClientCommand::SelectCharacter(guid));
                         return result.with_action(AppAction::Log {
                             kind: ChatMessageKind::System,
                             message: format!("Auto-selecting character: {:08X}", guid),
+                        });
+                    } else {
+                        return UpdateResult::new().with_action(AppAction::Log {
+                            kind: ChatMessageKind::Warning,
+                            message: format!("Character preference '{}' not found in available characters.", pref),
                         });
                     }
                 }

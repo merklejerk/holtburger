@@ -1,8 +1,38 @@
 use super::*;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::WorldObjectPropertyAccessors;
 
 impl WorldState {
+    pub(crate) fn sync_player_ownership_for_entity(&mut self, guid: Guid) {
+        let Some((container_id, wielder_id, equip_mask)) = self.entities.get(guid).map(|entity| {
+            (
+                entity.container_id(),
+                entity.wielder_id(),
+                EquipMask::from_bits_truncate(
+                    entity
+                        .get_int_prop(PropertyInt::CurrentWieldedLocation)
+                        .unwrap_or(0) as u32,
+                ),
+            )
+        }) else {
+            return;
+        };
+
+        let held_by_player = container_id.is_some_and(|owner_guid| {
+            owner_guid == self.player.guid || self.player.inventory.contains(&owner_guid)
+        });
+        let wielded_by_player = wielder_id == Some(self.player.guid);
+
+        self.update_player_inventory_recursive(guid, held_by_player || wielded_by_player);
+
+        if wielded_by_player {
+            self.player.wield_item(guid, equip_mask);
+        } else {
+            self.player.unwield_item(guid);
+        }
+    }
+
     pub(crate) fn emit_level_info(&self, events: &mut Vec<StateEvent>) {
         if let Some(info) = self.get_level_info() {
             events.push(StateEvent::LevelInfoUpdated(info));
@@ -141,12 +171,6 @@ impl WorldState {
         container_guid: Guid,
         events: &mut Vec<StateEvent>,
     ) -> bool {
-        let was_player_wielded = self
-            .entities
-            .get(item_guid)
-            .and_then(|entity| entity.wielder_id())
-            == Some(self.player.guid);
-
         if let Some(entity) = self.entities.get_mut(item_guid) {
             entity.set_iid_prop(PropertyInstanceId::Container, container_guid);
             entity.set_iid_prop(PropertyInstanceId::Wielder, Guid::NULL);
@@ -158,15 +182,9 @@ impl WorldState {
             return false;
         }
 
-        if was_player_wielded {
-            self.player.unwield_item(item_guid);
-        }
-
         let _ = self.clear_entity_world_presence(item_guid);
-
-        let is_owned =
-            container_guid == self.player.guid || self.player.inventory.contains(&container_guid);
-        self.update_player_inventory_recursive(item_guid, is_owned);
+        self.sync_player_ownership_for_entity(item_guid);
+        let _ = self.reconcile_entity_retention(item_guid);
 
         events.push(StateEvent::PropertiesUpdated {
             guid: item_guid,
@@ -188,12 +206,6 @@ impl WorldState {
         guid: Guid,
         events: &mut Vec<StateEvent>,
     ) -> bool {
-        let was_player_wielded = self
-            .entities
-            .get(guid)
-            .and_then(|entity| entity.wielder_id())
-            == Some(self.player.guid);
-
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
             entity.set_iid_prop(PropertyInstanceId::Wielder, Guid::NULL);
@@ -204,12 +216,8 @@ impl WorldState {
         } else {
             return false;
         }
-
-        if was_player_wielded {
-            self.player.unwield_item(guid);
-        }
-
-        self.update_player_inventory_recursive(guid, false);
+        self.sync_player_ownership_for_entity(guid);
+        let _ = self.reconcile_entity_retention(guid);
 
         events.push(StateEvent::PropertiesUpdated {
             guid,
@@ -245,10 +253,8 @@ impl WorldState {
         }
 
         let _ = self.clear_entity_world_presence(object_guid);
-
-        if wielder_guid == self.player.guid {
-            self.player.wield_item(object_guid, equip_mask);
-        }
+        self.sync_player_ownership_for_entity(object_guid);
+        let _ = self.reconcile_entity_retention(object_guid);
 
         events.push(StateEvent::PropertiesUpdated {
             guid: object_guid,
@@ -329,6 +335,14 @@ impl WorldState {
 
         if clear_world_presence {
             let _ = self.clear_entity_world_presence(target_guid);
+        }
+
+        match property {
+            PropertyInstanceId::Container | PropertyInstanceId::Wielder => {
+                self.sync_player_ownership_for_entity(target_guid);
+                let _ = self.reconcile_entity_retention(target_guid);
+            }
+            _ => {}
         }
     }
 

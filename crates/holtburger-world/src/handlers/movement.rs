@@ -9,16 +9,35 @@ pub(crate) fn handle_message(
 	events: &mut Vec<StateEvent>,
 ) -> bool {
 	match message {
-		GameMessage::UpdatePosition(data) if data.guid != state.player.guid => {
-			state.move_entity_to_position(data.guid, data.pos.pos, events)
+		GameMessage::UpdatePosition(data) => {
+			if data.guid == state.player.guid {
+				events.extend(state.set_player_position(data.pos.pos));
+				true
+			} else {
+				state.move_entity_to_position(data.guid, data.pos.pos, events)
+			}
 		}
-		GameMessage::PublicUpdatePosition(data) if data.guid != state.player.guid => {
-			state.move_entity_to_position(data.guid, data.pos, events)
+		GameMessage::PrivateUpdatePosition(data) => {
+			events.extend(state.set_player_position(data.pos));
+			true
 		}
-		GameMessage::AutonomousPosition(data) if data.guid != state.player.guid => {
-			state.move_entity_to_position(data.guid, data.position, events)
+		GameMessage::PublicUpdatePosition(data) => {
+			if data.guid == state.player.guid {
+				events.extend(state.set_player_position(data.pos));
+				true
+			} else {
+				state.move_entity_to_position(data.guid, data.pos, events)
+			}
 		}
-		GameMessage::UpdateMotion(data) if data.guid != state.player.guid => {
+		GameMessage::AutonomousPosition(data) => {
+			if data.guid == state.player.guid {
+				events.extend(state.apply_player_autonomous_position(data));
+				true
+			} else {
+				state.move_entity_to_position(data.guid, data.position, events)
+			}
+		}
+		GameMessage::UpdateMotion(data) => {
 			let guid = data.guid;
 
 			let mut target_info = None;
@@ -29,9 +48,13 @@ pub(crate) fn handle_message(
 				target_info = Some((target.position.landblock_id, target.position.coords));
 			}
 
-			let current_position = match state.entities.get(guid) {
-				Some(entity) => entity.position,
-				None => return false,
+			let current_position = if guid == state.player.guid {
+				state.player.position
+			} else {
+				match state.entities.get(guid) {
+					Some(entity) => entity.position,
+					None => return false,
+				}
 			};
 
 			let maybe_rotation = match &data.data {
@@ -57,13 +80,25 @@ pub(crate) fn handle_message(
 			};
 
 			if let Some(rotation) = maybe_rotation {
-				state.set_entity_rotation(guid, rotation, events)
+				if guid == state.player.guid {
+					let mut pos = state.player.position;
+					pos.rotation = rotation;
+					events.extend(state.set_player_position(pos));
+					true
+				} else {
+					state.set_entity_rotation(guid, rotation, events)
+				}
 			} else {
 				false
 			}
 		}
-		GameMessage::VectorUpdate(data) if data.guid != state.player.guid => {
-			state.update_entity_velocity(data.guid, data.velocity, data.omega, events)
+		GameMessage::VectorUpdate(data) => {
+			if data.guid == state.player.guid {
+				events.extend(state.set_player_vector(data.velocity, data.omega));
+				true
+			} else {
+				state.update_entity_velocity(data.guid, data.velocity, data.omega, events)
+			}
 		}
 		_ => false,
 	}

@@ -276,7 +276,7 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - [x] **Phase 3**: Extract world mutation helpers from `state/messages/*` into narrower `WorldState` methods.
 - [x] **Phase 4a**: Migrate simple feature handlers (`login`, `trade`, misc/system).
 - [x] **Phase 4b**: Migrate world-only handlers.
-- [ ] **Phase 4c**: Migrate shared player/world orchestration.
+- [x] **Phase 4c**: Migrate shared player/world orchestration.
 - [ ] **Phase 4d**: Remove legacy routers and rewrite tests.
 - [ ] **Phase 5**: Clean up docs, stale adapters, and optional naming follow-up.
 
@@ -291,6 +291,8 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - **Architectural**: Add trade/vendor mutation helpers on `WorldState` so the new handler modules orchestrate state transitions instead of re-embedding trade-state mutation logic.
 - **Sequencing**: For Phase 4b, move only clearly world-only inventory flows (`ParentEvent`, `PickupEvent`, `ViewContents`, `CloseGroundContainer`, non-player `WieldObject`, `IdentifyObjectResponse`) into `handlers/inventory.rs`; keep player-owned inventory transitions on the legacy path until Phase 4c.
 - **Architectural**: Route non-player movement and non-player/vendor property fan-out through `handlers/` first, but allow the legacy `state/messages/*` files to remain as compatibility fallback until the final router deletion phase.
+- **Architectural**: Move shared player/world orchestration into feature handlers instead of treating `PlayerState::handle_message()` as the primary router. `handlers/mod.rs` now owns the orchestration order and only falls back to legacy world handlers for the remaining cleanup phase.
+- **Implementation**: A corrupted intermediate edit left [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs) in a bad state, so the active inventory handler was temporarily moved to [crates/holtburger-world/src/handlers/inventory_handler.rs](crates/holtburger-world/src/handlers/inventory_handler.rs) via a module `#[path]` override in [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs). Phase 4d should delete the stale file and collapse back to the canonical path.
 
 ### Verification Log
 - **Phase 1 Complete**:
@@ -317,6 +319,13 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
   - Implemented world-only routing in [crates/holtburger-world/src/handlers/movement.rs](crates/holtburger-world/src/handlers/movement.rs), [crates/holtburger-world/src/handlers/properties.rs](crates/holtburger-world/src/handlers/properties.rs), and [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs).
   - Updated [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs) so non-player movement, non-player/vendor property updates, and world-only inventory events are handled in the new feature layer before falling back to legacy shared flows.
   - Added `WorldState::set_entity_rotation()` in [crates/holtburger-world/src/state/mutations.rs](crates/holtburger-world/src/state/mutations.rs) to keep non-player turn handling behind a narrow world mutation method.
+  - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
+- **Phase 4c Complete**:
+  - Added shared player mutation helpers in [crates/holtburger-world/src/player/mutations.rs](crates/holtburger-world/src/player/mutations.rs) for `PlayerDescription` hydration, movement sequence tracking, enchantment/spell updates, and health updates.
+  - Implemented [crates/holtburger-world/src/handlers/player.rs](crates/holtburger-world/src/handlers/player.rs) so player-local mutations are orchestrated from the handler layer instead of through `PlayerState::handle_message()`.
+  - Expanded [crates/holtburger-world/src/handlers/movement.rs](crates/holtburger-world/src/handlers/movement.rs), [crates/holtburger-world/src/handlers/properties.rs](crates/holtburger-world/src/handlers/properties.rs), and [crates/holtburger-world/src/handlers/inventory_handler.rs](crates/holtburger-world/src/handlers/inventory_handler.rs) to own the shared movement/property/inventory flows that mutate both player-local and world/entity state.
+  - Updated [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs) so it now orchestrates player-local updates first, shared world/entity updates second, and spell-name resolution last.
+  - Added `WorldState::set_player_vector()` in [crates/holtburger-world/src/state/physics.rs](crates/holtburger-world/src/state/physics.rs) so player vector updates can keep the entity mirror in sync while preserving the packet's `omega` value.
   - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
 - Pending implementation.
 

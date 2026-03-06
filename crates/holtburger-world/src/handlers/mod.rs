@@ -1,5 +1,6 @@
 pub mod login;
 pub mod movement;
+#[path = "inventory_handler.rs"]
 pub mod inventory;
 pub mod properties;
 pub mod trade;
@@ -10,6 +11,17 @@ use crate::state::WorldState;
 use crate::StateEvent;
 use holtburger_protocol::messages::GameMessage;
 
+fn resolve_spell_names(state: &WorldState, events: &mut Vec<StateEvent>) {
+    for event in events.iter_mut() {
+        match event {
+            StateEvent::SpellUpdated { spell_id, name } if name.is_none() => {
+                *name = state.resolve_spell_name(*spell_id);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Top-level dispatcher for protocol messages.
 /// 
 /// This is the entry point for all game messages received from the server.
@@ -19,24 +31,13 @@ pub fn handle_message(
     message: &GameMessage,
     events: &mut Vec<StateEvent>,
 ) {
-    if state.player.handle_message(
-        message,
-        events,
-        state.xp_table.as_ref(),
-        state.skill_table.as_deref(),
-    ) {
-        for event in events.iter_mut() {
-            match event {
-                StateEvent::SpellUpdated { spell_id, name } if name.is_none() => {
-                    *name = state.resolve_spell_name(*spell_id);
-                }
-                _ => {}
-            }
-        }
+    if player::handle_message(state, message, events) {
+        resolve_spell_names(state, events);
         return;
     }
 
     if system::handle_message(state, message, events) {
+        resolve_spell_names(state, events);
         return;
     }
 
@@ -44,18 +45,23 @@ pub fn handle_message(
         || properties::handle_message(state, message, events)
         || inventory::handle_message(state, message, events)
     {
+        resolve_spell_names(state, events);
         return;
     }
 
     if let GameMessage::GameEvent(event) = message {
+        let _ = player::handle_event(state, event, events);
+
         if login::handle_event(state, event, events)
             || trade::handle_event(state, event, events)
             || inventory::handle_event(state, event, events)
             || system::handle_event(state, event, events)
         {
+            resolve_spell_names(state, events);
             return;
         }
     }
 
     state.handle_message_legacy(message, events);
+    resolve_spell_names(state, events);
 }

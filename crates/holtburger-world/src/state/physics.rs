@@ -129,6 +129,26 @@ impl WorldState {
         }
         events
     }
+
+    pub fn set_player_vector(&mut self, velocity: Vector3, omega: Vector3) -> Vec<StateEvent> {
+        let mut events = Vec::new();
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return events;
+        }
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.velocity = velocity;
+            entity.omega = omega;
+            events.push(StateEvent::EntityVectorUpdated {
+                guid,
+                velocity,
+                omega,
+            });
+        }
+
+        events
+    }
     /// Applies an authoritative server-side movement sync to the player.
     pub fn apply_player_autonomous_position(
         &mut self,

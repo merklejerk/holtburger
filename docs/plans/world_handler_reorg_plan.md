@@ -271,8 +271,8 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 ## 7. Living Worksheet
 
 ### Task Checklist
-- [ ] **Phase 1**: Add the `handlers/` module tree and compatibility entry points.
-- [ ] **Phase 2**: Extract player-local mutation methods from `PlayerState::handle_message()`.
+- [x] **Phase 1**: Add the `handlers/` module tree and compatibility entry points.
+- [x] **Phase 2**: Extract player-local mutation methods from `PlayerState::handle_message()`.
 - [ ] **Phase 3**: Extract world mutation helpers from `state/messages/*` into narrower `WorldState` methods.
 - [ ] **Phase 4a**: Migrate simple feature handlers (`login`, `trade`, misc/system).
 - [ ] **Phase 4b**: Migrate world-only handlers.
@@ -287,6 +287,16 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - **Testing**: Test compatibility does not justify preserving `PlayerState::handle_message()` or other legacy routing APIs. Tests should follow the cleaner architecture.
 
 ### Verification Log
+- **Phase 1 Complete**:
+  - Created `handlers/` module with placeholder files.
+  - Re-routed `WorldState::handle_message` through `handlers::handle_message`.
+  - Fixed initial compile errors related to `StateEvent` imports and `handle_message_legacy` return types.
+  - Verified `cargo test -p holtburger-world` passes with all 27 tests green.
+- **Phase 2 Complete**:
+  - Created `player/mutations.rs` to house focused player state update logic.
+  - Extracted `update_attribute`, `update_skill`, `update_vital`, `update_vital_current`, and `update_position_from_server` from the legacy router.
+  - Slimmed down `PlayerState::handle_message` in `player/messages.rs` to use these new mutation methods.
+  - Verified no regressions in existing world tests.
 - Pending implementation.
 
 ### Open Questions

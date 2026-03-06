@@ -190,15 +190,7 @@ async fn main() -> Result<()> {
     }
 
     println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
-    let mut client = match Client::new(
-        &host,
-        port,
-        &args.account,
-        args.character.clone(),
-        dats_path.clone(),
-    )
-    .await
-    {
+    let mut client = match Client::new(&host, port, &args.account, dats_path.clone()).await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to initialize client: {}", e);
@@ -230,6 +222,7 @@ async fn main() -> Result<()> {
     let mut app_state = AppState {
         account_name: args.account.clone(),
         account_password: args.password.clone(),
+        character_preference: args.character.clone(),
         page: Page::Selection(SelectionState::default()),
         modal: None,
         logon_retry: RetryState::new(5),

@@ -31,6 +31,7 @@ impl Default for NetStats {
 pub struct AppState {
     pub account_name: String,
     pub account_password: String,
+    pub character_preference: Option<String>,
     pub page: Page,
     pub modal: Option<Modal>,
     pub logon_retry: RetryState,

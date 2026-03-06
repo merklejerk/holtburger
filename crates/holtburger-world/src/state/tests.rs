@@ -937,6 +937,11 @@ fn test_reset_trade_sweeps_preview_only_entities() {
     let player_guid = Guid(0x50000141);
     let preview_guid = Guid(0x60000142);
 
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+
     state.player.guid = player_guid;
     state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
 
@@ -952,11 +957,27 @@ fn test_reset_trade_sweeps_preview_only_entities() {
     let mut events = Vec::new();
     state.reset_trade(&mut events);
 
-    assert!(state.entities.get(preview_guid).is_none());
-    assert!(events
+    let deadline = state
+        .entity_lifecycle_state(preview_guid)
+        .and_then(|state| state.prune_deadline)
+        .expect("expected immediate prune eligibility after trade reset");
+
+    assert!(state.entities.get(preview_guid).is_some());
+    assert!(!events
         .iter()
         .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
     assert!(state.trade.as_ref().is_some_and(|trade| trade.partner_side.items.is_empty()));
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: deadline + 1.0,
+        local_time: Instant::now(),
+    });
+
+    let tick_events = state.tick(0.016, 0.35);
+    assert!(state.entities.get(preview_guid).is_none());
+    assert!(tick_events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
 }
 
 #[test]
@@ -995,6 +1016,11 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     let preview_guid = Guid(0x60000144);
     let owned_guid = Guid(0x60000145);
 
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+
     state.player.guid = player_guid;
     state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
 
@@ -1019,12 +1045,146 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     let mut events = Vec::new();
     state.handle_trade_complete(&mut events);
 
-    assert!(state.entities.get(preview_guid).is_none());
+    let deadline = state
+        .entity_lifecycle_state(preview_guid)
+        .and_then(|state| state.prune_deadline)
+        .expect("expected preview-only trade entity to become sweep-eligible");
+
+    assert!(state.entities.get(preview_guid).is_some());
     assert!(state.entities.get(owned_guid).is_some());
     assert!(!state
         .entity_lifecycle_state(owned_guid)
         .is_some_and(|state| state.trade_preview));
-    assert!(events
+    assert!(!events
         .iter()
         .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: deadline + 1.0,
+        local_time: Instant::now(),
+    });
+
+    let tick_events = state.tick(0.016, 0.35);
+    assert!(state.entities.get(preview_guid).is_none());
+    assert!(tick_events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
+}
+
+#[test]
+fn test_view_contents_marks_placeholder_entity_as_container_preview() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x70000150);
+    let item_guid = Guid(0x60000150);
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
+            container: container_guid,
+            items: vec![ViewContentsEventItem {
+                guid: item_guid,
+                container_type: 0,
+            }],
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(state.open_containers.contains(&container_guid));
+    assert_eq!(state.entities.get(item_guid).and_then(|entity| entity.container_id()), Some(container_guid));
+    assert!(state
+        .entity_lifecycle_state(item_guid)
+        .is_some_and(|state| state.container_preview));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::ContainerOpened(guid) if *guid == container_guid)));
+}
+
+#[test]
+fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x70000151);
+    let item_guid = Guid(0x60000151);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.open_containers.insert(container_guid);
+
+    let mut entity = Entity::new(item_guid, "PreviewItem".to_string(), WorldPosition::default());
+    entity.set_container_id(Some(container_guid));
+    entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(entity);
+    state.mark_container_preview(item_guid);
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
+            container_guid,
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+    let deadline = state
+        .entity_lifecycle_state(item_guid)
+        .and_then(|state| state.prune_deadline)
+        .expect("expected preview-only container entity to become sweep-eligible");
+
+    assert!(!state.open_containers.contains(&container_guid));
+    assert!(state.entities.get(item_guid).is_some());
+    assert!(state
+        .entity_lifecycle_state(item_guid)
+        .is_some_and(|state| state.container_preview));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid)));
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: deadline + 1.0,
+        local_time: Instant::now(),
+    });
+
+    let tick_events = state.tick(0.016, 0.35);
+    assert!(state.entities.get(item_guid).is_none());
+    assert!(tick_events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid)));
+}
+
+#[test]
+fn test_close_ground_container_preserves_entity_with_other_retention() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000152);
+    let container_guid = Guid(0x70000152);
+    let item_guid = Guid(0x60000152);
+
+    state.player.guid = player_guid;
+    state.open_containers.insert(container_guid);
+
+    let mut entity = Entity::new(item_guid, "RetainedItem".to_string(), WorldPosition::default());
+    entity.set_container_id(Some(container_guid));
+    entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(entity);
+    state.mark_container_preview(item_guid);
+    state.player.add_to_inventory(item_guid);
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
+            container_guid,
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(state.entities.get(item_guid).is_some());
+    assert!(state.entity_lifecycle_state(item_guid).is_none());
+    assert!(state.player.inventory.contains(&item_guid));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid)));
 }

@@ -179,7 +179,7 @@
 - [x] Server only takes IP?
 - [x] flags and weenie flags should also be converted to properties!
 - [x] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows D>efender by attempting to run it once, hit "Learn More" and then select "Run anyway".
-- [ ] Character chosen in selection screen does not match actual selected character.
+- [x] Character chosen in selection screen does not match actual selected character.
 - [ ] Not pruning entities!
     - When they go out of range/teleported.
     - When a trade is closed?

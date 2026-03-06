@@ -15,7 +15,6 @@ impl Client {
         match cmd {
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
-            | ClientCommand::SelectCharacterByIndex(_)
             | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
 
             ClientCommand::Talk(_) | ClientCommand::Tell { .. } => {
@@ -103,25 +102,6 @@ impl Client {
                 self.send_status_event();
                 self.auth.select_character(id, &mut self.session).await
             }
-            ClientCommand::SelectCharacterByIndex(idx) => match &self.state {
-                ClientState::CharacterSelection(chars) if (1..=chars.len()).contains(&idx) => {
-                    let char_guid = chars[idx - 1].guid;
-                    let char_name = &chars[idx - 1].name;
-                    log::info!(
-                        "Selecting character by index {}: {} (0x{:08X})",
-                        idx,
-                        char_name,
-                        char_guid
-                    );
-                    self.world.load_deferred_tables();
-                    self.state = ClientState::EnteringWorld;
-                    self.send_status_event();
-                    self.auth
-                        .select_character(char_guid, &mut self.session)
-                        .await
-                }
-                _ => Ok(()),
-            },
             ClientCommand::EnterWorld => {
                 if let Some(char_id) = self.auth.character_id {
                     log::info!(

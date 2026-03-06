@@ -365,6 +365,9 @@ impl WorldState {
     }
 
     pub(crate) fn handle_trade_complete(&mut self, events: &mut Vec<StateEvent>) {
+        let trade_item_guids = self.current_trade_item_guids();
+        self.sweep_trade_preview_entities(&trade_item_guids, events);
+
         if let Some(trade) = self.trade.as_mut() {
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
@@ -412,6 +415,10 @@ impl WorldState {
         object_guid: Guid,
         events: &mut Vec<StateEvent>,
     ) {
+        let should_mark_preview = self
+            .retention_snapshot(object_guid, self.current_server_time())
+            .is_none_or(|snapshot| !snapshot.has_authoritative_retention());
+
         if let Some(trade) = self.trade.as_mut() {
             if trade_side == 0x01 {
                 trade.self_side.items.push(object_guid);
@@ -421,6 +428,10 @@ impl WorldState {
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
             events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+        }
+
+        if should_mark_preview {
+            self.mark_trade_preview(object_guid);
         }
     }
 
@@ -436,6 +447,9 @@ impl WorldState {
     }
 
     pub(crate) fn reset_trade(&mut self, events: &mut Vec<StateEvent>) {
+        let trade_item_guids = self.current_trade_item_guids();
+        self.sweep_trade_preview_entities(&trade_item_guids, events);
+
         if let Some(trade) = self.trade.as_mut() {
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
@@ -454,8 +468,46 @@ impl WorldState {
     }
 
     pub(crate) fn close_trade(&mut self, events: &mut Vec<StateEvent>) {
+        let trade_item_guids = self.current_trade_item_guids();
+        self.sweep_trade_preview_entities(&trade_item_guids, events);
         self.trade = None;
         events.push(StateEvent::TradeStateUpdated(None));
+    }
+
+    pub(crate) fn current_trade_item_guids(&self) -> Vec<Guid> {
+        let mut item_guids = Vec::new();
+
+        if let Some(trade) = self.trade.as_ref() {
+            item_guids.extend(trade.self_side.items.iter().copied());
+            item_guids.extend(trade.partner_side.items.iter().copied());
+        }
+
+        item_guids.sort_unstable_by_key(|guid| guid.0);
+        item_guids.dedup();
+        item_guids
+    }
+
+    pub(crate) fn sweep_trade_preview_entities(
+        &mut self,
+        item_guids: &[Guid],
+        events: &mut Vec<StateEvent>,
+    ) {
+        let now = self.current_server_time();
+
+        for &guid in item_guids {
+            self.clear_trade_preview(guid);
+
+            let Some(snapshot) = self.reconcile_entity_retention(guid) else {
+                continue;
+            };
+
+            if snapshot.is_retained() {
+                continue;
+            }
+
+            self.set_entity_prune_deadline(guid, now);
+            let _ = self.sweep_entity(guid, now, events);
+        }
     }
 
     pub(crate) fn set_vendor_state(

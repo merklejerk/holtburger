@@ -19,13 +19,13 @@
 
 ### Reference Sources
 - Current player model and ownership notes: [crates/holtburger-world/src/player/mod.rs](crates/holtburger-world/src/player/mod.rs#L28-L32)
-- Current player message parser: [crates/holtburger-world/src/player/messages.rs](crates/holtburger-world/src/player/messages.rs#L14-L20)
+- Current player-focused handler orchestration: [crates/holtburger-world/src/handlers/player.rs](crates/holtburger-world/src/handlers/player.rs)
 - Current world state and mirror invariant notes: [crates/holtburger-world/src/state/mod.rs](crates/holtburger-world/src/state/mod.rs#L36-L43)
-- Current top-level dispatch flow: [crates/holtburger-world/src/state/messages/mod.rs](crates/holtburger-world/src/state/messages/mod.rs#L10-L40)
-- Current player/world split for `PlayerDescription`: [crates/holtburger-world/src/player/messages.rs](crates/holtburger-world/src/player/messages.rs#L365-L491), [crates/holtburger-world/src/state/messages/login.rs](crates/holtburger-world/src/state/messages/login.rs#L4-L38)
-- Current split for inventory events: [crates/holtburger-world/src/player/messages.rs](crates/holtburger-world/src/player/messages.rs#L692-L714), [crates/holtburger-world/src/state/messages/inventory.rs](crates/holtburger-world/src/state/messages/inventory.rs#L123-L180)
-- Current split for movement/mirror handling: [crates/holtburger-world/src/state/messages/movement.rs](crates/holtburger-world/src/state/messages/movement.rs#L4-L130), [crates/holtburger-world/src/state/physics.rs](crates/holtburger-world/src/state/physics.rs#L88-L137)
-- Current property fan-out across player/entities/vendor: [crates/holtburger-world/src/state/messages/properties.rs](crates/holtburger-world/src/state/messages/properties.rs#L1-L90)
+- Current top-level dispatch flow: [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs)
+- Current `PlayerDescription` orchestration split: [crates/holtburger-world/src/handlers/player.rs](crates/holtburger-world/src/handlers/player.rs), [crates/holtburger-world/src/handlers/login.rs](crates/holtburger-world/src/handlers/login.rs)
+- Current inventory orchestration split: [crates/holtburger-world/src/handlers/player.rs](crates/holtburger-world/src/handlers/player.rs), [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs)
+- Current movement/mirror handling: [crates/holtburger-world/src/handlers/movement.rs](crates/holtburger-world/src/handlers/movement.rs), [crates/holtburger-world/src/state/physics.rs](crates/holtburger-world/src/state/physics.rs#L88-L137)
+- Current property fan-out across player/entities/vendor: [crates/holtburger-world/src/handlers/properties.rs](crates/holtburger-world/src/handlers/properties.rs)
 
 ### Existing Architectural Precedent
 - The code already uses a two-phase dispatch model: player-first, world-second. We should preserve that behavior even if the modules move.
@@ -35,8 +35,8 @@
 ### Dry-Run Findings Against the Current Codebase
 - **Stable public dispatch API exists today**: `holtburger-core` currently calls `WorldState::handle_message()` directly, so the refactor should preserve that API and make it delegate internally rather than removing it early: [crates/holtburger-core/src/client/messages.rs](crates/holtburger-core/src/client/messages.rs#L39-L46)
 - **Tests depend directly on the current player router**: `player/tests.rs` calls `PlayerState::handle_message()` directly, but this is not a reason to preserve that API if the architecture is cleaner without it. The tests should be rewritten around the new mutation methods or new handler entry points instead: [crates/holtburger-world/src/player/tests.rs](crates/holtburger-world/src/player/tests.rs#L348-L348), [crates/holtburger-world/src/player/tests.rs](crates/holtburger-world/src/player/tests.rs#L422-L422)
-- **Some helpers are private to `state/` today**: `emit_level_info()` and `update_player_inventory_recursive()` are not currently callable from a top-level sibling module, which means a top-level `handlers/` layout either needs `pub(crate)` helper promotion or nested handler modules under `state/` / `player`: [crates/holtburger-world/src/state/mod.rs](crates/holtburger-world/src/state/mod.rs#L168-L172), [crates/holtburger-world/src/state/messages/inventory.rs](crates/holtburger-world/src/state/messages/inventory.rs#L4-L18)
-- **There are misc/system variants not captured by the initial handler list**: `UseDone`, `WeenieError`, and `WeenieErrorWithString` currently live in the inventory event handler, while `SetState` and some property-driven scene side effects live in the property handler. The final handler map needs either a `system` / `misc` handler or an explicit home for these variants: [crates/holtburger-world/src/state/messages/inventory.rs](crates/holtburger-world/src/state/messages/inventory.rs#L296-L321), [crates/holtburger-world/src/state/messages/properties.rs](crates/holtburger-world/src/state/messages/properties.rs#L307-L412)
+- **Some helpers are private to `state/` today**: `emit_level_info()` and `update_player_inventory_recursive()` are not currently callable from a top-level sibling module, which means a top-level `handlers/` layout either needs `pub(crate)` helper promotion or nested handler modules under `state/` / `player`: [crates/holtburger-world/src/state/mod.rs](crates/holtburger-world/src/state/mod.rs#L168-L172), [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs)
+- **There are misc/system variants not captured by the initial handler list**: `UseDone`, `WeenieError`, and `WeenieErrorWithString` need an explicit home, and `SetState` plus some property-driven scene side effects need to stay accounted for in the handler map: [crates/holtburger-world/src/handlers/system.rs](crates/holtburger-world/src/handlers/system.rs), [crates/holtburger-world/src/handlers/properties.rs](crates/holtburger-world/src/handlers/properties.rs)
 - **The baseline is green**: `cargo test -p holtburger-world --quiet` passes before the refactor, so we can treat the current test suite as a reliable regression floor.
 
 ## 3. Target Architecture
@@ -258,14 +258,14 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
   - Treat directory renames as an optional final pass, not part of the critical path.
 
 ## 6. Definition of Done
-- [ ] Protocol handlers are organized by feature under a dedicated handler area.
-- [ ] `PlayerState` is primarily a state model plus focused mutation helpers, not the main router.
-- [ ] `WorldState` remains the authority for world/entity/spatial invariants.
-- [ ] Shared messages (`PlayerDescription`, inventory transitions, movement, property updates) have one obvious orchestration home.
-- [ ] Mirror invariant tests pass.
-- [ ] Existing behavior-facing tests pass and new regression coverage exists for dual-touch messages.
-- [ ] `cargo check -p holtburger-world` passes.
-- [ ] `cargo test -p holtburger-world` passes.
+- [x] Protocol handlers are organized by feature under a dedicated handler area.
+- [x] `PlayerState` is primarily a state model plus focused mutation helpers, not the main router.
+- [x] `WorldState` remains the authority for world/entity/spatial invariants.
+- [x] Shared messages (`PlayerDescription`, inventory transitions, movement, property updates) have one obvious orchestration home.
+- [x] Mirror invariant tests pass.
+- [x] Existing behavior-facing tests pass and new regression coverage exists for dual-touch messages.
+- [x] `cargo check -p holtburger-world` passes.
+- [x] `cargo test -p holtburger-world` passes.
 - [ ] Module docs/comments explain the new ownership split.
 
 ## 7. Living Worksheet
@@ -277,7 +277,7 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - [x] **Phase 4a**: Migrate simple feature handlers (`login`, `trade`, misc/system).
 - [x] **Phase 4b**: Migrate world-only handlers.
 - [x] **Phase 4c**: Migrate shared player/world orchestration.
-- [ ] **Phase 4d**: Remove legacy routers and rewrite tests.
+- [x] **Phase 4d**: Remove legacy routers and rewrite tests.
 - [ ] **Phase 5**: Clean up docs, stale adapters, and optional naming follow-up.
 
 ### Decisions Log
@@ -291,8 +291,10 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - **Architectural**: Add trade/vendor mutation helpers on `WorldState` so the new handler modules orchestrate state transitions instead of re-embedding trade-state mutation logic.
 - **Sequencing**: For Phase 4b, move only clearly world-only inventory flows (`ParentEvent`, `PickupEvent`, `ViewContents`, `CloseGroundContainer`, non-player `WieldObject`, `IdentifyObjectResponse`) into `handlers/inventory.rs`; keep player-owned inventory transitions on the legacy path until Phase 4c.
 - **Architectural**: Route non-player movement and non-player/vendor property fan-out through `handlers/` first, but allow the legacy `state/messages/*` files to remain as compatibility fallback until the final router deletion phase.
-- **Architectural**: Move shared player/world orchestration into feature handlers instead of treating `PlayerState::handle_message()` as the primary router. `handlers/mod.rs` now owns the orchestration order and only falls back to legacy world handlers for the remaining cleanup phase.
+- **Architectural**: Move shared player/world orchestration into feature handlers instead of treating `PlayerState::handle_message()` as the primary router.
 - **Implementation**: A corrupted intermediate edit left [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs) in a bad state, so the active inventory handler was temporarily moved to [crates/holtburger-world/src/handlers/inventory_handler.rs](crates/holtburger-world/src/handlers/inventory_handler.rs) via a module `#[path]` override in [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs). Phase 4d should delete the stale file and collapse back to the canonical path.
+- **Architectural**: Phase 4d removes the legacy router seam entirely. `WorldState::handle_message()` now delegates straight to [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs), and `PlayerState` no longer exposes a message-router module.
+- **Implementation**: Phase 4d restored [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs) as the canonical inventory handler path and deleted the temporary `inventory_handler.rs` workaround.
 
 ### Verification Log
 - **Phase 1 Complete**:
@@ -327,8 +329,13 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
   - Updated [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs) so it now orchestrates player-local updates first, shared world/entity updates second, and spell-name resolution last.
   - Added `WorldState::set_player_vector()` in [crates/holtburger-world/src/state/physics.rs](crates/holtburger-world/src/state/physics.rs) so player vector updates can keep the entity mirror in sync while preserving the packet's `omega` value.
   - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
-- Pending implementation.
+- **Phase 4d Complete**:
+  - Deleted the legacy router files under [crates/holtburger-world/src/player](crates/holtburger-world/src/player) and [crates/holtburger-world/src/state/messages](crates/holtburger-world/src/state/messages), leaving the feature-based handler layer as the only routing surface.
+  - Simplified [crates/holtburger-world/src/state/mod.rs](crates/holtburger-world/src/state/mod.rs) so `WorldState::handle_message()` delegates directly to the handler layer, and removed the legacy router export from [crates/holtburger-world/src/player/mod.rs](crates/holtburger-world/src/player/mod.rs).
+  - Restored [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs) as the canonical inventory handler and deleted the temporary workaround module.
+  - Rewrote the remaining player-facing routing tests in [crates/holtburger-world/src/player/tests.rs](crates/holtburger-world/src/player/tests.rs) to exercise `WorldState::handle_message()` instead of the deleted `PlayerState` router seam.
+  - Verified `cargo check -p holtburger-world --quiet` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
 
 ### Open Questions
-- Should the final handler entry point live under `handlers/mod.rs` or remain attached as an `impl WorldState` method that delegates into `handlers`? Both are viable, but the first is cleaner while the second is less invasive.
-- After extraction, do we want to keep `player/messages.rs` as a player-specific handler implementation detail, or rename it immediately to a mutation-focused module to reflect its reduced role?
+- No blocking architecture questions remain for the handler split.
+- Phase 5 should decide whether to refresh module docs/comments only, or also pay the extra churn cost for an optional `state` → `world` rename.

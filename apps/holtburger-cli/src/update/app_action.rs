@@ -1,6 +1,6 @@
+use crate::pages::game::GameState;
 use crate::state::AppState;
-use crate::types::AppAction;
-use crate::types::UpdateResult;
+use crate::types::{AppAction, Page, UpdateResult};
 
 impl AppState {
     pub fn handle_app_action(&mut self, action: AppAction) -> UpdateResult {
@@ -21,6 +21,11 @@ impl AppState {
                 }
                 AppAction::DisplayClientInfo => {
                     self.display_client_info();
+                }
+                AppAction::TransitionToGame { guid, name } => {
+                    let game = GameState::new(guid, name, self.world_name.clone());
+                    self.page = Page::Game(Box::new(game));
+                    result.needs_redraw = true;
                 }
                 AppAction::Sequence { actions } => {
                     for sub in actions {

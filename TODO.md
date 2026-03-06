@@ -153,6 +153,7 @@
 - [x] Should auto-switch to trade tab when initiating trade/vendor.
 - [x] Spell casting should auto combat.
 - [x] Nearby tab lists things in inventory sub-packs.
+- [x] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -163,7 +164,6 @@
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them. The client says that item cannot be used though!
-- [ ] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
 - [ ] Log in chat when items are bought and sold.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.

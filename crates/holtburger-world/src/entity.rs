@@ -496,14 +496,13 @@ impl EntityManager {
         self.entities.values()
     }
 
-    pub fn iter_filtered<'a, F>(
-        &'a self,
-        mut predicate: F,
-    ) -> impl Iterator<Item = &'a Entity> + 'a
+    pub fn iter_filtered<'a, F>(&'a self, mut predicate: F) -> impl Iterator<Item = &'a Entity> + 'a
     where
         F: FnMut(&Entity) -> bool + 'a,
     {
-        self.entities.values().filter(move |entity| predicate(entity))
+        self.entities
+            .values()
+            .filter(move |entity| predicate(entity))
     }
 
     pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {

@@ -529,10 +529,7 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn mark_container_preview_entities_for_prune(
-        &mut self,
-        item_guids: &[Guid],
-    ) {
+    pub(crate) fn mark_container_preview_entities_for_prune(&mut self, item_guids: &[Guid]) {
         let now = self.current_server_time();
 
         for &guid in item_guids {

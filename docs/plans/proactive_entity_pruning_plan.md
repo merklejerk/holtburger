@@ -431,6 +431,11 @@ That means:
   - Updated retention derivation so closed preview-container relationships no longer count as active retention or durable authoritative container ownership, preventing placeholder-only entities from leaking indefinitely after UI close.
   - Preserved active open-container preview provenance across authoritative upserts while the container remains open, mirroring the trade-preview refresh behavior.
   - Added phase-6 regression tests for placeholder preview marking, deferred container-close pruning, retention override on close, and deferred trade-preview teardown.
+- **2026-03-06 Phase 7 completed**
+  - Removed stale unused preview-helper parameters from `state/mutations.rs` now that preview teardown is fully deferred-only, and updated the remaining call sites to match the tighter API surface.
+  - Tightened the replacement-path regression coverage so repeated authoritative `ObjectCreate` explicitly proves `EntityReplaced` without a fresh `EntitySpawned` when the entity never left local state.
+  - Added a direct `close_trade()` regression to lock down preview-only trade teardown on the non-reset terminal path.
+  - Added a retained-off-world regression covering inventory, equipment, and open-container preview retention so prune maintenance does not evict entities merely because they lack world presence.
 
 ### Decisions Log
 - **Decision**: Pruning should live in `holtburger-world`, not `holtburger-core`.
@@ -477,6 +482,8 @@ That means:
   - **Why**: The metadata still needs to distinguish stale preview-container relationships from real container ownership after UI close. What must end immediately is active retention, not necessarily the provenance bit itself.
 - **Decision**: Active open-container preview provenance should survive authoritative upserts while the container remains open.
   - **Why**: Container-preview entities can be refreshed while the UI is still open; clearing preview provenance on every upsert would orphan them from the later close-container teardown path.
+- **Decision**: Preview-helper signatures should only expose the data they still need after the deferred-only teardown refactor.
+  - **Why**: Leaving dead `events` or `container_guid` parameters behind weakens the ownership story and makes the helpers look more coupled to inline removal than they really are.
 
 ### Verification Log
 - Investigated ACE visibility flow in `ObjectMaint` and `PhysicsObj.handle_visible_cells()`.
@@ -495,6 +502,8 @@ That means:
 - Ran `cargo test -p holtburger-world` after the phase-5 changes; all 47 tests passed.
 - Implemented the phase-6 container-preview teardown and normalized preview helpers back to the deferred-only pruning model.
 - Ran `cargo test -p holtburger-world` after the phase-6 changes; all 50 tests passed.
+- Removed stale preview-helper parameters, added the final phase-7 regression coverage, and kept the deferred-only preview teardown API aligned with its actual responsibilities.
+- Ran `cargo test -p holtburger-world` after the phase-7 changes; all 52 tests passed.
 
 ### Open Questions
 - Do we want the first implementation to include indoor `VisibleCells` parity, or should we explicitly scope v1 to outdoor + trade-preview correctness?

@@ -143,7 +143,7 @@ pub(crate) fn handle_event(
             let item_guids = state.current_container_preview_item_guids(data.container_guid);
             state.open_containers.remove(&data.container_guid);
             events.push(StateEvent::ContainerClosed(data.container_guid));
-            state.mark_container_preview_entities_for_prune(data.container_guid, &item_guids, events);
+            state.mark_container_preview_entities_for_prune(&item_guids);
             true
         }
         GameEvent::IdentifyObjectResponse(data) => {

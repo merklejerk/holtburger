@@ -384,7 +384,7 @@ impl WorldState {
 
     pub(crate) fn handle_trade_complete(&mut self, events: &mut Vec<StateEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
-        self.mark_trade_preview_entities_for_prune(&trade_item_guids, events);
+        self.mark_trade_preview_entities_for_prune(&trade_item_guids);
 
         if let Some(trade) = self.trade.as_mut() {
             trade.self_side.accepted = false;
@@ -466,7 +466,7 @@ impl WorldState {
 
     pub(crate) fn reset_trade(&mut self, events: &mut Vec<StateEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
-        self.mark_trade_preview_entities_for_prune(&trade_item_guids, events);
+        self.mark_trade_preview_entities_for_prune(&trade_item_guids);
 
         if let Some(trade) = self.trade.as_mut() {
             trade.self_side.accepted = false;
@@ -487,7 +487,7 @@ impl WorldState {
 
     pub(crate) fn close_trade(&mut self, events: &mut Vec<StateEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
-        self.mark_trade_preview_entities_for_prune(&trade_item_guids, events);
+        self.mark_trade_preview_entities_for_prune(&trade_item_guids);
         self.trade = None;
         events.push(StateEvent::TradeStateUpdated(None));
     }
@@ -522,11 +522,7 @@ impl WorldState {
         item_guids
     }
 
-    pub(crate) fn mark_trade_preview_entities_for_prune(
-        &mut self,
-        item_guids: &[Guid],
-        _events: &mut Vec<StateEvent>,
-    ) {
+    pub(crate) fn mark_trade_preview_entities_for_prune(&mut self, item_guids: &[Guid]) {
         for &guid in item_guids {
             self.clear_trade_preview(guid);
             let _ = self.mark_entity_immediately_eligible_for_pruning_if_unretained(guid);
@@ -535,9 +531,7 @@ impl WorldState {
 
     pub(crate) fn mark_container_preview_entities_for_prune(
         &mut self,
-        _container_guid: Guid,
         item_guids: &[Guid],
-        _events: &mut Vec<StateEvent>,
     ) {
         let now = self.current_server_time();
 

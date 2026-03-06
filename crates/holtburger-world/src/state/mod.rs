@@ -1,4 +1,3 @@
-mod messages;
 mod mutations;
 mod physics;
 #[cfg(test)]
@@ -16,7 +15,7 @@ use super::stats;
 use super::vendor::{CoreVendorItem, VendorState};
 use binrw::BinRead;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInstanceId, PropertyInt,
     PropertyString, PropertyUpdate, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{Guid, Vector3};
@@ -56,6 +55,12 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<StateEvent> {
+        let mut events = Vec::new();
+        crate::handlers::handle_message(self, msg, &mut events);
+        events
+    }
+
     pub fn get_level_info(&self) -> Option<stats::CharacterLevelInfo> {
         let table = self.xp_table.as_ref()?;
         let level = self.player.level();

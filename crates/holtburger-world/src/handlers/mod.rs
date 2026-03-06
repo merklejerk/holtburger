@@ -1,6 +1,5 @@
 pub mod login;
 pub mod movement;
-#[path = "inventory_handler.rs"]
 pub mod inventory;
 pub mod properties;
 pub mod trade;
@@ -50,9 +49,10 @@ pub fn handle_message(
     }
 
     if let GameMessage::GameEvent(event) = message {
-        let _ = player::handle_event(state, event, events);
+        let player_handled = player::handle_event(state, event, events);
 
-        if login::handle_event(state, event, events)
+        if player_handled
+            || login::handle_event(state, event, events)
             || trade::handle_event(state, event, events)
             || inventory::handle_event(state, event, events)
             || system::handle_event(state, event, events)
@@ -61,7 +61,4 @@ pub fn handle_message(
             return;
         }
     }
-
-    state.handle_message_legacy(message, events);
-    resolve_spell_names(state, events);
 }

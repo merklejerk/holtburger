@@ -327,13 +327,20 @@ fn test_health_rounding() {
 
 #[test]
 fn test_vector_update_routing() {
+    use crate::entity::Entity;
     use crate::StateEvent;
+    use crate::state::WorldState;
     use holtburger_common::Vector3;
     use holtburger_protocol::messages::GameMessage;
     use holtburger_protocol::messages::VectorUpdateData;
 
-    let mut player = PlayerState::new();
-    player.guid = Guid(0x50000001);
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
+    state.entities.insert(Entity::new(
+        state.player.guid,
+        "Player".to_string(),
+        WorldPosition::default(),
+    ));
 
     let data = VectorUpdateData {
         guid: Guid(0x50000001),
@@ -344,11 +351,10 @@ fn test_vector_update_routing() {
     };
 
     let msg = GameMessage::VectorUpdate(Box::new(data));
-    let mut events = Vec::new();
-    let handled = player.handle_message(&msg, &mut events, None, None);
+    let events = state.handle_message(&msg);
 
-    assert!(handled);
     assert_eq!(events.len(), 1);
+    assert_eq!(state.player.instance_sequence, 123);
     if let StateEvent::EntityVectorUpdated {
         guid,
         velocity,
@@ -366,15 +372,16 @@ fn test_vector_update_routing() {
 #[test]
 fn test_magic_purge_bad_enchantments_preserves_vitae() {
     use crate::StateEvent;
+    use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsEventData,
     };
 
-    let mut player = PlayerState::new();
-    player.guid = Guid(0x50000001);
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
 
     // Beneficial buff: should remain after bad-enchantment purge.
-    player.enchantments.push(Enchantment {
+    state.player.enchantments.push(Enchantment {
         spell_id: 100,
         layer: 1,
         spell_category: 100,
@@ -388,7 +395,7 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     });
 
     // Harmful debuff: should be removed by bad-enchantment purge.
-    player.enchantments.push(Enchantment {
+    state.player.enchantments.push(Enchantment {
         spell_id: 200,
         layer: 1,
         spell_category: 200,
@@ -399,7 +406,7 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     });
 
     // Vitae penalty: must be preserved even though it's not BENEFICIAL.
-    player.enchantments.push(Enchantment {
+    state.player.enchantments.push(Enchantment {
         spell_id: 300,
         layer: 1,
         spell_category: 300,
@@ -410,22 +417,20 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     });
 
     let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: player.guid,
+        target: state.player.guid,
         sequence: 1,
         event: GameEvent::MagicPurgeBadEnchantments(Box::new(MagicPurgeBadEnchantmentsEventData {
-            target: player.guid,
+            target: state.player.guid,
             sequence: 1,
         })),
     }));
 
-    let mut events = Vec::new();
-    let handled = player.handle_message(&msg, &mut events, None, None);
+    let events = state.handle_message(&msg);
 
-    assert!(handled);
-    assert!(player.enchantments.iter().any(|e| e.spell_id == 100));
-    assert!(!player.enchantments.iter().any(|e| e.spell_id == 200));
-    assert!(player.enchantments.iter().any(|e| e.spell_id == 300));
-    assert_eq!(player.vitae(), 0.95);
+    assert!(state.player.enchantments.iter().any(|e| e.spell_id == 100));
+    assert!(!state.player.enchantments.iter().any(|e| e.spell_id == 200));
+    assert!(state.player.enchantments.iter().any(|e| e.spell_id == 300));
+    assert_eq!(state.player.vitae(), 0.95);
 
     assert!(
         events
@@ -442,16 +447,17 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
 #[test]
 fn test_magic_purge_enchantments_preserves_vitae_only() {
     use crate::StateEvent;
+    use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsEventData,
         MagicUpdateEnchantmentEventData,
     };
 
-    let mut player = PlayerState::new();
-    player.guid = Guid(0x50000001);
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
 
     // Existing buff should be removed by full purge.
-    player.enchantments.push(Enchantment {
+    state.player.enchantments.push(Enchantment {
         spell_id: 100,
         layer: 1,
         spell_category: 100,
@@ -476,31 +482,30 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
     };
 
     let update_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: player.guid,
+        target: state.player.guid,
         sequence: 16,
         event: GameEvent::MagicUpdateEnchantment(Box::new(MagicUpdateEnchantmentEventData {
-            target: player.guid,
+            target: state.player.guid,
             sequence: 16,
             enchantment: vitae_enchant,
         })),
     }));
 
     let purge_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
-        target: player.guid,
+        target: state.player.guid,
         sequence: 17,
         event: GameEvent::MagicPurgeEnchantments(Box::new(MagicPurgeEnchantmentsEventData {
-            target: player.guid,
+            target: state.player.guid,
             sequence: 17,
         })),
     }));
 
-    let mut events = Vec::new();
-    assert!(player.handle_message(&update_msg, &mut events, None, None));
-    assert!(player.handle_message(&purge_msg, &mut events, None, None));
+    let mut events = state.handle_message(&update_msg);
+    events.extend(state.handle_message(&purge_msg));
 
-    assert!(!player.enchantments.iter().any(|e| e.spell_id == 100));
-    assert!(player.enchantments.iter().any(|e| e.spell_id == 666));
-    assert_eq!(player.vitae(), 0.88);
+    assert!(!state.player.enchantments.iter().any(|e| e.spell_id == 100));
+    assert!(state.player.enchantments.iter().any(|e| e.spell_id == 666));
+    assert_eq!(state.player.vitae(), 0.88);
 
     let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
         StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),
@@ -511,12 +516,13 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
 
 #[test]
 fn test_heal_command_updates() {
+    use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameMessage, PrivateUpdateVitalCurrentData, PrivateUpdateVitalData,
     };
 
-    let mut player = PlayerState::new();
-    player.guid = Guid(0x50000001);
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
 
     // 1. Initial login: PrivateUpdateVital for Health (ID 1), Stamina (ID 3), Mana (ID 5)
     let vitals_to_init = [(1, "Health"), (3, "Stamina"), (5, "Mana")];
@@ -530,13 +536,13 @@ fn test_heal_command_updates() {
             xp: 0,
             current: 50,
         }));
-        player.handle_message(&msg, &mut Vec::new(), None, None);
+        let _ = state.handle_message(&msg);
     }
 
     // Verify they are in the map
-    assert!(player.vitals.contains_key(&stats::VitalType::Health));
-    assert!(player.vitals.contains_key(&stats::VitalType::Stamina));
-    assert!(player.vitals.contains_key(&stats::VitalType::Mana));
+    assert!(state.player.vitals.contains_key(&stats::VitalType::Health));
+    assert!(state.player.vitals.contains_key(&stats::VitalType::Stamina));
+    assert!(state.player.vitals.contains_key(&stats::VitalType::Mana));
 
     // 2. Simulate @heal: PrivateUpdateVitalCurrent for Health (ID 2), Stamina (ID 4), Mana (ID 6)
     let heal_updates = [(2, 100), (4, 100), (6, 100)];
@@ -547,15 +553,13 @@ fn test_heal_command_updates() {
             vital: id,
             current: val,
         }));
-        let mut events = Vec::new();
-        let handled = player.handle_message(&msg, &mut events, None, None);
-        assert!(handled, "Failed to handle vital update for ID {}", id);
+        let events = state.handle_message(&msg);
         assert_eq!(events.len(), 1);
     }
 
     // 3. Verify final state
     assert_eq!(
-        player
+        state.player
             .vitals
             .get(&stats::VitalType::Health)
             .unwrap()
@@ -563,7 +567,7 @@ fn test_heal_command_updates() {
         100
     );
     assert_eq!(
-        player
+        state.player
             .vitals
             .get(&stats::VitalType::Stamina)
             .unwrap()
@@ -571,7 +575,7 @@ fn test_heal_command_updates() {
         100
     );
     assert_eq!(
-        player.vitals.get(&stats::VitalType::Mana).unwrap().current,
+        state.player.vitals.get(&stats::VitalType::Mana).unwrap().current,
         100
     );
 }

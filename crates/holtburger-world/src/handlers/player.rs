@@ -1,7 +1,7 @@
 use crate::StateEvent;
+use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::state::WorldState;
 use holtburger_protocol::messages::*;
-use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 
 pub(crate) fn handle_message(
     state: &mut WorldState,

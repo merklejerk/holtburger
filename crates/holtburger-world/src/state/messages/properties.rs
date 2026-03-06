@@ -25,14 +25,9 @@ impl WorldState {
                 });
             }
             GameMessage::PrivateUpdatePropertyInt(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_int(data.property, data.value);
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
                     match data.property {
                         p if p == PropertyInt::Level as u32
                             || p == PropertyInt::AvailableSkillCredits as u32 =>
@@ -51,12 +46,6 @@ impl WorldState {
                         _ => {}
                     }
                     self.player.emit_derived_stats(events);
-                } else if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                } else if let Some(vendor) = self.vendor.as_mut()
-                    && let Some(item) = vendor.items.iter_mut().find(|i| i.guid == target_guid)
-                {
-                    item.set_property(update.clone());
                 }
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
@@ -64,21 +53,9 @@ impl WorldState {
                 });
             }
             GameMessage::PublicUpdatePropertyInt(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_int(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                } else if let Some(vendor) = self.vendor.as_mut()
-                    && let Some(item) = vendor.items.iter_mut().find(|i| i.guid == target_guid)
-                {
-                    item.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
                     if data.property == PropertyInt::CombatMode as u32 {
                         let maybe_mode =
                             holtburger_protocol::messages::combat::CombatMode::from_repr(
@@ -97,21 +74,9 @@ impl WorldState {
                 });
             }
             GameMessage::PrivateUpdatePropertyInt64(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_int64(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                } else if let Some(vendor) = self.vendor.as_mut()
-                    && let Some(item) = vendor.items.iter_mut().find(|i| i.guid == target_guid)
-                {
-                    item.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
                     match data.property {
                         p if p == PropertyInt64::TotalExperience as u32
                             || p == PropertyInt64::AvailableExperience as u32
@@ -128,80 +93,33 @@ impl WorldState {
                 });
             }
             GameMessage::PublicUpdatePropertyInt64(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_int64(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                } else if let Some(vendor) = self.vendor.as_mut()
-                    && let Some(item) = vendor.items.iter_mut().find(|i| i.guid == target_guid)
-                {
-                    item.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, false);
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
                     updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyBool(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_bool(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                } else if let Some(vendor) = self.vendor.as_mut()
-                    && let Some(item) = vendor.items.iter_mut().find(|i| i.guid == target_guid)
-                {
-                    item.set_property(update.clone());
-                }
-                if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
                     updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyBool(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_bool(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                } else if let Some(vendor) = self.vendor.as_mut()
-                    && let Some(item) = vendor.items.iter_mut().find(|i| i.guid == target_guid)
-                {
-                    item.set_property(update.clone());
-                }
-                if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
                     updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyFloat(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_float(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
                     self.player.emit_derived_stats(events);
                 }
                 events.push(StateEvent::PropertiesUpdated {
@@ -210,17 +128,9 @@ impl WorldState {
                 });
             }
             GameMessage::PublicUpdatePropertyFloat(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_float(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
                     self.player.emit_derived_stats(events);
                 }
                 events.push(StateEvent::PropertiesUpdated {
@@ -229,121 +139,42 @@ impl WorldState {
                 });
             }
             GameMessage::PrivateUpdatePropertyString(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_string(data.property, data.value.clone());
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                }
-                if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
                     updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyString(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_string(data.property, data.value.clone());
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                } else if let Some(vendor) = self.vendor.as_mut()
-                    && let Some(item) = vendor.items.iter_mut().find(|i| i.guid == target_guid)
-                {
-                    item.set_property(update.clone());
-                }
-                if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
                     updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyDataId(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_did(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                }
-                if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
                     updates: vec![update],
                 });
             }
             GameMessage::PublicUpdatePropertyDataId(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_did(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                }
-                if target_guid == self.player.guid {
-                    self.player.set_property(update.clone());
-                }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
                     updates: vec![update],
                 });
             }
             GameMessage::PrivateUpdatePropertyInstanceId(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                    if target_guid == self.player.guid {
-                        self.player.set_property(update.clone());
-                    }
-
-                    if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
-                        match prop {
-                            PropertyInstanceId::Container => {
-                                if data.value != Guid::NULL && target_guid != self.player.guid {
-                                    let mut pos = entity.position;
-                                    pos.landblock_id = Guid::NULL;
-                                    let old_lb = entity.position.landblock_id;
-                                    entity.position = pos;
-                                    self.scene.remove_entity(entity.guid, old_lb);
-                                }
-                            }
-                            PropertyInstanceId::Wielder => {
-                                if data.value == Guid::NULL {
-                                    entity.physics_parent_id = None;
-                                }
-
-                                if data.value != Guid::NULL && target_guid != self.player.guid {
-                                    let mut pos = entity.position;
-                                    pos.landblock_id = Guid::NULL;
-                                    let old_lb = entity.position.landblock_id;
-                                    entity.position = pos;
-                                    self.scene.remove_entity(entity.guid, old_lb);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
+                if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
+                    self.apply_instance_id_side_effect(target_guid, prop, data.value);
                 }
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
@@ -351,45 +182,10 @@ impl WorldState {
                 });
             }
             GameMessage::PublicUpdatePropertyInstanceId(data) => {
-                let target_guid = if data.guid == Guid::NULL {
-                    self.player.guid
-                } else {
-                    data.guid
-                };
                 let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
-                if let Some(entity) = self.entities.get_mut(target_guid) {
-                    entity.set_property(update.clone());
-                    if target_guid == self.player.guid {
-                        self.player.set_property(update.clone());
-                    }
-
-                    if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
-                        match prop {
-                            PropertyInstanceId::Container => {
-                                if data.value != Guid::NULL && target_guid != self.player.guid {
-                                    let mut pos = entity.position;
-                                    pos.landblock_id = Guid::NULL;
-                                    let old_lb = entity.position.landblock_id;
-                                    entity.position = pos;
-                                    self.scene.remove_entity(entity.guid, old_lb);
-                                }
-                            }
-                            PropertyInstanceId::Wielder => {
-                                if data.value == Guid::NULL {
-                                    entity.physics_parent_id = None;
-                                }
-
-                                if data.value != Guid::NULL && target_guid != self.player.guid {
-                                    let mut pos = entity.position;
-                                    pos.landblock_id = Guid::NULL;
-                                    let old_lb = entity.position.landblock_id;
-                                    entity.position = pos;
-                                    self.scene.remove_entity(entity.guid, old_lb);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+                let target_guid = self.apply_property_update_to_target(data.guid, &update, true);
+                if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
+                    self.apply_instance_id_side_effect(target_guid, prop, data.value);
                 }
                 events.push(StateEvent::PropertiesUpdated {
                     guid: target_guid,
@@ -397,14 +193,7 @@ impl WorldState {
                 });
             }
             GameMessage::SetState(data) => {
-                if let Some(entity) = self.entities.get_mut(data.guid) {
-                    entity.physics_state = data.physics_state;
-                    entity.properties.hydrate_from_set_state(data);
-                    events.push(StateEvent::EntityStateUpdated {
-                        guid: data.guid,
-                        physics_state: data.physics_state,
-                    });
-                }
+                let _ = self.apply_set_state_update(data, events);
             }
             _ => return false,
         }

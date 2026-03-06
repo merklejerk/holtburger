@@ -1,24 +1,6 @@
 use super::super::*;
 
 impl WorldState {
-    fn update_player_inventory_recursive(&mut self, root: Guid, owned: bool) {
-        let mut stack = vec![root];
-        while let Some(current) = stack.pop() {
-            if owned {
-                self.player.add_to_inventory(current);
-            } else {
-                self.player.remove_from_inventory(current);
-            }
-
-            // Find children in self.entities
-            for (&guid, entity) in &self.entities.entities {
-                if entity.container_id() == Some(current) {
-                    stack.push(guid);
-                }
-            }
-        }
-    }
-
     pub(crate) fn handle_inventory_message(
         &mut self,
         msg: &GameMessage,
@@ -99,10 +81,8 @@ impl WorldState {
                     if let Some(_entity) = self.remove_entity(guid) {
                         events.push(StateEvent::EntityDespawned(guid));
                     }
-                } else if let Some(entity) = self.entities.get_mut(guid) {
-                    let old_lb = entity.position.landblock_id;
-                    entity.position.landblock_id = Guid::NULL;
-                    self.scene.remove_entity(guid, old_lb);
+                } else {
+                    let _ = self.clear_entity_world_presence(guid);
                 }
             }
             GameMessage::InventoryRemoveObject(data) => {
@@ -128,67 +108,10 @@ impl WorldState {
     ) -> bool {
         match &ev.event {
             GameEvent::InventoryPutObjInContainer(data) => {
-                if let Some(entity) = self.entities.get_mut(data.item_guid) {
-                    if entity.wielder_id() == Some(self.player.guid) {
-                        self.player.unwield_item(data.item_guid);
-                    }
-
-                    entity.set_iid_prop(PropertyInstanceId::Container, data.container_guid);
-                    entity.set_iid_prop(PropertyInstanceId::Wielder, Guid::NULL);
-                    entity.set_int_prop(
-                        PropertyInt::CurrentWieldedLocation,
-                        EquipMask::NONE.bits() as i32,
-                    );
-                    entity.position.landblock_id = Guid::NULL;
-
-                    // Update player inventory set recursively
-                    let is_owned = data.container_guid == self.player.guid
-                        || self.player.inventory.contains(&data.container_guid);
-                    self.update_player_inventory_recursive(data.item_guid, is_owned);
-
-                    events.push(StateEvent::PropertiesUpdated {
-                        guid: data.item_guid,
-                        updates: vec![
-                            PropertyUpdate::InstanceId(
-                                PropertyInstanceId::Container,
-                                data.container_guid,
-                            ),
-                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
-                            PropertyUpdate::Int(
-                                PropertyInt::CurrentWieldedLocation,
-                                EquipMask::NONE.bits() as i32,
-                            ),
-                        ],
-                    });
-                }
+                let _ = self.move_entity_into_container(data.item_guid, data.container_guid, events);
             }
             GameEvent::InventoryPutObjectIn3D(data) => {
-                if let Some(entity) = self.entities.get_mut(data.object_guid) {
-                    if entity.wielder_id() == Some(self.player.guid) {
-                        self.player.unwield_item(data.object_guid);
-                    }
-                    entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
-                    entity.set_iid_prop(PropertyInstanceId::Wielder, Guid::NULL);
-                    entity.set_int_prop(
-                        PropertyInt::CurrentWieldedLocation,
-                        EquipMask::NONE.bits() as i32,
-                    );
-
-                    // Recursively remove from inventory tracking
-                    self.update_player_inventory_recursive(data.object_guid, false);
-
-                    events.push(StateEvent::PropertiesUpdated {
-                        guid: data.object_guid,
-                        updates: vec![
-                            PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
-                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
-                            PropertyUpdate::Int(
-                                PropertyInt::CurrentWieldedLocation,
-                                EquipMask::NONE.bits() as i32,
-                            ),
-                        ],
-                    });
-                }
+                let _ = self.move_entity_into_world(data.object_guid, events);
             }
             GameEvent::ViewContents(data) => {
                 self.open_containers.insert(data.container);
@@ -266,32 +189,7 @@ impl WorldState {
                 }
             }
             GameEvent::WieldObject(data) => {
-                if let Some(entity) = self.entities.get_mut(data.object_guid) {
-                    // The target of the GameEvent message is the wielder
-                    entity.set_iid_prop(PropertyInstanceId::Wielder, ev.target);
-                    entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
-                    entity.set_int_prop(
-                        PropertyInt::CurrentWieldedLocation,
-                        data.equip_mask.bits() as i32,
-                    );
-                    entity.position.landblock_id = Guid::NULL;
-
-                    if ev.target == self.player.guid {
-                        self.player.wield_item(data.object_guid, data.equip_mask);
-                    }
-
-                    events.push(StateEvent::PropertiesUpdated {
-                        guid: data.object_guid,
-                        updates: vec![
-                            PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, ev.target),
-                            PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
-                            PropertyUpdate::Int(
-                                PropertyInt::CurrentWieldedLocation,
-                                data.equip_mask.bits() as i32,
-                            ),
-                        ],
-                    });
-                }
+                let _ = self.wield_entity_for(data.object_guid, ev.target, data.equip_mask, events);
             }
             GameEvent::UseDone(data) => {
                 events.push(StateEvent::UseDone { error: data.error });
@@ -299,14 +197,8 @@ impl WorldState {
             GameEvent::WeenieError(data) => {
                 events.push(StateEvent::WeenieError { error: data.error });
 
-                if data.error == WeenieError::TradeComplete
-                    && let Some(trade) = self.trade.as_mut()
-                {
-                    trade.self_side.accepted = false;
-                    trade.partner_side.accepted = false;
-                    trade.self_side.items.clear();
-                    trade.partner_side.items.clear();
-                    events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+                if data.error == WeenieError::TradeComplete {
+                    self.handle_trade_complete(events);
                 }
             }
             GameEvent::WeenieErrorWithString(data) => {

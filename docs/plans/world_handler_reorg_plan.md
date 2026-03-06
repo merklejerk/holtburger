@@ -273,7 +273,7 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 ### Task Checklist
 - [x] **Phase 1**: Add the `handlers/` module tree and compatibility entry points.
 - [x] **Phase 2**: Extract player-local mutation methods from `PlayerState::handle_message()`.
-- [ ] **Phase 3**: Extract world mutation helpers from `state/messages/*` into narrower `WorldState` methods.
+- [x] **Phase 3**: Extract world mutation helpers from `state/messages/*` into narrower `WorldState` methods.
 - [ ] **Phase 4a**: Migrate simple feature handlers (`login`, `trade`, misc/system).
 - [ ] **Phase 4b**: Migrate world-only handlers.
 - [ ] **Phase 4c**: Migrate shared player/world orchestration.
@@ -285,6 +285,8 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - **Architectural**: Keep the `PlayerState` / `WorldState` distinction because it encodes real invariants and ownership, even though the current handler layout is confusing.
 - **Sequencing**: Treat `state` → `world` renaming as optional and explicitly defer it until after handler extraction.
 - **Testing**: Test compatibility does not justify preserving `PlayerState::handle_message()` or other legacy routing APIs. Tests should follow the cleaner architecture.
+- **Architectural**: Keep world-side mutation helpers in `state/mutations.rs` for now so the new `handlers/` layer can call a narrow `WorldState` API later without fighting visibility or borrow-checker churn during the migration.
+- **Architectural**: Introduce a generic property-target mutation helper on `WorldState` now, but keep message-specific side effects (`CombatModeUpdated`, level info emission, derived stat recalculation) in the existing property handler until Phase 4 moves routing into `handlers/`.
 
 ### Verification Log
 - **Phase 1 Complete**:
@@ -297,6 +299,11 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
   - Extracted `update_attribute`, `update_skill`, `update_vital`, `update_vital_current`, and `update_position_from_server` from the legacy router.
   - Slimmed down `PlayerState::handle_message` in `player/messages.rs` to use these new mutation methods.
   - Verified no regressions in existing world tests.
+- **Phase 3 Complete**:
+  - Created `state/mutations.rs` to hold world-side mutation helpers and promoted `emit_level_info()` to that shared helper surface.
+  - Extracted helpers for player-description follow-up, world/entity movement, inventory/container/wielder placement, generic property target application, instance-id side effects, and trade-complete cleanup.
+  - Refactored [crates/holtburger-world/src/state/messages/login.rs](crates/holtburger-world/src/state/messages/login.rs), [crates/holtburger-world/src/state/messages/movement.rs](crates/holtburger-world/src/state/messages/movement.rs), [crates/holtburger-world/src/state/messages/inventory.rs](crates/holtburger-world/src/state/messages/inventory.rs), and [crates/holtburger-world/src/state/messages/properties.rs](crates/holtburger-world/src/state/messages/properties.rs) to use those narrower `WorldState` methods.
+  - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
 - Pending implementation.
 
 ### Open Questions

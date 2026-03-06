@@ -23,10 +23,10 @@ impl SelectionState {
                 }
             }
             KeyCode::Enter => {
-                if !self.characters.is_empty() {
-                    result.commands.push(ClientCommand::SelectCharacterByIndex(
-                        self.selected_character_index + 1,
-                    ));
+                if let Some(character) = self.characters.get(self.selected_character_index) {
+                    result
+                        .commands
+                        .push(ClientCommand::SelectCharacter(character.guid));
                 }
             }
             KeyCode::Char(c) => {
@@ -34,11 +34,11 @@ impl SelectionState {
                     && digit > 0
                 {
                     let idx = (digit as usize).saturating_sub(1);
-                    if idx < self.characters.len() {
+                    if let Some(character) = self.characters.get(idx) {
                         self.selected_character_index = idx;
                         result
                             .commands
-                            .push(ClientCommand::SelectCharacterByIndex(idx + 1));
+                            .push(ClientCommand::SelectCharacter(character.guid));
                         result.needs_redraw = true;
                     }
                 }

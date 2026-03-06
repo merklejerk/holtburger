@@ -535,3 +535,100 @@ fn test_upsert_entity_from_create_replaces_in_place() {
     assert!(state.entity_lifecycle_state(guid).is_none());
     assert_eq!(state.entities.get(guid).unwrap().name(), "Replacement");
 }
+
+#[test]
+fn test_tick_sweeps_explicit_delete_without_movement() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    let target_guid = Guid(0x60000123);
+
+    state.player.guid = player_guid;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        WorldPosition::default(),
+    ));
+    state.entities.insert(Entity::new(
+        target_guid,
+        "Target".to_string(),
+        WorldPosition::default(),
+    ));
+    state.mark_entity_explicit_delete(target_guid);
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(target_guid).is_none());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)));
+}
+
+#[test]
+fn test_tick_sweeps_expired_deadline_without_movement() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    let target_guid = Guid(0x60000124);
+
+    state.player.guid = player_guid;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
+    target.position.landblock_id = Guid::NULL;
+    state.entities.insert(target);
+    state.set_entity_prune_deadline(target_guid, state.current_server_time() - 1.0);
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(target_guid).is_none());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)));
+}
+
+#[test]
+fn test_tick_does_not_sweep_unexpired_deadline() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    let target_guid = Guid(0x60000125);
+
+    state.player.guid = player_guid;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
+    target.position.landblock_id = Guid::NULL;
+    state.entities.insert(target);
+    state.set_entity_prune_deadline(target_guid, state.current_server_time() + 60.0);
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(target_guid).is_some());
+    assert!(events.is_empty());
+}
+
+#[test]
+fn test_tick_runs_sweep_without_player_guid() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x70000123);
+
+    state.entities.insert(Entity::new(
+        guid,
+        "Orphan".to_string(),
+        WorldPosition::default(),
+    ));
+    state.mark_entity_explicit_delete(guid);
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(guid).is_none());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(target) if *target == guid)));
+}

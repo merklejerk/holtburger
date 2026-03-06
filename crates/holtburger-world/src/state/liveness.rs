@@ -52,6 +52,10 @@ impl EntityLifecycleStore {
             self.by_guid.remove(&guid);
         }
     }
+
+    pub fn tracked_guids(&self) -> impl Iterator<Item = Guid> + '_ {
+        self.by_guid.keys().copied()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,6 +195,32 @@ impl WorldState {
         }
 
         snapshot.prune_deadline_expired
+    }
+
+    pub(crate) fn sweep_entity(
+        &mut self,
+        guid: Guid,
+        now: f64,
+        events: &mut Vec<StateEvent>,
+    ) -> bool {
+        if !self.should_evict_entity(guid, now) {
+            return false;
+        }
+
+        if self.remove_entity(guid).is_some() {
+            events.push(StateEvent::EntityDespawned(guid));
+            true
+        } else {
+            self.entity_lifecycle.clear(guid);
+            false
+        }
+    }
+
+    pub(crate) fn sweep_eviction_queue(&mut self, now: f64, events: &mut Vec<StateEvent>) {
+        let candidates: Vec<_> = self.entity_lifecycle.tracked_guids().collect();
+        for guid in candidates {
+            let _ = self.sweep_entity(guid, now, events);
+        }
     }
 
     pub fn is_entity_client_visible(&self, guid: Guid) -> bool {

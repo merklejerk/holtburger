@@ -51,6 +51,8 @@ impl WorldState {
     }
     pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<StateEvent> {
         let mut events = Vec::new();
+        let now = self.current_server_time();
+        self.sweep_eviction_queue(now, &mut events);
 
         if self.player.guid == Guid::NULL {
             return events;

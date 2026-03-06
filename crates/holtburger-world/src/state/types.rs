@@ -12,6 +12,7 @@ use crate::StateEvent;
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::SpatialScene;
+use crate::state::liveness::EntityLifecycleStore;
 use crate::state::trade::TradeState;
 use crate::stats;
 use crate::vendor::VendorState;
@@ -47,6 +48,7 @@ pub struct WorldState {
     pub vendor: Option<VendorState>,
     pub trade: Option<TradeState>,
     pub open_containers: std::collections::HashSet<Guid>,
+    pub(crate) entity_lifecycle: EntityLifecycleStore,
 }
 
 impl WorldState {
@@ -197,6 +199,7 @@ impl WorldState {
             vendor: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
+            entity_lifecycle: EntityLifecycleStore::default(),
         }
     }
 
@@ -245,6 +248,7 @@ impl WorldState {
         let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
             self.scene.remove_entity(guid, entity.position.landblock_id);
+            self.entity_lifecycle.clear(guid);
             Some(entity)
         } else {
             None

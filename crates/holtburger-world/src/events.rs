@@ -37,6 +37,7 @@ pub struct DerivedStatsData {
 #[derive(Debug, Clone)]
 pub enum StateEvent {
     EntitySpawned(Box<Entity>),
+    EntityReplaced(Box<Entity>),
     EntityMoved {
         guid: Guid,
         pos: WorldPosition,

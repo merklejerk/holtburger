@@ -472,12 +472,38 @@ impl EntityManager {
         self.entities.insert(entity.guid, entity);
     }
 
+    pub fn contains(&self, guid: impl Into<Guid>) -> bool {
+        self.entities.contains_key(&guid.into())
+    }
+
     pub fn get(&self, guid: impl Into<Guid>) -> Option<&Entity> {
         self.entities.get(&guid.into())
     }
 
+    pub fn get_filtered<F>(&self, guid: impl Into<Guid>, predicate: F) -> Option<&Entity>
+    where
+        F: FnOnce(&Entity) -> bool,
+    {
+        let entity = self.get(guid)?;
+        predicate(entity).then_some(entity)
+    }
+
     pub fn get_mut(&mut self, guid: impl Into<Guid>) -> Option<&mut Entity> {
         self.entities.get_mut(&guid.into())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Entity> {
+        self.entities.values()
+    }
+
+    pub fn iter_filtered<'a, F>(
+        &'a self,
+        mut predicate: F,
+    ) -> impl Iterator<Item = &'a Entity> + 'a
+    where
+        F: FnMut(&Entity) -> bool + 'a,
+    {
+        self.entities.values().filter(move |entity| predicate(entity))
     }
 
     pub fn remove(&mut self, guid: impl Into<Guid>) -> Option<Entity> {

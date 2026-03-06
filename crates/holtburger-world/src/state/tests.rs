@@ -900,3 +900,131 @@ fn test_nearby_entities_omit_explicit_delete_and_null_landblock() {
     assert!(!nearby.contains(&deleted_guid));
     assert!(!nearby.contains(&null_guid));
 }
+
+#[test]
+fn test_add_to_trade_marks_preview_only_for_non_authoritative_entities() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000140);
+    let preview_guid = Guid(0x60000140);
+    let owned_guid = Guid(0x60000141);
+
+    state.player.guid = player_guid;
+    state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
+
+    let mut preview_entity = Entity::new(preview_guid, "Preview".to_string(), WorldPosition::default());
+    preview_entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(preview_entity);
+
+    state.entities.insert(Entity::new(
+        owned_guid,
+        "Owned".to_string(),
+        WorldPosition::default(),
+    ));
+    state.player.add_to_inventory(owned_guid);
+
+    state.add_trade_item(0x02, preview_guid, &mut Vec::new());
+    state.add_trade_item(0x01, owned_guid, &mut Vec::new());
+
+    assert!(state.entity_lifecycle_state(preview_guid).is_some_and(|state| state.trade_preview));
+    assert!(!state
+        .entity_lifecycle_state(owned_guid)
+        .is_some_and(|state| state.trade_preview));
+}
+
+#[test]
+fn test_reset_trade_sweeps_preview_only_entities() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000141);
+    let preview_guid = Guid(0x60000142);
+
+    state.player.guid = player_guid;
+    state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
+
+    let mut preview_entity = Entity::new(preview_guid, "Preview".to_string(), WorldPosition::default());
+    preview_entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(preview_entity);
+    state.mark_trade_preview(preview_guid);
+
+    if let Some(trade) = state.trade.as_mut() {
+        trade.partner_side.items.push(preview_guid);
+    }
+
+    let mut events = Vec::new();
+    state.reset_trade(&mut events);
+
+    assert!(state.entities.get(preview_guid).is_none());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
+    assert!(state.trade.as_ref().is_some_and(|trade| trade.partner_side.items.is_empty()));
+}
+
+#[test]
+fn test_clear_trade_acceptance_does_not_sweep_preview_entities() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000142);
+    let preview_guid = Guid(0x60000143);
+
+    state.player.guid = player_guid;
+    state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
+
+    let mut preview_entity = Entity::new(preview_guid, "Preview".to_string(), WorldPosition::default());
+    preview_entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(preview_entity);
+    state.mark_trade_preview(preview_guid);
+
+    if let Some(trade) = state.trade.as_mut() {
+        trade.self_side.items.push(preview_guid);
+        trade.self_side.accepted = true;
+        trade.partner_side.accepted = true;
+    }
+
+    let mut events = Vec::new();
+    state.clear_trade_acceptance(&mut events);
+
+    assert!(state.entities.get(preview_guid).is_some());
+    assert!(state.entity_lifecycle_state(preview_guid).is_some_and(|state| state.trade_preview));
+    assert!(state.trade.as_ref().is_some_and(|trade| trade.self_side.items == vec![preview_guid]));
+    assert!(events.iter().any(|event| matches!(event, StateEvent::TradeStateUpdated(Some(_)))));
+}
+
+#[test]
+fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_entity() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000143);
+    let preview_guid = Guid(0x60000144);
+    let owned_guid = Guid(0x60000145);
+
+    state.player.guid = player_guid;
+    state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
+
+    let mut preview_entity = Entity::new(preview_guid, "Preview".to_string(), WorldPosition::default());
+    preview_entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(preview_entity);
+    state.mark_trade_preview(preview_guid);
+
+    let mut owned_entity = Entity::new(owned_guid, "Owned".to_string(), WorldPosition::default());
+    owned_entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(owned_entity);
+    state.mark_trade_preview(owned_guid);
+    state.player.add_to_inventory(owned_guid);
+
+    if let Some(trade) = state.trade.as_mut() {
+        trade.self_side.items.push(owned_guid);
+        trade.partner_side.items.push(preview_guid);
+        trade.self_side.accepted = true;
+        trade.partner_side.accepted = true;
+    }
+
+    let mut events = Vec::new();
+    state.handle_trade_complete(&mut events);
+
+    assert!(state.entities.get(preview_guid).is_none());
+    assert!(state.entities.get(owned_guid).is_some());
+    assert!(!state
+        .entity_lifecycle_state(owned_guid)
+        .is_some_and(|state| state.trade_preview));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
+}

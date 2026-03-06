@@ -112,6 +112,7 @@ Design note:
 - Avoid storing a second copy of durable ownership booleans such as `in_inventory`, `equipped`, or `world_visible` if they can be derived from the existing entity graph and state tables. The transient metadata store should exist to model client-local pruning state, not to become a competing source of truth.
 - Prefer derived world participation over extra flags: if an entity has `landblock_id == Guid::NULL`, spatial/world queries should treat it as absent from the world unless a future indoor/PVS rule requires a narrower distinction.
 - Entities with explicit delete intent may also need to be hidden from world/spatial and client-facing queries before physical eviction. Prefer central filtered-access helpers over scattering lifecycle checks throughout the UI and event surface.
+- Preview-only container membership must not become accidental durable retention once the container closes. If a synthesized `ViewContents` placeholder still has a `Container` iid for a container that is no longer open, retention logic should treat that relationship as preview-only until a stronger authoritative ownership signal arrives.
 
 ### Suggested helper surface
 Keep the public mutation surface small and intention-revealing. A concrete first-pass API could look like:
@@ -188,6 +189,9 @@ That means:
 - `StateEvent::EntitySpawned` should be emitted only when an entity actually enters local state.
 - A repeated `ObjectCreate` that rehydrates an existing entity should refresh in place rather than forcing a despawn/respawn pair. Prefer a dedicated `StateEvent::EntityReplaced` / equivalent refresh event over overloading `EntitySpawned`.
 
+Operational clarification:
+- Helper names that include `sweep_*` are allowed to mean “reconcile preview retention and mark the entity as immediately sweep-eligible,” but they should not physically remove entities inline during protocol handling. Actual removal should remain confined to the centralized pruning pass.
+
 Operational rule:
 - Prefer deriving eviction eligibility from current authoritative state over asking each mutation call-site to manually mark entities for deletion. The main exceptions are lifecycle facts that are not encoded in normal state, such as explicit delete packets and preview provenance.
 
@@ -196,8 +200,8 @@ Treat trade-preview entities as ephemeral unless another retention reason exists
 
 That means:
 - `AddToTrade` should mark the item as a trade preview if it is not already retained locally by inventory/equipment/container ownership.
-- `ResetTrade`, `CloseTrade`, `DeclineTrade`, `TradeFailure`, and successful trade finalization should trigger a trade-preview sweep.
-- `ClearTradeAcceptance` should only clear acceptance state unless ACE evidence shows it is terminal in a given flow.
+- `ResetTrade`, `CloseTrade`, and successful trade finalization should trigger a trade-preview sweep.
+- `ClearTradeAcceptance`, `DeclineTrade`, and `TradeFailure` should stay on the acceptance-reset path unless stronger evidence shows that a given flow actually ends preview visibility.
 - The sweep should despawn entities that are retained **only** by the finished trade preview.
 
 ### Open-container policy to emulate first
@@ -300,12 +304,16 @@ That means:
   - Update: [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs)
   - Update: [crates/holtburger-world/src/state/mutations.rs](crates/holtburger-world/src/state/mutations.rs)
 - **Deliverables**:
-  - Add a `sweep_container_preview_entities()` helper.
+  - Add a `sweep_container_preview_entities()` helper that clears preview provenance, reconciles retention, and marks preview-only entities as immediately eligible for the centralized pruning pass rather than removing them inline.
   - Invoke it when `CloseGroundContainer` removes a container from the open set.
+  - Treat `Container` iid relationships to closed preview containers as preview-only retention, not durable authoritative ownership, until another stronger ownership signal arrives.
+  - Normalize existing preview teardown helpers, including `sweep_trade_preview_entities()`, to the same deferred-only model so preview teardown never performs physical removal inline during protocol handling.
   - Preserve entities that also have real ownership via world presence, inventory/equipment, or another open container.
 - **Acceptance Criteria**:
   - Closing a container does not leave placeholder-only entities behind.
   - Closing a container does not despawn entities that remain retained for another reason.
+  - Container close paths do not physically remove entities outside the centralized pruning pass.
+  - Trade-preview teardown helpers also stop calling direct physical-removal paths during protocol handling.
 
 ### Phase 7: Tests and parity notes
 - **Goal**: Lock the behavior down and document intentional approximations.
@@ -376,9 +384,9 @@ That means:
 - [x] Add ACE destruction-queue policy
 - [x] Make delete-style protocol paths record explicit delete intent instead of deleting inline
 - [x] Add `EntityReplaced` / equivalent signaling for in-place authoritative rehydration
-- [ ] Add trade-preview sweep behavior
+- [x] Add trade-preview sweep behavior
 - [ ] Add container-preview sweep behavior
-- [ ] Add regression tests for stationary timeout, re-entry, and trade cleanup
+- [x] Add regression tests for stationary timeout, re-entry, and trade cleanup
 - [ ] Document any indoor-PVS limitation left for follow-up
 
 ### Progress Update
@@ -406,6 +414,12 @@ That means:
   - Updated deadline-based eviction semantics so expired visibility timeouts can evict world entities even though their last authoritative `landblock_id` is still populated.
   - Routed world/spatial query surfaces through lifecycle-aware world-participant filtering so explicit-delete entities and `landblock_id == Guid::NULL` entities no longer appear in nearby-world reads before physical eviction.
   - Added phase-4 regression tests covering stationary deadline assignment, 25-second timeout sweep, re-entry cancellation, and nearby-world filtering.
+- **2026-03-06 Phase 5 completed**
+  - Added trade-preview marking for `AddToTrade` only when the item lacks stronger authoritative retention, so local inventory and equipment items do not become preview-owned by accident.
+  - Added `sweep_trade_preview_entities()` plus shared trade-item capture helpers, and wired preview cleanup into `ResetTrade`, `CloseTrade`, and `TradeComplete` handling.
+  - Kept `ClearTradeAcceptance`, `DeclineTrade`, and `TradeFailure` on the non-terminal acceptance-reset path because ACE evidence does not show those packets ending preview visibility.
+  - Preserved recipient-owned entities during trade finalization by clearing preview provenance and only sweeping items that have no stronger retention reason.
+  - Added phase-5 regression tests for preview marking, reset-time cleanup, non-terminal acceptance clears, and trade-complete preservation of real owned entities.
 
 ### Decisions Log
 - **Decision**: Pruning should live in `holtburger-world`, not `holtburger-core`.
@@ -440,6 +454,14 @@ That means:
   - **Why**: ACE uses `VisibleCells` indoors, and guessing beyond current client knowledge would produce sus false positives; same-cell indoor retention is the narrowest safe approximation until visible-cell support exists.
 - **Decision**: Deadline-based visibility eviction should ignore `in_world` as a permanent retention reason once the destruction timeout expires.
   - **Why**: The destruction queue exists specifically to evict stale world entities whose last authoritative world position is still known, so the timeout has to override raw world presence when no stronger retention reason remains.
+- **Decision**: `DeclineTrade` and `TradeFailure` should stay on the non-terminal acceptance-reset path for now.
+  - **Why**: ACE clears acceptance on those flows but does not prove that preview visibility ends there; sweeping previews on those packets would risk deleting still-valid trade-window entities.
+- **Decision**: Active trade-preview provenance should survive authoritative `ObjectCreate` refreshes while the item is still listed in the current trade state.
+  - **Why**: Partner-side preview objects can be rehydrated during an active trade, and clearing preview provenance on every upsert would orphan those entities from the later teardown sweep.
+- **Decision**: Preview teardown helpers should mark immediate sweep eligibility, not physically delete entities inline.
+  - **Why**: The architecture already chose a fully deferred pruning model. Letting protocol-driven teardown helpers call physical removal directly would reintroduce the coupling the sweep pass was meant to eliminate.
+- **Decision**: Closed preview containers should not count as durable container ownership in retention decisions.
+  - **Why**: `ViewContents` placeholders can legitimately retain a `Container` iid after the UI closes; treating that closed-container relationship as authoritative ownership would leak preview-only entities indefinitely.
 
 ### Verification Log
 - Investigated ACE visibility flow in `ObjectMaint` and `PhysicsObj.handle_visible_cells()`.
@@ -454,9 +476,15 @@ That means:
 - Ran `cargo test -p holtburger-world` after the phase-3 changes; all 39 tests passed.
 - Implemented the phase-4 ACE-style destruction queue maintenance and world-query filtering for stale world entities.
 - Ran `cargo test -p holtburger-world` after the phase-4 changes; all 43 tests passed.
+- Implemented the phase-5 trade-preview retention and terminal teardown sweep behavior.
+- Ran `cargo test -p holtburger-world` after the phase-5 changes; all 47 tests passed.
 
 ### Open Questions
 - Do we want the first implementation to include indoor `VisibleCells` parity, or should we explicitly scope v1 to outdoor + trade-preview correctness?
   - **Recommended default**: scope v1 to outdoor + trade-preview correctness, then follow with indoor PVS parity once the liveness model is in place.
 - Do we want to model open-container placeholder cleanup in the same pass as trade-preview cleanup?
   - **Recommended default**: yes. It is the same architectural problem class, already exists in current code, and should share the same retention/reconciliation helpers rather than becoming a follow-up patch.
+
+### Follow-up Notes
+- Phase 6 should include a small cross-cutting cleanup pass that converts existing preview teardown helpers from “clear preview and immediately call `sweep_entity()`” to “clear preview and mark immediate eligibility for the next centralized pruning pass.”
+  - Current known target: [crates/holtburger-world/src/state/mutations.rs](crates/holtburger-world/src/state/mutations.rs) `sweep_trade_preview_entities()`.

@@ -111,6 +111,12 @@ impl EntityRetentionSnapshot {
 }
 
 impl WorldState {
+    pub(crate) fn trade_contains_item(&self, guid: Guid) -> bool {
+        self.trade.as_ref().is_some_and(|trade| {
+            trade.self_side.items.contains(&guid) || trade.partner_side.items.contains(&guid)
+        })
+    }
+
     pub(crate) fn entity_lifecycle_state(&self, guid: Guid) -> Option<&EntityLifecycleState> {
         self.entity_lifecycle.get(guid)
     }
@@ -274,7 +280,9 @@ impl WorldState {
 
         self.clear_entity_explicit_delete(guid);
         self.clear_entity_prune_deadline(guid);
-        self.clear_trade_preview(guid);
+        if !self.trade_contains_item(guid) {
+            self.clear_trade_preview(guid);
+        }
         self.clear_container_preview(guid);
 
         if let Some(old_lb) = self.entities.get(guid).map(|existing| existing.position.landblock_id) {

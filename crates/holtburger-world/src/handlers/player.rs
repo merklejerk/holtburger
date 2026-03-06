@@ -11,7 +11,7 @@ pub(crate) fn handle_message(
 		GameMessage::ObjectCreate(data) => {
 			if data.public_weenie_desc.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL {
 				if let Some(pos) = data.pos {
-					state.player.position = pos;
+					state.sync_player_position(pos);
 				}
 			}
 			false

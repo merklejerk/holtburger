@@ -23,11 +23,16 @@ pub mod types;
 pub(crate) use types::LastSentStats;
 pub use types::{SkillBase, VitalBase};
 
-/// The localized state of the current player.
+/// Session-local player model and derived player-facing state.
 ///
-/// NOTE: This data is mirrored in the `WorldState.entities` map.
-/// Authorities should update player state via `WorldState` mutation methods
-/// to maintain the mirror invariant.
+/// `PlayerState` owns player-specific data such as attributes, vitals, spells, inventory, and
+/// protocol sequence tracking. It is intentionally **not** the protocol router anymore; feature
+/// handlers under `crate::handlers` orchestrate message flows and call into focused mutation
+/// methods on `PlayerState` and `WorldState`.
+///
+/// NOTE: physical player location/velocity is mirrored in `WorldState.entities`. Mutations that
+/// affect the mirrored physical state should go through `WorldState` helper methods so the entity
+/// graph and spatial index stay in sync.
 #[derive(Debug, Clone)]
 pub struct PlayerState {
     /// Unique identifier for the player's character.

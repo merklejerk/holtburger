@@ -266,7 +266,7 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - [x] Existing behavior-facing tests pass and new regression coverage exists for dual-touch messages.
 - [x] `cargo check -p holtburger-world` passes.
 - [x] `cargo test -p holtburger-world` passes.
-- [ ] Module docs/comments explain the new ownership split.
+- [x] Module docs/comments explain the new ownership split.
 
 ## 7. Living Worksheet
 
@@ -278,7 +278,7 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - [x] **Phase 4b**: Migrate world-only handlers.
 - [x] **Phase 4c**: Migrate shared player/world orchestration.
 - [x] **Phase 4d**: Remove legacy routers and rewrite tests.
-- [ ] **Phase 5**: Clean up docs, stale adapters, and optional naming follow-up.
+- [x] **Phase 5**: Clean up docs, stale adapters, and optional naming follow-up.
 
 ### Decisions Log
 - **Architectural**: Prefer separating **state models** from **protocol handlers** over flattening everything into `state/`.
@@ -295,6 +295,8 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - **Implementation**: A corrupted intermediate edit left [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs) in a bad state, so the active inventory handler was temporarily moved to [crates/holtburger-world/src/handlers/inventory_handler.rs](crates/holtburger-world/src/handlers/inventory_handler.rs) via a module `#[path]` override in [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs). Phase 4d should delete the stale file and collapse back to the canonical path.
 - **Architectural**: Phase 4d removes the legacy router seam entirely. `WorldState::handle_message()` now delegates straight to [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs), and `PlayerState` no longer exposes a message-router module.
 - **Implementation**: Phase 4d restored [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs) as the canonical inventory handler path and deleted the temporary `inventory_handler.rs` workaround.
+- **Documentation**: Phase 5 updates module/crate docs to describe the final ownership split explicitly: `handlers/` orchestrates protocol flow, `PlayerState` owns player-local state, and `WorldState` owns world/entity invariants.
+- **Sequencing**: Keep the optional `state` → `world` rename deferred. The architectural benefit is real but not worth mixing with this completed handler refactor.
 
 ### Verification Log
 - **Phase 1 Complete**:
@@ -335,7 +337,12 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
   - Restored [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs) as the canonical inventory handler and deleted the temporary workaround module.
   - Rewrote the remaining player-facing routing tests in [crates/holtburger-world/src/player/tests.rs](crates/holtburger-world/src/player/tests.rs) to exercise `WorldState::handle_message()` instead of the deleted `PlayerState` router seam.
   - Verified `cargo check -p holtburger-world --quiet` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
+- **Phase 5 Complete**:
+  - Updated crate/module documentation in [crates/holtburger-world/src/lib.rs](crates/holtburger-world/src/lib.rs), [crates/holtburger-world/src/player/mod.rs](crates/holtburger-world/src/player/mod.rs), and [crates/holtburger-world/src/state/mod.rs](crates/holtburger-world/src/state/mod.rs) to describe the final handler-vs-model ownership split.
+  - Refreshed [crates/holtburger-world/ARCHITECTURE.md](crates/holtburger-world/ARCHITECTURE.md) so it references the real module layout and the handler-based dispatch flow instead of the pre-refactor architecture.
+  - Added `WorldState::sync_player_position()` in [crates/holtburger-world/src/state/physics.rs](crates/holtburger-world/src/state/physics.rs) and switched [crates/holtburger-world/src/handlers/player.rs](crates/holtburger-world/src/handlers/player.rs) to use it during object hydration, removing a stale direct mirror write from the handler layer.
+  - Re-verified that stale references to the removed compatibility files are gone and that `cargo check -p holtburger-world --quiet` plus `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
 
 ### Open Questions
 - No blocking architecture questions remain for the handler split.
-- Phase 5 should decide whether to refresh module docs/comments only, or also pay the extra churn cost for an optional `state` → `world` rename.
+- The optional `state` → `world` rename remains a separate future cleanup, not part of this completed refactor.

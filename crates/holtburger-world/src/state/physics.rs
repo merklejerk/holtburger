@@ -111,6 +111,34 @@ impl WorldState {
         events.push(StateEvent::EntityMoved { guid, pos });
         events
     }
+
+    /// Synchronizes the player's mirrored position without emitting movement events.
+    ///
+    /// This is intended for hydration/bootstrap flows where the client is seeding authoritative
+    /// state rather than reacting to a live movement update packet.
+    pub fn sync_player_position(&mut self, mut pos: WorldPosition) {
+        let guid = self.player.guid;
+        if guid == Guid::NULL {
+            return;
+        }
+
+        if !pos.rotation.w.is_finite()
+            || !pos.rotation.x.is_finite()
+            || !pos.rotation.y.is_finite()
+            || !pos.rotation.z.is_finite()
+        {
+            pos.rotation = self.player.position.rotation;
+        }
+
+        let old_lb = self.player.position.landblock_id;
+        self.player.position = pos;
+
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.position = pos;
+        }
+        self.scene.update_entity(guid, old_lb, pos.landblock_id);
+    }
+
     /// Updates the player's velocity in both PlayerState (if mirrored) and the Entity map.
     pub fn set_player_velocity(&mut self, velocity: Vector3) -> Vec<StateEvent> {
         let mut events = Vec::new();

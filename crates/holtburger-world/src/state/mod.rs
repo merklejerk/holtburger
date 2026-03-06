@@ -1,4 +1,5 @@
 mod messages;
+mod mutations;
 mod physics;
 #[cfg(test)]
 mod tests;
@@ -163,12 +164,6 @@ impl WorldState {
             .unwrap_or(1.0);
 
         super::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
-    }
-
-    fn emit_level_info(&self, events: &mut Vec<StateEvent>) {
-        if let Some(info) = self.get_level_info() {
-            events.push(StateEvent::LevelInfoUpdated(info));
-        }
     }
 
     pub fn new(

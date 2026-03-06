@@ -1,6 +1,8 @@
 use super::*;
 use std::sync::Arc;
 
+use crate::state::liveness::EntityUpsertKind;
+
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectProperties;
 
@@ -454,4 +456,82 @@ fn test_player_wielder_iid_update_keeps_position() {
         state.entities.get(player_guid).unwrap().wielder_id(),
         Some(Guid(0x8000031B))
     );
+}
+
+#[test]
+fn test_explicit_delete_hides_entity_from_filtered_access() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0xABC);
+
+    state.entities.insert(Entity::new(
+        guid,
+        "HiddenSoon".to_string(),
+        WorldPosition::default(),
+    ));
+
+    state.mark_entity_explicit_delete(guid);
+
+    assert!(state.entities.get(guid).is_some());
+    assert!(state.get_visible_entity(guid).is_none());
+    assert_eq!(state.iter_visible_entities().count(), 0);
+}
+
+#[test]
+fn test_retention_snapshot_reflects_lifecycle_metadata() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0xDEF);
+    let mut entity = Entity::new(guid, "Preview".to_string(), WorldPosition::default());
+    entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(entity);
+
+    state.mark_trade_preview(guid);
+    state.mark_container_preview(guid);
+    state.mark_entity_explicit_delete(guid);
+    state.set_entity_prune_deadline(guid, 5.0);
+
+    let snapshot = state.retention_snapshot(guid, 10.0).unwrap();
+    assert!(!snapshot.in_world);
+    assert!(snapshot.trade_preview);
+    assert!(snapshot.container_preview);
+    assert!(snapshot.explicit_delete_requested);
+    assert!(snapshot.prune_deadline_expired);
+}
+
+#[test]
+fn test_remove_entity_clears_lifecycle_metadata() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x1234);
+
+    state.entities.insert(Entity::new(
+        guid,
+        "Disposable".to_string(),
+        WorldPosition::default(),
+    ));
+    state.mark_entity_explicit_delete(guid);
+
+    state.remove_entity(guid);
+
+    assert!(state.entity_lifecycle_state(guid).is_none());
+}
+
+#[test]
+fn test_upsert_entity_from_create_replaces_in_place() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x4321);
+    let mut events = Vec::new();
+
+    let original = Entity::new(guid, "Original".to_string(), WorldPosition::default());
+    state.upsert_entity_from_create(original, &mut events);
+    assert!(matches!(events.first(), Some(StateEvent::EntitySpawned(_))));
+
+    state.mark_entity_explicit_delete(guid);
+    events.clear();
+
+    let replacement = Entity::new(guid, "Replacement".to_string(), WorldPosition::default());
+    let outcome = state.upsert_entity_from_create(replacement, &mut events);
+
+    assert!(matches!(outcome, EntityUpsertKind::Replaced));
+    assert!(matches!(events.first(), Some(StateEvent::EntityReplaced(_))));
+    assert!(state.entity_lifecycle_state(guid).is_none());
+    assert_eq!(state.entities.get(guid).unwrap().name(), "Replacement");
 }

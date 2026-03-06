@@ -369,17 +369,26 @@ That means:
 ## 8. Worksheet
 
 ### Task Checklist
-- [ ] Add liveness/retention metadata to `WorldState`
-- [ ] Add filtered lifecycle-aware accessors to `EntityManager`
+- [x] Add liveness/retention metadata to `WorldState`
+- [x] Add filtered lifecycle-aware accessors to `EntityManager`
 - [ ] Add generic sweep engine to `WorldState::tick()`
 - [ ] Route core object lifecycle handlers and property side-effects through shared prune helpers
 - [ ] Add ACE destruction-queue policy
 - [ ] Make delete-style protocol paths record explicit delete intent instead of deleting inline
-- [ ] Add `EntityReplaced` / equivalent signaling for in-place authoritative rehydration
+- [x] Add `EntityReplaced` / equivalent signaling for in-place authoritative rehydration
 - [ ] Add trade-preview sweep behavior
 - [ ] Add container-preview sweep behavior
 - [ ] Add regression tests for stationary timeout, re-entry, and trade cleanup
 - [ ] Document any indoor-PVS limitation left for follow-up
+
+### Progress Update
+- **2026-03-06 Phase 1 completed**
+  - Added lifecycle metadata scaffolding in `holtburger-world` with explicit delete intent, prune deadline, trade-preview, and container-preview state keyed by GUID.
+  - Added derived `EntityRetentionSnapshot` scaffolding and helper methods for filtered visibility, retention inspection, and future sweep decisions.
+  - Added filtered `EntityManager` accessors while preserving raw/internal accessors.
+  - Added `StateEvent::EntityReplaced` plus client-view plumbing for future in-place `ObjectCreate` refresh handling.
+  - Kept current runtime behavior unchanged for live protocol handling; the new upsert/reconciliation helpers exist but are not wired into `ObjectCreate` yet.
+  - Added phase-1 unit tests covering filtered access, lifecycle metadata cleanup, retention snapshot derivation, and in-place replacement signaling helpers.
 
 ### Decisions Log
 - **Decision**: Pruning should live in `holtburger-world`, not `holtburger-core`.
@@ -398,12 +407,18 @@ That means:
   - **Why**: It communicates a real in-place replacement to downstream consumers without abusing `EntitySpawned` semantics or forcing synthetic despawn/respawn churn.
 - **Decision**: Treat trade-preview entities as ephemeral retention, not durable ownership.
   - **Why**: ACE exposes them with `CreateObject` on `AddToTrade` but does not provide symmetric delete messaging on trade teardown.
+- **Decision**: Use `f64` prune deadlines in the lifecycle metadata store.
+  - **Why**: `WorldState` already exposes `current_server_time()` as `f64`, so phase 1 can reuse that time base without introducing another clock abstraction before the sweep engine exists.
+- **Decision**: Keep `EntityManager::get()` / `get_mut()` raw and add separate filtered access helpers.
+  - **Why**: Lifecycle internals still need unfettered access, while ordinary world/client consumers need a single lifecycle-aware chokepoint without making raw access magical.
 
 ### Verification Log
 - Investigated ACE visibility flow in `ObjectMaint` and `PhysicsObj.handle_visible_cells()`.
 - Investigated ACE trade flow in `Player_Trade.cs` and item networking in `Player_Inventory.cs`.
 - Verified that `holtburger-core` already drives `WorldState::tick()` on a fixed interval.
 - Verified that current `holtburger-world` pruning is packet-driven only.
+- Implemented phase-1 lifecycle scaffolding in `holtburger-world` without changing current live protocol behavior.
+- Ran `cargo test -p holtburger-world` after the phase-1 changes; all 31 tests passed.
 
 ### Open Questions
 - Do we want the first implementation to include indoor `VisibleCells` parity, or should we explicitly scope v1 to outdoor + trade-preview correctness?

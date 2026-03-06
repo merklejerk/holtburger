@@ -275,7 +275,7 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - [x] **Phase 2**: Extract player-local mutation methods from `PlayerState::handle_message()`.
 - [x] **Phase 3**: Extract world mutation helpers from `state/messages/*` into narrower `WorldState` methods.
 - [x] **Phase 4a**: Migrate simple feature handlers (`login`, `trade`, misc/system).
-- [ ] **Phase 4b**: Migrate world-only handlers.
+- [x] **Phase 4b**: Migrate world-only handlers.
 - [ ] **Phase 4c**: Migrate shared player/world orchestration.
 - [ ] **Phase 4d**: Remove legacy routers and rewrite tests.
 - [ ] **Phase 5**: Clean up docs, stale adapters, and optional naming follow-up.
@@ -289,6 +289,8 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - **Architectural**: Introduce a generic property-target mutation helper on `WorldState` now, but keep message-specific side effects (`CombatModeUpdated`, level info emission, derived stat recalculation) in the existing property handler until Phase 4 moves routing into `handlers/`.
 - **Sequencing**: Move simple-feature routing into `handlers/` before deleting the old `state/messages/login.rs` and `state/messages/trade.rs` files. Their file-level cleanup can wait for the legacy-router removal phase once the rest of the dispatch migration is done.
 - **Architectural**: Add trade/vendor mutation helpers on `WorldState` so the new handler modules orchestrate state transitions instead of re-embedding trade-state mutation logic.
+- **Sequencing**: For Phase 4b, move only clearly world-only inventory flows (`ParentEvent`, `PickupEvent`, `ViewContents`, `CloseGroundContainer`, non-player `WieldObject`, `IdentifyObjectResponse`) into `handlers/inventory.rs`; keep player-owned inventory transitions on the legacy path until Phase 4c.
+- **Architectural**: Route non-player movement and non-player/vendor property fan-out through `handlers/` first, but allow the legacy `state/messages/*` files to remain as compatibility fallback until the final router deletion phase.
 
 ### Verification Log
 - **Phase 1 Complete**:
@@ -310,6 +312,11 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
   - Moved top-level routing for login, trade, vendor, `UseDone`, `WeenieError*`, and `SetState` into [crates/holtburger-world/src/handlers/login.rs](crates/holtburger-world/src/handlers/login.rs), [crates/holtburger-world/src/handlers/trade.rs](crates/holtburger-world/src/handlers/trade.rs), and [crates/holtburger-world/src/handlers/system.rs](crates/holtburger-world/src/handlers/system.rs).
   - Updated [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs) to own player-first dispatch plus the new simple-feature handler ordering before falling back to the legacy world handlers.
   - Added `WorldState` trade/vendor mutation helpers in [crates/holtburger-world/src/state/mutations.rs](crates/holtburger-world/src/state/mutations.rs) and removed the migrated routes from the legacy fallback in [crates/holtburger-world/src/state/messages/mod.rs](crates/holtburger-world/src/state/messages/mod.rs), [crates/holtburger-world/src/state/messages/inventory.rs](crates/holtburger-world/src/state/messages/inventory.rs), and [crates/holtburger-world/src/state/messages/properties.rs](crates/holtburger-world/src/state/messages/properties.rs).
+  - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
+- **Phase 4b Complete**:
+  - Implemented world-only routing in [crates/holtburger-world/src/handlers/movement.rs](crates/holtburger-world/src/handlers/movement.rs), [crates/holtburger-world/src/handlers/properties.rs](crates/holtburger-world/src/handlers/properties.rs), and [crates/holtburger-world/src/handlers/inventory.rs](crates/holtburger-world/src/handlers/inventory.rs).
+  - Updated [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs) so non-player movement, non-player/vendor property updates, and world-only inventory events are handled in the new feature layer before falling back to legacy shared flows.
+  - Added `WorldState::set_entity_rotation()` in [crates/holtburger-world/src/state/mutations.rs](crates/holtburger-world/src/state/mutations.rs) to keep non-player turn handling behind a narrow world mutation method.
   - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
 - Pending implementation.
 

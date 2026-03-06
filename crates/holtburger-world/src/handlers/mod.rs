@@ -40,9 +40,17 @@ pub fn handle_message(
         return;
     }
 
+    if movement::handle_message(state, message, events)
+        || properties::handle_message(state, message, events)
+        || inventory::handle_message(state, message, events)
+    {
+        return;
+    }
+
     if let GameMessage::GameEvent(event) = message {
         if login::handle_event(state, event, events)
             || trade::handle_event(state, event, events)
+            || inventory::handle_event(state, event, events)
             || system::handle_event(state, event, events)
         {
             return;

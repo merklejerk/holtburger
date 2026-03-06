@@ -1,5 +1,6 @@
 use super::*;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::math::Quaternion;
 
 impl WorldState {
     pub(crate) fn emit_level_info(&self, events: &mut Vec<StateEvent>) {
@@ -98,6 +99,24 @@ impl WorldState {
                 guid,
                 velocity,
                 omega,
+            });
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn set_entity_rotation(
+        &mut self,
+        guid: Guid,
+        rotation: Quaternion,
+        events: &mut Vec<StateEvent>,
+    ) -> bool {
+        if let Some(entity) = self.entities.get_mut(guid) {
+            entity.position.rotation = rotation;
+            events.push(StateEvent::EntityMoved {
+                guid,
+                pos: entity.position,
             });
             true
         } else {

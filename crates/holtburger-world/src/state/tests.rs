@@ -1127,7 +1127,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
 }
 
 #[test]
-fn test_view_contents_marks_placeholder_entity_as_container_preview() {
+fn test_view_contents_ignores_unknown_guid_without_synthesizing_entity() {
     let mut state = WorldState::new(None, None);
     let container_guid = Guid(0x70000150);
     let item_guid = Guid(0x60000150);
@@ -1147,7 +1147,47 @@ fn test_view_contents_marks_placeholder_entity_as_container_preview() {
     let events = state.handle_message(&msg);
 
     assert!(state.open_containers.contains(&container_guid));
-    assert_eq!(state.entities.get(item_guid).and_then(|entity| entity.container_id()), Some(container_guid));
+    assert!(state.entities.get(item_guid).is_none());
+    assert!(state.entity_lifecycle_state(item_guid).is_none());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::ContainerOpened(guid) if *guid == container_guid)));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntitySpawned(entity) if entity.guid == item_guid)));
+}
+
+#[test]
+fn test_view_contents_marks_existing_entity_as_container_preview() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x70000157);
+    let item_guid = Guid(0x60000157);
+
+    state.entities.insert(Entity::new(
+        item_guid,
+        "Known Item".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
+            container: container_guid,
+            items: vec![ViewContentsEventItem {
+                guid: item_guid,
+                container_type: 0,
+            }],
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(state.open_containers.contains(&container_guid));
+    assert_eq!(
+        state.entities.get(item_guid).and_then(|entity| entity.container_id()),
+        Some(container_guid)
+    );
     assert!(state
         .entity_lifecycle_state(item_guid)
         .is_some_and(|state| state.container_preview));

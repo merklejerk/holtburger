@@ -75,6 +75,13 @@ impl GameState {
                     .insert(entity_ref.guid, entity_ref.clone());
                 self.update_inventory_and_equipment(entity_ref);
             }
+            ClientViewEvent::EntityReplaced { entity } => {
+                let entity_ref = entity.as_ref();
+                self.data
+                    .entities
+                    .insert(entity_ref.guid, entity_ref.clone());
+                self.update_inventory_and_equipment(entity_ref);
+            }
             ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
                 let mut needs_update = false;
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
@@ -705,6 +712,39 @@ impl Default for ViewState {
             last_trade_initiation: None,
             layout_cache: LayoutCache::default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_common::position::WorldPosition;
+
+    #[test]
+    fn test_entity_replaced_updates_cached_entity_state() {
+        let player_guid = Guid(0x50000001);
+        let entity_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.data.entities.insert(
+            entity_guid,
+            Entity::new(entity_guid, "Old Name".to_string(), WorldPosition::default()),
+        );
+
+        let replacement = Entity::new(
+            entity_guid,
+            "New Name".to_string(),
+            WorldPosition::default(),
+        );
+
+        let _ = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(replacement),
+        });
+
+        assert_eq!(
+            state.data.entities.get(&entity_guid).map(|entity| entity.name()),
+            Some("New Name")
+        );
     }
 }
 

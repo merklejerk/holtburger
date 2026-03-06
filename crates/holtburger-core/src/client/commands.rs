@@ -570,7 +570,7 @@ impl Client {
             }
             ClientCommand::QueryEntityDebugInfo(guid) => {
                 log::info!(">>> Client requested Debug Snapshot for {}", guid);
-                if let Some(entity) = self.world.entities.get(guid) {
+                if let Some(entity) = self.world.get_visible_entity(guid) {
                     let snapshot_event =
                         crate::client::types::ClientViewEvent::EntityDebugInfoSnapshot {
                             entity: Box::new(entity.clone()),

@@ -633,6 +633,9 @@ fn test_upsert_entity_from_create_replaces_in_place() {
 
     assert!(matches!(outcome, EntityUpsertKind::Replaced));
     assert!(matches!(events.first(), Some(StateEvent::EntityReplaced(_))));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntitySpawned(entity) if entity.guid == guid)));
     assert!(state.entity_lifecycle_state(guid).is_none());
     assert_eq!(state.entities.get(guid).unwrap().name(), "Replacement");
 }
@@ -1010,6 +1013,58 @@ fn test_clear_trade_acceptance_does_not_sweep_preview_entities() {
 }
 
 #[test]
+fn test_close_trade_sweeps_preview_only_entities() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000152);
+    let preview_guid = Guid(0x60000152);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+
+    state.player.guid = player_guid;
+    state.register_trade(player_guid, Guid(0x5000BEEF), &mut Vec::new());
+
+    let mut preview_entity = Entity::new(preview_guid, "Preview".to_string(), WorldPosition::default());
+    preview_entity.position.landblock_id = Guid::NULL;
+    state.entities.insert(preview_entity);
+    state.mark_trade_preview(preview_guid);
+
+    if let Some(trade) = state.trade.as_mut() {
+        trade.partner_side.items.push(preview_guid);
+    }
+
+    let mut events = Vec::new();
+    state.close_trade(&mut events);
+
+    let deadline = state
+        .entity_lifecycle_state(preview_guid)
+        .and_then(|state| state.prune_deadline)
+        .expect("expected preview-only trade entity to become sweep-eligible");
+
+    assert!(state.trade.is_none());
+    assert!(state.entities.get(preview_guid).is_some());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::TradeStateUpdated(None))));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: deadline + 1.0,
+        local_time: Instant::now(),
+    });
+
+    let tick_events = state.tick(0.016, 0.35);
+    assert!(state.entities.get(preview_guid).is_none());
+    assert!(tick_events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)));
+}
+
+#[test]
 fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_entity() {
     let mut state = WorldState::new(None, None);
     let player_guid = Guid(0x50000143);
@@ -1157,9 +1212,9 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
 #[test]
 fn test_close_ground_container_preserves_entity_with_other_retention() {
     let mut state = WorldState::new(None, None);
-    let player_guid = Guid(0x50000152);
-    let container_guid = Guid(0x70000152);
-    let item_guid = Guid(0x60000152);
+    let player_guid = Guid(0x50000153);
+    let container_guid = Guid(0x70000153);
+    let item_guid = Guid(0x60000153);
 
     state.player.guid = player_guid;
     state.open_containers.insert(container_guid);
@@ -1187,4 +1242,62 @@ fn test_close_ground_container_preserves_entity_with_other_retention() {
     assert!(!events
         .iter()
         .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid)));
+}
+
+#[test]
+fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_container_retention() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000154);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x0A0AFFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let inventory_guid = Guid(0x60000154);
+    let equipped_guid = Guid(0x60000155);
+    let container_guid = Guid(0x70000154);
+    let preview_guid = Guid(0x60000156);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), player_pos));
+
+    let mut inventory_entity = Entity::new(inventory_guid, "InventoryItem".to_string(), WorldPosition::default());
+    inventory_entity.position.landblock_id = Guid::NULL;
+    inventory_entity.set_container_id(Some(player_guid));
+    state.add_entity(inventory_entity);
+    state.player.add_to_inventory(inventory_guid);
+
+    let mut equipped_entity = Entity::new(equipped_guid, "EquippedItem".to_string(), WorldPosition::default());
+    equipped_entity.position.landblock_id = Guid::NULL;
+    equipped_entity.set_wielder_id(Some(player_guid));
+    state.add_entity(equipped_entity);
+    state.player.wield_item(equipped_guid, EquipMask::MELEE_WEAPON);
+
+    let mut preview_entity = Entity::new(preview_guid, "PreviewItem".to_string(), WorldPosition::default());
+    preview_entity.position.landblock_id = Guid::NULL;
+    preview_entity.set_container_id(Some(container_guid));
+    state.add_entity(preview_entity);
+    state.open_containers.insert(container_guid);
+    state.mark_container_preview(preview_guid);
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(events.is_empty());
+    assert!(state.entities.get(inventory_guid).is_some());
+    assert!(state.entities.get(equipped_guid).is_some());
+    assert!(state.entities.get(preview_guid).is_some());
+    assert!(state
+        .entity_lifecycle_state(inventory_guid)
+        .is_none_or(|state| state.prune_deadline.is_none()));
+    assert!(state
+        .entity_lifecycle_state(equipped_guid)
+        .is_none_or(|state| state.prune_deadline.is_none()));
+    assert!(state
+        .entity_lifecycle_state(preview_guid)
+        .is_some_and(|state| state.prune_deadline.is_none() && state.container_preview));
 }

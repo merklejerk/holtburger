@@ -32,6 +32,10 @@ pub struct ServerTimeSync {
 
 /// The authoritative state of the game world.
 ///
+/// `WorldState` owns entity/spatial/trade/vendor state plus the invariants that tie those systems
+/// together. Protocol routing itself lives in `crate::handlers`; `WorldState::handle_message()` is
+/// just the stable facade used by callers such as `holtburger-core`.
+///
 /// NOTE: The player's state is partially mirrored between `self.player` (session sequence data)
 /// and the `Entity` map (physical landblock/coords/velocity).
 ///
@@ -55,6 +59,10 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    /// Stable public entry point for applying a decoded game message to world state.
+    ///
+    /// Feature handlers own the orchestration order; this method preserves the external API while
+    /// keeping routing separate from the state model itself.
     pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<StateEvent> {
         let mut events = Vec::new();
         crate::handlers::handle_message(self, msg, &mut events);

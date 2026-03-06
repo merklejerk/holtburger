@@ -157,7 +157,7 @@ pub(crate) fn handle_message(
 			state.player.remove_from_inventory(data.object_guid);
 			false
 		}
-		GameMessage::GameEvent(event) => handle_event(state, event, events),
+		GameMessage::GameEvent(_) => false,
 		_ => false,
 	}
 }

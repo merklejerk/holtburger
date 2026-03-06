@@ -1,5 +1,6 @@
 use super::*;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::state::liveness::EntityUpsertKind;
 
@@ -731,4 +732,171 @@ fn test_tick_runs_sweep_without_player_guid() {
     assert!(events
         .iter()
         .any(|event| matches!(event, StateEvent::EntityDespawned(target) if *target == guid)));
+}
+
+#[test]
+fn test_stationary_tick_starts_visibility_prune_deadline() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000130);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x0A0AFFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let far_pos = WorldPosition {
+        landblock_id: Guid(0x2020FFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), player_pos));
+
+    let target_guid = Guid(0x60000130);
+    state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
+
+    let events = state.tick(0.016, 0.35);
+    let deadline = state
+        .entity_lifecycle_state(target_guid)
+        .and_then(|lifecycle| lifecycle.prune_deadline)
+        .expect("expected a destruction deadline to be assigned");
+
+    assert!(events.is_empty());
+    assert!(deadline >= 125.0);
+    assert!(state.entities.get(target_guid).is_some());
+}
+
+#[test]
+fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000131);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x0A0AFFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let far_pos = WorldPosition {
+        landblock_id: Guid(0x2020FFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), player_pos));
+
+    let target_guid = Guid(0x60000131);
+    state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
+
+    let _ = state.tick(0.016, 0.35);
+    let deadline = state
+        .entity_lifecycle_state(target_guid)
+        .and_then(|lifecycle| lifecycle.prune_deadline)
+        .expect("expected a destruction deadline to be assigned");
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: deadline + 1.0,
+        local_time: Instant::now(),
+    });
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(target_guid).is_none());
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)));
+}
+
+#[test]
+fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000132);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x0A0AFFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let far_pos = WorldPosition {
+        landblock_id: Guid(0x2020FFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), player_pos));
+
+    let target_guid = Guid(0x60000132);
+    state.add_entity(Entity::new(target_guid, "Traveler".to_string(), far_pos));
+
+    let _ = state.tick(0.016, 0.35);
+    assert!(state
+        .entity_lifecycle_state(target_guid)
+        .and_then(|lifecycle| lifecycle.prune_deadline)
+        .is_some());
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 110.0,
+        local_time: Instant::now(),
+    });
+
+    let mut events = Vec::new();
+    let _ = state.move_entity_to_position(target_guid, player_pos, &mut events);
+    let tick_events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(target_guid).is_some());
+    assert!(state.entity_lifecycle_state(target_guid).is_none());
+    assert!(!tick_events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)));
+}
+
+#[test]
+fn test_nearby_entities_omit_explicit_delete_and_null_landblock() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000133);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x0A0AFFFF),
+        coords: Vector3::new(0.0, 0.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), player_pos));
+
+    let visible_guid = Guid(0x60000133);
+    state.add_entity(Entity::new(visible_guid, "Visible".to_string(), player_pos));
+
+    let deleted_guid = Guid(0x60000134);
+    state.add_entity(Entity::new(deleted_guid, "Deleted".to_string(), player_pos));
+    state.mark_entity_explicit_delete(deleted_guid);
+
+    let null_guid = Guid(0x60000135);
+    let mut null_entity = Entity::new(null_guid, "NullLandblock".to_string(), player_pos);
+    null_entity.position.landblock_id = Guid::NULL;
+    state.add_entity(null_entity);
+
+    let nearby: std::collections::HashSet<_> = state
+        .get_nearby_entities()
+        .into_iter()
+        .map(|entity| entity.guid)
+        .collect();
+
+    assert!(nearby.contains(&visible_guid));
+    assert!(!nearby.contains(&deleted_guid));
+    assert!(!nearby.contains(&null_guid));
 }

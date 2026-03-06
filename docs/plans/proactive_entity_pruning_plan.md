@@ -373,7 +373,7 @@ That means:
 - [x] Add filtered lifecycle-aware accessors to `EntityManager`
 - [x] Add generic sweep engine to `WorldState::tick()`
 - [x] Route core object lifecycle handlers and property side-effects through shared prune helpers
-- [ ] Add ACE destruction-queue policy
+- [x] Add ACE destruction-queue policy
 - [x] Make delete-style protocol paths record explicit delete intent instead of deleting inline
 - [x] Add `EntityReplaced` / equivalent signaling for in-place authoritative rehydration
 - [ ] Add trade-preview sweep behavior
@@ -400,6 +400,12 @@ That means:
   - Centralized player-ownership sync for container and wielder transitions so protocol handlers and generic instance-id property updates now share the same authoritative inventory/equipment bookkeeping.
   - Reworked `PickupEvent` and `ParentEvent` to mutate authoritative state first, then reconcile lifecycle state instead of performing ad hoc direct removals.
   - Added phase-3 regression tests for authoritative object rehydration, delete-intent marking, property-driven ownership retention, and pickup-to-sweep handoff.
+- **2026-03-06 Phase 4 completed**
+  - Added ACE-style visibility deadline maintenance in `WorldState::tick()` so out-of-range world entities enter a 25-second local destruction queue before sweep eviction.
+  - Scoped indoor pruning conservatively for now: outdoor visibility uses landblock neighborhoods, while indoor visibility falls back to same-cell retention until visible-cell support exists.
+  - Updated deadline-based eviction semantics so expired visibility timeouts can evict world entities even though their last authoritative `landblock_id` is still populated.
+  - Routed world/spatial query surfaces through lifecycle-aware world-participant filtering so explicit-delete entities and `landblock_id == Guid::NULL` entities no longer appear in nearby-world reads before physical eviction.
+  - Added phase-4 regression tests covering stationary deadline assignment, 25-second timeout sweep, re-entry cancellation, and nearby-world filtering.
 
 ### Decisions Log
 - **Decision**: Pruning should live in `holtburger-world`, not `holtburger-core`.
@@ -430,6 +436,10 @@ That means:
   - **Why**: `ObjectCreate`, container events, wield events, and generic `Container` / `Wielder` property updates all describe the same authoritative ownership graph; centralizing that bookkeeping avoids drift between packet-specific paths.
 - **Decision**: Phase 3 should treat `PickupEvent` as a lifecycle handoff to explicit-delete sweep once authoritative retention disappears.
   - **Why**: That preserves current removal behavior without reintroducing inline despawns, and keeps actual local removal inside the shared sweep engine.
+- **Decision**: Phase 4 should treat outdoor visibility with landblock-neighborhood pruning but keep indoor pruning at same-cell only for now.
+  - **Why**: ACE uses `VisibleCells` indoors, and guessing beyond current client knowledge would produce sus false positives; same-cell indoor retention is the narrowest safe approximation until visible-cell support exists.
+- **Decision**: Deadline-based visibility eviction should ignore `in_world` as a permanent retention reason once the destruction timeout expires.
+  - **Why**: The destruction queue exists specifically to evict stale world entities whose last authoritative world position is still known, so the timeout has to override raw world presence when no stronger retention reason remains.
 
 ### Verification Log
 - Investigated ACE visibility flow in `ObjectMaint` and `PhysicsObj.handle_visible_cells()`.
@@ -442,6 +452,8 @@ That means:
 - Ran `cargo test -p holtburger-world` after the phase-2 changes; all 35 tests passed.
 - Implemented the phase-3 protocol lifecycle wiring so `ObjectCreate`, delete-style messages, pickup handling, and generic `Container` / `Wielder` updates all flow through the shared lifecycle helpers.
 - Ran `cargo test -p holtburger-world` after the phase-3 changes; all 39 tests passed.
+- Implemented the phase-4 ACE-style destruction queue maintenance and world-query filtering for stale world entities.
+- Ran `cargo test -p holtburger-world` after the phase-4 changes; all 43 tests passed.
 
 ### Open Questions
 - Do we want the first implementation to include indoor `VisibleCells` parity, or should we explicitly scope v1 to outdoor + trade-preview correctness?

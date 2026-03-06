@@ -131,13 +131,19 @@ pub(crate) fn handle_event(
                         });
                     }
                 }
+
+                state.mark_container_preview(guid);
+                state.sync_player_ownership_for_entity(guid);
+                let _ = state.reconcile_entity_retention(guid);
             }
 
             true
         }
         GameEvent::CloseGroundContainer(data) => {
+            let item_guids = state.current_container_preview_item_guids(data.container_guid);
             state.open_containers.remove(&data.container_guid);
             events.push(StateEvent::ContainerClosed(data.container_guid));
+            state.mark_container_preview_entities_for_prune(data.container_guid, &item_guids, events);
             true
         }
         GameEvent::IdentifyObjectResponse(data) => {

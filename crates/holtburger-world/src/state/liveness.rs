@@ -80,6 +80,10 @@ pub(crate) struct EntityRetentionSnapshot {
 }
 
 impl EntityRetentionSnapshot {
+    pub fn has_preview_retention(self) -> bool {
+        self.trade_preview || (self.container_preview && self.inside_open_container)
+    }
+
     pub fn has_nonworld_retention(self) -> bool {
         self.held_by_player
             || self.equipped_by_player
@@ -87,8 +91,7 @@ impl EntityRetentionSnapshot {
             || self.has_container_owner
             || self.has_wielder_owner
             || self.has_parent_owner
-            || self.trade_preview
-            || self.container_preview
+            || self.has_preview_retention()
     }
 
     pub fn has_authoritative_retention(self) -> bool {
@@ -99,10 +102,6 @@ impl EntityRetentionSnapshot {
             || self.has_container_owner
             || self.has_wielder_owner
             || self.has_parent_owner
-    }
-
-    pub fn has_preview_retention(self) -> bool {
-        self.trade_preview || self.container_preview
     }
 
     pub fn is_retained(self) -> bool {
@@ -172,17 +171,18 @@ impl WorldState {
         let container_id = entity.container_id();
         let open_container = container_id.is_some_and(|container| self.open_containers.contains(&container));
         let lifecycle = self.entity_lifecycle.get(guid);
+        let container_preview = lifecycle.is_some_and(|state| state.container_preview);
 
         Some(EntityRetentionSnapshot {
             in_world: entity.position.landblock_id != Guid::NULL,
             held_by_player: self.player.inventory.contains(&guid),
             equipped_by_player: self.player.equipment.contains_key(&guid),
             inside_open_container: open_container,
-            has_container_owner: container_id.is_some(),
+            has_container_owner: container_id.is_some() && (!container_preview || open_container),
             has_wielder_owner: entity.wielder_id().is_some(),
             has_parent_owner: entity.physics_parent_id.is_some(),
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
-            container_preview: lifecycle.is_some_and(|state| state.container_preview),
+            container_preview,
             explicit_delete_requested: lifecycle.is_some_and(|state| state.explicit_delete_requested),
             prune_deadline_expired: lifecycle
                 .and_then(|state| state.prune_deadline)
@@ -277,13 +277,23 @@ impl WorldState {
     ) -> EntityUpsertKind {
         let guid = entity.guid;
         let new_lb = entity.position.landblock_id;
+        let preserve_container_preview = entity
+            .container_id()
+            .is_some_and(|container| self.open_containers.contains(&container))
+            || self
+                .entities
+                .get(guid)
+                .and_then(|existing| existing.container_id())
+                .is_some_and(|container| self.open_containers.contains(&container));
 
         self.clear_entity_explicit_delete(guid);
         self.clear_entity_prune_deadline(guid);
         if !self.trade_contains_item(guid) {
             self.clear_trade_preview(guid);
         }
-        self.clear_container_preview(guid);
+        if !preserve_container_preview {
+            self.clear_container_preview(guid);
+        }
 
         if let Some(old_lb) = self.entities.get(guid).map(|existing| existing.position.landblock_id) {
             self.entities.insert(entity.clone());

@@ -8,45 +8,19 @@ use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use std::time::Duration;
 
-/// Finds a character Guid based on a preference string (either 1-based index or case-insensitive name).
-pub(super) fn find_preferred_character(
-    characters: &[CharacterEntry],
-    preference: &Option<String>,
-) -> Option<Guid> {
-    let pref = preference.as_ref()?;
-
-    // Try numeric index: if sorting by name is desired, we sort a copy
-    if let Ok(idx) = pref.parse::<usize>()
-        && idx > 0
-        && idx <= characters.len()
-    {
-        let mut sorted_chars = characters.to_vec();
-        sorted_chars.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        return Some(sorted_chars[idx - 1].guid);
-    }
-
-    // Try name match
-    characters
-        .iter()
-        .find(|c| c.name.to_lowercase() == pref.to_lowercase())
-        .map(|c| c.guid)
-}
-
 pub(super) struct AuthState {
     pub(super) account_name: String,
     pub(super) characters: Vec<CharacterEntry>,
     pub(super) character_id: Option<Guid>,
-    pub(super) character_preference: Option<String>,
     pub(super) connection_cookie: u64,
 }
 
 impl AuthState {
-    pub(super) fn new(account_name: String, character_preference: Option<String>) -> Self {
+    pub(super) fn new(account_name: String) -> Self {
         Self {
             account_name,
             characters: Vec::new(),
             character_id: None,
-            character_preference,
             connection_cookie: 0,
         }
     }
@@ -177,54 +151,5 @@ impl AuthState {
         session.client_id = client_id;
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_find_preferred_character() {
-        let chars = vec![
-            CharacterEntry {
-                guid: Guid(1),
-                name: "Alice".to_string(),
-                delete_time: 0,
-            },
-            CharacterEntry {
-                guid: Guid(2),
-                name: "Bob".to_string(),
-                delete_time: 0,
-            },
-        ];
-
-        // By index
-        assert_eq!(
-            find_preferred_character(&chars, &Some("1".to_string())),
-            Some(Guid(1))
-        );
-        assert_eq!(
-            find_preferred_character(&chars, &Some("2".to_string())),
-            Some(Guid(2))
-        );
-        assert_eq!(
-            find_preferred_character(&chars, &Some("3".to_string())),
-            None
-        );
-
-        // By name
-        assert_eq!(
-            find_preferred_character(&chars, &Some("alice".to_string())),
-            Some(Guid(1))
-        );
-        assert_eq!(
-            find_preferred_character(&chars, &Some("BOB".to_string())),
-            Some(Guid(2))
-        );
-        assert_eq!(
-            find_preferred_character(&chars, &Some("Charlie".to_string())),
-            None
-        );
     }
 }

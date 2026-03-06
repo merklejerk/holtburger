@@ -60,21 +60,9 @@ async fn main() -> Result<()> {
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
     let mut client = if let Some(replay_path) = &args.replay {
-        Client::new_replay(
-            replay_path,
-            &args.account,
-            args.character.clone(),
-            dats_path,
-        )?
+        Client::new_replay(replay_path, &args.account, dats_path)?
     } else {
-        Client::new(
-            &args.server,
-            args.port,
-            &args.account,
-            args.character.clone(),
-            dats_path,
-        )
-        .await?
+        Client::new(&args.server, args.port, &args.account, dats_path).await?
     };
 
     client.message_dump_dir = Some(out_dir);

@@ -362,6 +362,10 @@ impl Page {
 
 #[derive(Debug, Clone)]
 pub enum AppAction {
+    TransitionToGame {
+        guid: Guid,
+        name: String,
+    },
     Assess {
         guid: Guid,
     },

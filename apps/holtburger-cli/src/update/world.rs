@@ -1,4 +1,4 @@
-use crate::pages::{game::GameState, selection::SelectionState};
+use crate::pages::selection::SelectionState;
 use crate::state::AppState;
 use crate::types::{ChatMessageKind, Page, UpdateResult};
 use holtburger_core::{ClientState, ClientViewEvent, ErrorReason};
@@ -19,6 +19,7 @@ impl AppState {
                 self.page = Page::Selection(SelectionState {
                     characters: chars,
                     selected_character_index: 0,
+                    character_preference: self.character_preference.take(),
                 });
                 self.logon_retry.reset();
             }
@@ -45,18 +46,6 @@ impl AppState {
                 if self.client_state == ClientState::InWorld {
                     self.logon_retry.reset();
                     self.enter_retry.reset();
-                } else if self.client_state == ClientState::EnteringWorld
-                    && let crate::types::Page::Selection(sel) = &self.page
-                    && !sel.characters.is_empty()
-                    && sel.selected_character_index < sel.characters.len()
-                {
-                    let char_info = &sel.characters[sel.selected_character_index];
-                    let game = GameState::new(
-                        char_info.guid,
-                        char_info.name.clone(),
-                        self.world_name.clone(),
-                    );
-                    self.page = crate::types::Page::Game(Box::new(game));
                 }
             }
             ClientViewEvent::ErrorRaised {
@@ -175,7 +164,8 @@ impl AppState {
                 result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));
             }
             ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. } => {
-                result.merge(self.handle_client_status_event(event));
+                result.merge(self.handle_client_status_event(event.clone()));
+                result.merge(self.page.handle_view_event(event));
             }
             _ => {
                 // All other entity, player, trade, and combat events delegate completely!

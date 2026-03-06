@@ -11,7 +11,6 @@ impl Client {
         server_host: &str,
         server_port: u16,
         account_name: &str,
-        character_preference: Option<String>,
         dats_path: std::path::PathBuf,
     ) -> Result<Self> {
         let target = tokio::net::lookup_host(format!("{}:{}", server_host, server_port))
@@ -65,20 +64,12 @@ impl Client {
         let session = session_res?;
         let (portal_dat, cell_dat) = dat_res?;
 
-        Self::create_with_session_and_dats(
-            session,
-            account_name,
-            character_preference,
-            dats_path,
-            portal_dat,
-            cell_dat,
-        )
+        Self::create_with_session_and_dats(session, account_name, dats_path, portal_dat, cell_dat)
     }
 
     pub fn new_replay(
         replay_path: &str,
         account_name: &str,
-        character_preference: Option<String>,
         dats_path: std::path::PathBuf,
     ) -> Result<Self> {
         // Replay doesn't strictly need a target addr, but we can use a dummy one
@@ -112,20 +103,12 @@ impl Client {
             }
         }
 
-        Self::create_with_session_and_dats(
-            session,
-            account_name,
-            character_preference,
-            dats_path,
-            portal_dat,
-            cell_dat,
-        )
+        Self::create_with_session_and_dats(session, account_name, dats_path, portal_dat, cell_dat)
     }
 
     fn create_with_session_and_dats(
         session: Session,
         account_name: &str,
-        character_preference: Option<String>,
         dats_path: std::path::PathBuf,
         portal_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>>,
         cell_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>>,
@@ -152,7 +135,7 @@ impl Client {
             message_dump_dir: None,
             message_counter: 0,
             movement: MovementSystem::new(),
-            auth: AuthState::new(account_name.to_string(), character_preference),
+            auth: AuthState::new(account_name.to_string()),
         })
     }
 }

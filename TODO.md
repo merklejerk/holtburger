@@ -69,6 +69,7 @@
 - [x] Use enum structs instead of tuples for `AppAction`.
 - [x] Label locked chests and doors in nearby tab.
 - [x] Exit combat mode when trying to trade.
+- [x] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -86,7 +87,6 @@
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
-- [ ] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -172,6 +172,7 @@
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] No trade/vendor verbs when in an interaction.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

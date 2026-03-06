@@ -69,6 +69,7 @@
 - [x] Use enum structs instead of tuples for `AppAction`.
 - [x] Label locked chests and doors in nearby tab.
 - [x] Exit combat mode when trying to trade.
+- [x] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -86,7 +87,6 @@
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
-- [ ] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 
 ### High
 - [x] Fail when spell/attack distance is too far.

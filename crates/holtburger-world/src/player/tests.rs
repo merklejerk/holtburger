@@ -327,8 +327,8 @@ fn test_health_rounding() {
 
 #[test]
 fn test_vector_update_routing() {
-    use crate::entity::Entity;
     use crate::StateEvent;
+    use crate::entity::Entity;
     use crate::state::WorldState;
     use holtburger_common::Vector3;
     use holtburger_protocol::messages::GameMessage;
@@ -559,7 +559,8 @@ fn test_heal_command_updates() {
 
     // 3. Verify final state
     assert_eq!(
-        state.player
+        state
+            .player
             .vitals
             .get(&stats::VitalType::Health)
             .unwrap()
@@ -567,7 +568,8 @@ fn test_heal_command_updates() {
         100
     );
     assert_eq!(
-        state.player
+        state
+            .player
             .vitals
             .get(&stats::VitalType::Stamina)
             .unwrap()
@@ -575,7 +577,12 @@ fn test_heal_command_updates() {
         100
     );
     assert_eq!(
-        state.player.vitals.get(&stats::VitalType::Mana).unwrap().current,
+        state
+            .player
+            .vitals
+            .get(&stats::VitalType::Mana)
+            .unwrap()
+            .current,
         100
     );
 }

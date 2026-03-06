@@ -1,6 +1,6 @@
+use crate::StateEvent;
 use crate::entity::Entity;
 use crate::state::WorldState;
-use crate::StateEvent;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     PropertyInstanceId, PropertyUpdate, WorldObjectPropertyAccessorsMut,

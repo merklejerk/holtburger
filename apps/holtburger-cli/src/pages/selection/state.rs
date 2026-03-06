@@ -45,7 +45,10 @@ impl SelectionState {
                     } else {
                         return UpdateResult::new().with_action(AppAction::Log {
                             kind: ChatMessageKind::Warning,
-                            message: format!("Character preference '{}' not found in available characters.", pref),
+                            message: format!(
+                                "Character preference '{}' not found in available characters.",
+                                pref
+                            ),
                         });
                     }
                 }

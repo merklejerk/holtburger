@@ -192,21 +192,11 @@ impl WorldState {
                 let _ = self.wield_entity_for(data.object_guid, ev.target, data.equip_mask, events);
             }
             GameEvent::UseDone(data) => {
-                events.push(StateEvent::UseDone { error: data.error });
+                let _ = data;
+                return false;
             }
-            GameEvent::WeenieError(data) => {
-                events.push(StateEvent::WeenieError { error: data.error });
-
-                if data.error == WeenieError::TradeComplete {
-                    self.handle_trade_complete(events);
-                }
-            }
-            GameEvent::WeenieErrorWithString(data) => {
-                events.push(StateEvent::WeenieErrorWithString {
-                    error: data.error,
-                    parameter: data.parameter.clone(),
-                });
-            }
+            GameEvent::WeenieError(_) => return false,
+            GameEvent::WeenieErrorWithString(_) => return false,
             _ => return false,
         }
         true

@@ -24,7 +24,6 @@ use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use std::sync::Arc;
 
-use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::*;
 
 pub struct ServerTimeSync {

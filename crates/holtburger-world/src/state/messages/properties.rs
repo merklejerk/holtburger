@@ -192,9 +192,6 @@ impl WorldState {
                     updates: vec![update],
                 });
             }
-            GameMessage::SetState(data) => {
-                let _ = self.apply_set_state_update(data, events);
-            }
             _ => return false,
         }
         true

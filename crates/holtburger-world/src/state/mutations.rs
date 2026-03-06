@@ -1,6 +1,6 @@
 use super::*;
-use holtburger_common::position::WorldPosition;
 use holtburger_common::math::Quaternion;
+use holtburger_common::position::WorldPosition;
 
 impl WorldState {
     pub(crate) fn emit_level_info(&self, events: &mut Vec<StateEvent>) {
@@ -164,8 +164,8 @@ impl WorldState {
 
         let _ = self.clear_entity_world_presence(item_guid);
 
-        let is_owned = container_guid == self.player.guid
-            || self.player.inventory.contains(&container_guid);
+        let is_owned =
+            container_guid == self.player.guid || self.player.inventory.contains(&container_guid);
         self.update_player_inventory_recursive(item_guid, is_owned);
 
         events.push(StateEvent::PropertiesUpdated {
@@ -284,7 +284,10 @@ impl WorldState {
         if let Some(entity) = self.entities.get_mut(target_guid) {
             entity.set_property(update.clone());
         } else if let Some(vendor) = self.vendor.as_mut()
-            && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == target_guid)
+            && let Some(item) = vendor
+                .items
+                .iter_mut()
+                .find(|item| item.guid == target_guid)
         {
             item.set_property(update.clone());
         }

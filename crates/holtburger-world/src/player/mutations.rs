@@ -1,11 +1,30 @@
 use super::PlayerState;
-use crate::stats;
-use crate::player::types::{SkillBase, VitalBase};
 use crate::StateEvent;
+use crate::player::types::{SkillBase, VitalBase};
+use crate::stats;
 use holtburger_common::Guid;
 use holtburger_common::properties::{EnchantmentTypeFlags, PropertyString};
-use holtburger_protocol::messages::*;
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::*;
+
+pub struct SkillUpdateParams<'a> {
+    pub skill_id: u32,
+    pub ranks: u32,
+    pub status: u32,
+    pub init: u32,
+    pub xp: u32,
+    pub xp_table: Option<&'a holtburger_dat::file_type::XpTable>,
+    pub skill_table: Option<&'a holtburger_dat::file_type::SkillTable>,
+}
+
+pub struct VitalUpdateParams<'a> {
+    pub vital_id: u32,
+    pub ranks: u32,
+    pub start: u32,
+    pub current: u32,
+    pub xp: u32,
+    pub xp_table: Option<&'a holtburger_dat::file_type::XpTable>,
+}
 
 impl PlayerState {
     /// Hydrates an attribute from a network update message.
@@ -43,15 +62,19 @@ impl PlayerState {
     /// Hydrates a skill from a network update message.
     pub fn update_skill(
         &mut self,
-        skill_id: u32,
-        ranks: u32,
-        status: u32,
-        init: u32,
-        xp: u32,
-        xp_table: Option<&holtburger_dat::file_type::XpTable>,
-        skill_table: Option<&holtburger_dat::file_type::SkillTable>,
+        params: SkillUpdateParams,
         events: &mut Vec<StateEvent>,
     ) {
+        let SkillUpdateParams {
+            skill_id,
+            ranks,
+            status,
+            init,
+            xp,
+            xp_table,
+            skill_table,
+        } = params;
+
         if let Some(skill_type) = stats::SkillType::from_repr(skill_id) {
             let training = match status {
                 1 => stats::TrainingLevel::Untrained,
@@ -60,13 +83,8 @@ impl PlayerState {
                 _ => stats::TrainingLevel::Unusable,
             };
 
-            self.skill_bases.insert(
-                skill_type,
-                SkillBase {
-                    ranks,
-                    init,
-                },
-            );
+            self.skill_bases
+                .insert(skill_type, SkillBase { ranks, init });
 
             let base_val = self.derive_skill_value(skill_type, ranks, init, false);
             let current_val = self.derive_skill_value(skill_type, ranks, init, true);
@@ -82,10 +100,7 @@ impl PlayerState {
                 init,
                 spent_xp: xp,
                 next_rank_xp: xp_table.and_then(|t| {
-                    t.get_next_skill_rank_xp(
-                        ranks,
-                        training == stats::TrainingLevel::Specialized,
-                    )
+                    t.get_next_skill_rank_xp(ranks, training == stats::TrainingLevel::Specialized)
                 }),
                 base: base_val,
                 current: current_val,
@@ -103,22 +118,21 @@ impl PlayerState {
     /// Hydrates a vital from a network update message.
     pub fn update_vital(
         &mut self,
-        vital_id: u32,
-        ranks: u32,
-        start: u32,
-        current: u32,
-        xp: u32,
-        xp_table: Option<&holtburger_dat::file_type::XpTable>,
+        params: VitalUpdateParams,
         events: &mut Vec<StateEvent>,
     ) {
+        let VitalUpdateParams {
+            vital_id,
+            ranks,
+            start,
+            current,
+            xp,
+            xp_table,
+        } = params;
+
         if let Some(vital_type) = stats::VitalType::from_id(vital_id) {
-            self.vital_bases.insert(
-                vital_type,
-                VitalBase {
-                    ranks,
-                    start,
-                },
-            );
+            self.vital_bases
+                .insert(vital_type, VitalBase { ranks, start });
 
             let base = self.calculate_vital_base(vital_type);
             let buffed_max = self.calculate_vital_current(vital_type);
@@ -464,7 +478,11 @@ impl PlayerState {
         health: f32,
         events: &mut Vec<StateEvent>,
     ) -> bool {
-        let target_guid = if target == Guid::NULL { self.guid } else { target };
+        let target_guid = if target == Guid::NULL {
+            self.guid
+        } else {
+            target
+        };
 
         if target_guid != self.guid || target_guid == Guid::NULL {
             return false;

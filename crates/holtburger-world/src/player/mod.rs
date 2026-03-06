@@ -15,8 +15,8 @@ use holtburger_protocol::messages::magic::Enchantment;
 use super::stats;
 
 pub mod magic;
-pub mod mutations;
 pub mod movement;
+pub mod mutations;
 pub mod stats_calc;
 pub mod types;
 

@@ -1,16 +1,16 @@
+pub mod inventory;
 pub mod login;
 pub mod movement;
-pub mod inventory;
-pub mod properties;
-pub mod trade;
 pub mod player;
+pub mod properties;
 pub mod system;
+pub mod trade;
 
-use crate::state::WorldState;
 use crate::StateEvent;
+use crate::state::WorldState;
 use holtburger_protocol::messages::GameMessage;
 
-fn resolve_spell_names(state: &WorldState, events: &mut Vec<StateEvent>) {
+fn resolve_spell_names(state: &WorldState, events: &mut [StateEvent]) {
     for event in events.iter_mut() {
         match event {
             StateEvent::SpellUpdated { spell_id, name } if name.is_none() => {
@@ -22,14 +22,10 @@ fn resolve_spell_names(state: &WorldState, events: &mut Vec<StateEvent>) {
 }
 
 /// Top-level dispatcher for protocol messages.
-/// 
+///
 /// This is the entry point for all game messages received from the server.
 /// It orchestrates mutations across [PlayerState] and [WorldState].
-pub fn handle_message(
-    state: &mut WorldState,
-    message: &GameMessage,
-    events: &mut Vec<StateEvent>,
-) {
+pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mut Vec<StateEvent>) {
     if player::handle_message(state, message, events) {
         resolve_spell_names(state, events);
         return;
@@ -58,7 +54,6 @@ pub fn handle_message(
             || system::handle_event(state, event, events)
         {
             resolve_spell_names(state, events);
-            return;
         }
     }
 }

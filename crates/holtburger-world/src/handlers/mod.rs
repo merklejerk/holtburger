@@ -19,8 +19,35 @@ pub fn handle_message(
     message: &GameMessage,
     events: &mut Vec<StateEvent>,
 ) {
-    // Phase 1: Delegation to existing handlers via compatibility shims.
-    // As we migrate handlers in Phase 4, we will move the logic from 
-    // `state/messages/mod.rs` into the sub-modules of this area.
+    if state.player.handle_message(
+        message,
+        events,
+        state.xp_table.as_ref(),
+        state.skill_table.as_deref(),
+    ) {
+        for event in events.iter_mut() {
+            match event {
+                StateEvent::SpellUpdated { spell_id, name } if name.is_none() => {
+                    *name = state.resolve_spell_name(*spell_id);
+                }
+                _ => {}
+            }
+        }
+        return;
+    }
+
+    if system::handle_message(state, message, events) {
+        return;
+    }
+
+    if let GameMessage::GameEvent(event) = message {
+        if login::handle_event(state, event, events)
+            || trade::handle_event(state, event, events)
+            || system::handle_event(state, event, events)
+        {
+            return;
+        }
+    }
+
     state.handle_message_legacy(message, events);
 }

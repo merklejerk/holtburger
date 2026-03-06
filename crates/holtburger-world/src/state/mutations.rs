@@ -337,4 +337,114 @@ impl WorldState {
             events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
         }
     }
+
+    pub(crate) fn register_trade(
+        &mut self,
+        initiator: Guid,
+        partner: Guid,
+        events: &mut Vec<StateEvent>,
+    ) {
+        let partner_guid = if initiator == self.player.guid {
+            partner
+        } else {
+            initiator
+        };
+
+        let trade_state = TradeState {
+            partner_guid,
+            initiator_guid: initiator,
+            trade_stamp: 0.0,
+            self_side: TradeSide {
+                guid: self.player.guid,
+                accepted: false,
+                items: Vec::new(),
+            },
+            partner_side: TradeSide {
+                guid: partner_guid,
+                accepted: false,
+                items: Vec::new(),
+            },
+        };
+
+        self.trade = Some(trade_state.clone());
+        events.push(StateEvent::TradeStateUpdated(Some(trade_state)));
+    }
+
+    pub(crate) fn add_trade_item(
+        &mut self,
+        trade_side: u32,
+        object_guid: Guid,
+        events: &mut Vec<StateEvent>,
+    ) {
+        if let Some(trade) = self.trade.as_mut() {
+            if trade_side == 0x01 {
+                trade.self_side.items.push(object_guid);
+            } else {
+                trade.partner_side.items.push(object_guid);
+            }
+            trade.self_side.accepted = false;
+            trade.partner_side.accepted = false;
+            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+        }
+    }
+
+    pub(crate) fn accept_trade(&mut self, who_accepted: Guid, events: &mut Vec<StateEvent>) {
+        if let Some(trade) = self.trade.as_mut() {
+            if who_accepted == self.player.guid {
+                trade.self_side.accepted = true;
+            } else {
+                trade.partner_side.accepted = true;
+            }
+            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+        }
+    }
+
+    pub(crate) fn reset_trade(&mut self, events: &mut Vec<StateEvent>) {
+        if let Some(trade) = self.trade.as_mut() {
+            trade.self_side.accepted = false;
+            trade.partner_side.accepted = false;
+            trade.self_side.items.clear();
+            trade.partner_side.items.clear();
+            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+        }
+    }
+
+    pub(crate) fn clear_trade_acceptance(&mut self, events: &mut Vec<StateEvent>) {
+        if let Some(trade) = self.trade.as_mut() {
+            trade.self_side.accepted = false;
+            trade.partner_side.accepted = false;
+            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+        }
+    }
+
+    pub(crate) fn close_trade(&mut self, events: &mut Vec<StateEvent>) {
+        self.trade = None;
+        events.push(StateEvent::TradeStateUpdated(None));
+    }
+
+    pub(crate) fn set_vendor_state(
+        &mut self,
+        data: &ApproachVendorEventData,
+        events: &mut Vec<StateEvent>,
+    ) {
+        let items = data
+            .items
+            .iter()
+            .map(CoreVendorItem::from_protocol)
+            .collect();
+
+        let vendor_state = VendorState {
+            vendor_guid: data.vendor_guid,
+            items,
+            buy_multiplier: data.buy_multiplier,
+            sell_multiplier: data.sell_multiplier,
+            merchandise_item_types: data.merchandise_item_types,
+            alternate_currency_wcid: data.alternate_currency_wcid,
+            alternate_currency_amount: data.alternate_currency_amount,
+            alternate_currency_name: data.alternate_currency_name.clone(),
+        };
+
+        self.vendor = Some(vendor_state.clone());
+        events.push(StateEvent::VendorStateUpdated(Some(vendor_state)));
+    }
 }

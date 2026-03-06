@@ -1,1 +1,17 @@
-// Placeholder for login-related message handling.
+use crate::StateEvent;
+use crate::state::WorldState;
+use holtburger_protocol::messages::{GameEvent, GameEventMessage};
+
+pub(crate) fn handle_event(
+	state: &mut WorldState,
+	event: &GameEventMessage,
+	events: &mut Vec<StateEvent>,
+) -> bool {
+	match &event.event {
+		GameEvent::PlayerDescription(data) => {
+			state.apply_player_description_world_state(data.guid, &data.name, data.pos, events);
+			true
+		}
+		_ => false,
+	}
+}

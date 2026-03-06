@@ -274,7 +274,7 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - [x] **Phase 1**: Add the `handlers/` module tree and compatibility entry points.
 - [x] **Phase 2**: Extract player-local mutation methods from `PlayerState::handle_message()`.
 - [x] **Phase 3**: Extract world mutation helpers from `state/messages/*` into narrower `WorldState` methods.
-- [ ] **Phase 4a**: Migrate simple feature handlers (`login`, `trade`, misc/system).
+- [x] **Phase 4a**: Migrate simple feature handlers (`login`, `trade`, misc/system).
 - [ ] **Phase 4b**: Migrate world-only handlers.
 - [ ] **Phase 4c**: Migrate shared player/world orchestration.
 - [ ] **Phase 4d**: Remove legacy routers and rewrite tests.
@@ -287,6 +287,8 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
 - **Testing**: Test compatibility does not justify preserving `PlayerState::handle_message()` or other legacy routing APIs. Tests should follow the cleaner architecture.
 - **Architectural**: Keep world-side mutation helpers in `state/mutations.rs` for now so the new `handlers/` layer can call a narrow `WorldState` API later without fighting visibility or borrow-checker churn during the migration.
 - **Architectural**: Introduce a generic property-target mutation helper on `WorldState` now, but keep message-specific side effects (`CombatModeUpdated`, level info emission, derived stat recalculation) in the existing property handler until Phase 4 moves routing into `handlers/`.
+- **Sequencing**: Move simple-feature routing into `handlers/` before deleting the old `state/messages/login.rs` and `state/messages/trade.rs` files. Their file-level cleanup can wait for the legacy-router removal phase once the rest of the dispatch migration is done.
+- **Architectural**: Add trade/vendor mutation helpers on `WorldState` so the new handler modules orchestrate state transitions instead of re-embedding trade-state mutation logic.
 
 ### Verification Log
 - **Phase 1 Complete**:
@@ -303,6 +305,11 @@ Renaming `state` to `world` too early could create noisy churn and bury the mean
   - Created `state/mutations.rs` to hold world-side mutation helpers and promoted `emit_level_info()` to that shared helper surface.
   - Extracted helpers for player-description follow-up, world/entity movement, inventory/container/wielder placement, generic property target application, instance-id side effects, and trade-complete cleanup.
   - Refactored [crates/holtburger-world/src/state/messages/login.rs](crates/holtburger-world/src/state/messages/login.rs), [crates/holtburger-world/src/state/messages/movement.rs](crates/holtburger-world/src/state/messages/movement.rs), [crates/holtburger-world/src/state/messages/inventory.rs](crates/holtburger-world/src/state/messages/inventory.rs), and [crates/holtburger-world/src/state/messages/properties.rs](crates/holtburger-world/src/state/messages/properties.rs) to use those narrower `WorldState` methods.
+  - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
+- **Phase 4a Complete**:
+  - Moved top-level routing for login, trade, vendor, `UseDone`, `WeenieError*`, and `SetState` into [crates/holtburger-world/src/handlers/login.rs](crates/holtburger-world/src/handlers/login.rs), [crates/holtburger-world/src/handlers/trade.rs](crates/holtburger-world/src/handlers/trade.rs), and [crates/holtburger-world/src/handlers/system.rs](crates/holtburger-world/src/handlers/system.rs).
+  - Updated [crates/holtburger-world/src/handlers/mod.rs](crates/holtburger-world/src/handlers/mod.rs) to own player-first dispatch plus the new simple-feature handler ordering before falling back to the legacy world handlers.
+  - Added `WorldState` trade/vendor mutation helpers in [crates/holtburger-world/src/state/mutations.rs](crates/holtburger-world/src/state/mutations.rs) and removed the migrated routes from the legacy fallback in [crates/holtburger-world/src/state/messages/mod.rs](crates/holtburger-world/src/state/messages/mod.rs), [crates/holtburger-world/src/state/messages/inventory.rs](crates/holtburger-world/src/state/messages/inventory.rs), and [crates/holtburger-world/src/state/messages/properties.rs](crates/holtburger-world/src/state/messages/properties.rs).
   - Verified `cargo check -p holtburger-world` and `cargo test -p holtburger-world --quiet` both pass with all 27 tests green.
 - Pending implementation.
 

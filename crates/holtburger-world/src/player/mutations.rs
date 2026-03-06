@@ -60,11 +60,7 @@ impl PlayerState {
     }
 
     /// Hydrates a skill from a network update message.
-    pub fn update_skill(
-        &mut self,
-        params: SkillUpdateParams,
-        events: &mut Vec<StateEvent>,
-    ) {
+    pub fn update_skill(&mut self, params: SkillUpdateParams, events: &mut Vec<StateEvent>) {
         let SkillUpdateParams {
             skill_id,
             ranks,
@@ -116,11 +112,7 @@ impl PlayerState {
     }
 
     /// Hydrates a vital from a network update message.
-    pub fn update_vital(
-        &mut self,
-        params: VitalUpdateParams,
-        events: &mut Vec<StateEvent>,
-    ) {
+    pub fn update_vital(&mut self, params: VitalUpdateParams, events: &mut Vec<StateEvent>) {
         let VitalUpdateParams {
             vital_id,
             ranks,

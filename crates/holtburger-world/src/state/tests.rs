@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectProperties;

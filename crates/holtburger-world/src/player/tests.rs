@@ -1,5 +1,7 @@
 use super::*;
-use holtburger_common::properties::{EnchantmentTypeFlags, PropertyInt};
+use holtburger_common::properties::{
+    EnchantmentTypeFlags, PropertyInt, WorldObjectPropertyAccessorsMut,
+};
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
     player.attributes.insert(

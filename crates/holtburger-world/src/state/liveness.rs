@@ -80,6 +80,17 @@ pub(crate) struct EntityRetentionSnapshot {
 }
 
 impl EntityRetentionSnapshot {
+    pub fn has_nonworld_retention(self) -> bool {
+        self.held_by_player
+            || self.equipped_by_player
+            || self.inside_open_container
+            || self.has_container_owner
+            || self.has_wielder_owner
+            || self.has_parent_owner
+            || self.trade_preview
+            || self.container_preview
+    }
+
     pub fn has_authoritative_retention(self) -> bool {
         self.in_world
             || self.held_by_player
@@ -197,7 +208,7 @@ impl WorldState {
             return true;
         }
 
-        if snapshot.is_retained() {
+        if snapshot.has_nonworld_retention() {
             return false;
         }
 
@@ -236,6 +247,11 @@ impl WorldState {
                 .entity_lifecycle
                 .get(guid)
                 .is_some_and(|state| state.explicit_delete_requested)
+    }
+
+    pub fn is_entity_world_participant(&self, guid: Guid) -> bool {
+        self.get_visible_entity(guid)
+            .is_some_and(|entity| entity.position.landblock_id != Guid::NULL)
     }
 
     pub fn get_visible_entity(&self, guid: Guid) -> Option<&Entity> {

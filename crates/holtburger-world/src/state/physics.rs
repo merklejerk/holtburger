@@ -1,6 +1,73 @@
 use super::*;
+use std::collections::HashSet;
+
+const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
+
+fn uses_outdoor_visibility_neighbors(landblock_id: Guid) -> bool {
+    (landblock_id & 0x0000_FFFF) == 0x0000_FFFF
+}
 
 impl WorldState {
+    fn current_visible_world_guids(&self) -> HashSet<Guid> {
+        if self.player.guid == Guid::NULL {
+            return HashSet::new();
+        }
+
+        let player_landblock = self.player.position.landblock_id;
+        if player_landblock == Guid::NULL {
+            return HashSet::new();
+        }
+
+        let candidate_guids = if uses_outdoor_visibility_neighbors(player_landblock) {
+            self.scene.get_nearby_entities(player_landblock)
+        } else {
+            self.scene
+                .get_in_landblock(player_landblock)
+                .cloned()
+                .unwrap_or_default()
+        };
+
+        candidate_guids
+            .into_iter()
+            .filter(|guid| self.is_entity_world_participant(*guid))
+            .collect()
+    }
+
+    fn maintain_visibility_prune_deadlines(&mut self, now: f64) {
+        let visible_guids = self.current_visible_world_guids();
+        let world_entity_guids: Vec<_> = self
+            .entities
+            .iter()
+            .filter(|entity| entity.guid != self.player.guid)
+            .filter(|entity| entity.position.landblock_id != Guid::NULL)
+            .map(|entity| entity.guid)
+            .collect();
+
+        for guid in world_entity_guids {
+            if visible_guids.contains(&guid) {
+                self.clear_entity_prune_deadline(guid);
+                continue;
+            }
+
+            let Some(snapshot) = self.retention_snapshot(guid, now) else {
+                continue;
+            };
+
+            if snapshot.explicit_delete_requested || snapshot.has_nonworld_retention() {
+                self.clear_entity_prune_deadline(guid);
+                continue;
+            }
+
+            if self
+                .entity_lifecycle_state(guid)
+                .and_then(|state| state.prune_deadline)
+                .is_none()
+            {
+                self.set_entity_prune_deadline(guid, now + ACE_DESTRUCTION_TIMEOUT_SECS);
+            }
+        }
+    }
+
     pub fn get_nearby_entities(&self) -> Vec<Entity> {
         if self.player.guid == Guid::NULL {
             return Vec::new();
@@ -11,6 +78,7 @@ impl WorldState {
         let nearby_guids = self.scene.get_nearby_entities(lb);
         nearby_guids
             .into_iter()
+            .filter(|guid| self.is_entity_world_participant(*guid))
             .filter_map(|guid| self.entities.get(guid).cloned())
             .collect()
     }
@@ -18,6 +86,10 @@ impl WorldState {
         let nearby = self.scene.get_nearby_entities(lb);
         for guid in nearby {
             if guid == self.player.guid {
+                continue;
+            }
+
+            if !self.is_entity_world_participant(guid) {
                 continue;
             }
 
@@ -53,6 +125,7 @@ impl WorldState {
         let mut events = Vec::new();
         let now = self.current_server_time();
         self.sweep_eviction_queue(now, &mut events);
+        self.maintain_visibility_prune_deadlines(now);
 
         if self.player.guid == Guid::NULL {
             return events;

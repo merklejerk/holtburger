@@ -327,12 +327,11 @@ fn test_inventory_remove_object() {
 
     let events = state.handle_message(&msg);
 
-    assert!(state.entities.get(obj_guid).is_none());
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, StateEvent::EntityDespawned(guid) if *guid == obj_guid))
-    );
+    assert!(state.entities.get(obj_guid).is_some());
+    assert!(state.entity_lifecycle_state(obj_guid).is_some_and(|state| state.explicit_delete_requested));
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, StateEvent::EntityDespawned(guid) if *guid == obj_guid)));
 }
 
 #[test]
@@ -456,6 +455,107 @@ fn test_player_wielder_iid_update_keeps_position() {
         state.entities.get(player_guid).unwrap().wielder_id(),
         Some(Guid(0x8000031B))
     );
+}
+
+#[test]
+fn test_object_create_reuses_upsert_path_and_clears_explicit_delete() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x90000001);
+
+    state.entities.insert(Entity::new(
+        guid,
+        "Original".to_string(),
+        WorldPosition::default(),
+    ));
+    state.mark_entity_explicit_delete(guid);
+
+    let mut data = ObjectDescriptionData::with_guid(guid);
+    data.public_weenie_desc.name = Some("Replacement".to_string());
+    let msg = GameMessage::ObjectCreate(Box::new(data));
+
+    let events = state.handle_message(&msg);
+
+    assert!(matches!(events.first(), Some(StateEvent::EntityReplaced(entity)) if entity.name() == "Replacement"));
+    assert_eq!(state.entities.get(guid).unwrap().name(), "Replacement");
+    assert!(state.entity_lifecycle_state(guid).is_none());
+}
+
+#[test]
+fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x90000002);
+
+    state.entities.insert(Entity::new(
+        guid,
+        "DeleteMe".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let msg = GameMessage::ObjectDelete(Box::new(ObjectDeleteData { guid }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(state.entities.get(guid).is_some());
+    assert!(state.entity_lifecycle_state(guid).is_some_and(|state| state.explicit_delete_requested));
+    assert!(!events
+        .iter()
+        .any(|event| matches!(event, StateEvent::EntityDespawned(target) if *target == guid)));
+}
+
+#[test]
+fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000001);
+    let guid = Guid(0x90000003);
+
+    state.player.guid = player_guid;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let mut item = Entity::new(guid, "Item".to_string(), WorldPosition::default());
+    item.position.landblock_id = Guid::NULL;
+    state.entities.insert(item);
+    state.set_entity_prune_deadline(guid, state.current_server_time() - 1.0);
+
+    let msg = GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
+        sequence: 0,
+        guid,
+        property: PropertyInstanceId::Container as u32,
+        value: player_guid,
+    }));
+
+    let _ = state.handle_message(&msg);
+
+    assert!(state.player.inventory.contains(&guid));
+    assert!(state.entity_lifecycle_state(guid).is_none());
+    assert_eq!(state.entities.get(guid).unwrap().position.landblock_id, Guid::NULL);
+}
+
+#[test]
+fn test_pickup_event_marks_unretained_entity_for_sweep() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x90000004);
+
+    state.entities.insert(Entity::new(
+        guid,
+        "GroundLoot".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let msg = GameMessage::PickupEvent(Box::new(PickupEventData {
+        guid,
+        success: true,
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(state.entities.get(guid).is_some());
+    assert_eq!(state.entities.get(guid).unwrap().position.landblock_id, Guid::NULL);
+    assert!(state.entity_lifecycle_state(guid).is_some_and(|state| state.explicit_delete_requested));
+    assert!(events.is_empty());
 }
 
 #[test]

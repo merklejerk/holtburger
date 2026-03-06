@@ -372,9 +372,9 @@ That means:
 - [x] Add liveness/retention metadata to `WorldState`
 - [x] Add filtered lifecycle-aware accessors to `EntityManager`
 - [x] Add generic sweep engine to `WorldState::tick()`
-- [ ] Route core object lifecycle handlers and property side-effects through shared prune helpers
+- [x] Route core object lifecycle handlers and property side-effects through shared prune helpers
 - [ ] Add ACE destruction-queue policy
-- [ ] Make delete-style protocol paths record explicit delete intent instead of deleting inline
+- [x] Make delete-style protocol paths record explicit delete intent instead of deleting inline
 - [x] Add `EntityReplaced` / equivalent signaling for in-place authoritative rehydration
 - [ ] Add trade-preview sweep behavior
 - [ ] Add container-preview sweep behavior
@@ -394,6 +394,12 @@ That means:
   - Added `sweep_entity()` and `sweep_eviction_queue()` as the single authoritative physical-removal path for lifecycle-driven eviction.
   - Kept `StateEvent::EntityDespawned` tied to actual removal from local state; lifecycle intent changes alone still do not emit despawn events.
   - Added phase-2 unit tests covering explicit-delete sweep, expired deadline sweep, non-expired deadline preservation, and sweep execution even when there is no active player GUID.
+- **2026-03-06 Phase 3 completed**
+  - Routed `ObjectCreate` through the shared upsert path so repeated authoritative creates now clear stale lifecycle metadata and emit `EntityReplaced` instead of synthetic despawn/respawn churn.
+  - Changed `ObjectDelete` and `InventoryRemoveObject` to record explicit delete intent without removing entities inline; actual despawns remain sweep-owned.
+  - Centralized player-ownership sync for container and wielder transitions so protocol handlers and generic instance-id property updates now share the same authoritative inventory/equipment bookkeeping.
+  - Reworked `PickupEvent` and `ParentEvent` to mutate authoritative state first, then reconcile lifecycle state instead of performing ad hoc direct removals.
+  - Added phase-3 regression tests for authoritative object rehydration, delete-intent marking, property-driven ownership retention, and pickup-to-sweep handoff.
 
 ### Decisions Log
 - **Decision**: Pruning should live in `holtburger-world`, not `holtburger-core`.
@@ -420,6 +426,10 @@ That means:
   - **Why**: Only lifecycle-tracked entities can currently be immediate or deadline-based eviction candidates, so using the lifecycle store keeps the generic sweep narrow and cheap until later phases add more policy.
 - **Decision**: Run sweep maintenance before every other `tick()` early return, including the no-player path.
   - **Why**: This preserves the invariant that eviction maintenance is independent of movement state and prevents stationary or not-yet-hydrated sessions from skipping cleanup work.
+- **Decision**: Generic ownership transitions should share one player-ownership sync helper instead of each handler mutating inventory/equipment separately.
+  - **Why**: `ObjectCreate`, container events, wield events, and generic `Container` / `Wielder` property updates all describe the same authoritative ownership graph; centralizing that bookkeeping avoids drift between packet-specific paths.
+- **Decision**: Phase 3 should treat `PickupEvent` as a lifecycle handoff to explicit-delete sweep once authoritative retention disappears.
+  - **Why**: That preserves current removal behavior without reintroducing inline despawns, and keeps actual local removal inside the shared sweep engine.
 
 ### Verification Log
 - Investigated ACE visibility flow in `ObjectMaint` and `PhysicsObj.handle_visible_cells()`.
@@ -430,6 +440,8 @@ That means:
 - Ran `cargo test -p holtburger-world` after the phase-1 changes; all 31 tests passed.
 - Implemented the phase-2 generic sweep engine in `WorldState::tick()` without wiring protocol handlers to it yet.
 - Ran `cargo test -p holtburger-world` after the phase-2 changes; all 35 tests passed.
+- Implemented the phase-3 protocol lifecycle wiring so `ObjectCreate`, delete-style messages, pickup handling, and generic `Container` / `Wielder` updates all flow through the shared lifecycle helpers.
+- Ran `cargo test -p holtburger-world` after the phase-3 changes; all 39 tests passed.
 
 ### Open Questions
 - Do we want the first implementation to include indoor `VisibleCells` parity, or should we explicitly scope v1 to outdoor + trade-preview correctness?

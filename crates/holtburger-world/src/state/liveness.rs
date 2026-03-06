@@ -173,8 +173,15 @@ impl WorldState {
         })
     }
 
-    pub(crate) fn reconcile_entity_retention(&self, guid: Guid) -> Option<EntityRetentionSnapshot> {
-        self.retention_snapshot(guid, self.current_server_time())
+    pub(crate) fn reconcile_entity_retention(
+        &mut self,
+        guid: Guid,
+    ) -> Option<EntityRetentionSnapshot> {
+        let snapshot = self.retention_snapshot(guid, self.current_server_time())?;
+        if snapshot.is_retained() {
+            self.clear_entity_prune_deadline(guid);
+        }
+        Some(snapshot)
     }
 
     pub(crate) fn is_entity_pending_eviction(&self, guid: Guid) -> bool {

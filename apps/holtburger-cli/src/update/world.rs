@@ -38,11 +38,11 @@ impl AppState {
         }
     }
 
-    fn handle_client_status_event(&mut self, event: ClientViewEvent) -> UpdateResult {
+    fn handle_client_status_event(&mut self, event: &ClientViewEvent) -> UpdateResult {
         let result = UpdateResult::new();
         match event {
             ClientViewEvent::StatusUpdate { state } => {
-                self.client_state = state;
+                self.client_state = state.clone();
                 if self.client_state == ClientState::InWorld {
                     self.logon_retry.reset();
                     self.enter_retry.reset();
@@ -52,7 +52,7 @@ impl AppState {
                 reason, message, ..
             } => {
                 if let ErrorReason::Character(error) = reason {
-                    if error == CharacterError::Logon {
+                    if *error == CharacterError::Logon {
                         self.logon_retry.schedule();
                         self.log(
                             ChatMessageKind::Warning,
@@ -62,7 +62,7 @@ impl AppState {
                             ),
                         );
                         return result;
-                    } else if error == CharacterError::EnterGameCharacterInWorld {
+                    } else if *error == CharacterError::EnterGameCharacterInWorld {
                         self.enter_retry.schedule();
                         self.log(
                             ChatMessageKind::Warning,
@@ -164,7 +164,7 @@ impl AppState {
                 result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));
             }
             ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. } => {
-                result.merge(self.handle_client_status_event(event.clone()));
+                result.merge(self.handle_client_status_event(&event));
                 result.merge(self.page.handle_view_event(event));
             }
             _ => {

@@ -371,7 +371,7 @@ That means:
 ### Task Checklist
 - [x] Add liveness/retention metadata to `WorldState`
 - [x] Add filtered lifecycle-aware accessors to `EntityManager`
-- [ ] Add generic sweep engine to `WorldState::tick()`
+- [x] Add generic sweep engine to `WorldState::tick()`
 - [ ] Route core object lifecycle handlers and property side-effects through shared prune helpers
 - [ ] Add ACE destruction-queue policy
 - [ ] Make delete-style protocol paths record explicit delete intent instead of deleting inline
@@ -389,6 +389,11 @@ That means:
   - Added `StateEvent::EntityReplaced` plus client-view plumbing for future in-place `ObjectCreate` refresh handling.
   - Kept current runtime behavior unchanged for live protocol handling; the new upsert/reconciliation helpers exist but are not wired into `ObjectCreate` yet.
   - Added phase-1 unit tests covering filtered access, lifecycle metadata cleanup, retention snapshot derivation, and in-place replacement signaling helpers.
+- **2026-03-06 Phase 2 completed**
+  - Added a centralized sweep engine in `WorldState::tick()` that runs before all movement-specific early returns.
+  - Added `sweep_entity()` and `sweep_eviction_queue()` as the single authoritative physical-removal path for lifecycle-driven eviction.
+  - Kept `StateEvent::EntityDespawned` tied to actual removal from local state; lifecycle intent changes alone still do not emit despawn events.
+  - Added phase-2 unit tests covering explicit-delete sweep, expired deadline sweep, non-expired deadline preservation, and sweep execution even when there is no active player GUID.
 
 ### Decisions Log
 - **Decision**: Pruning should live in `holtburger-world`, not `holtburger-core`.
@@ -411,6 +416,10 @@ That means:
   - **Why**: `WorldState` already exposes `current_server_time()` as `f64`, so phase 1 can reuse that time base without introducing another clock abstraction before the sweep engine exists.
 - **Decision**: Keep `EntityManager::get()` / `get_mut()` raw and add separate filtered access helpers.
   - **Why**: Lifecycle internals still need unfettered access, while ordinary world/client consumers need a single lifecycle-aware chokepoint without making raw access magical.
+- **Decision**: Sweep should iterate the lifecycle store’s tracked GUIDs rather than scanning the full entity map.
+  - **Why**: Only lifecycle-tracked entities can currently be immediate or deadline-based eviction candidates, so using the lifecycle store keeps the generic sweep narrow and cheap until later phases add more policy.
+- **Decision**: Run sweep maintenance before every other `tick()` early return, including the no-player path.
+  - **Why**: This preserves the invariant that eviction maintenance is independent of movement state and prevents stationary or not-yet-hydrated sessions from skipping cleanup work.
 
 ### Verification Log
 - Investigated ACE visibility flow in `ObjectMaint` and `PhysicsObj.handle_visible_cells()`.
@@ -419,6 +428,8 @@ That means:
 - Verified that current `holtburger-world` pruning is packet-driven only.
 - Implemented phase-1 lifecycle scaffolding in `holtburger-world` without changing current live protocol behavior.
 - Ran `cargo test -p holtburger-world` after the phase-1 changes; all 31 tests passed.
+- Implemented the phase-2 generic sweep engine in `WorldState::tick()` without wiring protocol handlers to it yet.
+- Ran `cargo test -p holtburger-world` after the phase-2 changes; all 35 tests passed.
 
 ### Open Questions
 - Do we want the first implementation to include indoor `VisibleCells` parity, or should we explicitly scope v1 to outdoor + trade-preview correctness?

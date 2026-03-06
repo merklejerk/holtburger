@@ -134,7 +134,9 @@ impl WorldState {
     }
 
     pub(crate) fn set_entity_prune_deadline(&mut self, guid: Guid, deadline: f64) {
-        self.entity_lifecycle.get_or_default_mut(guid).prune_deadline = Some(deadline);
+        self.entity_lifecycle
+            .get_or_default_mut(guid)
+            .prune_deadline = Some(deadline);
     }
 
     pub(crate) fn clear_entity_prune_deadline(&mut self, guid: Guid) {
@@ -156,7 +158,9 @@ impl WorldState {
     }
 
     pub(crate) fn mark_container_preview(&mut self, guid: Guid) {
-        self.entity_lifecycle.get_or_default_mut(guid).container_preview = true;
+        self.entity_lifecycle
+            .get_or_default_mut(guid)
+            .container_preview = true;
     }
 
     pub(crate) fn clear_container_preview(&mut self, guid: Guid) {
@@ -166,10 +170,15 @@ impl WorldState {
         self.entity_lifecycle.compact(guid);
     }
 
-    pub(crate) fn retention_snapshot(&self, guid: Guid, now: f64) -> Option<EntityRetentionSnapshot> {
+    pub(crate) fn retention_snapshot(
+        &self,
+        guid: Guid,
+        now: f64,
+    ) -> Option<EntityRetentionSnapshot> {
         let entity = self.entities.get(guid)?;
         let container_id = entity.container_id();
-        let open_container = container_id.is_some_and(|container| self.open_containers.contains(&container));
+        let open_container =
+            container_id.is_some_and(|container| self.open_containers.contains(&container));
         let lifecycle = self.entity_lifecycle.get(guid);
         let container_preview = lifecycle.is_some_and(|state| state.container_preview);
 
@@ -183,7 +192,8 @@ impl WorldState {
             has_parent_owner: entity.physics_parent_id.is_some(),
             trade_preview: lifecycle.is_some_and(|state| state.trade_preview),
             container_preview,
-            explicit_delete_requested: lifecycle.is_some_and(|state| state.explicit_delete_requested),
+            explicit_delete_requested: lifecycle
+                .is_some_and(|state| state.explicit_delete_requested),
             prune_deadline_expired: lifecycle
                 .and_then(|state| state.prune_deadline)
                 .is_some_and(|deadline| deadline <= now),
@@ -295,7 +305,11 @@ impl WorldState {
             self.clear_container_preview(guid);
         }
 
-        if let Some(old_lb) = self.entities.get(guid).map(|existing| existing.position.landblock_id) {
+        if let Some(old_lb) = self
+            .entities
+            .get(guid)
+            .map(|existing| existing.position.landblock_id)
+        {
             self.entities.insert(entity.clone());
             self.scene.update_entity(guid, old_lb, new_lb);
             events.push(StateEvent::EntityReplaced(Box::new(entity)));

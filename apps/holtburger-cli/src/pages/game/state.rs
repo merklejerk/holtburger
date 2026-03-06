@@ -715,6 +715,12 @@ impl Default for ViewState {
     }
 }
 
+impl ViewState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,7 +734,11 @@ mod tests {
 
         state.data.entities.insert(
             entity_guid,
-            Entity::new(entity_guid, "Old Name".to_string(), WorldPosition::default()),
+            Entity::new(
+                entity_guid,
+                "Old Name".to_string(),
+                WorldPosition::default(),
+            ),
         );
 
         let replacement = Entity::new(
@@ -742,14 +752,12 @@ mod tests {
         });
 
         assert_eq!(
-            state.data.entities.get(&entity_guid).map(|entity| entity.name()),
+            state
+                .data
+                .entities
+                .get(&entity_guid)
+                .map(|entity| entity.name()),
             Some("New Name")
         );
-    }
-}
-
-impl ViewState {
-    pub fn new() -> Self {
-        Self::default()
     }
 }

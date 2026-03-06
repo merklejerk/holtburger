@@ -1,7 +1,7 @@
 use crate::StateEvent;
 use crate::entity::Entity;
-use crate::state::liveness::EntityUpsertKind;
 use crate::state::WorldState;
+use crate::state::liveness::EntityUpsertKind;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     PropertyInstanceId, PropertyUpdate, WorldObjectPropertyAccessorsMut,

@@ -106,13 +106,7 @@ pub(crate) fn handle_event(
 
             for item in &data.items {
                 let guid = item.guid;
-                if state.entities.get(guid).is_none() {
-                    let mut entity =
-                        Entity::new(guid, "Unknown Item".to_string(), Default::default());
-                    entity.set_iid_prop(PropertyInstanceId::Container, data.container);
-                    state.add_entity(entity.clone());
-                    events.push(StateEvent::EntitySpawned(Box::new(entity)));
-                } else if let Some(entity) = state.entities.get_mut(guid) {
+                if let Some(entity) = state.entities.get_mut(guid) {
                     let old_lb = entity.position.landblock_id;
                     if old_lb != Guid::NULL || entity.container_id() != Some(data.container) {
                         entity.set_iid_prop(PropertyInstanceId::Container, data.container);
@@ -130,11 +124,11 @@ pub(crate) fn handle_event(
                             )],
                         });
                     }
-                }
 
-                state.mark_container_preview(guid);
-                state.sync_player_ownership_for_entity(guid);
-                let _ = state.reconcile_entity_retention(guid);
+                    state.mark_container_preview(guid);
+                    state.sync_player_ownership_for_entity(guid);
+                    let _ = state.reconcile_entity_retention(guid);
+                }
             }
 
             true

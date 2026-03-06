@@ -5,7 +5,6 @@ use crate::StateEvent;
 use crate::stats;
 use holtburger_common::Guid;
 use holtburger_common::properties::PropertyString;
-use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::*;
 
 use holtburger_protocol::messages::EquipMask;
@@ -29,22 +28,14 @@ impl PlayerState {
             }
             GameMessage::UpdatePosition(data) => {
                 if data.guid == self.guid && self.guid != Guid::NULL {
-                    let old_forced_seq = self.force_position_sequence;
-
-                    self.position = data.pos.pos;
-                    self.instance_sequence = data.pos.instance_sequence;
-                    self.position_sequence = data.pos.position_sequence;
-                    self.teleport_sequence = data.pos.teleport_sequence;
-                    self.force_position_sequence = data.pos.force_position_sequence;
-
-                    if is_newer_u16(self.force_position_sequence, old_forced_seq) {
-                        events.push(StateEvent::ForcedReposition {
-                            guid: self.guid,
-                            pos: self.position,
-                            sequence: self.force_position_sequence,
-                        });
-                    }
-
+                    self.update_position_from_server(
+                        data.pos.pos,
+                        data.pos.instance_sequence,
+                        data.pos.position_sequence,
+                        data.pos.teleport_sequence,
+                        data.pos.force_position_sequence,
+                        events,
+                    );
                     return false;
                 }
             }
@@ -96,29 +87,8 @@ impl PlayerState {
                     xp,
                     ..
                 } = &**data;
-                if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
-                    let base = start + ranks;
-                    let mult = self.get_attribute_multiplier(attr_type);
-                    let add = self.get_attribute_additive(attr_type);
-                    let current = ((base as f32 * mult) + add).round() as u32;
-
-                    let attr_obj = stats::Attribute {
-                        attr_type,
-                        ranks: *ranks,
-                        start: *start,
-                        spent_xp: *xp,
-                        next_rank_xp: xp_table.and_then(|t| t.get_next_attribute_rank_xp(*ranks)),
-                        base,
-                        current,
-                    };
-
-                    self.attributes.insert(attr_type, attr_obj.clone());
-
-                    events.push(StateEvent::AttributeUpdated(attr_obj));
-
-                    self.emit_derived_stats(events);
-                    return true;
-                }
+                self.update_attribute(*attribute, *ranks, *start, *xp, xp_table, events);
+                return true;
             }
             GameMessage::PublicUpdateAttribute(data) => {
                 let UpdateAttribute {
@@ -128,29 +98,8 @@ impl PlayerState {
                     xp,
                     ..
                 } = &**data;
-                if let Some(attr_type) = stats::AttributeType::from_repr(*attribute) {
-                    let base = start + ranks;
-                    let mult = self.get_attribute_multiplier(attr_type);
-                    let add = self.get_attribute_additive(attr_type);
-                    let current = ((base as f32 * mult) + add).round() as u32;
-
-                    let attr_obj = stats::Attribute {
-                        attr_type,
-                        ranks: *ranks,
-                        start: *start,
-                        spent_xp: *xp,
-                        next_rank_xp: xp_table.and_then(|t| t.get_next_attribute_rank_xp(*ranks)),
-                        base,
-                        current,
-                    };
-
-                    self.attributes.insert(attr_type, attr_obj.clone());
-
-                    events.push(StateEvent::AttributeUpdated(attr_obj));
-
-                    self.emit_derived_stats(events);
-                    return true;
-                }
+                self.update_attribute(*attribute, *ranks, *start, *xp, xp_table, events);
+                return true;
             }
             GameMessage::PrivateUpdateSkill(data) => {
                 let UpdateSkill {
@@ -161,55 +110,8 @@ impl PlayerState {
                     xp,
                     ..
                 } = &**data;
-                if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
-                    let training = match status {
-                        1 => stats::TrainingLevel::Untrained,
-                        2 => stats::TrainingLevel::Trained,
-                        3 => stats::TrainingLevel::Specialized,
-                        _ => stats::TrainingLevel::Unusable,
-                    };
-
-                    self.skill_bases.insert(
-                        skill_type,
-                        SkillBase {
-                            ranks: *ranks,
-                            init: *init,
-                        },
-                    );
-
-                    let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
-                    let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
-
-                    let (trained_cost, specialized_cost) = skill_table
-                        .and_then(|t| t.skill_base_hash.get(&(skill_type as u32)))
-                        .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
-                        .unwrap_or((0, 0));
-
-                    let skill_obj = stats::Skill {
-                        skill_type,
-                        ranks: *ranks,
-                        init: *init,
-                        spent_xp: *xp,
-                        next_rank_xp: xp_table.and_then(|t| {
-                            t.get_next_skill_rank_xp(
-                                *ranks,
-                                training == stats::TrainingLevel::Specialized,
-                            )
-                        }),
-                        base: base_val,
-                        current: current_val,
-                        training,
-                        trained_cost,
-                        specialized_cost,
-                    };
-
-                    self.skills.insert(skill_type, skill_obj.clone());
-
-                    events.push(StateEvent::SkillUpdated(skill_obj));
-
-                    self.emit_derived_stats(events);
-                    return true;
-                }
+                self.update_skill(*skill, *ranks, *status, *init, *xp, xp_table, skill_table, events);
+                return true;
             }
             GameMessage::PublicUpdateSkill(data) => {
                 let UpdateSkill {
@@ -220,55 +122,8 @@ impl PlayerState {
                     xp,
                     ..
                 } = &**data;
-                if let Some(skill_type) = stats::SkillType::from_repr(*skill) {
-                    let training = match status {
-                        1 => stats::TrainingLevel::Untrained,
-                        2 => stats::TrainingLevel::Trained,
-                        3 => stats::TrainingLevel::Specialized,
-                        _ => stats::TrainingLevel::Unusable,
-                    };
-
-                    self.skill_bases.insert(
-                        skill_type,
-                        SkillBase {
-                            ranks: *ranks,
-                            init: *init,
-                        },
-                    );
-
-                    let base_val = self.derive_skill_value(skill_type, *ranks, *init, false);
-                    let current_val = self.derive_skill_value(skill_type, *ranks, *init, true);
-
-                    let (trained_cost, specialized_cost) = skill_table
-                        .and_then(|t| t.skill_base_hash.get(&(skill_type as u32)))
-                        .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
-                        .unwrap_or((0, 0));
-
-                    let skill_obj = stats::Skill {
-                        skill_type,
-                        ranks: *ranks,
-                        init: *init,
-                        spent_xp: *xp,
-                        next_rank_xp: xp_table.and_then(|t| {
-                            t.get_next_skill_rank_xp(
-                                *ranks,
-                                training == stats::TrainingLevel::Specialized,
-                            )
-                        }),
-                        base: base_val,
-                        current: current_val,
-                        training,
-                        trained_cost,
-                        specialized_cost,
-                    };
-
-                    self.skills.insert(skill_type, skill_obj.clone());
-
-                    events.push(StateEvent::SkillUpdated(skill_obj));
-
-                    self.emit_derived_stats(events);
-                    return true;
-                }
+                self.update_skill(*skill, *ranks, *status, *init, *xp, xp_table, skill_table, events);
+                return true;
             }
             GameMessage::PrivateUpdateVital(data) => {
                 let UpdateVital {
@@ -279,36 +134,8 @@ impl PlayerState {
                     xp,
                     ..
                 } = &**data;
-                if let Some(vital_type) = stats::VitalType::from_id(*vital) {
-                    self.vital_bases.insert(
-                        vital_type,
-                        VitalBase {
-                            ranks: *ranks,
-                            start: *start,
-                        },
-                    );
-
-                    let base = self.calculate_vital_base(vital_type);
-                    let buffed_max = self.calculate_vital_current(vital_type);
-                    let final_base = if base == 0 { *current } else { base };
-
-                    let vital_obj = stats::Vital {
-                        vital_type,
-                        ranks: *ranks,
-                        start: *start,
-                        spent_xp: *xp,
-                        next_rank_xp: xp_table.and_then(|t| t.get_next_vital_rank_xp(*ranks)),
-                        base: final_base,
-                        buffed_max,
-                        current: *current,
-                    };
-                    self.vitals.insert(vital_type, vital_obj.clone());
-
-                    events.push(StateEvent::VitalUpdated(vital_obj));
-
-                    self.emit_derived_stats(events);
-                    return true;
-                }
+                self.update_vital(*vital, *ranks, *start, *current, *xp, xp_table, events);
+                return true;
             }
             GameMessage::PublicUpdateVital(data) => {
                 let UpdateVital {
@@ -319,46 +146,13 @@ impl PlayerState {
                     xp,
                     ..
                 } = &**data;
-                if let Some(vital_type) = stats::VitalType::from_id(*vital) {
-                    self.vital_bases.insert(
-                        vital_type,
-                        VitalBase {
-                            ranks: *ranks,
-                            start: *start,
-                        },
-                    );
-
-                    let base = self.calculate_vital_base(vital_type);
-                    let buffed_max = self.calculate_vital_current(vital_type);
-                    let final_base = if base == 0 { *current } else { base };
-
-                    let vital_obj = stats::Vital {
-                        vital_type,
-                        ranks: *ranks,
-                        start: *start,
-                        spent_xp: *xp,
-                        next_rank_xp: xp_table.and_then(|t| t.get_next_vital_rank_xp(*ranks)),
-                        base: final_base,
-                        buffed_max,
-                        current: *current,
-                    };
-                    self.vitals.insert(vital_type, vital_obj.clone());
-
-                    events.push(StateEvent::VitalUpdated(vital_obj));
-
-                    self.emit_derived_stats(events);
-                    return true;
-                }
+                self.update_vital(*vital, *ranks, *start, *current, *xp, xp_table, events);
+                return true;
             }
             GameMessage::PrivateUpdateVitalCurrent(data) => {
                 let UpdateVitalCurrent { vital, current, .. } = &**data;
-                if let Some(vital_type) = stats::VitalType::from_id(*vital)
-                    && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
-                {
-                    vital_obj.current = *current;
-                    events.push(StateEvent::VitalUpdated(vital_obj.clone()));
-                    return true;
-                }
+                self.update_vital_current(*vital, *current, events);
+                return true;
             }
             GameMessage::GameEvent(ev) => {
                 return match &ev.event {

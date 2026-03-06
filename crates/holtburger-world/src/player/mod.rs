@@ -16,6 +16,7 @@ use super::stats;
 
 pub mod magic;
 pub mod messages;
+pub mod mutations;
 pub mod movement;
 pub mod stats_calc;
 pub mod types;

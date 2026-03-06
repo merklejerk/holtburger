@@ -1,5 +1,6 @@
 pub mod context;
 pub mod entity;
+pub mod handlers;
 pub mod hydration;
 pub mod magic;
 pub mod player;

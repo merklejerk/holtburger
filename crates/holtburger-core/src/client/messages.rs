@@ -102,23 +102,11 @@ impl Client {
                 Ok(())
             }
             GameMessage::CharacterList(data) => {
-                use crate::client::auth::find_preferred_character;
                 self.auth.characters = data.characters.clone();
 
                 log::info!("Character List for account: {}", data.account_name);
                 for (i, c) in self.auth.characters.iter().enumerate() {
                     log::info!("  [{}] {} (0x{:08X})", i + 1, c.name, c.guid);
-                }
-
-                if let Some(id) =
-                    find_preferred_character(&self.auth.characters, &self.auth.character_preference)
-                {
-                    log::info!("Auto-selecting character: 0x{:08X}", id);
-                    self.world.load_deferred_tables();
-                    self.state = ClientState::EnteringWorld;
-                    self.send_status_event();
-                    self.auth.select_character(id, &mut self.session).await?;
-                    return Ok(world_events);
                 }
 
                 self.state = ClientState::CharacterSelection(self.auth.characters.clone());

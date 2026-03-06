@@ -208,7 +208,6 @@ pub enum ClientViewEvent {
 pub enum ClientCommand {
     Login(String),
     SelectCharacter(Guid),
-    SelectCharacterByIndex(usize),
     EnterWorld,
     Talk(String),
     Tell {

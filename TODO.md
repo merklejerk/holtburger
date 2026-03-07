@@ -181,6 +181,7 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] Display encumbrance (sticky line in inv tab?).
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

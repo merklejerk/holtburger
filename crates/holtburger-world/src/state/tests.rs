@@ -1525,3 +1525,101 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
             .is_some_and(|state| state.prune_deadline.is_none() && state.container_preview)
     );
 }
+
+#[test]
+fn test_remove_entity_marks_wielded_dependents_for_prune() {
+    let mut state = WorldState::new(None, None);
+    let wielder_guid = Guid(0x60000157);
+    let item_guid = Guid(0x60000158);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+
+    state.add_entity(Entity::new(
+        wielder_guid,
+        "Wielder".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let mut item = Entity::new(
+        item_guid,
+        "Wielded Item".to_string(),
+        WorldPosition::default(),
+    );
+    item.position.landblock_id = Guid::NULL;
+    item.set_wielder_id(Some(wielder_guid));
+    item.set_int_prop(
+        PropertyInt::CurrentWieldedLocation,
+        EquipMask::MELEE_WEAPON.bits() as i32,
+    );
+    state.add_entity(item);
+
+    let removed = state.remove_entity(wielder_guid);
+
+    assert!(removed.is_some());
+    assert_eq!(state.entities.get(item_guid).unwrap().wielder_id(), None);
+    assert!(
+        state
+            .entity_lifecycle_state(item_guid)
+            .and_then(|state| state.prune_deadline)
+            .is_some()
+    );
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(item_guid).is_none());
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+    );
+}
+
+#[test]
+fn test_remove_entity_marks_contained_dependents_for_prune() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x60000159);
+    let item_guid = Guid(0x6000015A);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+
+    state.add_entity(Entity::new(
+        container_guid,
+        "Container".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let mut item = Entity::new(
+        item_guid,
+        "Contained Item".to_string(),
+        WorldPosition::default(),
+    );
+    item.position.landblock_id = Guid::NULL;
+    item.set_container_id(Some(container_guid));
+    state.add_entity(item);
+
+    let removed = state.remove_entity(container_guid);
+
+    assert!(removed.is_some());
+    assert_eq!(state.entities.get(item_guid).unwrap().container_id(), None);
+    assert!(
+        state
+            .entity_lifecycle_state(item_guid)
+            .and_then(|state| state.prune_deadline)
+            .is_some()
+    );
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(state.entities.get(item_guid).is_none());
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+    );
+}

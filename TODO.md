@@ -156,6 +156,7 @@
 - [x] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
 - [x] Entities not on same landblock are getting pruned.
 - [x] Can't pick up items in chests.
+- [x] Wielded items not being despawend along with their wielder.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.

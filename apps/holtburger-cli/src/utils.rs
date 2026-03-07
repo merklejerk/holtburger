@@ -35,6 +35,16 @@ pub fn format_item_name<T: WorldObjectExt>(item: &T, guid: Guid) -> String {
     display_name
 }
 
+pub fn format_duration(seconds: f64) -> String {
+    if seconds >= 3600.0 {
+        format!("{:.1}h", seconds / 3600.0)
+    } else if seconds >= 60.0 {
+        format!("{:.1}m", seconds / 60.0)
+    } else {
+        format!("{:.0}s", seconds)
+    }
+}
+
 pub fn format_cost(n: u64) -> String {
     if n >= 1_000_000_000 {
         format!("{:.1}B", n as f64 / 1_000_000_000.0)

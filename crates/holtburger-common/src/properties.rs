@@ -148,6 +148,26 @@ pub enum MaterialType {
     Teak = 77,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize, Default)]
+#[repr(u32)]
+pub enum WeaponType {
+    #[default]
+    Undef = 0,
+    Unarmed = 1,
+    Sword = 2,
+    Axe = 3,
+    Mace = 4,
+    Spear = 5,
+    Dagger = 6,
+    Staff = 7,
+    Bow = 8,
+    Crossbow = 9,
+    Thrown = 10,
+    #[strum(serialize = "Two-Handed")]
+    TwoHanded = 11,
+    Magic = 12,
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
 )]

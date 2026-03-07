@@ -1,12 +1,14 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::{
-    PropertyBool, PropertyFloat, PropertyInt, PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors
+    PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType, WorldObjectExt as _,
+    WorldObjectPropertyAccessors,
 };
 
 use holtburger_world::crafting::salvage::get_material_name;
 use holtburger_world::damage::compute_damage_range;
 use holtburger_world::entity::Entity;
 use holtburger_world::magic::calculate_mana_time_left;
+use holtburger_world::stats::SkillType;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
@@ -209,6 +211,29 @@ pub fn get_assess_info(
                     Style::default().fg(Color::White),
                 ),
             ]));
+        }
+
+        if let Some(weapon_type_raw) = entity.get_int_prop(PropertyInt::WeaponType) {
+            if let Some(weapon_type) = WeaponType::from_repr(weapon_type_raw as u32) {
+                if weapon_type != WeaponType::Undef {
+                    lines.push(Line::from(vec![
+                        Span::styled("Type:   ", Style::default().fg(Color::Gray)),
+                        Span::styled(weapon_type.to_string(), Style::default().fg(Color::White)),
+                    ]));
+                }
+            }
+        }
+        if let Some(skill_type_raw) = entity.get_int_prop(PropertyInt::WieldSkillType) {
+            if let Some(skill_type) = SkillType::from_repr(skill_type_raw as u32) {
+                let difficulty = entity.get_int_prop(PropertyInt::WieldDifficulty).unwrap_or(0);
+                lines.push(Line::from(vec![
+                    Span::styled("Skill:  ", Style::default().fg(Color::Gray)),
+                    Span::styled(
+                        format!("{} ({})", skill_type, difficulty),
+                        Style::default().fg(Color::White),
+                    ),
+                ]));
+            }
         }
     }
 

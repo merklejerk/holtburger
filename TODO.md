@@ -187,6 +187,7 @@
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] Display encumbrance (sticky line in inv tab?).
 - [ ] Add intelligent entity context scanners.
+- [ ] Salvage preview output is duplicated and wrong.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

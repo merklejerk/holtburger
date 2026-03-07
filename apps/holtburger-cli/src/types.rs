@@ -5,6 +5,7 @@ use crate::pages::selection::SelectionState;
 use crate::state::RenderContext;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::combat::CombatMode;
@@ -199,6 +200,7 @@ pub enum Interaction {
     Healing { item_guid: Guid },
     Targeting { target_guid: Guid },
     Combining { item_guid: Guid },
+    Salvaging,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -420,6 +422,16 @@ pub enum AppAction {
     UseWith {
         item: Guid,
         target: Guid,
+    },
+    QueueSalvageItem {
+        guid: Guid,
+    },
+    UnqueueSalvageItem {
+        guid: Guid,
+    },
+    SalvageItems {
+        ust_guid: Guid,
+        item_guids: Vec<Guid>,
     },
     QueryDebugInfo {
         target: CommandTarget,

@@ -11,7 +11,7 @@ use crate::theme;
 use crate::types::TradeFocus;
 use crate::utils::format_item_name;
 use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VENDOR_CEIL_OFFSET};
-use holtburger_common::properties::{ItemType, PropertyInt};
+use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectExt as _};
 use holtburger_world::context::WorldContextExt;
 
 pub fn render_trade_tab(

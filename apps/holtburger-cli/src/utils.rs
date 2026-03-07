@@ -1,26 +1,32 @@
 use crate::types::FocusedPane;
 use holtburger_common::Guid;
-use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{ItemType, WorldObjectExt};
 use unicode_width::UnicodeWidthStr;
 
 /// Formats an item's display name, including stack size and structure/durability if present.
-pub fn format_item_name<T: WorldObjectPropertyAccessors>(item: &T, guid: Guid) -> String {
-    let name = item
-        .get_string_prop(PropertyString::Name)
-        .unwrap_or("Unknown");
+pub fn format_item_name<T: WorldObjectExt>(item: &T, guid: Guid) -> String {
+    let name = item.name();
     let mut display_name = if name.trim().is_empty() {
         format!("<{}>", guid)
     } else {
         name.to_string()
     };
 
-    let stack_size = item.get_int_prop(PropertyInt::StackSize).unwrap_or(1);
+    // Strip out count suffix from salvage bags since we append our own structure suffix.
+    let is_salvage = item
+        .item_type()
+        .is_some_and(|item_type| item_type.contains(ItemType::TINKERING_MATERIAL));
+    if is_salvage && let Some(idx) = display_name.rfind(" (") {
+        display_name.truncate(idx);
+    }
+
+    let stack_size = item.stack_size();
     if stack_size > 1 {
         display_name = format!("{} ({}x)", display_name, stack_size);
     }
 
-    let structure = item.get_int_prop(PropertyInt::Structure);
-    let max_structure = item.get_int_prop(PropertyInt::MaxStructure);
+    let structure = item.structure();
+    let max_structure = item.max_structure();
 
     if let (Some(s), Some(ms)) = (structure, max_structure) {
         display_name = format!("{} ({}/{})", display_name, s, ms);

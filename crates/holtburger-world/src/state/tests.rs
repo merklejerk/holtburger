@@ -5,6 +5,7 @@ use std::time::Instant;
 use crate::state::liveness::EntityUpsertKind;
 
 use holtburger_common::position::WorldPosition;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::properties::WorldObjectProperties;
 
 #[test]

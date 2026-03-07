@@ -4,6 +4,7 @@ use holtburger_common::properties::{
 };
 
 use holtburger_world::crafting::salvage::get_material_name;
+use holtburger_world::damage::compute_damage_range;
 use holtburger_world::entity::Entity;
 use holtburger_world::magic::calculate_mana_time_left;
 use ratatui::style::{Color, Modifier, Style};
@@ -183,26 +184,32 @@ pub fn get_assess_info(
     }
 
     // Weapon
-    if let Some(damage) = entity.get_int_prop(PropertyInt::Damage) {
+    if let Some(range) = compute_damage_range(entity) {
+        let mut display = if range.min.round() == range.max.round() {
+            format!("{:.1}", range.max)
+        } else {
+            format!("{:.1} - {:.1}", range.min, range.max)
+        };
+
+        if let Some(name) = range.damage_type.name() {
+            display.push_str(" ");
+            display.push_str(name);
+        }
+
         lines.push(Line::from(vec![
-            Span::styled("Damage: ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(format!("{}", damage), Style::default().fg(Color::Red)),
+            Span::styled("Damage: ", Style::default().fg(Color::Gray)),
+            Span::styled(display, Style::default().fg(Color::Red)),
         ]));
-    } else if let Some(profile) = &entity.weapon_profile {
-        lines.push(Line::from(vec![
-            Span::styled("Damage: ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}", profile.damage),
-                Style::default().fg(Color::Red),
-            ),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("Speed:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}", profile.weapon_time),
-                Style::default().fg(Color::White),
-            ),
-        ]));
+
+        if let Some(profile) = &entity.weapon_profile {
+            lines.push(Line::from(vec![
+                Span::styled("Speed:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{}", profile.weapon_time),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+        }
     }
 
     // Creature Info

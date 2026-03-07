@@ -298,7 +298,7 @@ pub enum GameActionOpcode {
     /// C2S: Stop viewing a container's contents.
     NoLongerViewingContents = 0x0195,
     /// C2S: Salvage items using an Ust.
-    CreateTinkeringTool = 0x027D,
+    SalvageItemsWith = 0x027D,
     // /// C2S: Query current mana levels of an item.
     // QueryItemMana = 0x0263,
     /// C2S: Attempt to give an item to another player.

@@ -31,6 +31,12 @@ enum EnterCombatModeResult {
     Failed(UpdateResult),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SalvagingState {
+    pub ust_guid: Guid,
+    pub queued_items: Vec<Guid>,
+}
+
 impl GameState {
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
         Self {
@@ -173,6 +179,44 @@ impl GameState {
             }
             AppAction::Use { guid } => {
                 result.commands.push(ClientCommand::Use(guid));
+            }
+            AppAction::QueueSalvageItem { guid } => {
+                if (self.view.active_interaction != Some(Interaction::Salvaging)
+                    || self.view.salvaging.is_none())
+                    && !self.reset_salvaging_state(&mut result)
+                {
+                    return Some(result);
+                }
+
+                if self.data.is_salvage_candidate(guid)
+                    && let Some(session) = self.view.salvaging.as_mut()
+                    && !session.queued_items.contains(&guid)
+                {
+                    session.queued_items.push(guid);
+                    result.needs_redraw = true;
+                }
+            }
+            AppAction::UnqueueSalvageItem { guid } => {
+                if let Some(session) = self.view.salvaging.as_mut() {
+                    session
+                        .queued_items
+                        .retain(|queued_guid| *queued_guid != guid);
+                    result.needs_redraw = true;
+                }
+            }
+            AppAction::SalvageItems {
+                ust_guid,
+                item_guids,
+            } => {
+                if !item_guids.is_empty() {
+                    result.commands.push(ClientCommand::SalvageItemsWith {
+                        tool: ust_guid,
+                        items: item_guids,
+                    });
+                }
+                self.view.active_interaction = None;
+                self.view.salvaging = None;
+                result.needs_redraw = true;
             }
             AppAction::Approach { guid } => {
                 result.commands.push(ClientCommand::MoveTo { target: guid });
@@ -448,11 +492,18 @@ impl GameState {
                 self.refresh_context_buffer();
             }
             AppAction::BeginInteraction { interaction } => {
-                self.view.active_interaction = Some(interaction);
+                if interaction == Interaction::Salvaging {
+                    if !self.reset_salvaging_state(&mut result) {
+                        return Some(result);
+                    }
+                } else {
+                    self.view.active_interaction = Some(interaction);
+                }
                 result.needs_redraw = true;
             }
             AppAction::CancelInteraction => {
                 self.view.active_interaction = None;
+                self.view.salvaging = None;
                 result.needs_redraw = true;
             }
             AppAction::ClearVendor => {
@@ -590,6 +641,27 @@ impl GameState {
         EnterCombatModeResult::Success(result)
     }
 
+    fn reset_salvaging_state(&mut self, result: &mut UpdateResult) -> bool {
+        let Some(ust_guid) = self.data.find_salvage_tool_guid() else {
+            self.push_missing_ust_warning(result);
+            return false;
+        };
+
+        self.view.active_interaction = Some(Interaction::Salvaging);
+        self.view.salvaging = Some(SalvagingState {
+            ust_guid,
+            queued_items: Vec::new(),
+        });
+        true
+    }
+
+    fn push_missing_ust_warning(&self, result: &mut UpdateResult) {
+        result.actions.push(AppAction::Log {
+            kind: ChatMessageKind::Warning,
+            message: "You do not have an Ust in your inventory.".to_string(),
+        });
+    }
+
     fn handle_entity_identified(&mut self, entity: &Entity) {
         let guid = entity.guid;
         self.data.entities.insert(guid, entity.clone());
@@ -646,6 +718,17 @@ impl GameState {
         if self.view.current_debug_guid == Some(guid) {
             self.view.current_debug_guid = None;
         }
+        if let Some(session) = self.view.salvaging.as_mut() {
+            session
+                .queued_items
+                .retain(|queued_guid| *queued_guid != guid);
+            if session.ust_guid == guid {
+                self.view.salvaging = None;
+                if self.view.active_interaction == Some(Interaction::Salvaging) {
+                    self.view.active_interaction = None;
+                }
+            }
+        }
     }
 
     fn handle_navigation_event(&mut self, event: ClientViewEvent) -> UpdateResult {
@@ -684,6 +767,8 @@ pub struct ViewState {
     pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// State of current interaction like vendor transactions.
     pub active_interaction: Option<Interaction>,
+    /// Current salvaging queue state when the player is in salvaging mode.
+    pub salvaging: Option<SalvagingState>,
     /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.
     pub last_trade_initiation: Option<(Instant, Guid)>,
     /// Cache of the exact bounding boxes computed during update_layout.
@@ -709,6 +794,7 @@ impl Default for ViewState {
             current_debug_guid: None,
             vendor: None,
             active_interaction: None,
+            salvaging: None,
             last_trade_initiation: None,
             layout_cache: LayoutCache::default(),
         }

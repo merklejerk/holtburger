@@ -25,6 +25,7 @@ impl Client {
             | ClientCommand::Use(_)
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
+            | ClientCommand::SalvageItemsWith { .. }
             | ClientCommand::CastTargetedSpell { .. }
             | ClientCommand::CastUntargetedSpell { .. }
             | ClientCommand::Buy { .. }
@@ -165,6 +166,16 @@ impl Client {
                     UseWithTargetActionData {
                         item_guid: item,
                         target_guid: target,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::SalvageItemsWith { tool, items } => {
+                log::info!(">>> Salvaging {} item(s) with 0x{:08X}", items.len(), tool);
+                self.send_game_action(GameAction::SalvageItemsWith(Box::new(
+                    SalvageItemsWithActionData {
+                        tool_guid: tool,
+                        items,
                     },
                 )))
                 .await

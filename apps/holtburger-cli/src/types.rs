@@ -199,6 +199,7 @@ pub enum Interaction {
     Healing { item_guid: Guid },
     Targeting { target_guid: Guid },
     Combining { item_guid: Guid },
+    Salvaging,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -420,6 +421,16 @@ pub enum AppAction {
     UseWith {
         item: Guid,
         target: Guid,
+    },
+    QueueSalvageItem {
+        guid: Guid,
+    },
+    UnqueueSalvageItem {
+        guid: Guid,
+    },
+    SalvageItems {
+        ust_guid: Guid,
+        item_guids: Vec<Guid>,
     },
     QueryDebugInfo {
         target: CommandTarget,

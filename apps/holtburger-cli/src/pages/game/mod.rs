@@ -1,5 +1,6 @@
 pub mod input;
 pub mod panels;
+mod salvaging;
 
 pub mod state;
 pub use self::state::GameState;

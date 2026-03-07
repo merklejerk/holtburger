@@ -33,7 +33,7 @@ pub enum GameAction {
     PingRequest(Box<PingRequestActionData>),
     DropItem(Box<DropItemActionData>),
     PutItemInContainer(Box<PutItemInContainerActionData>),
-    CreateTinkeringTool(Box<CreateTinkeringToolActionData>),
+    SalvageItemsWith(Box<SalvageItemsWithActionData>),
     Use(Box<UseActionData>),
     NoLongerViewingContents(Box<NoLongerViewingContentsActionData>),
     UseWithTarget(Box<UseWithTargetActionData>),
@@ -113,8 +113,8 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::PutItemInContainer => GameAction::PutItemInContainer(Box::new(
                     PutItemInContainerActionData::unpack(data, offset)?,
                 )),
-                GameActionOpcode::CreateTinkeringTool => GameAction::CreateTinkeringTool(Box::new(
-                    CreateTinkeringToolActionData::unpack(data, offset)?,
+                GameActionOpcode::SalvageItemsWith => GameAction::SalvageItemsWith(Box::new(
+                    SalvageItemsWithActionData::unpack(data, offset)?,
                 )),
                 GameActionOpcode::Use => {
                     GameAction::Use(Box::new(UseActionData::unpack(data, offset)?))
@@ -267,8 +267,8 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
-            GameAction::CreateTinkeringTool(data) => {
-                buf.write_u32::<LittleEndian>(GameActionOpcode::CreateTinkeringTool as u32)
+            GameAction::SalvageItemsWith(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::SalvageItemsWith as u32)
                     .unwrap();
                 data.pack(buf);
             }

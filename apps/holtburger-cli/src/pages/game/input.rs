@@ -138,6 +138,7 @@ impl GameState {
                     self.view.focused_pane = self.view.previous_focused_pane;
                 } else if self.view.active_interaction.is_some() {
                     self.view.active_interaction = None;
+                    self.view.salvaging = None;
                 }
                 result.needs_redraw = true;
             }

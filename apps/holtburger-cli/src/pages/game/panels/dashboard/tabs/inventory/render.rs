@@ -19,7 +19,7 @@ pub fn render_inventory_tab(
     tab: &mut InventoryTab,
     f: &mut Frame,
     data: &GameData,
-    _view: &ViewState,
+    view: &ViewState,
     area: Rect,
 ) {
     let mut bottom_area = area;
@@ -49,7 +49,7 @@ pub fn render_inventory_tab(
         f.render_widget(summary, top_area);
     }
 
-    let items = get_list_items(tab.selected_index, data, &counts);
+    let items = get_list_items(tab.selected_index, data, view, &counts);
     let content_len = items.len();
 
     let selected_index = tab.selected_index;
@@ -70,6 +70,7 @@ pub fn render_inventory_tab(
 fn get_list_items(
     selected_index: usize,
     data: &GameData,
+    view: &ViewState,
     container_counts: &HashMap<Guid, u32>,
 ) -> Vec<ListItem<'static>> {
     let entities = super::tab::get_entities(data);
@@ -86,6 +87,10 @@ fn get_list_items(
             .unwrap_or(false);
 
         let container_count = container_counts.get(&e.guid).cloned();
+        let is_salvaging = view
+            .salvaging
+            .as_ref()
+            .is_some_and(|session| session.queued_items.contains(&e.guid));
 
         list_items.push(render_inventory_item(
             e,
@@ -93,6 +98,7 @@ fn get_list_items(
             i == selected_index,
             is_equipped,
             is_offered,
+            is_salvaging,
             container_count,
         ));
     }
@@ -107,6 +113,7 @@ fn render_inventory_item(
     highlight: bool,
     is_equipped: bool,
     is_offered: bool,
+    is_salvaging: bool,
     container_count: Option<u32>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
@@ -126,6 +133,8 @@ fn render_inventory_item(
         display_name = format!("{} (EQUIPPED)", display_name);
     } else if is_offered {
         display_name = format!("{} (OFFERED)", display_name);
+    } else if is_salvaging {
+        display_name = format!("{} (SALVAGING)", display_name);
     }
 
     if !class.is_creature() {

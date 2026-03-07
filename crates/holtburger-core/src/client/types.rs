@@ -134,6 +134,9 @@ pub enum ClientViewEvent {
     EntitySpawned {
         entity: Box<Entity>,
     },
+    EntityReplaced {
+        entity: Box<Entity>,
+    },
     EntityIdentified {
         entity: Box<Entity>,
     },

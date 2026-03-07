@@ -188,9 +188,10 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::PrivateUpdatePropertyInstanceId(data) => {
+            let prop = PropertyInstanceId::from_repr(data.property);
             let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
             let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
-            if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
+            if let Some(prop) = prop {
                 state.apply_instance_id_side_effect(target_guid, prop, data.value);
             }
             events.push(StateEvent::PropertiesUpdated {
@@ -200,9 +201,10 @@ pub(crate) fn handle_message(
             true
         }
         GameMessage::PublicUpdatePropertyInstanceId(data) => {
+            let prop = PropertyInstanceId::from_repr(data.property);
             let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
             let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
-            if let Some(prop) = PropertyInstanceId::from_repr(data.property) {
+            if let Some(prop) = prop {
                 state.apply_instance_id_side_effect(target_guid, prop, data.value);
             }
             events.push(StateEvent::PropertiesUpdated {

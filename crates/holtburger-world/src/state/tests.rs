@@ -1381,10 +1381,17 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
 
     assert!(!state.open_containers.contains(&container_guid));
     assert!(state.entities.get(item_guid).is_some());
+    assert_eq!(
+        state
+            .entities
+            .get(item_guid)
+            .and_then(|entity| entity.container_id()),
+        None
+    );
     assert!(
         state
             .entity_lifecycle_state(item_guid)
-            .is_some_and(|state| state.container_preview)
+            .is_some_and(|state| state.prune_deadline.is_some())
     );
     assert!(
         !events
@@ -1403,6 +1410,152 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
         tick_events
             .iter()
             .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+    );
+}
+
+#[test]
+fn test_reopening_container_does_not_reactivate_stale_preview_contents() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x70000158);
+    let old_item_guid = Guid(0x60000159);
+    let new_item_guid = Guid(0x6000015A);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.open_containers.insert(container_guid);
+
+    let mut old_item = Entity::new(
+        old_item_guid,
+        "Old Preview Item".to_string(),
+        WorldPosition::default(),
+    );
+    old_item.position.landblock_id = Guid::NULL;
+    old_item.set_container_id(Some(container_guid));
+    state.entities.insert(old_item);
+    state.mark_container_preview(old_item_guid);
+
+    let close_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
+            container_guid,
+        })),
+    }));
+
+    let _ = state.handle_message(&close_msg);
+
+    assert_eq!(
+        state
+            .entities
+            .get(old_item_guid)
+            .and_then(|entity| entity.container_id()),
+        None
+    );
+
+    state.entities.insert(Entity::new(
+        new_item_guid,
+        "New Preview Item".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let reopen_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event: GameEvent::ViewContents(Box::new(ViewContentsEventData {
+            container: container_guid,
+            items: vec![ViewContentsEventItem {
+                guid: new_item_guid,
+                container_type: 0,
+            }],
+        })),
+    }));
+
+    let _ = state.handle_message(&reopen_msg);
+
+    assert_eq!(
+        state
+            .entities
+            .get(old_item_guid)
+            .and_then(|entity| entity.container_id()),
+        None
+    );
+    assert!(
+        !state
+            .entity_lifecycle_state(old_item_guid)
+            .is_some_and(|state| state.container_preview)
+    );
+    assert_eq!(
+        state
+            .entities
+            .get(new_item_guid)
+            .and_then(|entity| entity.container_id()),
+        Some(container_guid)
+    );
+    assert!(
+        state
+            .entity_lifecycle_state(new_item_guid)
+            .is_some_and(|state| state.container_preview)
+    );
+}
+
+#[test]
+fn test_late_container_item_arrival_is_marked_preview_and_pruned_on_close() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x7000015B);
+    let item_guid = Guid(0x6000015B);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.open_containers.insert(container_guid);
+
+    state.entities.insert(Entity::new(
+        item_guid,
+        "Late Chest Item".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let update_msg =
+        GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
+            sequence: 0,
+            guid: item_guid,
+            property: PropertyInstanceId::Container as u32,
+            value: container_guid,
+        }));
+
+    let _ = state.handle_message(&update_msg);
+
+    assert!(
+        state
+            .entity_lifecycle_state(item_guid)
+            .is_some_and(|state| state.container_preview)
+    );
+
+    let close_msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event: GameEvent::CloseGroundContainer(Box::new(CloseGroundContainerEventData {
+            container_guid,
+        })),
+    }));
+
+    let _ = state.handle_message(&close_msg);
+
+    assert_eq!(
+        state
+            .entities
+            .get(item_guid)
+            .and_then(|entity| entity.container_id()),
+        None
+    );
+    assert!(
+        state
+            .entity_lifecycle_state(item_guid)
+            .and_then(|state| state.prune_deadline)
+            .is_some()
     );
 }
 

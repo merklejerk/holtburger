@@ -157,6 +157,7 @@
 - [x] Entities not on same landblock are getting pruned.
 - [x] Can't pick up items in chests.
 - [x] Wielded items not being despawend along with their wielder.
+- [x] Items in chests persisting between relocks.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -176,7 +177,6 @@
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] No trade/vendor verbs when in an interaction.
-- [ ] Items in chests persisting between relocks.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -31,6 +31,14 @@ pub(crate) fn handle_message(
 
             let guid = entity.guid;
             let upsert_kind = state.upsert_entity_from_create(entity, events);
+            if state
+                .entities
+                .get(guid)
+                .and_then(|entity| entity.container_id())
+                .is_some_and(|container| state.open_containers.contains(&container))
+            {
+                state.mark_container_preview(guid);
+            }
             state.sync_player_ownership_for_entity(guid);
             let _ = state.reconcile_entity_retention(guid);
 
@@ -135,6 +143,11 @@ pub(crate) fn handle_event(
         }
         GameEvent::CloseGroundContainer(data) => {
             let item_guids = state.current_container_preview_item_guids(data.container_guid);
+            log::info!(
+                "Closing container {} with items {:?}",
+                data.container_guid,
+                item_guids
+            );
             state.open_containers.remove(&data.container_guid);
             events.push(StateEvent::ContainerClosed(data.container_guid));
             state.mark_container_preview_entities_for_prune(&item_guids);

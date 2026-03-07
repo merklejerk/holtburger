@@ -206,4 +206,4 @@
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
 - [x] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
-- [ ] Is `WorldObjectPropertyAccessors` a pointless abstraction?
+- [x] Is `WorldObjectPropertyAccessors` a pointless abstraction?

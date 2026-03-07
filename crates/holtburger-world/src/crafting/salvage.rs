@@ -1,6 +1,6 @@
 use crate::entity::Entity;
 use crate::stats::{Skill, SkillType, TrainingLevel};
-use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectExt};
 
 const MAX_SALVAGE_BAG_UNITS: u32 = 100;
 
@@ -43,7 +43,7 @@ struct WorkingBag {
 }
 
 impl SalvageItemInput {
-    pub fn from_entity(entity: &Entity) -> Option<Self> {
+    pub fn from_world_object<T: WorldObjectExt>(entity: &T) -> Option<Self> {
         Some(Self {
             item_type: entity.item_type()?,
             material_type: entity.material_type()?,
@@ -55,6 +55,10 @@ impl SalvageItemInput {
                 .unwrap_or(1)
                 .max(1) as u32,
         })
+    }
+
+    pub fn from_entity(entity: &Entity) -> Option<Self> {
+        Self::from_world_object(entity)
     }
 
     pub fn average_workmanship(&self) -> f64 {

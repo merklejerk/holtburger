@@ -16,6 +16,7 @@ use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Interaction,
     UpdateResult,
 };
+use holtburger_common::properties::WorldObjectExt as _;
 
 #[derive(Default)]
 pub struct GameState {

@@ -1,5 +1,6 @@
 use super::{Client, types::*};
 use anyhow::Result;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;

@@ -1,7 +1,7 @@
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
-use holtburger_common::properties::{EquipMask, PseudoEquipMask};
+use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};

@@ -164,7 +164,7 @@
     - [x] Exit salvaging interaction mode when queue is empty.
     - [x] Do not show salvage verb for full salvage bags.
     - [x] Show material type of salvage bags in inventory tab.
-- [ ] Augment assess output with stored entity properties.
+- [~] Augment assess output with stored entity properties.
 - [ ] Display properties only provided in assess results in assess screen:
     - [ ] Show salvage workmanship as float (`ItemWorkmanship / NumItemsInMaterial`).
     - [ ] Mana charge + time left.
@@ -187,7 +187,7 @@
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] Display encumbrance (sticky line in inv tab?).
 - [ ] Add intelligent entity context scanners.
-- [ ] Salvage preview output is duplicated and wrong.
+- [ ] Salvage preview output is duplicated and wrong (maybe not?).
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

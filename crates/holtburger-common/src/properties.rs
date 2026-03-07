@@ -4,6 +4,150 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use strum_macros::{Display, FromRepr};
 
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
+    pub struct DamageType: u32 {
+        const UNDEF       = 0x0;
+        const SLASH       = 0x1;
+        const PIERCE      = 0x2;
+        const BLUDGEON    = 0x4;
+        const COLD        = 0x8;
+        const FIRE        = 0x10;
+        const ACID        = 0x20;
+        const ELECTRIC    = 0x40;
+        const HEALTH      = 0x80;
+        const STAMINA     = 0x100;
+        const MANA        = 0x200;
+        const NETHER      = 0x400;
+        const BASE        = 0x10000000;
+
+        const PHYSICAL    = Self::SLASH.bits() | Self::PIERCE.bits() | Self::BLUDGEON.bits();
+        const ELEMENTAL   = Self::COLD.bits() | Self::FIRE.bits() | Self::ACID.bits() | Self::ELECTRIC.bits();
+    }
+}
+
+impl DamageType {
+    pub fn name(&self) -> Option<&'static str> {
+        if self.contains(Self::SLASH) { return Some("Slashing"); }
+        if self.contains(Self::PIERCE) { return Some("Piercing"); }
+        if self.contains(Self::BLUDGEON) { return Some("Bludgeoning"); }
+        if self.contains(Self::COLD) { return Some("Cold"); }
+        if self.contains(Self::FIRE) { return Some("Fire"); }
+        if self.contains(Self::ACID) { return Some("Acid"); }
+        if self.contains(Self::ELECTRIC) { return Some("Electric"); }
+        if self.contains(Self::HEALTH) { return Some("Health"); }
+        if self.contains(Self::STAMINA) { return Some("Stamina"); }
+        if self.contains(Self::MANA) { return Some("Mana"); }
+        if self.contains(Self::NETHER) { return Some("Nether"); }
+        if self.contains(Self::BASE) { return Some("Base"); }
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize)]
+#[repr(u32)]
+pub enum MaterialType {
+    Unknown = 0,
+    Ceramic = 1,
+    Porcelain = 2,
+    Cloth = 3,
+    Linen = 4,
+    Satin = 5,
+    Silk = 6,
+    Velvet = 7,
+    Wool = 8,
+    Gem = 9,
+    Agate = 10,
+    Amber = 11,
+    Amethyst = 12,
+    Aquamarine = 13,
+    Azurite = 14,
+    #[strum(serialize = "Black Garnet")]
+    BlackGarnet = 15,
+    #[strum(serialize = "Black Opal")]
+    BlackOpal = 16,
+    Bloodstone = 17,
+    Carnelian = 18,
+    Citrine = 19,
+    Diamond = 20,
+    Emerald = 21,
+    #[strum(serialize = "Fire Opal")]
+    FireOpal = 22,
+    #[strum(serialize = "Green Garnet")]
+    GreenGarnet = 23,
+    #[strum(serialize = "Green Jade")]
+    GreenJade = 24,
+    Hematite = 25,
+    #[strum(serialize = "Imperial Topaz")]
+    ImperialTopaz = 26,
+    Jet = 27,
+    #[strum(serialize = "Lapis Lazuli")]
+    LapisLazuli = 28,
+    #[strum(serialize = "Lavender Jade")]
+    LavenderJade = 29,
+    Malachite = 30,
+    Moonstone = 31,
+    Onyx = 32,
+    Opal = 33,
+    Peridot = 34,
+    #[strum(serialize = "Red Garnet")]
+    RedGarnet = 35,
+    #[strum(serialize = "Red Jade")]
+    RedJade = 36,
+    #[strum(serialize = "Rose Quartz")]
+    RoseQuartz = 37,
+    Ruby = 38,
+    Sapphire = 39,
+    #[strum(serialize = "Smokey Quartz")]
+    SmokeyQuartz = 40,
+    Sunstone = 41,
+    #[strum(serialize = "Tiger Eye")]
+    TigerEye = 42,
+    Tourmaline = 43,
+    Turquoise = 44,
+    #[strum(serialize = "White Jade")]
+    WhiteJade = 45,
+    #[strum(serialize = "White Quartz")]
+    WhiteQuartz = 46,
+    #[strum(serialize = "White Sapphire")]
+    WhiteSapphire = 47,
+    #[strum(serialize = "Yellow Garnet")]
+    YellowGarnet = 48,
+    #[strum(serialize = "Yellow Topaz")]
+    YellowTopaz = 49,
+    Zircon = 50,
+    Ivory = 51,
+    Leather = 52,
+    #[strum(serialize = "Armoredillo Hide")]
+    ArmoredilloHide = 53,
+    #[strum(serialize = "Gromnie Hide")]
+    GromnieHide = 54,
+    #[strum(serialize = "Reed Shark Hide")]
+    ReedSharkHide = 55,
+    Metal = 56,
+    Brass = 57,
+    Bronze = 58,
+    Copper = 59,
+    Gold = 60,
+    Iron = 61,
+    Pyreal = 62,
+    Silver = 63,
+    Steel = 64,
+    Stone = 65,
+    Alabaster = 66,
+    Granite = 67,
+    Marble = 68,
+    Obsidian = 69,
+    Sandstone = 70,
+    Serpentine = 71,
+    Wood = 72,
+    Ebony = 73,
+    Mahogany = 74,
+    Oak = 75,
+    Pine = 76,
+    Teak = 77,
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
 )]

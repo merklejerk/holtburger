@@ -357,6 +357,14 @@ impl WorldState {
 
         match property {
             PropertyInstanceId::Container | PropertyInstanceId::Wielder => {
+                if property == PropertyInstanceId::Container {
+                    if value != Guid::NULL && self.open_containers.contains(&value) {
+                        self.mark_container_preview(target_guid);
+                    } else {
+                        self.clear_container_preview(target_guid);
+                    }
+                }
+
                 self.sync_player_ownership_for_entity(target_guid);
                 let _ = self.reconcile_entity_retention(target_guid);
             }
@@ -543,6 +551,11 @@ impl WorldState {
                 continue;
             }
 
+            if let Some(entity) = self.entities.get_mut(guid) {
+                entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
+            }
+
+            self.clear_container_preview(guid);
             self.set_entity_prune_deadline(guid, now);
         }
     }

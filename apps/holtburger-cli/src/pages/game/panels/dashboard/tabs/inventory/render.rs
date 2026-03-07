@@ -10,8 +10,9 @@ use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::utils::format_item_name;
 use holtburger_common::Guid;
-use holtburger_common::properties::EquipMask;
+use holtburger_common::properties::{EquipMask, ItemType};
 use holtburger_world::context::WorldContextExt;
+use holtburger_world::crafting::salvage::get_material_name;
 use holtburger_world::entity::Entity;
 use std::collections::HashMap;
 
@@ -128,6 +129,13 @@ fn render_inventory_item(
     let type_marker = class.emoji();
 
     let mut display_name = format_item_name(e, e.guid);
+
+    if e.item_type()
+        .is_some_and(|it| it.contains(ItemType::TINKERING_MATERIAL))
+        && let Some(mat_type) = e.material_type() {
+            let mat_name = get_material_name(mat_type);
+            display_name = format!("{} {}", mat_name, display_name);
+        }
 
     if is_equipped {
         display_name = format!("{} (EQUIPPED)", display_name);

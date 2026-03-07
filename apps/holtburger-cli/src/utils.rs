@@ -1,6 +1,6 @@
 use crate::types::FocusedPane;
 use holtburger_common::Guid;
-use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors, ItemType};
 use unicode_width::UnicodeWidthStr;
 
 /// Formats an item's display name, including stack size and structure/durability if present.
@@ -13,6 +13,15 @@ pub fn format_item_name<T: WorldObjectPropertyAccessors>(item: &T, guid: Guid) -
     } else {
         name.to_string()
     };
+
+    // Strip out count suffix from salvage bags since we append our own structure suffix.
+    let is_salvage = item
+        .get_int_prop(PropertyInt::ItemType)
+        .is_some_and(|bits| ItemType::from_bits(bits as u32).unwrap_or_default().contains(ItemType::TINKERING_MATERIAL));
+    if is_salvage
+        && let Some(idx) = display_name.rfind(" (") {
+            display_name.truncate(idx);
+        }
 
     let stack_size = item.get_int_prop(PropertyInt::StackSize).unwrap_or(1);
     if stack_size > 1 {

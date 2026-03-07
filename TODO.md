@@ -161,7 +161,7 @@
 - [x] No trade/vendor verbs when in an interaction.
 - [ ] Augment assess output with entity properties.
 - [~] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
-    - [ ] Show salvage workmanship as float.
+    - [ ] Show salvage workmanship as float (`ItemWorkmanship / NumItemsInMaterial`).
     - [ ] Exit salvaging interaction mode when queue is empty.
     - [ ] Show material type of salvage bags in inventory tab.
     - [ ] Do not show salvage verb for full salvage bags.

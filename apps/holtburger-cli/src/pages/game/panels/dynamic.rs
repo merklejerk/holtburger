@@ -16,13 +16,13 @@ pub fn render_dynamic_pane(
 ) {
     let (combat_color, combat_title) = match data.combat_mode {
         holtburger_protocol::messages::combat::CombatMode::Melee => {
-            (Some(Color::LightRed), Some(" MELEE "))
+            (Some(Color::LightRed), Some("MELEE"))
         }
         holtburger_protocol::messages::combat::CombatMode::Missile => {
-            (Some(Color::LightRed), Some(" MISSILE "))
+            (Some(Color::LightRed), Some("MISSILE"))
         }
         holtburger_protocol::messages::combat::CombatMode::Magic => {
-            (Some(Color::Cyan), Some(" MAGIC "))
+            (Some(Color::Cyan), Some("MAGIC"))
         }
         _ => (None, None),
     };
@@ -37,7 +37,7 @@ pub fn render_dynamic_pane(
     // Left title: Interaction Info / World Name (if needed)
     if let Some(interaction) = view.active_interaction {
         let title_text = format!(
-            " {} ",
+            " {} | [ESC] to cancel ",
             match interaction {
                 Interaction::Targeting { .. } => "Targeting",
                 Interaction::Healing { .. } => "Healing",
@@ -59,7 +59,7 @@ pub fn render_dynamic_pane(
     if let Some(title_text) = combat_title {
         block = block.title(
             ratatui::widgets::block::Title::from(Span::styled(
-                format!("Combat: {}", title_text),
+                format!(" Combat mode: {} ", title_text),
                 Style::default().add_modifier(Modifier::BOLD),
             ))
             .alignment(ratatui::layout::Alignment::Right),

@@ -201,6 +201,11 @@ impl GameState {
                     session
                         .queued_items
                         .retain(|queued_guid| *queued_guid != guid);
+
+                    if session.queued_items.is_empty() {
+                        self.view.active_interaction = None;
+                        self.view.salvaging = None;
+                    }
                     result.needs_redraw = true;
                 }
             }

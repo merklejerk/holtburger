@@ -1,8 +1,6 @@
 use crate::entity::Entity;
 use crate::stats::{Skill, SkillType, TrainingLevel};
-use holtburger_common::properties::{
-    ItemType, PropertyBool, PropertyInt, WorldObjectPropertyAccessors,
-};
+use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectPropertyAccessors};
 
 const MAX_SALVAGE_BAG_UNITS: u32 = 100;
 
@@ -95,14 +93,6 @@ impl WorkingBag {
     }
 }
 
-pub fn is_salvage_candidate(entity: &Entity, is_offered_in_trade: bool) -> bool {
-    if entity.get_bool_prop(PropertyBool::Retained) || is_offered_in_trade {
-        return false;
-    }
-
-    entity.material_type().is_some() && entity.workmanship().is_some()
-}
-
 pub fn best_trained_tinkering_skill<'a>(skills: impl IntoIterator<Item = &'a Skill>) -> u32 {
     skills
         .into_iter()
@@ -146,7 +136,7 @@ pub fn predict_salvage_preview(
     }
 }
 
-pub fn material_name(material_type: u32) -> &'static str {
+pub fn get_material_name(material_type: u32) -> &'static str {
     match material_type {
         0 => "Unknown",
         1 => "Ceramic",

@@ -1,7 +1,7 @@
 use crate::entity::Entity;
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
-use holtburger_common::properties::ItemType;
+use holtburger_common::properties::{ItemType, PropertyBool, WorldObjectPropertyAccessors};
 use holtburger_protocol::messages::combat::CombatMode;
 
 /// Provides access to the world state for common logic.
@@ -166,6 +166,30 @@ pub trait WorldContextExt: WorldContext {
 
     fn is_wielding_caster(&self) -> bool {
         self.get_suggested_combat_mode() == CombatMode::Magic
+    }
+
+    fn is_salvage_candidate(&self, guid: Guid) -> bool {
+        let Some(entity) = self.get_entity(guid) else {
+            return false;
+        };
+
+        if entity.get_bool_prop(PropertyBool::Retained) {
+            return false;
+        }
+
+        let Some(item_type) = entity.item_type() else {
+            return false;
+        };
+
+        if item_type.contains(ItemType::TINKERING_MATERIAL) {
+            let structure = entity.structure().unwrap_or(0);
+            let max_structure = entity.max_structure().unwrap_or(0);
+            if structure >= max_structure && max_structure > 0 {
+                return false;
+            }
+        }
+
+        entity.material_type().is_some() && entity.workmanship().is_some()
     }
 
     /// Finds a non-full container in the player's possession.

@@ -1,6 +1,85 @@
 use super::*;
+use std::collections::HashSet;
+
+const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
+const CONSERVATIVE_VISIBILITY_DISTANCE_M: f32 = 384.0;
 
 impl WorldState {
+    fn current_visible_world_guids(&self) -> HashSet<Guid> {
+        if self.player.guid == Guid::NULL {
+            return HashSet::new();
+        }
+
+        let player_landblock = self.player.position.landblock_id;
+        if player_landblock == Guid::NULL {
+            return HashSet::new();
+        }
+
+        let nearby_guids = self.scene.get_nearby_entities(player_landblock);
+
+        self.entities
+            .iter()
+            .filter(|entity| entity.guid != self.player.guid)
+            .filter(|entity| entity.position.landblock_id != Guid::NULL)
+            .filter(|entity| self.is_entity_world_participant(entity.guid))
+            .filter(|entity| self.is_conservatively_visible_world_entity(entity, &nearby_guids))
+            .map(|entity| entity.guid)
+            .collect()
+    }
+
+    // TODO: Replace this conservative approximation with ACE-parity cell visibility.
+    // ACE decides visibility from the current ObjCell, not just from landblock adjacency.
+    // Proper parity here requires consulting cell.dat envcell records so we can:
+    // 1. detect whether the player's current cell is an EnvCell,
+    // 2. read SeenOutside for that cell,
+    // 3. union the current envcell with its VisibleCells,
+    // 4. merge outdoor landblock-neighborhood visibility only for SeenOutside envcells.
+    // Until we wire that up, prefer retaining too much over pruning too aggressively.
+    fn is_conservatively_visible_world_entity(
+        &self,
+        entity: &Entity,
+        nearby_guids: &HashSet<Guid>,
+    ) -> bool {
+        nearby_guids.contains(&entity.guid)
+            || self.player.position.distance_to(&entity.position)
+                <= CONSERVATIVE_VISIBILITY_DISTANCE_M
+    }
+
+    fn maintain_visibility_prune_deadlines(&mut self, now: f64) {
+        let visible_guids = self.current_visible_world_guids();
+        let world_entity_guids: Vec<_> = self
+            .entities
+            .iter()
+            .filter(|entity| entity.guid != self.player.guid)
+            .filter(|entity| entity.position.landblock_id != Guid::NULL)
+            .map(|entity| entity.guid)
+            .collect();
+
+        for guid in world_entity_guids {
+            if visible_guids.contains(&guid) {
+                self.clear_entity_prune_deadline(guid);
+                continue;
+            }
+
+            let Some(snapshot) = self.retention_snapshot(guid, now) else {
+                continue;
+            };
+
+            if snapshot.explicit_delete_requested || snapshot.has_nonworld_retention() {
+                self.clear_entity_prune_deadline(guid);
+                continue;
+            }
+
+            if self
+                .entity_lifecycle_state(guid)
+                .and_then(|state| state.prune_deadline)
+                .is_none()
+            {
+                self.set_entity_prune_deadline(guid, now + ACE_DESTRUCTION_TIMEOUT_SECS);
+            }
+        }
+    }
+
     pub fn get_nearby_entities(&self) -> Vec<Entity> {
         if self.player.guid == Guid::NULL {
             return Vec::new();
@@ -11,6 +90,7 @@ impl WorldState {
         let nearby_guids = self.scene.get_nearby_entities(lb);
         nearby_guids
             .into_iter()
+            .filter(|guid| self.is_entity_world_participant(*guid))
             .filter_map(|guid| self.entities.get(guid).cloned())
             .collect()
     }
@@ -18,6 +98,10 @@ impl WorldState {
         let nearby = self.scene.get_nearby_entities(lb);
         for guid in nearby {
             if guid == self.player.guid {
+                continue;
+            }
+
+            if !self.is_entity_world_participant(guid) {
                 continue;
             }
 
@@ -51,6 +135,9 @@ impl WorldState {
     }
     pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<StateEvent> {
         let mut events = Vec::new();
+        let now = self.current_server_time();
+        self.sweep_eviction_queue(now, &mut events);
+        self.maintain_visibility_prune_deadlines(now);
 
         if self.player.guid == Guid::NULL {
             return events;

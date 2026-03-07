@@ -1,7 +1,8 @@
 use binrw::BinRead;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessors,
+    EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, WorldObjectPropertyAccessors,
+    WorldObjectPropertyAccessorsMut,
 };
 use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
@@ -12,6 +13,7 @@ use crate::StateEvent;
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::SpatialScene;
+use crate::state::liveness::EntityLifecycleStore;
 use crate::state::trade::TradeState;
 use crate::stats;
 use crate::vendor::VendorState;
@@ -47,6 +49,7 @@ pub struct WorldState {
     pub vendor: Option<VendorState>,
     pub trade: Option<TradeState>,
     pub open_containers: std::collections::HashSet<Guid>,
+    pub(crate) entity_lifecycle: EntityLifecycleStore,
 }
 
 impl WorldState {
@@ -197,6 +200,7 @@ impl WorldState {
             vendor: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
+            entity_lifecycle: EntityLifecycleStore::default(),
         }
     }
 
@@ -245,6 +249,50 @@ impl WorldState {
         let guid = guid.into();
         if let Some(entity) = self.entities.remove(guid) {
             self.scene.remove_entity(guid, entity.position.landblock_id);
+            self.entity_lifecycle.clear(guid);
+
+            let dependent_guids: Vec<_> = self
+                .entities
+                .iter()
+                .filter(|dependent| {
+                    dependent.container_id() == Some(guid)
+                        || dependent.wielder_id() == Some(guid)
+                        || dependent.physics_parent_id == Some(guid)
+                })
+                .map(|dependent| dependent.guid)
+                .collect();
+
+            for dependent_guid in dependent_guids {
+                let mut detached = false;
+
+                if let Some(dependent) = self.entities.get_mut(dependent_guid) {
+                    if dependent.container_id() == Some(guid) {
+                        dependent.set_container_id(None);
+                        detached = true;
+                    }
+
+                    if dependent.wielder_id() == Some(guid) {
+                        dependent.set_wielder_id(None);
+                        dependent.set_int_prop(
+                            PropertyInt::CurrentWieldedLocation,
+                            EquipMask::NONE.bits() as i32,
+                        );
+                        detached = true;
+                    }
+
+                    if dependent.physics_parent_id == Some(guid) {
+                        dependent.physics_parent_id = None;
+                        detached = true;
+                    }
+                }
+
+                if detached {
+                    self.sync_player_ownership_for_entity(dependent_guid);
+                    let _ = self
+                        .mark_entity_immediately_eligible_for_pruning_if_unretained(dependent_guid);
+                }
+            }
+
             Some(entity)
         } else {
             None

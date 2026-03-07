@@ -64,7 +64,7 @@ impl MovementSystem {
         session: &mut Session,
     ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
         let player_pos = world.player.position.coords;
-        let target_pos = if let Some(target) = world.entities.get(target_guid) {
+        let target_pos = if let Some(target) = world.get_visible_entity(target_guid) {
             target.position.coords
         } else {
             log::warn!("Approach aborted: Target 0x{:08X} not found", target_guid);
@@ -198,7 +198,7 @@ impl MovementSystem {
                 // If the turn has a heading, use it. Some TurnToObjects have 0.0 which means "compute it".
                 if tto.desired_heading.abs() > 1e-6 {
                     next_pos.rotation = Quaternion::from_heading(tto.desired_heading);
-                } else if let Some(target) = world.entities.get(tto.target) {
+                } else if let Some(target) = world.get_visible_entity(tto.target) {
                     // Try to compute heading to target (West = 0, North = 90, East = 180, South = 270)
                     // We only do this if they are in the same landblock for now.
                     if target.position.landblock_id == next_pos.landblock_id {

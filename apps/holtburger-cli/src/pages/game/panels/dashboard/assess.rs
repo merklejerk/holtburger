@@ -1,13 +1,21 @@
+use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::{
-    PropertyInt, PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors,
+    PropertyBool, PropertyInt, PropertyString, WorldObjectExt as _,
+    WorldObjectPropertyAccessors,
 };
+
+use holtburger_world::crafting::salvage::get_material_name;
 use holtburger_world::entity::Entity;
+use holtburger_world::magic::calculate_mana_time_left;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::UnicodeWidthStr;
+use std::collections::HashMap;
 
 /// Generates a list of strings representing human-friendly assessment information for an entity.
-pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
+pub fn get_assess_info(
+    entity: &Entity,
+    spell_lookup: Option<&HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>>,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     // Header - Prominent
@@ -51,6 +59,99 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled("Burden: ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{}bu", burden), Style::default().fg(Color::White)),
+        ]));
+    }
+
+    // Material and Workmanship
+    if let Some(mat_type) = entity.get_int_prop(PropertyInt::MaterialType) {
+        lines.push(Line::from(vec![
+            Span::styled("Material:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                get_material_name(mat_type as u32),
+                Style::default().fg(Color::White),
+            ),
+        ]));
+    }
+    if let Some(workmanship) = entity.get_int_prop(PropertyInt::ItemWorkmanship) {
+        lines.push(Line::from(vec![
+            Span::styled("Workmanship: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{}", workmanship), Style::default().fg(Color::White)),
+        ]));
+    }
+
+    // Tinkering
+    if let Some(tinkers) = entity.get_int_prop(PropertyInt::NumTimesTinkered) {
+        if tinkers > 0 {
+            lines.push(Line::from(vec![
+                Span::styled("Tinkered:    ", Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{} times", tinkers), Style::default().fg(Color::White)),
+            ]));
+        }
+    }
+
+    // Item Mana
+    let cur_mana = entity.get_int_prop(PropertyInt::ItemCurMana);
+    let max_mana = entity.get_int_prop(PropertyInt::ItemMaxMana);
+    if let Some(max) = max_mana {
+        let cur = cur_mana.unwrap_or(0);
+        let mut mana_line = vec![
+            Span::styled("Mana:        ", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{}/{}", cur, max), Style::default().fg(Color::Blue)),
+        ];
+
+        // Spellcraft
+        if let Some(sc) = entity.get_int_prop(PropertyInt::ItemSpellcraft) {
+            mana_line.push(Span::styled(" (", Style::default().fg(Color::DarkGray)));
+            mana_line.push(Span::styled(format!("{}", sc), Style::default().fg(Color::Cyan)));
+            mana_line.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
+        }
+        lines.push(Line::from(mana_line));
+
+        // Time left (if it has a rate)
+        if let Some(rate) = entity.get_float_prop(holtburger_common::properties::PropertyFloat::ManaRate) {
+            if let Some(seconds_left) = calculate_mana_time_left(cur, rate) {
+                lines.push(Line::from(vec![
+                    Span::styled("Mana Left:   ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(format_duration(seconds_left), Style::default().fg(Color::Blue)),
+                ]));
+            }
+        }
+    }
+
+    // Possession States
+    let is_retained = entity.get_bool_prop(PropertyBool::Retained);
+    let is_bonded = entity.get_int_prop(PropertyInt::Bonded).unwrap_or(0) != 0;
+    let attuned = entity.get_int_prop(PropertyInt::Attuned).unwrap_or(0);
+
+    let mut states = Vec::new();
+    if is_retained {
+        states.push(Span::styled("Retained", Style::default().fg(Color::Magenta)));
+    }
+    if is_bonded {
+        states.push(Span::styled("Bonded", Style::default().fg(Color::Magenta)));
+    }
+    match attuned {
+        1 => states.push(Span::styled("Attuned", Style::default().fg(Color::Magenta))),
+        2 => states.push(Span::styled("Sticky", Style::default().fg(Color::Red))),
+        _ => {}
+    }
+
+    if !states.is_empty() {
+        let mut line = vec![Span::styled("Status:      ", Style::default().fg(Color::DarkGray))];
+        for (i, state) in states.into_iter().enumerate() {
+            if i > 0 {
+                line.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
+            }
+            line.push(state);
+        }
+        lines.push(Line::from(line));
+    }
+
+    // Locked status
+    if entity.get_bool_prop(PropertyBool::Locked) {
+        lines.push(Line::from(vec![
+            Span::styled("Locked:      ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Yes", Style::default().fg(Color::Red)),
         ]));
     }
 
@@ -190,36 +291,40 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     if let Some(use_msg) = entity.get_string_prop(PropertyString::Use) {
         lines.push(Line::from(vec![
             Span::styled("Use:    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(use_msg.to_owned(), Style::default().fg(Color::White)),
         ]));
+        for wrapped in wrap_text(use_msg, 36) {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(wrapped, Style::default().fg(Color::White)),
+            ]));
+        }
     }
 
-    lines
-}
+    // Spellbook
+    if !entity.spell_book.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Spells:",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
 
-fn wrap_text(text: &str, width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    for paragraph in text.split('\n') {
-        if paragraph.is_empty() {
-            lines.push("".to_string());
-            continue;
-        }
-
-        let mut current_line = String::new();
-        for word in paragraph.split_whitespace() {
-            if current_line.is_empty() {
-                current_line.push_str(word);
-            } else if current_line.width() + 1 + word.width() <= width {
-                current_line.push(' ');
-                current_line.push_str(word);
-            } else {
-                lines.push(current_line);
-                current_line = word.to_string();
+        for spell_id in &entity.spell_book {
+            if let Some(lookup) = spell_lookup {
+                if let Some(info) = lookup.get(spell_id) {
+                    lines.push(Line::from(vec![
+                        Span::styled("  - ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(info.name.clone(), Style::default().fg(Color::Cyan)),
+                    ]));
+                    continue;
+                }
             }
-        }
-        if !current_line.is_empty() {
-            lines.push(current_line);
+            lines.push(Line::from(vec![
+                Span::styled("  - ", Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("Unknown Spell ({})", spell_id), Style::default().fg(Color::DarkGray)),
+            ]));
         }
     }
+
     lines
 }
+

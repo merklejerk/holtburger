@@ -568,7 +568,7 @@ pub trait TabController {
         match view.context_view {
             ContextView::Assess(guid) => {
                 if let Some(e) = data.entities.get(&guid) {
-                    return assess::get_assess_info(e);
+                    return assess::get_assess_info(e, Some(&data.spell_info));
                 }
                 vec![]
             }

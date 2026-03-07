@@ -909,6 +909,47 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
 }
 
 #[test]
+fn test_indoor_player_keeps_nearby_outdoor_entity_visible_under_conservative_heuristic() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000132);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x0A0A0100),
+        coords: Vector3::new(96.0, 96.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    let nearby_outdoor_pos = WorldPosition {
+        landblock_id: Guid(0x0A0AFFFF),
+        coords: Vector3::new(100.0, 100.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+    state.add_entity(Entity::new(player_guid, "Player".to_string(), player_pos));
+
+    let target_guid = Guid(0x60000136);
+    state.add_entity(Entity::new(
+        target_guid,
+        "SeenOutside-ish".to_string(),
+        nearby_outdoor_pos,
+    ));
+
+    let events = state.tick(0.016, 0.35);
+
+    assert!(events.is_empty());
+    assert!(state.entities.get(target_guid).is_some());
+    assert!(
+        state
+            .entity_lifecycle_state(target_guid)
+            .is_none_or(|lifecycle| lifecycle.prune_deadline.is_none())
+    );
+}
+
+#[test]
 fn test_nearby_entities_omit_explicit_delete_and_null_landblock() {
     let mut state = WorldState::new(None, None);
     let player_guid = Guid(0x50000133);

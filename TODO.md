@@ -154,6 +154,7 @@
 - [x] Spell casting should auto combat.
 - [x] Nearby tab lists things in inventory sub-packs.
 - [x] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
+- [x] Entities not on same landblock are getting pruned.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -173,6 +174,8 @@
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] No trade/vendor verbs when in an interaction.
+- [ ] Can't pick up items in chests.
+- [ ] Items in chests persisting between relocks.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -180,7 +183,7 @@
 - [x] flags and weenie flags should also be converted to properties!
 - [x] Note that Windows Terminal is preinstalled on windows 11, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe) if you get an error about missing `VCRuntime140.dll`, and you may have to whitelist the exe with Windows D>efender by attempting to run it once, hit "Learn More" and then select "Run anyway".
 - [x] Character chosen in selection screen does not match actual selected character.
-- [ ] Not pruning entities!
+- [x] Not pruning entities!
     - When they go out of range/teleported.
     - When a trade is closed?
 

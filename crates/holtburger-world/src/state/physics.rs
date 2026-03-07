@@ -2,10 +2,7 @@ use super::*;
 use std::collections::HashSet;
 
 const ACE_DESTRUCTION_TIMEOUT_SECS: f64 = 25.0;
-
-fn uses_outdoor_visibility_neighbors(landblock_id: Guid) -> bool {
-    (landblock_id & 0x0000_FFFF) == 0x0000_FFFF
-}
+const CONSERVATIVE_VISIBILITY_DISTANCE_M: f32 = 384.0;
 
 impl WorldState {
     fn current_visible_world_guids(&self) -> HashSet<Guid> {
@@ -18,19 +15,34 @@ impl WorldState {
             return HashSet::new();
         }
 
-        let candidate_guids = if uses_outdoor_visibility_neighbors(player_landblock) {
-            self.scene.get_nearby_entities(player_landblock)
-        } else {
-            self.scene
-                .get_in_landblock(player_landblock)
-                .cloned()
-                .unwrap_or_default()
-        };
+        let nearby_guids = self.scene.get_nearby_entities(player_landblock);
 
-        candidate_guids
-            .into_iter()
-            .filter(|guid| self.is_entity_world_participant(*guid))
+        self.entities
+            .iter()
+            .filter(|entity| entity.guid != self.player.guid)
+            .filter(|entity| entity.position.landblock_id != Guid::NULL)
+            .filter(|entity| self.is_entity_world_participant(entity.guid))
+            .filter(|entity| self.is_conservatively_visible_world_entity(entity, &nearby_guids))
+            .map(|entity| entity.guid)
             .collect()
+    }
+
+    // TODO: Replace this conservative approximation with ACE-parity cell visibility.
+    // ACE decides visibility from the current ObjCell, not just from landblock adjacency.
+    // Proper parity here requires consulting cell.dat envcell records so we can:
+    // 1. detect whether the player's current cell is an EnvCell,
+    // 2. read SeenOutside for that cell,
+    // 3. union the current envcell with its VisibleCells,
+    // 4. merge outdoor landblock-neighborhood visibility only for SeenOutside envcells.
+    // Until we wire that up, prefer retaining too much over pruning too aggressively.
+    fn is_conservatively_visible_world_entity(
+        &self,
+        entity: &Entity,
+        nearby_guids: &HashSet<Guid>,
+    ) -> bool {
+        nearby_guids.contains(&entity.guid)
+            || self.player.position.distance_to(&entity.position)
+                <= CONSERVATIVE_VISIBILITY_DISTANCE_M
     }
 
     fn maintain_visibility_prune_deadlines(&mut self, now: f64) {

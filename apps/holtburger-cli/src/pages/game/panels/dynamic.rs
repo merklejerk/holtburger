@@ -1,3 +1,4 @@
+use crate::pages::game::salvaging::format_salvage_results;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
@@ -43,6 +44,7 @@ pub fn render_dynamic_pane(
                 Interaction::Healing { .. } => "Healing",
                 Interaction::Moving { .. } => "Moving",
                 Interaction::Combining { .. } => "Combining",
+                Interaction::Salvaging => "Salvaging",
             }
         );
 
@@ -78,11 +80,35 @@ pub fn render_dynamic_pane(
 
     // --- 1. Interaction Info / World Name ---
     if let Some(interaction) = view.active_interaction {
+        if interaction == Interaction::Salvaging {
+            let preview = view
+                .salvaging
+                .as_ref()
+                .map(|session| data.salvage_preview(&session.queued_items))
+                .unwrap_or_else(|| data.salvage_preview(&[]));
+
+            let line = Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!(
+                        "{} items for {}",
+                        preview.item_count,
+                        format_salvage_results(&preview.bags)
+                    ),
+                    Style::default().add_modifier(Modifier::BOLD),
+                ),
+            ]);
+
+            f.render_widget(Paragraph::new(line), chunks[0]);
+            return;
+        }
+
         let target_guid = match interaction {
             Interaction::Moving { item_guid } => item_guid,
             Interaction::Healing { item_guid } => item_guid,
             Interaction::Targeting { target_guid } => target_guid,
             Interaction::Combining { item_guid } => item_guid,
+            Interaction::Salvaging => unreachable!(),
         };
 
         let (name, guid) = if let Some(entity) = data.entities.get(&target_guid) {

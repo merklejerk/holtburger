@@ -164,6 +164,23 @@ impl TabController for InventoryTab {
         let mut verbs = Vec::new();
 
         if let Some((cur_entity, _, _)) = entities.get(self.selected_index) {
+            verbs.extend([
+                Verb::new(
+                    vec![AppAction::Assess {
+                        guid: cur_entity.guid,
+                    }],
+                    'a',
+                    "Assess",
+                ),
+                Verb::new(
+                    vec![AppAction::QueryDebugInfo {
+                        target: CommandTarget::Entity(cur_entity.guid),
+                    }],
+                    'g',
+                    "Debug",
+                ),
+            ]);
+
             let class = classify_entity(cur_entity);
             let player_guid = data.player_guid;
 
@@ -207,6 +224,43 @@ impl TabController for InventoryTab {
                                 "Use with target",
                             ));
                         }
+                        return verbs;
+                    }
+                    Interaction::Salvaging => {
+                        let Some(session) = view.salvaging.as_ref() else {
+                            return verbs;
+                        };
+                        let is_queued = session.queued_items.contains(&cur_entity.guid);
+
+                        if is_queued && !session.queued_items.is_empty() {
+                            verbs.push(Verb::new(
+                                AppAction::SalvageItems {
+                                    ust_guid: session.ust_guid,
+                                    item_guids: session.queued_items.clone(),
+                                },
+                                '\r',
+                                "Confirm salvage",
+                            ));
+
+                            verbs.push(Verb::new(
+                                AppAction::UnqueueSalvageItem {
+                                    guid: cur_entity.guid,
+                                },
+                                'v',
+                                "Unsalvage",
+                            ));
+                        }
+
+                        if !is_queued && data.is_salvage_candidate(cur_entity.guid) {
+                            verbs.push(Verb::new(
+                                AppAction::QueueSalvageItem {
+                                    guid: cur_entity.guid,
+                                },
+                                'v',
+                                "Salvage",
+                            ));
+                        }
+
                         return verbs;
                     }
                     Interaction::Moving {
@@ -278,14 +332,6 @@ impl TabController for InventoryTab {
                 }
             }
 
-            verbs.push(Verb::new(
-                vec![AppAction::Assess {
-                    guid: cur_entity.guid,
-                }],
-                'a',
-                "Assess",
-            ));
-
             match class {
                 EntityClass::Tool
                 | EntityClass::Container
@@ -338,6 +384,22 @@ impl TabController for InventoryTab {
                     ));
                 }
                 _ => {}
+            }
+
+            if data.find_salvage_tool_guid().is_some() && data.is_salvage_candidate(cur_entity.guid)
+            {
+                verbs.push(Verb::new(
+                    vec![
+                        AppAction::BeginInteraction {
+                            interaction: Interaction::Salvaging,
+                        },
+                        AppAction::QueueSalvageItem {
+                            guid: cur_entity.guid,
+                        },
+                    ],
+                    'v',
+                    "Salvage",
+                ));
             }
 
             if !cur_entity.is_attuned_sticky() {
@@ -411,14 +473,6 @@ impl TabController for InventoryTab {
                     "Sell",
                 ));
             }
-
-            verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo {
-                    target: CommandTarget::Entity(cur_entity.guid),
-                }],
-                'g',
-                "Debug",
-            ));
         }
 
         verbs

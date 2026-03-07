@@ -244,12 +244,12 @@ impl ProtocolPack for StackableSplitTo3DActionData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
-pub struct CreateTinkeringToolActionData {
+pub struct SalvageItemsWithActionData {
     pub tool_guid: Guid,
     pub items: Vec<Guid>,
 }
 
-impl ProtocolUnpack for CreateTinkeringToolActionData {
+impl ProtocolUnpack for SalvageItemsWithActionData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let tool_guid = Guid::unpack(data, offset)?;
         if *offset + 4 > data.len() {
@@ -261,11 +261,11 @@ impl ProtocolUnpack for CreateTinkeringToolActionData {
         for _ in 0..item_count {
             items.push(Guid::unpack(data, offset)?);
         }
-        Some(CreateTinkeringToolActionData { tool_guid, items })
+        Some(SalvageItemsWithActionData { tool_guid, items })
     }
 }
 
-impl ProtocolPack for CreateTinkeringToolActionData {
+impl ProtocolPack for SalvageItemsWithActionData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.tool_guid.pack(buf);
         buf.write_u32::<LittleEndian>(self.items.len() as u32)
@@ -354,10 +354,10 @@ mod tests {
     }
 
     #[test]
-    fn test_create_tinkering_tool_parity() {
+    fn test_salvage_items_with_parity() {
         let action = GameMessage::GameAction(Box::new(GameActionMessage {
             sequence: 1,
-            action: GameAction::CreateTinkeringTool(Box::new(CreateTinkeringToolActionData {
+            action: GameAction::SalvageItemsWith(Box::new(SalvageItemsWithActionData {
                 tool_guid: Guid(0x50000201),
                 items: vec![Guid(0x50000100)],
             })),

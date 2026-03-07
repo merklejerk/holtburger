@@ -1560,6 +1560,51 @@ fn test_late_container_item_arrival_is_marked_preview_and_pruned_on_close() {
 }
 
 #[test]
+fn test_closed_container_update_preserves_preview_provenance_and_prune_deadline() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x7000015C);
+    let item_guid = Guid(0x6000015C);
+
+    state.server_time = Some(ServerTimeSync {
+        server_time: 100.0,
+        local_time: Instant::now(),
+    });
+
+    let mut item = Entity::new(
+        item_guid,
+        "Late Closed Chest Item".to_string(),
+        WorldPosition::default(),
+    );
+    item.position.landblock_id = Guid::NULL;
+    item.set_container_id(Some(container_guid));
+    state.entities.insert(item);
+    state.mark_container_preview(item_guid);
+    state.set_entity_prune_deadline(item_guid, 125.0);
+
+    let update_msg =
+        GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
+            sequence: 0,
+            guid: item_guid,
+            property: PropertyInstanceId::Container as u32,
+            value: container_guid,
+        }));
+
+    let _ = state.handle_message(&update_msg);
+
+    assert!(
+        state
+            .entity_lifecycle_state(item_guid)
+            .is_some_and(|state| state.container_preview)
+    );
+    assert!(
+        state
+            .entity_lifecycle_state(item_guid)
+            .and_then(|state| state.prune_deadline)
+            .is_some()
+    );
+}
+
+#[test]
 fn test_close_ground_container_preserves_entity_with_other_retention() {
     let mut state = WorldState::new(None, None);
     let player_guid = Guid(0x50000153);

@@ -358,10 +358,10 @@ impl WorldState {
         match property {
             PropertyInstanceId::Container | PropertyInstanceId::Wielder => {
                 if property == PropertyInstanceId::Container {
-                    if value != Guid::NULL && self.open_containers.contains(&value) {
-                        self.mark_container_preview(target_guid);
-                    } else {
+                    if value == Guid::NULL {
                         self.clear_container_preview(target_guid);
+                    } else if self.open_containers.contains(&value) {
+                        self.mark_container_preview(target_guid);
                     }
                 }
 

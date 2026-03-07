@@ -143,11 +143,6 @@ pub(crate) fn handle_event(
         }
         GameEvent::CloseGroundContainer(data) => {
             let item_guids = state.current_container_preview_item_guids(data.container_guid);
-            log::info!(
-                "Closing container {} with items {:?}",
-                data.container_guid,
-                item_guids
-            );
             state.open_containers.remove(&data.container_guid);
             events.push(StateEvent::ContainerClosed(data.container_guid));
             state.mark_container_preview_entities_for_prune(&item_guids);

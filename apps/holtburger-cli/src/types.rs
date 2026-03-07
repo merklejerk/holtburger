@@ -5,6 +5,7 @@ use crate::pages::selection::SelectionState;
 use crate::state::RenderContext;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::combat::CombatMode;

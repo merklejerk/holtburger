@@ -1,4 +1,6 @@
-use holtburger_common::properties::{PropertyInt, PropertyString, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{
+    PropertyInt, PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors,
+};
 use holtburger_world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -36,13 +38,16 @@ pub fn get_assess_info(entity: &Entity) -> Vec<Line<'static>> {
     }
 
     // Basic Stats
-    if let Some(value) = entity.get_int_prop(PropertyInt::Value) {
+    if entity.item_value() > 0 {
         lines.push(Line::from(vec![
             Span::styled("Value:  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}", value), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{}", entity.item_value()),
+                Style::default().fg(Color::White),
+            ),
         ]));
     }
-    if let Some(burden) = entity.get_int_prop(PropertyInt::EncumbranceVal) {
+    if let Some(burden) = entity.burden() {
         lines.push(Line::from(vec![
             Span::styled("Burden: ", Style::default().fg(Color::DarkGray)),
             Span::styled(format!("{}bu", burden), Style::default().fg(Color::White)),

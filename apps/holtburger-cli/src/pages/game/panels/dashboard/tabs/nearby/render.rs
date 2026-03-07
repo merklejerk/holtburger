@@ -8,7 +8,7 @@ use super::tab::NearbyTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::utils::format_item_name;
-use holtburger_common::properties::WorldObjectPropertyAccessors;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 
@@ -80,7 +80,7 @@ fn render_nearby_item(
 
     let mut display_name = format_item_name(e, e.guid);
 
-    if e.get_bool_prop(holtburger_common::properties::PropertyBool::Locked) {
+    if e.is_locked() {
         display_name = format!("{} [Locked]", display_name);
     }
 

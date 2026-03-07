@@ -4,7 +4,7 @@ use crate::pages::game::ViewState;
 use crate::types::CommandTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, PropertyFloat, PropertyInt, PropertyString,
+    EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
@@ -39,22 +39,9 @@ pub fn get_debug_info(
             else {
                 return lines;
             };
-            let name = v
-                .properties
-                .strings
-                .get(&PropertyString::Name)
-                .cloned()
-                .unwrap_or_else(|| "Unknown".to_string());
-            let value = v
-                .properties
-                .ints
-                .get(&PropertyInt::Value)
-                .copied()
-                .unwrap_or(0);
-
-            lines.push(Line::from(format!("DEBUG VENDOR ITEM: {}", name)));
+            lines.push(Line::from(format!("DEBUG VENDOR ITEM: {}", v.name())));
             lines.push(Line::from(format!("GUID:   {:08X}", v.guid)));
-            lines.push(Line::from(format!("Value:  {}", value)));
+            lines.push(Line::from(format!("Value:  {}", v.item_value())));
             lines.push(Line::from(format!("WCID:   {}", v.wcid)));
         }
         CommandTarget::Entity(guid) | CommandTarget::EntityWithSlot(guid, _) => {

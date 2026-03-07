@@ -2,7 +2,7 @@ use binrw::BinRead;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, WorldObjectPropertyAccessors,
-    WorldObjectPropertyAccessorsMut,
+    WorldObjectPropertyAccessorsMut, WorldObjectExt as _,
 };
 use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};

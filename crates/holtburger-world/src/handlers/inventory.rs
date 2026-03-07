@@ -3,6 +3,7 @@ use crate::entity::Entity;
 use crate::state::WorldState;
 use crate::state::liveness::EntityUpsertKind;
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::properties::{
     PropertyInstanceId, PropertyUpdate, WorldObjectPropertyAccessorsMut,
 };

@@ -1,7 +1,7 @@
 use super::*;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectPropertyAccessors;
+use holtburger_common::properties::WorldObjectExt as _;
 
 impl WorldState {
     pub(crate) fn mark_entity_immediately_eligible_for_pruning_if_unretained(
@@ -27,11 +27,7 @@ impl WorldState {
             (
                 entity.container_id(),
                 entity.wielder_id(),
-                EquipMask::from_bits_truncate(
-                    entity
-                        .get_int_prop(PropertyInt::CurrentWieldedLocation)
-                        .unwrap_or(0) as u32,
-                ),
+                entity.wield_location(),
             )
         }) else {
             return;

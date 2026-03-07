@@ -10,7 +10,7 @@ use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::utils::format_item_name;
 use holtburger_common::Guid;
-use holtburger_common::properties::{EquipMask, ItemType};
+use holtburger_common::properties::{EquipMask, ItemType, WorldObjectExt as _};
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::crafting::salvage::get_material_name;
 use holtburger_world::entity::Entity;

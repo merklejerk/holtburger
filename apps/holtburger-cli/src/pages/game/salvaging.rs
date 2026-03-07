@@ -2,9 +2,9 @@ use super::GameData;
 use holtburger_common::Guid;
 use holtburger_common::properties::ItemType;
 use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessors};
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::crafting::salvage::{
-    SalvageItemInput, SalvagePreviewBag, SalvageSkillProfile, best_trained_tinkering_skill,
-    is_salvage_candidate, material_name, predict_salvage_preview,
+    SalvageItemInput, SalvageSkillProfile, best_trained_tinkering_skill, predict_salvage_preview,
 };
 
 impl GameData {
@@ -22,16 +22,15 @@ impl GameData {
     }
 
     pub fn is_salvage_candidate(&self, guid: Guid) -> bool {
-        let Some(entity) = self.entities.get(&guid) else {
+        if self
+            .trade
+            .as_ref()
+            .is_some_and(|trade| trade.self_side.items.contains(&guid))
+        {
             return false;
-        };
+        }
 
-        is_salvage_candidate(
-            entity,
-            self.trade
-                .as_ref()
-                .is_some_and(|trade| trade.self_side.items.contains(&guid)),
-        )
+        WorldContextExt::is_salvage_candidate(self, guid)
     }
 
     pub fn salvage_preview(
@@ -66,22 +65,4 @@ impl GameData {
             },
         )
     }
-}
-
-pub fn format_salvage_results(bags: &[SalvagePreviewBag]) -> String {
-    if bags.is_empty() {
-        return "no salvage".to_string();
-    }
-
-    bags.iter()
-        .map(|bag| {
-            format!(
-                "{} {}u @ {:.2} WS",
-                material_name(bag.material_type),
-                bag.units,
-                bag.workmanship
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ")
 }

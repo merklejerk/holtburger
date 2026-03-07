@@ -1,7 +1,7 @@
-use crate::pages::game::salvaging::format_salvage_results;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
+use holtburger_world::crafting::salvage::{SalvagePreviewBag, get_material_name};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -87,17 +87,17 @@ pub fn render_dynamic_pane(
                 .map(|session| data.salvage_preview(&session.queued_items))
                 .unwrap_or_else(|| data.salvage_preview(&[]));
 
-            let line = Line::from(vec![
+            let mut line_spans = vec![
                 Span::raw("  "),
                 Span::styled(
-                    format!(
-                        "{} items for {}",
-                        preview.item_count,
-                        format_salvage_results(&preview.bags)
-                    ),
+                    format!("{} items", preview.item_count),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
-            ]);
+                Span::raw(" for "),
+            ];
+            line_spans.extend(format_salvage_results(&preview.bags).spans);
+
+            let line = Line::from(line_spans);
 
             f.render_widget(Paragraph::new(line), chunks[0]);
             return;
@@ -119,7 +119,12 @@ pub fn render_dynamic_pane(
 
         let line = Line::from(vec![
             Span::raw("  "),
-            Span::styled(name, Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                name,
+                Style::default()
+                    .add_modifier(Modifier::BOLD)
+                    .fg(Color::Yellow),
+            ),
             Span::raw(format!(" ({:#010X})", guid)),
         ]);
 
@@ -134,4 +139,34 @@ pub fn render_dynamic_pane(
         let info = format!(" {}:{} on {} ", account_name, current_char, server);
         f.render_widget(Paragraph::new(info), chunks[0]);
     }
+}
+
+fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
+    if bags.is_empty() {
+        return Line::from("no salvage");
+    }
+
+    let mut spans = Vec::new();
+    for (i, bag) in bags.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(", "));
+        }
+        spans.push(Span::styled(
+            format!("{} ", get_material_name(bag.material_type)),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Yellow),
+        ));
+        spans.push(Span::styled(
+            format!("{}u", bag.units),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::raw(" @ "));
+        spans.push(Span::styled(
+            format!("{:.2} WS", bag.workmanship),
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    Line::from(spans)
 }

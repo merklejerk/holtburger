@@ -70,6 +70,7 @@
 - [x] Label locked chests and doors in nearby tab.
 - [x] Exit combat mode when trying to trade.
 - [x] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
+- [x] Context panel should reset to scroll offset 0.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -159,7 +160,15 @@
 - [x] Wielded items not being despawend along with their wielder.
 - [x] Items in chests persisting between relocks.
 - [x] No trade/vendor verbs when in an interaction.
-- [ ] Augment assess output with entity properties.
+- [x] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
+    - [x] Exit salvaging interaction mode when queue is empty.
+    - [x] Do not show salvage verb for full salvage bags.
+    - [x] Show material type of salvage bags in inventory tab.
+- [ ] Augment assess output with stored entity properties.
+- [ ] Display properties only provided in assess results in assess screen:
+    - [ ] Show salvage workmanship as float (`ItemWorkmanship / NumItemsInMaterial`).
+    - [ ] Mana charge + time left.
+    - [ ] Locked/Unlocked status.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
@@ -175,8 +184,9 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
-- [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] Display encumbrance (sticky line in inv tab?).
+- [ ] Add intelligent entity context scanners.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -196,3 +206,4 @@
 - [x] Weenies are sent entirely over the wire? (Verified: ACE sends all functional properties.)
 - [x] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
+- [ ] Is `WorldObjectPropertyAccessors` a pointless abstraction?

@@ -299,6 +299,10 @@ pub enum ClientCommand {
         item: Guid,
         target: Guid,
     },
+    SalvageItemsWith {
+        tool: Guid,
+        items: Vec<Guid>,
+    },
     CastTargetedSpell {
         target: Guid,
         spell_id: u32,

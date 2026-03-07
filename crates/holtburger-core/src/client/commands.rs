@@ -1,7 +1,7 @@
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
-use holtburger_common::properties::{EquipMask, PseudoEquipMask};
+use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
@@ -25,6 +25,7 @@ impl Client {
             | ClientCommand::Use(_)
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
+            | ClientCommand::SalvageItemsWith { .. }
             | ClientCommand::CastTargetedSpell { .. }
             | ClientCommand::CastUntargetedSpell { .. }
             | ClientCommand::Buy { .. }
@@ -165,6 +166,16 @@ impl Client {
                     UseWithTargetActionData {
                         item_guid: item,
                         target_guid: target,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::SalvageItemsWith { tool, items } => {
+                log::info!(">>> Salvaging {} item(s) with 0x{:08X}", items.len(), tool);
+                self.send_game_action(GameAction::SalvageItemsWith(Box::new(
+                    SalvageItemsWithActionData {
+                        tool_guid: tool,
+                        items,
                     },
                 )))
                 .await

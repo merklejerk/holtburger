@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt as _;
 
 use crate::StateEvent;
 use crate::entity::Entity;

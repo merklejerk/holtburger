@@ -8,6 +8,7 @@
 //!   narrow state mutations plus [`StateEvent`] emission.
 
 pub mod context;
+pub mod crafting;
 pub mod entity;
 pub mod events;
 pub mod handlers;

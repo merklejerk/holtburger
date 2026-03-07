@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 
 use holtburger_common::Guid;
@@ -209,10 +207,6 @@ impl WorldState {
             self.clear_entity_prune_deadline(guid);
         }
         Some(snapshot)
-    }
-
-    pub(crate) fn is_entity_pending_eviction(&self, guid: Guid) -> bool {
-        self.should_evict_entity(guid, self.current_server_time())
     }
 
     pub(crate) fn should_evict_entity(&self, guid: Guid, now: f64) -> bool {

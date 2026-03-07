@@ -243,7 +243,12 @@ impl TabController for NearbyTab {
                 ));
             }
 
-            if !e.is_stuck() && e.is_root() {
+            // Item must not be stuck and is either on the ground or in an open container to be pickable.
+            if !e.is_stuck()
+                && (e.is_root()
+                    || e.container_id()
+                        .is_some_and(|c| data.open_containers.contains(&c)))
+            {
                 verbs.push(Verb::new(
                     vec![AppAction::PickUp {
                         item: e.guid,
@@ -251,6 +256,15 @@ impl TabController for NearbyTab {
                     }],
                     'p',
                     "Pick Up",
+                ));
+            }
+
+            // We can approach root items.
+            if e.is_root() {
+                verbs.push(Verb::new(
+                    vec![AppAction::Approach { guid: e.guid }],
+                    'r',
+                    "Approach",
                 ));
             }
 
@@ -272,7 +286,6 @@ impl TabController for NearbyTab {
                     'g',
                     "Debug",
                 ),
-                Verb::new(vec![AppAction::Approach { guid: e.guid }], 'r', "Approach"),
             ]);
 
             match class {

@@ -16,10 +16,9 @@ pub fn format_item_name<T: WorldObjectExt>(item: &T, guid: Guid) -> String {
     let is_salvage = item
         .item_type()
         .is_some_and(|item_type| item_type.contains(ItemType::TINKERING_MATERIAL));
-    if is_salvage
-        && let Some(idx) = display_name.rfind(" (") {
-            display_name.truncate(idx);
-        }
+    if is_salvage && let Some(idx) = display_name.rfind(" (") {
+        display_name.truncate(idx);
+    }
 
     let stack_size = item.stack_size();
     if stack_size > 1 {

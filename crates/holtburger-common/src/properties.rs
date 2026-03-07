@@ -1766,7 +1766,8 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     }
 
     fn usable(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::ItemUseable).map(|v| v as u32)
+        self.get_int_prop(PropertyInt::ItemUseable)
+            .map(|v| v as u32)
     }
 
     fn use_radius(&self) -> Option<f64> {
@@ -1899,7 +1900,9 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     }
 
     fn valid_locations(&self) -> EquipMask {
-        EquipMask::from_bits_truncate(self.get_int_prop(PropertyInt::ValidLocations).unwrap_or(0) as u32)
+        EquipMask::from_bits_truncate(
+            self.get_int_prop(PropertyInt::ValidLocations).unwrap_or(0) as u32
+        )
     }
 
     fn wield_location(&self) -> EquipMask {

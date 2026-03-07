@@ -1,6 +1,7 @@
 use crate::StateEvent;
 use crate::entity::Entity;
 use crate::state::WorldState;
+use crate::state::liveness::EntityUpsertKind;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     PropertyInstanceId, PropertyUpdate, WorldObjectPropertyAccessorsMut,
@@ -28,26 +29,34 @@ pub(crate) fn handle_message(
             );
             entity.apply_description(data);
 
-            if let Some(cid) = entity.container_id()
-                && (cid == state.player.guid || state.player.inventory.contains(&cid))
+            let guid = entity.guid;
+            let upsert_kind = state.upsert_entity_from_create(entity, events);
+            if state
+                .entities
+                .get(guid)
+                .and_then(|entity| entity.container_id())
+                .is_some_and(|container| state.open_containers.contains(&container))
             {
-                state.player.add_to_inventory(entity.guid);
+                state.mark_container_preview(guid);
             }
-            if let Some(wid) = entity.wielder_id()
-                && wid == state.player.guid
-            {
-                state.player.add_to_inventory(entity.guid);
+            state.sync_player_ownership_for_entity(guid);
+            let _ = state.reconcile_entity_retention(guid);
+
+            if matches!(upsert_kind, EntityUpsertKind::Inserted) {
+                return true;
             }
 
-            state.add_entity(entity.clone());
-            events.push(StateEvent::EntitySpawned(Box::new(entity)));
             true
         }
         GameMessage::ObjectDelete(data) => {
-            remove_entity_with_inventory_cleanup(state, data.guid, events)
+            state.update_player_inventory_recursive(data.guid, false);
+            state.mark_entity_explicit_delete(data.guid);
+            true
         }
         GameMessage::InventoryRemoveObject(data) => {
-            remove_entity_with_inventory_cleanup(state, data.object_guid, events)
+            state.update_player_inventory_recursive(data.object_guid, false);
+            state.mark_entity_explicit_delete(data.object_guid);
+            true
         }
         GameMessage::ParentEvent(data) => {
             if let Some(entity) = state.entities.get_mut(data.child_guid) {
@@ -61,6 +70,8 @@ pub(crate) fn handle_message(
                     entity.position.landblock_id = Guid::NULL;
                 }
 
+                let _ = state.reconcile_entity_retention(data.child_guid);
+
                 true
             } else {
                 false
@@ -68,25 +79,18 @@ pub(crate) fn handle_message(
         }
         GameMessage::PickupEvent(data) => {
             let guid = data.guid;
-            let mut should_remove = true;
-            if let Some(entity) = state.entities.get(guid)
-                && (entity.container_id().is_some()
-                    || entity.wielder_id().is_some()
-                    || entity.physics_parent_id.is_some())
-            {
-                should_remove = false;
+            let had_entity = state.entities.get(guid).is_some();
+            if !had_entity {
+                return false;
             }
 
-            if should_remove {
-                if state.remove_entity(guid).is_some() {
-                    events.push(StateEvent::EntityDespawned(guid));
-                    true
-                } else {
-                    false
-                }
-            } else {
-                state.clear_entity_world_presence(guid)
+            let _ = state.clear_entity_world_presence(guid);
+            let snapshot = state.reconcile_entity_retention(guid);
+            if snapshot.is_some_and(|retention| !retention.is_retained()) {
+                state.mark_entity_explicit_delete(guid);
             }
+
+            true
         }
         _ => false,
     }
@@ -110,13 +114,7 @@ pub(crate) fn handle_event(
 
             for item in &data.items {
                 let guid = item.guid;
-                if state.entities.get(guid).is_none() {
-                    let mut entity =
-                        Entity::new(guid, "Unknown Item".to_string(), Default::default());
-                    entity.set_iid_prop(PropertyInstanceId::Container, data.container);
-                    state.add_entity(entity.clone());
-                    events.push(StateEvent::EntitySpawned(Box::new(entity)));
-                } else if let Some(entity) = state.entities.get_mut(guid) {
+                if let Some(entity) = state.entities.get_mut(guid) {
                     let old_lb = entity.position.landblock_id;
                     if old_lb != Guid::NULL || entity.container_id() != Some(data.container) {
                         entity.set_iid_prop(PropertyInstanceId::Container, data.container);
@@ -134,14 +132,20 @@ pub(crate) fn handle_event(
                             )],
                         });
                     }
+
+                    state.mark_container_preview(guid);
+                    state.sync_player_ownership_for_entity(guid);
+                    let _ = state.reconcile_entity_retention(guid);
                 }
             }
 
             true
         }
         GameEvent::CloseGroundContainer(data) => {
+            let item_guids = state.current_container_preview_item_guids(data.container_guid);
             state.open_containers.remove(&data.container_guid);
             events.push(StateEvent::ContainerClosed(data.container_guid));
+            state.mark_container_preview_entities_for_prune(&item_guids);
             true
         }
         GameEvent::IdentifyObjectResponse(data) => {
@@ -185,19 +189,5 @@ pub(crate) fn handle_event(
             state.wield_entity_for(data.object_guid, event.target, data.equip_mask, events)
         }
         _ => false,
-    }
-}
-
-fn remove_entity_with_inventory_cleanup(
-    state: &mut WorldState,
-    guid: Guid,
-    events: &mut Vec<StateEvent>,
-) -> bool {
-    state.update_player_inventory_recursive(guid, false);
-    if state.remove_entity(guid).is_some() {
-        events.push(StateEvent::EntityDespawned(guid));
-        true
-    } else {
-        false
     }
 }

@@ -157,7 +157,6 @@ impl Entity {
             resist_color: None,
         }
     }
-
 }
 
 pub struct EntityManager {

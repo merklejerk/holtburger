@@ -132,10 +132,11 @@ fn render_inventory_item(
 
     if e.item_type()
         .is_some_and(|it| it.contains(ItemType::TINKERING_MATERIAL))
-        && let Some(mat_type) = e.material_type() {
-            let mat_name = get_material_name(mat_type);
-            display_name = format!("{} {}", mat_name, display_name);
-        }
+        && let Some(mat_type) = e.material_type()
+    {
+        let mat_name = get_material_name(mat_type);
+        display_name = format!("{} {}", mat_name, display_name);
+    }
 
     if is_equipped {
         display_name = format!("{} (EQUIPPED)", display_name);

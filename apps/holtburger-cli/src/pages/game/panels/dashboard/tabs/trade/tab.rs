@@ -63,8 +63,11 @@ impl TabController for TradeTab {
         let mut verbs = Vec::new();
         let target = self.get_target(data, view);
 
-        if interaction.is_some() {
-            return verbs;
+        match interaction {
+            None | Some(Interaction::Targeting { .. }) => {}
+            _ => {
+                return verbs;
+            }
         }
 
         if let Some(target_item) = match &target {

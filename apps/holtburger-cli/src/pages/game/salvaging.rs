@@ -1,7 +1,9 @@
 use super::GameData;
 use holtburger_common::Guid;
 use holtburger_common::properties::ItemType;
-use holtburger_common::properties::{PropertyInt, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{
+    PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
+};
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::crafting::salvage::{
     SalvageItemInput, SalvageSkillProfile, best_trained_tinkering_skill, predict_salvage_preview,

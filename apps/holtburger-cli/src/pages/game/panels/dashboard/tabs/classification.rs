@@ -1,5 +1,6 @@
 use holtburger_common::properties::{
-    ItemType, ObjectDescriptionFlag, PropertyBool, PropertyInt, WorldObjectProperties,
+    ItemType, ObjectDescriptionFlag, PropertyBool, PropertyInt, WorldObjectExt,
+    WorldObjectProperties, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::object::messages::PublicWeenieDescription;
 use holtburger_world::entity::Entity;
@@ -108,7 +109,7 @@ pub fn get_entity_color(class: EntityClass) -> Color {
 }
 
 pub fn classify_entity(entity: &Entity) -> EntityClass {
-    classify_raw(entity.flags, entity.item_type())
+    classify_world_object(entity.flags, entity)
 }
 
 pub fn classify_vendor_item(item: &CoreVendorItem) -> EntityClass {
@@ -116,15 +117,9 @@ pub fn classify_vendor_item(item: &CoreVendorItem) -> EntityClass {
 }
 
 pub fn classify_properties(props: &WorldObjectProperties) -> EntityClass {
-    let item_type = props
-        .ints
-        .get(&PropertyInt::ItemType)
-        .map(|v| ItemType::from_bits_truncate(*v as u32));
-
     let physics_state = props
-        .ints
-        .get(&PropertyInt::PhysicsState)
-        .map(|v| holtburger_common::properties::PhysicsState::from_bits_truncate(*v as u32))
+        .get_int_prop(PropertyInt::PhysicsState)
+        .map(|v| holtburger_common::properties::PhysicsState::from_bits_truncate(v as u32))
         .unwrap_or(holtburger_common::properties::PhysicsState::empty());
 
     // Let's create dummy flags for classify_raw based on what we know.
@@ -132,26 +127,16 @@ pub fn classify_properties(props: &WorldObjectProperties) -> EntityClass {
     if physics_state.contains(holtburger_common::properties::PhysicsState::STATIC) {
         flags |= ObjectDescriptionFlag::STUCK;
     }
-    if props
-        .bools
-        .get(&PropertyBool::Stuck)
-        .copied()
-        .unwrap_or(false)
-    {
+    if props.is_stuck() {
         flags |= ObjectDescriptionFlag::STUCK;
     }
-    if props
-        .bools
-        .get(&PropertyBool::Attackable)
-        .copied()
-        .unwrap_or(false)
-    {
+    if props.get_bool_prop(PropertyBool::Attackable) {
         flags |= ObjectDescriptionFlag::ATTACKABLE;
     }
     // Note: ItemType does not have a PLAYER flag, it's in ObjectDescriptionFlag.
     // We can't easily deduce it from properties alone unless we have a specific property.
 
-    classify_raw(flags, item_type)
+    classify_world_object(flags, props)
 }
 
 pub fn classify_description(desc: &PublicWeenieDescription) -> EntityClass {
@@ -265,4 +250,11 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
     }
 
     EntityClass::Unknown
+}
+
+fn classify_world_object<T: WorldObjectExt>(
+    flags: ObjectDescriptionFlag,
+    object: &T,
+) -> EntityClass {
+    classify_raw(flags, object.item_type())
 }

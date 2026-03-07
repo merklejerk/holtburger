@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use holtburger_common::Guid;
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;

@@ -1,6 +1,7 @@
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
+use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_world::crafting::salvage::{SalvagePreviewBag, get_material_name};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

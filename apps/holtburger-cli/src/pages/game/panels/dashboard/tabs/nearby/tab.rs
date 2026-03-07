@@ -3,7 +3,7 @@ use std::vec;
 
 use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_common::Guid;
-use holtburger_common::properties::PseudoEquipMask;
+use holtburger_common::properties::{PseudoEquipMask, WorldObjectExt as _};
 use holtburger_world::context::{WorldContext, WorldContextExt};
 use holtburger_world::entity::Entity;
 use ratatui::Frame;

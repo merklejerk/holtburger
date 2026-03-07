@@ -1,7 +1,7 @@
 use crate::entity::Entity;
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
-use holtburger_common::properties::{ItemType, PropertyBool, WorldObjectPropertyAccessors};
+use holtburger_common::properties::{ItemType, WorldObjectExt};
 use holtburger_protocol::messages::combat::CombatMode;
 
 /// Provides access to the world state for common logic.
@@ -173,7 +173,7 @@ pub trait WorldContextExt: WorldContext {
             return false;
         };
 
-        if entity.get_bool_prop(PropertyBool::Retained) {
+        if entity.is_retained() {
             return false;
         }
 

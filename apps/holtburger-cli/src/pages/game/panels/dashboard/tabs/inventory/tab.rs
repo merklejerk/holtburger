@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_common::Guid;
-use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
+use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, WorldObjectExt as _};
 use holtburger_world::context::{WorldContext, WorldContextExt};
 use holtburger_world::entity::Entity;
 use ratatui::Frame;

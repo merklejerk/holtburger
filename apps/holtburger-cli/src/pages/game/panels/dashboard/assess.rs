@@ -1,7 +1,6 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::{
-    PropertyBool, PropertyInt, PropertyString, WorldObjectExt as _,
-    WorldObjectPropertyAccessors,
+    PropertyBool, PropertyFloat, PropertyInt, PropertyString, WorldObjectExt as _, WorldObjectPropertyAccessors
 };
 
 use holtburger_world::crafting::salvage::get_material_name;
@@ -10,6 +9,8 @@ use holtburger_world::magic::calculate_mana_time_left;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
+
+const LABEL_COLOR: Color = Color::Gray;
 
 /// Generates a list of strings representing human-friendly assessment information for an entity.
 pub fn get_assess_info(
@@ -48,7 +49,7 @@ pub fn get_assess_info(
     // Basic Stats
     if entity.item_value() > 0 {
         lines.push(Line::from(vec![
-            Span::styled("Value:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Value:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(
                 format!("{}", entity.item_value()),
                 Style::default().fg(Color::White),
@@ -57,65 +58,68 @@ pub fn get_assess_info(
     }
     if let Some(burden) = entity.burden() {
         lines.push(Line::from(vec![
-            Span::styled("Burden: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Burden:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(format!("{}bu", burden), Style::default().fg(Color::White)),
         ]));
     }
 
     // Material and Workmanship
     if let Some(mat_type) = entity.get_int_prop(PropertyInt::MaterialType) {
-        lines.push(Line::from(vec![
-            Span::styled("Material:    ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                get_material_name(mat_type as u32),
-                Style::default().fg(Color::White),
-            ),
-        ]));
-    }
-    if let Some(workmanship) = entity.get_int_prop(PropertyInt::ItemWorkmanship) {
-        lines.push(Line::from(vec![
-            Span::styled("Workmanship: ", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}", workmanship), Style::default().fg(Color::White)),
-        ]));
+        if let Some(workmanship) = entity.get_int_prop(PropertyInt::ItemWorkmanship) {
+            lines.push(Line::from(vec![
+                Span::styled("Material:  ", Style::default().fg(LABEL_COLOR)),
+                Span::styled(
+                    get_material_name(mat_type as u32),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(format!(" ({})", workmanship), Style::default().fg(Color::White)),
+            ]));
+        }
     }
 
     // Tinkering
     if let Some(tinkers) = entity.get_int_prop(PropertyInt::NumTimesTinkered) {
         if tinkers > 0 {
             lines.push(Line::from(vec![
-                Span::styled("Tinkered:    ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Tinkered:  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(format!("{} times", tinkers), Style::default().fg(Color::White)),
             ]));
         }
     }
-
+    
+    // Spellcraft
+    if let Some(sc) = entity.get_int_prop(PropertyInt::ItemSpellcraft) {
+        lines.push(Line::from(vec![
+            Span::styled("Spellcraft:  ", Style::default().fg(LABEL_COLOR)),
+            Span::styled(format!("{}", sc), Style::default().fg(Color::Cyan)),
+        ]));
+    }
     // Item Mana
     let cur_mana = entity.get_int_prop(PropertyInt::ItemCurMana);
     let max_mana = entity.get_int_prop(PropertyInt::ItemMaxMana);
     if let Some(max) = max_mana {
         let cur = cur_mana.unwrap_or(0);
-        let mut mana_line = vec![
-            Span::styled("Mana:        ", Style::default().fg(Color::DarkGray)),
-            Span::styled(format!("{}/{}", cur, max), Style::default().fg(Color::Blue)),
-        ];
-
-        // Spellcraft
-        if let Some(sc) = entity.get_int_prop(PropertyInt::ItemSpellcraft) {
-            mana_line.push(Span::styled(" (", Style::default().fg(Color::DarkGray)));
-            mana_line.push(Span::styled(format!("{}", sc), Style::default().fg(Color::Cyan)));
-            mana_line.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
-        }
-        lines.push(Line::from(mana_line));
-
+        
         // Time left (if it has a rate)
-        if let Some(rate) = entity.get_float_prop(holtburger_common::properties::PropertyFloat::ManaRate) {
+        let time_left =  if let Some(rate) = entity.get_float_prop(PropertyFloat::ManaRate) {
             if let Some(seconds_left) = calculate_mana_time_left(cur, rate) {
-                lines.push(Line::from(vec![
-                    Span::styled("Mana Left:   ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(format_duration(seconds_left), Style::default().fg(Color::Blue)),
-                ]));
+                Some(format_duration(seconds_left))
+            } else {
+                None 
             }
-        }
+        } else {
+            None
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled("Mana:  ", Style::default().fg(LABEL_COLOR)),
+            Span::styled(format!("{}/{}", cur, max), Style::default().fg(Color::Blue)),
+            if let  Some(t) = time_left {
+                 Span::styled(format!(" ({} left)", t), Style::default().fg(Color::Blue))
+            } else {
+                Span::raw("")
+            },
+        ]));
     }
 
     // Possession States
@@ -132,33 +136,48 @@ pub fn get_assess_info(
     }
     match attuned {
         1 => states.push(Span::styled("Attuned", Style::default().fg(Color::Magenta))),
-        2 => states.push(Span::styled("Sticky", Style::default().fg(Color::Red))),
+        2 => states.push(Span::styled("Sticky", Style::default().fg(Color::Magenta))),
         _ => {}
+    }
+    if entity.is_locked() {
+        states.push(Span::styled("Locked", Style::default().fg(Color::Red)));
     }
 
     if !states.is_empty() {
-        let mut line = vec![Span::styled("Status:      ", Style::default().fg(Color::DarkGray))];
+        let mut line = vec![Span::styled("Status:  ", Style::default().fg(LABEL_COLOR))];
         for (i, state) in states.into_iter().enumerate() {
             if i > 0 {
-                line.push(Span::styled(", ", Style::default().fg(Color::DarkGray)));
+                line.push(Span::styled(", ", Style::default().fg(LABEL_COLOR)));
             }
             line.push(state);
         }
         lines.push(Line::from(line));
     }
 
-    // Locked status
-    if entity.get_bool_prop(PropertyBool::Locked) {
+    // Stack 
+    if let Some(max_stack_size) = entity.max_stack_size() {
+        let stack_size = entity.stack_size();
+        if stack_size > 1 {
+            lines.push(Line::from(vec![
+                Span::styled("Count:  ", Style::default().fg(LABEL_COLOR)),
+                Span::styled(format!("{}/{}", stack_size, max_stack_size), Style::default().fg(Color::White)),
+            ]));
+        }
+    }
+
+    // Structure
+    if let Some(max_structure) = entity.max_structure() {
+        let structure = entity.structure().unwrap_or(0);
         lines.push(Line::from(vec![
-            Span::styled("Locked:      ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Yes", Style::default().fg(Color::Red)),
+            Span::styled("Uses:  ", Style::default().fg(LABEL_COLOR)),
+            Span::styled(format!("{}/{}", structure, max_structure), Style::default().fg(Color::White)),
         ]));
     }
 
     // Armor
     if let Some(armor) = entity.get_int_prop(PropertyInt::ArmorLevel) {
         lines.push(Line::from(vec![
-            Span::styled("Armor:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Armor:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(format!("{}", armor), Style::default().fg(Color::Green)),
         ]));
     }
@@ -166,19 +185,19 @@ pub fn get_assess_info(
     // Weapon
     if let Some(damage) = entity.get_int_prop(PropertyInt::Damage) {
         lines.push(Line::from(vec![
-            Span::styled("Damage: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Damage: ", Style::default().fg(LABEL_COLOR)),
             Span::styled(format!("{}", damage), Style::default().fg(Color::Red)),
         ]));
     } else if let Some(profile) = &entity.weapon_profile {
         lines.push(Line::from(vec![
-            Span::styled("Damage: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Damage: ", Style::default().fg(LABEL_COLOR)),
             Span::styled(
                 format!("{}", profile.damage),
                 Style::default().fg(Color::Red),
             ),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("Speed:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Speed:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(
                 format!("{}", profile.weapon_time),
                 Style::default().fg(Color::White),
@@ -189,7 +208,7 @@ pub fn get_assess_info(
     // Creature Info
     if let Some(profile) = &entity.creature_profile {
         lines.push(Line::from(vec![
-            Span::styled("Health:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Health:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(
                 format!("{}/{}", profile.health, profile.health_max),
                 Style::default().fg(Color::Red),
@@ -197,14 +216,14 @@ pub fn get_assess_info(
         ]));
         if let Some(attr) = &profile.attributes {
             lines.push(Line::from(vec![
-                Span::styled("Stamina: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Stamina: ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     format!("{}/{}", attr.stamina, attr.stamina_max),
                     Style::default().fg(Color::Yellow),
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("Mana:    ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Mana:    ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     format!("{}/{}", attr.mana, attr.mana_max),
                     Style::default().fg(Color::Blue),
@@ -217,39 +236,39 @@ pub fn get_assess_info(
                 Style::default().add_modifier(Modifier::BOLD),
             )));
             lines.push(Line::from(vec![
-                Span::styled("  Strength:     ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Strength:     ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     format!("{}", attr.strength),
                     Style::default().fg(Color::White),
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  Endurance:    ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Endurance:    ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     format!("{}", attr.endurance),
                     Style::default().fg(Color::White),
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  Coordination: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Coordination: ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     format!("{}", attr.coordination),
                     Style::default().fg(Color::White),
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  Quickness:    ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Quickness:    ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     format!("{}", attr.quickness),
                     Style::default().fg(Color::White),
                 ),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  Focus:        ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Focus:        ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(format!("{}", attr.focus), Style::default().fg(Color::White)),
             ]));
             lines.push(Line::from(vec![
-                Span::styled("  Self:         ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  Self:         ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     format!("{}", attr.self_attr),
                     Style::default().fg(Color::White),
@@ -290,7 +309,7 @@ pub fn get_assess_info(
     // Use info
     if let Some(use_msg) = entity.get_string_prop(PropertyString::Use) {
         lines.push(Line::from(vec![
-            Span::styled("Use:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Use:    ", Style::default().fg(LABEL_COLOR)),
         ]));
         for wrapped in wrap_text(use_msg, 36) {
             lines.push(Line::from(vec![
@@ -312,7 +331,7 @@ pub fn get_assess_info(
             if let Some(lookup) = spell_lookup {
                 if let Some(info) = lookup.get(spell_id) {
                     lines.push(Line::from(vec![
-                        Span::styled("  - ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("  - ", Style::default().fg(LABEL_COLOR)),
                         Span::styled(info.name.clone(), Style::default().fg(Color::Cyan)),
                     ]));
                     continue;

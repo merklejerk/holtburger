@@ -155,6 +155,7 @@
 - [x] Nearby tab lists things in inventory sub-packs.
 - [x] When using the `-c` CLI arg, a message appears that says character list is empty (but still logs you in).
 - [x] Entities not on same landblock are getting pruned.
+- [x] Can't pick up items in chests.
 - [ ] Augment assess output with entity properties.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
@@ -174,7 +175,6 @@
 - [ ] Salvaging: show the [S]alvage verb on any item in inventory if the player has an Ust in the inventory, which adds the item to the salvaging queue and turns on salvaging mode. Dynamic panel previews the salvage result (import server formula)`.
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] No trade/vendor verbs when in an interaction.
-- [ ] Can't pick up items in chests.
 - [ ] Items in chests persisting between relocks.
 
 ### Critical

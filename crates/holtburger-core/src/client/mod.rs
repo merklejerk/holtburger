@@ -264,6 +264,13 @@ impl Client {
                         entity: entity.clone(),
                     });
             }
+            StateEvent::EntityReplaced(entity) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityReplaced {
+                        entity: entity.clone(),
+                    });
+            }
             StateEvent::EntityIdentified(entity) => {
                 let _ = self
                     .client_view_event_tx

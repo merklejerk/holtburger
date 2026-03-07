@@ -38,6 +38,8 @@ pub const PLAYER_TELEPORT: &[u8] = include_bytes!("../tests/fixtures/player_tele
 pub const VIEW_CONTENTS: &[u8] = include_bytes!("../tests/fixtures/view_contents.bin");
 pub const ACTION_DROP_ITEM: &[u8] = include_bytes!("../tests/fixtures/action_drop_item.bin");
 pub const ACTION_PUT_ITEM: &[u8] = include_bytes!("../tests/fixtures/action_put_item.bin");
+pub const ACTION_CREATE_TINKERING_TOOL: &[u8] =
+    include_bytes!("../tests/fixtures/action_create_tinkering_tool.bin");
 pub const ACTION_USE: &[u8] = include_bytes!("../tests/fixtures/action_use.bin");
 pub const GAMEPLAY_OPTIONS_TUI_2026_02_07: &[u8] =
     include_bytes!("../tests/fixtures/gameplay_options_tui_2026_02_07.bin");

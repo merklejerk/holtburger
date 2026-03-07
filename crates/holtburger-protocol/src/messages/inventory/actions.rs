@@ -244,6 +244,39 @@ impl ProtocolPack for StackableSplitTo3DActionData {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SalvageItemsWithActionData {
+    pub tool_guid: Guid,
+    pub items: Vec<Guid>,
+}
+
+impl ProtocolUnpack for SalvageItemsWithActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let tool_guid = Guid::unpack(data, offset)?;
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let item_count = LittleEndian::read_u32(&data[*offset..*offset + 4]) as usize;
+        *offset += 4;
+        let mut items = Vec::with_capacity(item_count);
+        for _ in 0..item_count {
+            items.push(Guid::unpack(data, offset)?);
+        }
+        Some(SalvageItemsWithActionData { tool_guid, items })
+    }
+}
+
+impl ProtocolPack for SalvageItemsWithActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.tool_guid.pack(buf);
+        buf.write_u32::<LittleEndian>(self.items.len() as u32)
+            .unwrap();
+        for item in &self.items {
+            item.pack(buf);
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct NoLongerViewingContentsActionData {
     pub container_guid: Guid,
 }
@@ -318,6 +351,18 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(fixtures::ACTION_PUT_ITEM, &action);
+    }
+
+    #[test]
+    fn test_salvage_items_with_parity() {
+        let action = GameMessage::GameAction(Box::new(GameActionMessage {
+            sequence: 1,
+            action: GameAction::SalvageItemsWith(Box::new(SalvageItemsWithActionData {
+                tool_guid: Guid(0x50000201),
+                items: vec![Guid(0x50000100)],
+            })),
+        }));
+        assert_pack_unpack_parity(fixtures::ACTION_CREATE_TINKERING_TOOL, &action);
     }
 
     #[test]

@@ -17,20 +17,18 @@ pub fn render_context_pane(
     let height = area.height.saturating_sub(2) as usize;
     let total_ctx = context_buffer.len();
 
-    let effective_ctx_scroll = scroll_offset;
-    let ctx_end = total_ctx.saturating_sub(effective_ctx_scroll);
-    let ctx_start = ctx_end.saturating_sub(height);
+    let ctx_start = scroll_offset.min(total_ctx.saturating_sub(height));
+    let ctx_end = (ctx_start + height).min(total_ctx);
 
     let mut ctx_items: Vec<ListItem<'static>> = context_buffer[ctx_start..ctx_end]
         .iter()
         .map(|s| ListItem::new(s.clone()))
         .collect();
 
-    if ctx_items.len() < height && effective_ctx_scroll == 0 {
+    if ctx_items.len() < height {
         let pad_count = height - ctx_items.len();
-        let mut padding: Vec<ListItem> = (0..pad_count).map(|_| ListItem::new(" ")).collect();
-        padding.append(&mut ctx_items);
-        ctx_items = padding;
+        let padding: Vec<ListItem> = (0..pad_count).map(|_| ListItem::new(" ")).collect();
+        ctx_items.extend(padding);
     }
 
     let base_title = match context_view {
@@ -43,16 +41,7 @@ pub fn render_context_pane(
         ContextView::DebugEnchantment(_) => "Debug Information",
     };
 
-    let ctx_title = if total_ctx > height {
-        format!(
-            " {} [{}/{}] ",
-            base_title,
-            total_ctx.saturating_sub(effective_ctx_scroll),
-            total_ctx
-        )
-    } else {
-        format!(" {} ", base_title)
-    };
+    let ctx_title = format!(" {} ", base_title);
 
     let ctx_list = List::new(ctx_items).block(
         pane_block(is_focused)

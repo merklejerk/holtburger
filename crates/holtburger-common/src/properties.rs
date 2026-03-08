@@ -1090,6 +1090,102 @@ pub enum PropertyDataId {
     PcapPhysicsDidDataTemplatedFrom = 8044,
 }
 
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+    pub struct ImbuedEffectType: u32 {
+        const Undef                           = 0;
+        const CriticalStrike                  = 0x0001;
+        const CripplingBlow                   = 0x0002;
+        const ArmorRending                    = 0x0004;
+        const SlashRending                    = 0x0008;
+        const PierceRending                   = 0x0010;
+        const BludgeonRending                 = 0x0020;
+        const AcidRending                     = 0x0040;
+        const ColdRending                     = 0x0080;
+        const ElectricRending                 = 0x0100;
+        const FireRending                     = 0x0200;
+        const MeleeDefense                    = 0x0400;
+        const MissileDefense                  = 0x0800;
+        const MagicDefense                    = 0x1000;
+        const Spellbook                       = 0x2000;
+        const NetherRending                   = 0x4000;
+        const IgnoreSomeMagicProjectileDamage = 0x20000000;
+        const AlwaysCritical                  = 0x40000000;
+        const IgnoreAllArmor                  = 0x80000000;
+    }
+}
+
+impl ImbuedEffectType {
+    pub fn name(&self) -> Option<&'static str> {
+        match *self {
+            Self::CriticalStrike => Some("Critical Strike"),
+            Self::CripplingBlow => Some("Crippling Blow"),
+            Self::ArmorRending => Some("Armor Rending"),
+            Self::SlashRending => Some("Slash Rending"),
+            Self::PierceRending => Some("Pierce Rending"),
+            Self::BludgeonRending => Some("Bludgeon Rending"),
+            Self::AcidRending => Some("Acid Rending"),
+            Self::ColdRending => Some("Cold Rending"),
+            Self::ElectricRending => Some("Electric Rending"),
+            Self::FireRending => Some("Fire Rending"),
+            Self::MeleeDefense => Some("Melee Defense"),
+            Self::MissileDefense => Some("Missile Defense"),
+            Self::MagicDefense => Some("Magic Defense"),
+            Self::Spellbook => Some("Spellbook"),
+            Self::NetherRending => Some("Nether Rending"),
+            Self::IgnoreSomeMagicProjectileDamage => Some("Ignore Some Magic Projectile Damage"),
+            Self::AlwaysCritical => Some("Always Critical"),
+            Self::IgnoreAllArmor => Some("Ignore All Armor"),
+            _ => None,
+        }
+    }
+
+    /// Returns a list of individual effect names for all flags currently set in the bitmask.
+    pub fn names(&self) -> Vec<&'static str> {
+        let mut names = Vec::new();
+        // Iterate through all known flags (excluding Undef)
+        if self.contains(Self::CriticalStrike) { names.push("Critical Strike"); }
+        if self.contains(Self::CripplingBlow) { names.push("Crippling Blow"); }
+        if self.contains(Self::ArmorRending) { names.push("Armor Rending"); }
+        if self.contains(Self::SlashRending) { names.push("Slash Rending"); }
+        if self.contains(Self::PierceRending) { names.push("Pierce Rending"); }
+        if self.contains(Self::BludgeonRending) { names.push("Bludgeon Rending"); }
+        if self.contains(Self::AcidRending) { names.push("Acid Rending"); }
+        if self.contains(Self::ColdRending) { names.push("Cold Rending"); }
+        if self.contains(Self::ElectricRending) { names.push("Electric Rending"); }
+        if self.contains(Self::FireRending) { names.push("Fire Rending"); }
+        if self.contains(Self::MeleeDefense) { names.push("Melee Defense"); }
+        if self.contains(Self::MissileDefense) { names.push("Missile Defense"); }
+        if self.contains(Self::MagicDefense) { names.push("Magic Defense"); }
+        if self.contains(Self::Spellbook) { names.push("Spellbook"); }
+        if self.contains(Self::NetherRending) { names.push("Nether Rending"); }
+        if self.contains(Self::IgnoreSomeMagicProjectileDamage) { names.push("Ignore Some Magic Projectile Damage"); }
+        if self.contains(Self::AlwaysCritical) { names.push("Always Critical"); }
+        if self.contains(Self::IgnoreAllArmor) { names.push("Ignore All Armor"); }
+        names
+    }
+}
+
+pub enum Property {
+    Bool(PropertyBool),
+    Int(PropertyInt),
+    Int64(PropertyInt64),
+    Float(PropertyFloat),
+    String(PropertyString),
+    DataId(PropertyDataId),
+}
+
+pub fn get_property_to_fixed_effect_name(property: Property) -> Option<&'static str> {
+    match property {
+        Property::Float(PropertyFloat::IgnoreArmor) => Some("Armor Cleaving"),
+        Property::Float(PropertyFloat::CriticalFrequency) => Some("Biting Strike"),
+        Property::Float(PropertyFloat::CriticalMultiplier) => Some("Crushing Blow"),
+        Property::Float(PropertyFloat::ResistanceModifier) => Some("Resistance Cleaving"),
+        Property::Bool(PropertyBool::IgnoreMagicArmor) => Some("Hollow"),
+        _ => None,
+    }
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
 )]

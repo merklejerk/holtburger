@@ -1,7 +1,6 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::{
-    PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType, WorldObjectExt as _,
-    WorldObjectPropertyAccessors,
+    ImbuedEffectType, ItemType, PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors
 };
 
 use holtburger_world::crafting::salvage::get_material_name;
@@ -186,22 +185,24 @@ pub fn get_assess_info(
     }
 
     // Weapon
-    if let Some(range) = compute_damage_range(entity) {
-        let mut display = if range.min.round() == range.max.round() {
-            format!("{:.1}", range.max)
-        } else {
-            format!("{:.1} - {:.1}", range.min, range.max)
-        };
+    if entity.item_type().is_some_and(|it| it.intersects(ItemType::MELEE_WEAPON | ItemType::CASTER | ItemType::MISSILE_WEAPON)) {
+        if let Some(range) = compute_damage_range(entity) {
+            let mut display = if range.min.round() == range.max.round() {
+                format!("{:.1}", range.max)
+            } else {
+                format!("{:.1} - {:.1}", range.min, range.max)
+            };
 
-        if let Some(name) = range.damage_type.name() {
-            display.push_str(" ");
-            display.push_str(name);
+            if let Some(name) = range.damage_type.name() {
+                display.push_str(" ");
+                display.push_str(name);
+            }
+
+            lines.push(Line::from(vec![
+                Span::styled("Damage: ", Style::default().fg(Color::Gray)),
+                Span::styled(display, Style::default().fg(Color::Red)),
+            ]));
         }
-
-        lines.push(Line::from(vec![
-            Span::styled("Damage: ", Style::default().fg(Color::Gray)),
-            Span::styled(display, Style::default().fg(Color::Red)),
-        ]));
 
         if let Some(profile) = &entity.weapon_profile {
             lines.push(Line::from(vec![
@@ -217,7 +218,7 @@ pub fn get_assess_info(
             if let Some(weapon_type) = WeaponType::from_repr(weapon_type_raw as u32) {
                 if weapon_type != WeaponType::Undef {
                     lines.push(Line::from(vec![
-                        Span::styled("Type:   ", Style::default().fg(Color::Gray)),
+                        Span::styled("Type:  ", Style::default().fg(Color::Gray)),
                         Span::styled(weapon_type.to_string(), Style::default().fg(Color::White)),
                     ]));
                 }
@@ -232,6 +233,150 @@ pub fn get_assess_info(
                         format!("{} ({})", skill_type, difficulty),
                         Style::default().fg(Color::White),
                     ),
+                ]));
+            }
+        }
+
+        // --- Weapon Bonuses ---
+        let mut bonuses = Vec::new();
+
+        // Offense / Attack Bonus
+        let offense = entity
+            .get_float_prop(PropertyFloat::WeaponOffense)
+            .or_else(|| entity.weapon_profile.as_ref().map(|p| p.weapon_offense))
+            .unwrap_or(1.0);
+        if (1.0 - offense).abs() > f64::EPSILON {
+            bonuses.push(Line::from(vec![
+                Span::styled("  Attack Bonus:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", ((offense - 1.0) * 100.0).round()),
+                    Style::default().fg(Color::Green),
+                ),
+            ]));
+        }
+
+        // Defense Bonus
+        let defense = entity
+            .get_float_prop(PropertyFloat::WeaponDefense)
+            .unwrap_or(1.0);
+        if (1.0 - defense).abs() > f64::EPSILON {
+            bonuses.push(Line::from(vec![
+                Span::styled("  Defense Bonus:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", ((defense - 1.0) * 100.0).round()),
+                    Style::default().fg(Color::Green),
+                ),
+            ]));
+        }
+
+        // Missile Defense Bonus
+        let defense = entity
+            .get_float_prop(PropertyFloat::WeaponMissileDefense)
+            .unwrap_or(1.0);
+        if (1.0 - defense).abs() > f64::EPSILON {
+            bonuses.push(Line::from(vec![
+                Span::styled("  Missile Defense Bonus:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", ((defense - 1.0) * 100.0).round()),
+                    Style::default().fg(Color::Green),
+                ),
+            ]));
+        }
+
+        // Magic Defense Bonus
+        let defense = entity
+            .get_float_prop(PropertyFloat::WeaponMagicDefense)
+            .unwrap_or(1.0);
+        if (1.0 - defense).abs() > f64::EPSILON {
+            bonuses.push(Line::from(vec![
+                Span::styled("  Magic Defense Bonus:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", ((defense - 1.0) * 100.0).round()),
+                    Style::default().fg(Color::Green),
+                ),
+            ]));
+        }
+
+        // Mana Conversion
+        let mc_mod = entity
+            .get_float_prop(PropertyFloat::ManaConversionMod)
+            .unwrap_or(0.0);
+        if mc_mod != 0.0 {
+            bonuses.push(Line::from(vec![
+                Span::styled("  Mana Conv:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", (mc_mod * 100.0).round()),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
+        }
+
+        // Crit Rate (Frequency)
+        let crit_freq = entity
+            .get_float_prop(PropertyFloat::CriticalFrequency)
+            .unwrap_or(0.0);
+        if crit_freq != 0.0 {
+            bonuses.push(Line::from(vec![
+                Span::styled("  Crit Rate:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", (crit_freq * 100.0).round()),
+                    Style::default().fg(Color::Yellow),
+                ),
+            ]));
+        }
+
+        // Elemental Damage Mod
+        let elem_mod = entity
+            .get_float_prop(PropertyFloat::ElementalDamageMod)
+            .unwrap_or(1.0);
+        if (1.0 - elem_mod).abs() > f64::EPSILON {
+            bonuses.push(Line::from(vec![
+                Span::styled("  Elemental Damage:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{:+}%", ((elem_mod - 1.0) * 100.0).round()),
+                    Style::default().fg(Color::Magenta),
+                ),
+            ]));
+        }
+
+        if !bonuses.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Bonuses:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            lines.extend(bonuses);
+        }
+
+        // --- Imbuements ---
+        let imbue_props = [
+            PropertyInt::ImbuedEffect,
+            PropertyInt::ImbuedEffect2,
+            PropertyInt::ImbuedEffect3,
+            PropertyInt::ImbuedEffect4,
+            PropertyInt::ImbuedEffect5,
+        ];
+
+        let mut combined_mask = 0u32;
+        for prop in imbue_props {
+            if let Some(val) = entity.get_int_prop(prop) {
+                combined_mask |= val as u32;
+            }
+        }
+
+        let combined_effect = ImbuedEffectType::from_bits_truncate(combined_mask);
+        let imbue_names = combined_effect.names();
+
+        if !imbue_names.is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Imbuements:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )));
+            for name in imbue_names {
+                lines.push(Line::from(vec![
+                    Span::styled("  - ", Style::default().fg(Color::Gray)),
+                    Span::styled(name, Style::default().fg(Color::LightBlue)),
                 ]));
             }
         }

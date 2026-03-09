@@ -139,9 +139,21 @@ impl GameData {
         // 1. Items directly in the player's main pack (ContainerId == player_guid)
         // 2. Items in sub-packs (ContainerId == subpack_guid, recursively tracked)
         // 3. Items currently wielded/equipped (WielderId == player_guid)
+        //
+        // NOTE: ACE Server pre-calculates EncumbranceVal for containers to include all children.
+        // To avoid double-counting, we ONLY sum items that are NOT inside a container we've
+        // already counted (i.e. their container is the player_guid directly).
         let mut encumbrance = 0.0;
         for guid in self.inventory.iter() {
             if let Some(item) = self.entities.get(guid) {
+                // If this item is inside another container that is also in our inventory,
+                // we skip it because the container's EncumbranceVal already includes it.
+                if let Some(container_id) = item.container_id()
+                    && self.inventory.contains(&container_id)
+                    && Some(container_id) != self.player_guid
+                {
+                    continue;
+                }
                 encumbrance += item.get_int_prop(PropertyInt::EncumbranceVal).unwrap_or(0) as f32;
             }
         }
@@ -161,12 +173,7 @@ impl GameData {
             .unwrap_or(0)
             .max(0) as f32;
 
-        let mut bonus_burden = 30.0 * num_augs;
-        if bonus_burden > 150.0 {
-            bonus_burden = 150.0;
-        }
-
-        let capacity = 150.0 * strength + strength * bonus_burden;
+        let capacity = (150.0 * strength) + (num_augs * 30.0 * strength);
 
         if capacity <= 0.0 {
             return Some(3.0);

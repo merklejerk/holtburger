@@ -49,7 +49,7 @@ pub fn render_inventory_tab(
             summary_spans.push(Span::raw(" | "));
             summary_spans.push(Span::styled(
                 format!("Burden {:.0}%", burden * 100.0),
-                Style::default().fg(if burden > 1.0 {
+                Style::default().fg(if burden > 1.25 {
                     theme::ERROR_FG
                 } else if burden > 0.8 {
                     theme::WARNING_FG

@@ -169,6 +169,7 @@
     - [x] Show salvage workmanship as float (`ItemWorkmanship / NumItemsInMaterial`).
     - [x] Mana charge + time left.
     - [x] Locked/Unlocked status.
+- [x] Buffs on items show up as `Unknown Spell` with large (negative?) spell ID.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.

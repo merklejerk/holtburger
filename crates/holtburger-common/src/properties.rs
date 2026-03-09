@@ -1,22 +1,27 @@
 mod access;
-mod flags;
-mod ids;
-mod map;
-mod object_ext;
+mod combat;
+mod inventory;
+mod object;
+mod property_keys;
+mod radar;
+mod storage;
+mod world_object;
 
 pub use access::{
-    HasProperties, HasPropertiesMut, WorldObjectPropertyAccessors,
-    WorldObjectPropertyAccessorsMut,
+    HasProperties, HasPropertiesMut, WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-pub use flags::{
-    CombatUse, EnchantmentTypeFlags, EquipMask, GfxObjFlags, IdentifyResponseFlags,
-    ImbuedEffectType, ItemType, ObjectDescriptionFlag, PhysicsDescriptionFlag, PhysicsState,
-    PseudoEquipMask, RadarBehavior, RadarColor, Usable, WeenieHeaderFlag, WeenieHeaderFlag2,
-    WeenieType,
+pub use combat::{
+    AttackType, CombatUse, DamageType, EnchantmentTypeFlags, ImbuedEffectType, WeaponType,
 };
-pub use ids::{
-    AttunedStatus, DamageType, MaterialType, PropertyBool, PropertyDataId,
-    PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64, PropertyString, WeaponType,
+pub use inventory::{AttunedStatus, EquipMask, ItemType, MaterialType, PseudoEquipMask, Usable};
+pub use object::{
+    GfxObjFlags, IdentifyResponseFlags, ObjectDescriptionFlag, PhysicsDescriptionFlag,
+    PhysicsState, WeenieHeaderFlag, WeenieHeaderFlag2, WeenieType,
 };
-pub use map::{PropertyMap, PropertyUpdate, PropertyValue, WorldObjectProperties};
-pub use object_ext::WorldObjectExt;
+pub use property_keys::{
+    PropertyBool, PropertyDataId, PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64,
+    PropertyString,
+};
+pub use radar::{RadarBehavior, RadarColor};
+pub use storage::{PropertyMap, PropertyUpdate, PropertyValue, WorldObjectProperties};
+pub use world_object::WorldObjectExt;

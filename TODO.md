@@ -170,6 +170,10 @@
     - [x] Mana charge + time left.
     - [x] Locked/Unlocked status.
 - [x] Buffs on items show up as `Unknown Spell` with large (negative?) spell ID.
+- [x] Altered names (like salvage) break inventory sorting.
+- [x] Armor tailoring kits do not show combine verb and the use verb just makes them disappear.
+- [x] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them. The client says that item cannot be used though!
+- [x] Display encumbrance (sticky line in inv tab?).
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
@@ -178,7 +182,6 @@
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
 - [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
-- [ ] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them. The client says that item cannot be used though!
 - [ ] Log in chat when items are bought and sold.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
@@ -186,10 +189,7 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] Display encumbrance (sticky line in inv tab?).
 - [ ] Add intelligent entity context scanners.
-- [ ] Altered names (like salvage) break inventory sorting.
-- [ ] Armor tailoring kits do not show combine verb and the use verb just makes them disappear.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
 
 ### Critical

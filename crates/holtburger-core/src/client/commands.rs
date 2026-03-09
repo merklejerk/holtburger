@@ -110,6 +110,7 @@ impl Client {
                         char_id
                     );
                     self.world.load_deferred_tables();
+                    self.emit_spell_catalog_loaded();
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
                     self.auth.select_character(char_id, &mut self.session).await

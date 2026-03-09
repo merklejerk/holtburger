@@ -34,6 +34,16 @@ pub struct Client {
 }
 
 impl Client {
+    fn emit_spell_catalog_loaded(&self) {
+        if let Some(catalog) = &self.world.spell_catalog {
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::SpellCatalogLoaded {
+                    catalog: catalog.clone(),
+                });
+        }
+    }
+
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
         self.wire_event_tx.subscribe()
     }
@@ -224,18 +234,12 @@ impl Client {
                 let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();
                 spell_ids.sort();
 
-                let mut spells = HashMap::new();
-                for &spell_id in &spell_ids {
-                    if let Some(spell) = self.world.resolve_spell_info(spell_id) {
-                        spells.insert(spell_id, spell);
-                    }
-                }
-
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells });
+                    .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids });
             }
             StateEvent::PlayerInfo(_) => {
+                self.emit_spell_catalog_loaded();
                 // Emit all snapshots
                 self.emit_world_view_projection(&StateEvent::PlayerEnchantmentsUpdated {
                     enchantments: self.world.player.enchantments.clone(),

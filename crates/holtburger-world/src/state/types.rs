@@ -13,6 +13,7 @@ use crate::StateEvent;
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::SpatialScene;
+use crate::spell::{SpellCatalog, SpellInfo};
 use crate::state::liveness::EntityLifecycleStore;
 use crate::state::trade::TradeState;
 use crate::stats;
@@ -44,7 +45,7 @@ pub struct WorldState {
     pub cell_dat: Option<Arc<dyn ResourceProvider>>,
     pub xp_table: Option<XpTable>,
     pub skill_table: Option<Arc<SkillTable>>,
-    pub spell_table: Option<Arc<SpellTable>>,
+    pub spell_catalog: Option<Arc<SpellCatalog>>,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
     pub trade: Option<TradeState>,
@@ -104,17 +105,17 @@ impl WorldState {
 
     pub fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
         let mut names = std::collections::HashMap::new();
-        if let Some(table) = &self.spell_table {
+        if let Some(catalog) = &self.spell_catalog {
             // Player's known spells
             for spell_id in self.player.spells.keys() {
-                if let Some(spell) = table.spells.get(spell_id) {
+                if let Some(spell) = catalog.get(*spell_id) {
                     names.insert(*spell_id, spell.name.clone());
                 }
             }
             // Enchantments currently active on the player
             for enc in &self.player.enchantments {
                 let spell_id = enc.spell_id as u32;
-                if let Some(spell) = table.spells.get(&spell_id) {
+                if let Some(spell) = catalog.get(spell_id) {
                     names.insert(spell_id, spell.name.clone());
                 }
             }
@@ -123,18 +124,14 @@ impl WorldState {
     }
 
     pub fn resolve_spell_name(&self, spell_id: u32) -> Option<String> {
-        self.spell_table
+        self.spell_catalog
             .as_ref()?
-            .spells
-            .get(&spell_id)
-            .map(|s| s.name.clone())
+            .resolve_name(spell_id)
+            .map(str::to_string)
     }
 
-    pub fn resolve_spell_info(
-        &self,
-        spell_id: u32,
-    ) -> Option<holtburger_dat::file_type::spell_table::SpellBase> {
-        self.spell_table.as_ref()?.spells.get(&spell_id).cloned()
+    pub fn resolve_spell_info(&self, spell_id: u32) -> Option<SpellInfo> {
+        self.spell_catalog.as_ref()?.get(spell_id).cloned()
     }
 
     pub fn get_player_enchanted_int(&self, key: PropertyInt) -> i32 {
@@ -195,7 +192,7 @@ impl WorldState {
             cell_dat,
             xp_table: None,
             skill_table,
-            spell_table: None,
+            spell_catalog: None,
             scene: SpatialScene::new(),
             vendor: None,
             trade: None,
@@ -212,11 +209,11 @@ impl WorldState {
             {
                 self.xp_table = Some(table);
             }
-            if self.spell_table.is_none()
+            if self.spell_catalog.is_none()
                 && let Ok(data) = db.get_file(SpellTable::FILE_ID)
                 && let Ok(table) = SpellTable::read(&mut std::io::Cursor::new(data))
             {
-                self.spell_table = Some(Arc::new(table));
+                self.spell_catalog = Some(Arc::new(table.into()));
             }
         }
     }

@@ -138,6 +138,17 @@ pub fn get_total_vitae(enchantments: &[Enchantment]) -> f32 {
     get_enchantment_multiplier(enchantments, flags, key)
 }
 
+/// Calculates the time remaining until an item's mana is depleted.
+/// Returns None if the item does not have mana or is not depleting (rate >= 0).
+pub fn calculate_mana_time_left(cur_mana: i32, mana_rate: f64) -> Option<f64> {
+    if mana_rate >= 0.0 {
+        return None;
+    }
+
+    let burn_rate = -mana_rate;
+    Some(cur_mana as f64 / burn_rate)
+}
+
 pub fn get_enchantment_name(enchant: &Enchantment, spell_names: &HashMap<u32, String>) -> String {
     if let Some(name) = spell_names.get(&(enchant.spell_id as u32)) {
         return name.clone();
@@ -226,6 +237,20 @@ mod tests {
         enc.stat_mod_type = 0;
         enc.stat_mod_key = 666;
         assert_eq!(get_enchantment_name(&enc, &names), "Mod #666");
+    }
+
+    #[test]
+    fn test_calculate_mana_time_left() {
+        // 100 mana, burn rate of 1 per second -> 100 seconds
+        assert_eq!(calculate_mana_time_left(100, -1.0), Some(100.0));
+        // 100 mana, burn rate of 2 per second -> 50 seconds
+        assert_eq!(calculate_mana_time_left(100, -2.0), Some(50.0));
+        // Positive rate (charging) should return None
+        assert_eq!(calculate_mana_time_left(100, 1.0), None);
+        // Zero rate should return None
+        assert_eq!(calculate_mana_time_left(100, 0.0), None);
+        // Zero mana should return 0 seconds
+        assert_eq!(calculate_mana_time_left(0, -1.0), Some(0.0));
     }
 
     #[test]

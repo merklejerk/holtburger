@@ -17,7 +17,7 @@ pub struct SpellsTab {
 impl SpellsTab {
     fn get_target(&self, data: &GameData) -> CommandTarget {
         let mut spells = data.player_spells.clone();
-        spells.sort_by_key(|&sid| data.spell_names.get(&sid).cloned().unwrap_or_default());
+        spells.sort_by_key(|&sid| data.spell_name_or_fallback(sid));
         if let Some(&sid) = spells.get(self.selected_index) {
             CommandTarget::Spell(sid)
         } else {

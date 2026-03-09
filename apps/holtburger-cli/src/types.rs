@@ -568,7 +568,7 @@ pub trait TabController {
         match view.context_view {
             ContextView::Assess(guid) => {
                 if let Some(e) = data.entities.get(&guid) {
-                    return assess::get_assess_info(e);
+                    return assess::get_assess_info(e, data.spell_catalog.as_deref());
                 }
                 vec![]
             }
@@ -606,7 +606,7 @@ pub trait TabController {
                                     }
                                 })
                         },
-                        Some(&data.spell_info),
+                        data.spell_catalog.as_deref(),
                         player_info,
                     );
                 }
@@ -614,11 +614,11 @@ pub trait TabController {
             }
             ContextView::Spell(spell_id) => {
                 let target = CommandTarget::Spell(spell_id);
-                debug::get_details_info(data, &target, Some(&data.spell_info))
+                debug::get_details_info(data, &target, data.spell_catalog.as_deref())
             }
             ContextView::Enchantment(enchant) => {
                 let target = CommandTarget::Enchantment(enchant);
-                debug::get_details_info(data, &target, Some(&data.spell_info))
+                debug::get_details_info(data, &target, data.spell_catalog.as_deref())
             }
             ContextView::DebugSpell(spell_id) => {
                 let target = CommandTarget::Spell(spell_id);
@@ -627,7 +627,7 @@ pub trait TabController {
                     Some(view),
                     &target,
                     |_| None,
-                    Some(&data.spell_info),
+                    data.spell_catalog.as_deref(),
                     None,
                 )
             }
@@ -638,7 +638,7 @@ pub trait TabController {
                     Some(view),
                     &target,
                     |_| None,
-                    Some(&data.spell_info),
+                    data.spell_catalog.as_deref(),
                     None,
                 )
             }

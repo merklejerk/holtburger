@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use holtburger_common::properties::EnchantmentTypeFlags;
 use holtburger_common::properties::PropertyFloat;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_world::magic::get_enchantment_name;
 use holtburger_world::stats::{AttributeType, SkillType, TrainingLevel, VitalType};
 
 use super::tab::CharacterTab;
@@ -198,11 +197,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 let val_color = if highlight { Color::Cyan } else { color };
                 let time_str = format_duration(enchant.start_time, enchant.duration);
 
-                let spell_name = data
-                    .spell_names
-                    .get(&(enchant.spell_id as u32))
-                    .cloned()
-                    .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
+                let spell_name = data.spell_name_or_fallback(enchant.spell_id as u32);
 
                 list_items.push(
                     ListItem::new(Line::from(vec![
@@ -231,7 +226,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 } else {
                     Color::DarkGray
                 };
-                let name = get_enchantment_name(enchant, &data.spell_names);
+                let name = data.spell_name_or_fallback(enchant.spell_id as u32);
                 let time_str = format_duration(enchant.start_time, enchant.duration);
                 list_items.push(
                     ListItem::new(Line::from(vec![
@@ -360,8 +355,8 @@ pub fn get_char_tab_lines(data: &GameData) -> Vec<CharTabLine> {
     // Misc are sorted by name then ID
     let sort_by_name = |list: &mut Vec<Enchantment>| {
         list.sort_by(|a, b| {
-            let na = get_enchantment_name(a, &data.spell_names);
-            let nb = get_enchantment_name(b, &data.spell_names);
+            let na = data.spell_name_or_fallback(a.spell_id as u32);
+            let nb = data.spell_name_or_fallback(b.spell_id as u32);
             na.cmp(&nb).then(a.spell_id.cmp(&b.spell_id))
         });
     };

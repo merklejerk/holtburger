@@ -93,22 +93,44 @@ fn test_set_player_position_sanitizes_nan_rotation() {
 
 #[test]
 fn test_spell_name_resolution() {
-    use holtburger_dat::file_type::spell_table::{SpellBase, SpellTable};
+    use crate::spell::{SpellCatalog, SpellInfo};
 
     let mut state = WorldState::new(None, None);
     let mut spells = std::collections::HashMap::new();
     spells.insert(
         1337,
-        SpellBase {
+        SpellInfo {
             name: "L33t Spell".to_string(),
-            ..Default::default()
+            description: String::new(),
+            school: crate::spell::MagicSchool::None,
+            icon_id: 0,
+            category: 0,
+            bitfield: 0,
+            base_mana: 0,
+            base_range_constant: 0.0,
+            base_range_mod: 0.0,
+            power: 0,
+            spell_economy_mod: 0.0,
+            formula_version: 0,
+            component_loss: 0.0,
+            meta_spell_type: 0,
+            meta_spell_id: 0,
+            extras: crate::spell::SpellExtrasInfo::None,
+            components: [0; 8],
+            caster_effect: 0,
+            target_effect: 0,
+            fizzle_effect: 0,
+            recovery_interval: 0.0,
+            recovery_amount: 0.0,
+            display_order: 0,
+            non_component_target_type: 0,
+            mana_mod: 0,
         },
     );
 
-    state.spell_table = Some(Arc::new(SpellTable {
-        id: SpellTable::FILE_ID,
+    state.spell_catalog = Some(Arc::new(SpellCatalog {
         spells,
-        spell_sets: std::collections::HashMap::new(),
+        ..Default::default()
     }));
 
     assert_eq!(state.resolve_spell_name(1337).unwrap(), "L33t Spell");
@@ -119,13 +141,13 @@ fn test_spell_name_resolution() {
 fn test_load_deferred_tables_noop_without_portal_dat() {
     let mut state = WorldState::new(None, None);
     assert!(state.xp_table.is_none());
-    assert!(state.spell_table.is_none());
+    assert!(state.spell_catalog.is_none());
 
     // Calling load_deferred_tables with no provider should be a clean no-op
     state.load_deferred_tables();
 
     assert!(state.xp_table.is_none());
-    assert!(state.spell_table.is_none());
+    assert!(state.spell_catalog.is_none());
 }
 
 #[test]
@@ -146,7 +168,7 @@ fn test_load_deferred_tables_gracefully_handles_read_failure() {
     state.load_deferred_tables();
 
     assert!(state.xp_table.is_none());
-    assert!(state.spell_table.is_none());
+    assert!(state.spell_catalog.is_none());
 }
 
 #[test]

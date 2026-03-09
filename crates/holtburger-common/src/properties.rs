@@ -15,9 +15,8 @@ pub use flags::{
     WeenieType,
 };
 pub use ids::{
-    AttunedStatus, DamageType, MaterialType, Property, PropertyBool, PropertyDataId,
+    AttunedStatus, DamageType, MaterialType, PropertyBool, PropertyDataId,
     PropertyFloat, PropertyInstanceId, PropertyInt, PropertyInt64, PropertyString, WeaponType,
-    get_property_to_fixed_effect_name,
 };
 pub use map::{PropertyMap, PropertyUpdate, PropertyValue, WorldObjectProperties};
 pub use object_ext::WorldObjectExt;

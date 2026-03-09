@@ -540,3 +540,37 @@ bitflags! {
         const SOURCE_REMOTE_TARGET_REMOTE_NEVER_WALK = 0x600020;
     }
 }
+
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+    pub struct AttackType: u32 {
+        const Undef               = 0;
+        const Punch               = 0x0001;
+        const Thrust              = 0x0002;
+        const Slash               = 0x0004;
+        const Kick                = 0x0008;
+        const OffhandPunch        = 0x0010;
+        const DoubleSlash         = 0x0020;
+        const TripleSlash         = 0x0040;
+        const DoubleThrust        = 0x0080;
+        const TripleThrust        = 0x0100;
+        const OffhandThrust       = 0x0200;
+        const OffhandSlash        = 0x0400;
+        const OffhandDoubleSlash  = 0x0800;
+        const OffhandTripleSlash  = 0x1000;
+        const OffhandDoubleThrust = 0x2000;
+        const OffhandTripleThrust = 0x4000;
+
+        const Unarmed             = Self::Punch.bits() | Self::Kick.bits() | Self::OffhandPunch.bits();
+
+        const DoubleStrike        = Self::DoubleSlash.bits() | Self::DoubleThrust.bits() | Self::OffhandDoubleSlash.bits() | Self::OffhandDoubleThrust.bits();
+        const TripleStrike        = Self::TripleSlash.bits() | Self::TripleThrust.bits() | Self::OffhandTripleSlash.bits() | Self::OffhandTripleThrust.bits();
+
+        const Offhand             = Self::OffhandThrust.bits() | Self::OffhandSlash.bits() | Self::OffhandDoubleSlash.bits() | Self::OffhandTripleSlash.bits() | Self::OffhandDoubleThrust.bits() | Self::OffhandTripleThrust.bits();
+        const Thrusts             = Self::Thrust.bits() | Self::DoubleThrust.bits() | Self::TripleThrust.bits() | Self::OffhandThrust.bits() | Self::OffhandDoubleThrust.bits() | Self::OffhandTripleThrust.bits();
+        const Slashes             = Self::Slash.bits() | Self::DoubleSlash.bits() | Self::TripleSlash.bits() | Self::OffhandSlash.bits() | Self::OffhandDoubleSlash.bits() | Self::OffhandTripleSlash.bits();
+        const Punches             = Self::Punch.bits() | Self::OffhandPunch.bits();
+
+        const MultiStrike         = Self::DoubleStrike.bits() | Self::TripleStrike.bits();
+    }
+}

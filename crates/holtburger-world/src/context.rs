@@ -395,9 +395,9 @@ mod tests {
 
     use super::{WorldContext, WorldContextExt};
     use crate::entity::Entity;
+    use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyInt, Usable};
-    use holtburger_common::Guid;
 
     #[derive(Default)]
     struct TestWorld {
@@ -458,10 +458,13 @@ mod tests {
 
         assert!(!world.can_use(item_guid));
 
-        world.entities.get_mut(&item_guid).unwrap().properties.ints.insert(
-            PropertyInt::ItemUseable,
-            Usable::REMOTE.bits() as i32,
-        );
+        world
+            .entities
+            .get_mut(&item_guid)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemUseable, Usable::REMOTE.bits() as i32);
 
         assert!(world.can_use(item_guid));
     }
@@ -490,10 +493,16 @@ mod tests {
 
         assert!(!world.can_begin_use_with(item_guid));
 
-        world.entities.get_mut(&item_guid).unwrap().properties.ints.insert(
-            PropertyInt::ItemUseable,
-            Usable::SOURCE_CONTAINED_TARGET_REMOTE.bits() as i32,
-        );
+        world
+            .entities
+            .get_mut(&item_guid)
+            .unwrap()
+            .properties
+            .ints
+            .insert(
+                PropertyInt::ItemUseable,
+                Usable::SOURCE_CONTAINED_TARGET_REMOTE.bits() as i32,
+            );
 
         assert!(world.can_begin_use_with(item_guid));
     }

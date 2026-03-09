@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::{
+    PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
+};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
@@ -116,6 +118,61 @@ impl GameData {
             }
             stack.extend(children);
         }
+    }
+
+    pub fn get_container_counts(&self) -> HashMap<Guid, u32> {
+        let mut counts = HashMap::new();
+        for entity in self.entities.values() {
+            if let Some(container_id) = entity.container_id() {
+                *counts.entry(container_id).or_insert(0) += 1;
+            }
+        }
+        counts
+    }
+
+    pub fn get_burden(&self) -> Option<f32> {
+        let player_guid = self.player_guid?;
+        let player_entity = self.entities.get(&player_guid)?;
+
+        // Sum up the burden of all items in player's possession.
+        // In the CLI, `inventory` tracking includes:
+        // 1. Items directly in the player's main pack (ContainerId == player_guid)
+        // 2. Items in sub-packs (ContainerId == subpack_guid, recursively tracked)
+        // 3. Items currently wielded/equipped (WielderId == player_guid)
+        let mut encumbrance = 0.0;
+        for guid in self.inventory.iter() {
+            if let Some(item) = self.entities.get(guid) {
+                encumbrance += item.get_int_prop(PropertyInt::EncumbranceVal).unwrap_or(0) as f32;
+            }
+        }
+
+        let strength = self
+            .attributes
+            .get(&AttributeType::StrengthAttr)
+            .map(|a| a.current)
+            .unwrap_or(0) as f32;
+
+        if strength <= 0.0 {
+            return Some(3.0);
+        }
+
+        let num_augs = player_entity
+            .get_int_prop(PropertyInt::AugmentationIncreasedCarryingCapacity)
+            .unwrap_or(0)
+            .max(0) as f32;
+
+        let mut bonus_burden = 30.0 * num_augs;
+        if bonus_burden > 150.0 {
+            bonus_burden = 150.0;
+        }
+
+        let capacity = 150.0 * strength + strength * bonus_burden;
+
+        if capacity <= 0.0 {
+            return Some(3.0);
+        }
+
+        Some(encumbrance / capacity)
     }
 
     pub fn spell_name(&self, spell_id: u32) -> Option<&str> {

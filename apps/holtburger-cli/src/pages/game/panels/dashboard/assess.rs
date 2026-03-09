@@ -1,5 +1,5 @@
 use crate::utils::{format_duration, wrap_text};
-use holtburger_world::assessment::{Assessment, StatusFlag};
+use holtburger_world::assessment::{Assessment, Effect, StatusFlag};
 use holtburger_world::entity::Entity;
 use holtburger_world::stats::SkillType;
 use ratatui::style::{Color, Modifier, Style};
@@ -186,7 +186,7 @@ pub fn get_assess_info(
             }
         }
 
-        if let Some(st_raw) = weapon.skill_type {
+        if let Some(st_raw) = weapon.wield_skill_type {
             if let Some(st) = SkillType::from_repr(st_raw) {
                 lines.push(Line::from(vec![
                     Span::styled("Skill:  ", Style::default().fg(Color::Gray)),
@@ -295,6 +295,39 @@ pub fn get_assess_info(
                 Span::styled("  - ", Style::default().fg(Color::Gray)),
                 Span::styled(name.clone(), Style::default().fg(Color::LightBlue)),
             ]));
+        }
+    }
+
+    if !assess.effects.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Effects:",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        for effect in &assess.effects {
+            let label = effect.to_string();
+            let value = match effect {
+                Effect::BitingStrike(v) => Some(format!("{:.1}%", v * 100.0)),
+                Effect::CrushingBlow(v) => Some(format!("{:.1}%", v * 100.0)),
+                Effect::Slayer {
+                    creature_type,
+                    bonus,
+                } => Some(format!("{} ({:.1}%)", creature_type, bonus * 100.0)),
+                Effect::Cleaving(v) => Some(format!("{}", v)),
+                _ => None,
+            };
+
+            let mut spans = vec![
+                Span::styled("  - ", Style::default().fg(Color::Gray)),
+                Span::styled(label, Style::default().fg(Color::LightCyan)),
+            ];
+
+            if let Some(v) = value {
+                spans.push(Span::styled(": ", Style::default().fg(Color::Gray)));
+                spans.push(Span::styled(v, Style::default().fg(Color::White)));
+            }
+
+            lines.push(Line::from(spans));
         }
     }
 

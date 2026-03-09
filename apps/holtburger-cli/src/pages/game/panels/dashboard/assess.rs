@@ -166,6 +166,9 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
             Style::default().fg(Color::Red),
         ));
     }
+    if assess.is_ivoryable {
+        status_spans.push(Span::styled("Ivoryable", Style::default().fg(Color::Green)));
+    }
 
     if !status_spans.is_empty() {
         let mut line = vec![Span::styled("Status:  ", Style::default().fg(LABEL_COLOR))];

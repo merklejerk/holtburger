@@ -157,12 +157,13 @@ pub fn get_assess_info(
 
     // Weapon
     if let Some(weapon) = &assess.weapon {
+        let damage_type_display = weapon.damage_types.join(" / ");
         let display = if weapon.damage_min.round() == weapon.damage_max.round() {
-            format!("{:.1} {}", weapon.damage_max, weapon.damage_type)
+            format!("{:.1} {}", weapon.damage_max, damage_type_display)
         } else {
             format!(
                 "{:.1} - {:.1} {}",
-                weapon.damage_min, weapon.damage_max, weapon.damage_type
+                weapon.damage_min, weapon.damage_max, damage_type_display
             )
         };
 
@@ -281,19 +282,19 @@ pub fn get_assess_info(
             )));
             lines.extend(bonuses);
         }
+    }
 
-        if !weapon.imbuements.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Imbuements:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-            for name in &weapon.imbuements {
-                lines.push(Line::from(vec![
-                    Span::styled("  - ", Style::default().fg(Color::Gray)),
-                    Span::styled(name.clone(), Style::default().fg(Color::LightBlue)),
-                ]));
-            }
+    if !assess.imbued_effects.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Imbuements:",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        for name in &assess.imbued_effects {
+            lines.push(Line::from(vec![
+                Span::styled("  - ", Style::default().fg(Color::Gray)),
+                Span::styled(name.clone(), Style::default().fg(Color::LightBlue)),
+            ]));
         }
     }
 

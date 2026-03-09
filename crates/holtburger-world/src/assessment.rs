@@ -24,6 +24,7 @@ pub struct Assessment {
     pub weapon: Option<WeaponInfo>,
     pub creature: Option<CreatureInfo>,
     pub protections: Option<Protections>,
+    pub imbued_effects: Vec<String>,
     pub use_info: Option<String>,
     pub spells: Vec<u32>,
 }
@@ -71,7 +72,7 @@ pub struct UsesInfo {
 pub struct WeaponInfo {
     pub damage_min: f64,
     pub damage_max: f64,
-    pub damage_type: String,
+    pub damage_types: Vec<String>,
     pub speed: f32,
     pub weapon_type: Option<WeaponType>,
     pub skill_type: Option<u32>, // SkillType enum from stats.rs might be better but u32 is safe for now
@@ -83,7 +84,6 @@ pub struct WeaponInfo {
     pub mana_conversion_mod: Option<f64>,
     pub crit_rate: Option<f64>,
     pub elemental_damage_mod: Option<f64>,
-    pub imbuements: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -140,6 +140,7 @@ impl Assessment {
             weapon: WeaponInfo::from_entity(entity),
             creature: CreatureInfo::from_entity(entity),
             protections: Protections::from_entity(entity),
+            imbued_effects: get_imbued_effects(entity),
             use_info: entity
                 .get_string_prop(PropertyString::Use)
                 .map(|s| s.to_string()),
@@ -237,22 +238,6 @@ impl WeaponInfo {
 
         let range = compute_damage_range(entity)?;
 
-        let imbuements = [
-            PropertyInt::ImbuedEffect,
-            PropertyInt::ImbuedEffect2,
-            PropertyInt::ImbuedEffect3,
-            PropertyInt::ImbuedEffect4,
-            PropertyInt::ImbuedEffect5,
-        ]
-        .into_iter()
-        .filter_map(|p| entity.get_int_prop(p))
-        .fold(0u32, |acc, val| acc | (val as u32));
-
-        let imbuements = ImbuedEffectType::from_bits_truncate(imbuements)
-            .iter_display_names()
-            .map(|s| s.to_string())
-            .collect();
-
         // Use attack offense from profile as fallback for the bonus
         let attack_bonus = get_normalized_multiplier(entity, PropertyFloat::WeaponOffense).or_else(|| {
             entity
@@ -265,12 +250,11 @@ impl WeaponInfo {
         Some(WeaponInfo {
             damage_min: range.min,
             damage_max: range.max,
-            damage_type: range
+            damage_types: range
                 .damage_type
                 .iter_display_names()
-                .next()
-                .unwrap_or("Unknown")
-                .to_string(),
+                .map(|s| s.to_string())
+                .collect(),
             speed: entity
                 .weapon_profile
                 .as_ref()
@@ -288,7 +272,6 @@ impl WeaponInfo {
             mana_conversion_mod: get_nonzero_modifier(entity, PropertyFloat::ManaConversionMod),
             crit_rate: get_nonzero_modifier(entity, PropertyFloat::CriticalFrequency),
             elemental_damage_mod: get_normalized_multiplier(entity, PropertyFloat::ElementalDamageMod),
-            imbuements,
         })
     }
 }
@@ -342,4 +325,22 @@ impl Protections {
             nether: ap.nether,
         })
     }
+}
+
+fn get_imbued_effects(entity: &Entity) -> Vec<String> {
+    let bits = [
+        PropertyInt::ImbuedEffect,
+        PropertyInt::ImbuedEffect2,
+        PropertyInt::ImbuedEffect3,
+        PropertyInt::ImbuedEffect4,
+        PropertyInt::ImbuedEffect5,
+    ]
+    .into_iter()
+    .filter_map(|p| entity.get_int_prop(p))
+    .fold(0u32, |acc, val| acc | (val as u32));
+
+    ImbuedEffectType::from_bits_truncate(bits)
+        .iter_display_names()
+        .map(|s| s.to_string())
+        .collect()
 }

@@ -1,6 +1,7 @@
 use crate::types::FocusedPane;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, WorldObjectExt};
+use holtburger_world::crafting::salvage::get_material_name;
 use unicode_width::UnicodeWidthStr;
 
 /// Formats an item's display name, including stack size and structure/durability if present.
@@ -11,6 +12,15 @@ pub fn format_item_name<T: WorldObjectExt>(item: &T, guid: Guid) -> String {
     } else {
         name.to_string()
     };
+
+    if item
+        .item_type()
+        .is_some_and(|it| it.contains(ItemType::TINKERING_MATERIAL))
+        && let Some(mat_type) = item.material_type()
+    {
+        let mat_name = get_material_name(mat_type);
+        display_name = format!("{} {}", mat_name, display_name);
+    }
 
     // Strip out count suffix from salvage bags since we append our own structure suffix.
     let is_salvage = item

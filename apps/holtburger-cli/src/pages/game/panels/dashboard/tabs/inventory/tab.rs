@@ -73,12 +73,14 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
         }
     }
 
+    // Precompute names for sorting to avoid repeated allocations
+    let item_names: HashMap<Guid, String> = candidates
+        .iter()
+        .map(|&e| (e.guid, format_item_name(e, e.guid)))
+        .collect();
+
     // Sort roots by name for Inventory
-    roots.sort_by(|&a, &b| {
-        let ea = &entities[&a];
-        let eb = &entities[&b];
-        format_item_name(ea, ea.guid).cmp(&format_item_name(eb, eb.guid))
-    });
+    roots.sort_by_key(|id| item_names.get(id).unwrap());
 
     // Flatten with depth using DFS
     let mut result = Vec::new();
@@ -94,11 +96,7 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
         result.push((e, dist, depth));
 
         if let Some(mut children) = children_map.remove(&guid) {
-            children.sort_by(|&a, &b| {
-                let ea = &entities[&a];
-                let eb = &entities[&b];
-                format_item_name(ea, ea.guid).cmp(&format_item_name(eb, eb.guid))
-            });
+            children.sort_by_key(|id| item_names.get(id).unwrap());
             for child_guid in children.into_iter().rev() {
                 stack.push((child_guid, depth + 1));
             }

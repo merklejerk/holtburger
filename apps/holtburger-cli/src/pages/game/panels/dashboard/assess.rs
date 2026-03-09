@@ -501,13 +501,13 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
             ]));
         }
 
-        if let Some(scribe) = &ins.scribe {
-            if !scribe.is_empty() {
-                lines.push(Line::from(vec![Span::styled(
-                    format!("      -- {}", scribe),
-                    Style::default().fg(Color::Gray),
-                )]));
-            }
+        if let Some(scribe) = &ins.scribe
+            && !scribe.is_empty()
+        {
+            lines.push(Line::from(vec![Span::styled(
+                format!("      -- {}", scribe),
+                Style::default().fg(Color::Gray),
+            )]));
         }
     }
 

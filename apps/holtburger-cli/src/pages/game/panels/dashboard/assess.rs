@@ -1,6 +1,7 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_world::assessment::{
-    Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirementType,
+    Assessment, AttributeType, AttunedStatus, BondedStatus, Effect, HeritageGroup, TrainingLevel,
+    VitalType, WieldRequirementType,
 };
 use holtburger_world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
@@ -17,66 +18,22 @@ fn format_wield_requirement(
     use holtburger_common::stats::SkillType;
 
     match req_type {
-        WieldRequirementType::Skill => {
-            if let Some(skill) = SkillType::from_repr(skill_id) {
-                format!("{} ({}): {}", req_type, skill, difficulty)
-            } else {
-                format!("{} ({}): {}", req_type, skill_id, difficulty)
-            }
+        WieldRequirementType::Skill | WieldRequirementType::RawSkill => {
+            let skill = SkillType::from_repr(skill_id)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("Unknown Skill ({})", skill_id));
+            format!("{} ({}): {}", req_type, skill, difficulty)
         }
-        WieldRequirementType::RawSkill => {
-            if let Some(skill) = SkillType::from_repr(skill_id) {
-                format!("{} ({}): {}", req_type, skill, difficulty)
-            } else {
-                format!("{} ({}): {}", req_type, skill_id, difficulty)
-            }
-        }
-        WieldRequirementType::Attrib => {
-            let attr = match skill_id {
-                1 => "Strength",
-                2 => "Endurance",
-                3 => "Quickness",
-                4 => "Coordination",
-                5 => "Focus",
-                6 => "Self",
-                _ => "Unknown",
-            };
+        WieldRequirementType::Attrib | WieldRequirementType::RawAttrib => {
+            let attr = AttributeType::from_repr(skill_id as usize)
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| format!("Unknown Attribute ({})", skill_id));
             format!("{} ({}): {}", req_type, attr, difficulty)
         }
-        WieldRequirementType::RawAttrib => {
-            let attr = match skill_id {
-                1 => "Strength",
-                2 => "Endurance",
-                3 => "Quickness",
-                4 => "Coordination",
-                5 => "Focus",
-                6 => "Self",
-                _ => "Unknown",
-            };
-            format!("{} ({}): {}", req_type, attr, difficulty)
-        }
-        WieldRequirementType::SecondaryAttrib => {
-            let vital = match skill_id {
-                1 => "Max Health",
-                2 => "Health",
-                3 => "Max Stamina",
-                4 => "Stamina",
-                5 => "Max Mana",
-                6 => "Mana",
-                _ => "Unknown",
-            };
-            format!("{} ({}): {}", req_type, vital, difficulty)
-        }
-        WieldRequirementType::RawSecondaryAttrib => {
-            let vital = match skill_id {
-                1 => "Max Health",
-                2 => "Health",
-                3 => "Max Stamina",
-                4 => "Stamina",
-                5 => "Max Mana",
-                6 => "Mana",
-                _ => "Unknown",
-            };
+        WieldRequirementType::SecondaryAttrib | WieldRequirementType::RawSecondaryAttrib => {
+            let vital = VitalType::from_repr(skill_id as usize)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| format!("Unknown Vital ({})", skill_id));
             format!("{} ({}): {}", req_type, vital, difficulty)
         }
         WieldRequirementType::Level => {
@@ -86,35 +43,22 @@ fn format_wield_requirement(
             let skill = SkillType::from_repr(skill_id)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("Unknown Skill ({})", skill_id));
-            let training = match difficulty {
-                1 => "Untrained",
-                2 => "Trained",
-                3 => "Specialized",
-                _ => "Unknown",
-            };
+            let training = TrainingLevel::from_repr(difficulty as usize)
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| format!("Unknown ({})", difficulty));
             format!("Training ({}): {}", skill, training)
         }
         WieldRequirementType::CreatureType => {
-            // Mapping CreatureType would be long, we'll use numeric for now or add a helper
-            format!("Creature Type ({}): {}", skill_id, difficulty)
+            use holtburger_common::stats::CreatureType;
+            let creature = CreatureType::from_repr(difficulty as u32)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| format!("Unknown Creature ({})", difficulty));
+            format!("Creature Type: {}", creature)
         }
         WieldRequirementType::HeritageType => {
-            let heritage = match difficulty {
-                1 => "Aluvian",
-                2 => "Gharundim",
-                3 => "Sho",
-                4 => "Viamontian",
-                5 => "Shadowbound",
-                6 => "Gearknight",
-                7 => "Tumerok",
-                8 => "Lugian",
-                9 => "Empyrean",
-                10 => "Penumbraen",
-                11 => "Undead",
-                12 => "Olthoi",
-                13 => "Olthoi Acid",
-                _ => "Unknown",
-            };
+            let heritage = HeritageGroup::from_repr(difficulty as usize)
+                .map(|h| h.to_string())
+                .unwrap_or_else(|| format!("Unknown Heritage ({})", difficulty));
             format!("Heritage: {}", heritage)
         }
         _ => format!("{}: {}", req_type, difficulty),

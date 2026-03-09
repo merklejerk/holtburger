@@ -3,7 +3,7 @@ use holtburger_common::properties::{
     PropertyInt, PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_common::stats::{CreatureType, SkillType};
-use strum_macros::Display;
+use strum_macros::{Display, FromRepr};
 use crate::entity::Entity;
 use crate::damage::compute_damage_range;
 use crate::magic::calculate_mana_time_left;
@@ -51,7 +51,7 @@ pub struct WieldRequirement {
     pub difficulty: i32,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
 pub enum WieldRequirementType {
     Invalid = 0,
     Skill = 1,
@@ -66,6 +66,54 @@ pub enum WieldRequirementType {
     BoolStat = 10,
     CreatureType = 11,
     HeritageType = 12,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+pub enum AttributeType {
+    Undef = 0,
+    Strength = 1,
+    Endurance = 2,
+    Quickness = 3,
+    Coordination = 4,
+    Focus = 5,
+    SelfAttr = 6,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+pub enum VitalType {
+    Undef = 0,
+    MaxHealth = 1,
+    Health = 2,
+    MaxStamina = 3,
+    Stamina = 4,
+    MaxMana = 5,
+    Mana = 6,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+pub enum TrainingLevel {
+    Inactive = 0,
+    Untrained = 1,
+    Trained = 2,
+    Specialized = 3,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+pub enum HeritageGroup {
+    Invalid = 0,
+    Aluvian = 1,
+    Gharundim = 2,
+    Sho = 3,
+    Viamontian = 4,
+    Shadowbound = 5,
+    Gearknight = 6,
+    Tumerok = 7,
+    Lugian = 8,
+    Empyrean = 9,
+    Penumbraen = 10,
+    Undead = 11,
+    Olthoi = 12,
+    OlthoiAcid = 13,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Display)]
@@ -297,27 +345,13 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
 
     for (req_prop, skill_prop, diff_prop) in configs {
         let req_type_id = entity.get_int_prop(req_prop).unwrap_or(0);
-        let requirement_type = match req_type_id {
-            1 => WieldRequirementType::Skill,
-            2 => WieldRequirementType::RawSkill,
-            3 => WieldRequirementType::Attrib,
-            4 => WieldRequirementType::RawAttrib,
-            5 => WieldRequirementType::SecondaryAttrib,
-            6 => WieldRequirementType::RawSecondaryAttrib,
-            7 => WieldRequirementType::Level,
-            8 => WieldRequirementType::Training,
-            9 => WieldRequirementType::IntStat,
-            10 => WieldRequirementType::BoolStat,
-            11 => WieldRequirementType::CreatureType,
-            12 => WieldRequirementType::HeritageType,
-            _ => {
-                // Default to Skill if skill_prop exists but req_prop doesn't
-                if entity.get_int_prop(skill_prop).is_some() {
-                    WieldRequirementType::Skill
-                } else {
-                    WieldRequirementType::Invalid
-                }
-            }
+        let requirement_type = if let Some(rt) = WieldRequirementType::from_repr(req_type_id as usize) {
+            rt
+        } else if entity.get_int_prop(skill_prop).is_some() {
+            // Default to Skill if skill_prop exists but req_prop doesn't
+            WieldRequirementType::Skill
+        } else {
+            WieldRequirementType::Invalid
         };
 
         if requirement_type != WieldRequirementType::Invalid {

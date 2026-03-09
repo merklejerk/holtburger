@@ -1,11 +1,125 @@
 use crate::utils::{format_duration, wrap_text};
-use holtburger_world::assessment::{Assessment, Effect, StatusFlag};
+use holtburger_world::assessment::{
+    Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirementType,
+};
 use holtburger_world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
 
 const LABEL_COLOR: Color = Color::Gray;
+
+fn format_wield_requirement(
+    req_type: WieldRequirementType,
+    skill_id: u32,
+    difficulty: i32,
+) -> String {
+    use holtburger_common::stats::SkillType;
+
+    match req_type {
+        WieldRequirementType::Skill => {
+            if let Some(skill) = SkillType::from_repr(skill_id) {
+                format!("{} ({}): {}", req_type, skill, difficulty)
+            } else {
+                format!("{} ({}): {}", req_type, skill_id, difficulty)
+            }
+        }
+        WieldRequirementType::RawSkill => {
+            if let Some(skill) = SkillType::from_repr(skill_id) {
+                format!("{} ({}): {}", req_type, skill, difficulty)
+            } else {
+                format!("{} ({}): {}", req_type, skill_id, difficulty)
+            }
+        }
+        WieldRequirementType::Attrib => {
+            let attr = match skill_id {
+                1 => "Strength",
+                2 => "Endurance",
+                3 => "Quickness",
+                4 => "Coordination",
+                5 => "Focus",
+                6 => "Self",
+                _ => "Unknown",
+            };
+            format!("{} ({}): {}", req_type, attr, difficulty)
+        }
+        WieldRequirementType::RawAttrib => {
+            let attr = match skill_id {
+                1 => "Strength",
+                2 => "Endurance",
+                3 => "Quickness",
+                4 => "Coordination",
+                5 => "Focus",
+                6 => "Self",
+                _ => "Unknown",
+            };
+            format!("{} ({}): {}", req_type, attr, difficulty)
+        }
+        WieldRequirementType::SecondaryAttrib => {
+            let vital = match skill_id {
+                1 => "Max Health",
+                2 => "Health",
+                3 => "Max Stamina",
+                4 => "Stamina",
+                5 => "Max Mana",
+                6 => "Mana",
+                _ => "Unknown",
+            };
+            format!("{} ({}): {}", req_type, vital, difficulty)
+        }
+        WieldRequirementType::RawSecondaryAttrib => {
+            let vital = match skill_id {
+                1 => "Max Health",
+                2 => "Health",
+                3 => "Max Stamina",
+                4 => "Stamina",
+                5 => "Max Mana",
+                6 => "Mana",
+                _ => "Unknown",
+            };
+            format!("{} ({}): {}", req_type, vital, difficulty)
+        }
+        WieldRequirementType::Level => {
+            format!("Level: {}", difficulty)
+        }
+        WieldRequirementType::Training => {
+            let skill = SkillType::from_repr(skill_id)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("Unknown Skill ({})", skill_id));
+            let training = match difficulty {
+                1 => "Untrained",
+                2 => "Trained",
+                3 => "Specialized",
+                _ => "Unknown",
+            };
+            format!("Training ({}): {}", skill, training)
+        }
+        WieldRequirementType::CreatureType => {
+            // Mapping CreatureType would be long, we'll use numeric for now or add a helper
+            format!("Creature Type ({}): {}", skill_id, difficulty)
+        }
+        WieldRequirementType::HeritageType => {
+            let heritage = match difficulty {
+                1 => "Aluvian",
+                2 => "Gharundim",
+                3 => "Sho",
+                4 => "Viamontian",
+                5 => "Shadowbound",
+                6 => "Gearknight",
+                7 => "Tumerok",
+                8 => "Lugian",
+                9 => "Empyrean",
+                10 => "Penumbraen",
+                11 => "Undead",
+                12 => "Olthoi",
+                13 => "Olthoi Acid",
+                _ => "Unknown",
+            };
+            format!("Heritage: {}", heritage)
+        }
+        _ => format!("{}: {}", req_type, difficulty),
+    }
+}
 
 /// Generates a list of strings representing human-friendly assessment information for an entity.
 pub fn get_assess_info(
@@ -100,26 +214,44 @@ pub fn get_assess_info(
         ]));
     }
 
-    // Possession States
-    if !assess.status_flags.is_empty() {
-        let mut states = Vec::new();
-        for flag in &assess.status_flags {
-            let (label, color) = match flag {
-                StatusFlag::Retained => ("Retained", Color::Magenta),
-                StatusFlag::Bonded => ("Bonded", Color::Magenta),
-                StatusFlag::Attuned => ("Attuned", Color::Magenta),
-                StatusFlag::Sticky => ("Sticky", Color::Magenta),
-                StatusFlag::Locked => ("Locked", Color::Red),
-            };
-            states.push(Span::styled(label, Style::default().fg(color)));
-        }
+    // Item Status/Bonding
+    let mut status_spans = Vec::new();
 
+    if let Some(bonded) = assess.bonded {
+        if bonded != BondedStatus::Normal {
+            status_spans.push(Span::styled(
+                bonded.to_string(),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+    }
+
+    if let Some(attuned) = assess.attuned {
+        if attuned != AttunedStatus::Normal {
+            status_spans.push(Span::styled(
+                attuned.to_string(),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+    }
+
+    if assess.is_retained {
+        status_spans.push(Span::styled("Retained", Style::default().fg(Color::Magenta)));
+    }
+    if assess.is_locked {
+        status_spans.push(Span::styled("Locked", Style::default().fg(Color::Red)));
+    }
+    if !assess.is_sellable {
+        status_spans.push(Span::styled("Inscribed", Style::default().fg(Color::Red)));
+    }
+
+    if !status_spans.is_empty() {
         let mut line = vec![Span::styled("Status:  ", Style::default().fg(LABEL_COLOR))];
-        for (i, state) in states.into_iter().enumerate() {
+        for (i, span) in status_spans.into_iter().enumerate() {
             if i > 0 {
                 line.push(Span::styled(", ", Style::default().fg(LABEL_COLOR)));
             }
-            line.push(state);
+            line.push(span);
         }
         lines.push(Line::from(line));
     }
@@ -184,105 +316,59 @@ pub fn get_assess_info(
         if let Some(wt) = weapon.weapon_type {
             if wt != holtburger_common::properties::WeaponType::Undef {
                 lines.push(Line::from(vec![
-                    Span::styled("Type:  ", Style::default().fg(Color::Gray)),
+                    Span::styled("Type:   ", Style::default().fg(Color::Gray)),
                     Span::styled(wt.to_string(), Style::default().fg(Color::White)),
                 ]));
             }
         }
+    }
 
-        if let Some(st) = weapon.wield_skill_type {
+    // Wield Requirements
+    if !assess.wield_requirements.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Wield Requirements:",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        for req in &assess.wield_requirements {
             lines.push(Line::from(vec![
-                Span::styled("Skill:  ", Style::default().fg(Color::Gray)),
+                Span::styled("  ", Style::default().fg(Color::Gray)),
                 Span::styled(
-                    format!("{} ({})", st, weapon.difficulty),
+                    format_wield_requirement(req.requirement_type, req.skill_id, req.difficulty),
                     Style::default().fg(Color::White),
                 ),
             ]));
         }
+    }
 
-        // --- Weapon Bonuses ---
-        let mut bonuses = Vec::new();
+    // Bonuses
+    if !assess.bonuses.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Bonuses:",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        for bonus in &assess.bonuses {
+            let value_display = if bonus.is_multiplier {
+                format!("{:+}%", (bonus.value * 100.0).round())
+            } else {
+                format!("{:+}%", (bonus.value * 100.0).round()) // Both are % based in display
+            };
 
-        if let Some(bonus) = weapon.attack_bonus {
-            bonuses.push(Line::from(vec![
-                Span::styled("  Attack Bonus:  ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:+}%", (bonus * 100.0).round()),
-                    Style::default().fg(Color::Green),
-                ),
+            let color = match bonus.name.as_str() {
+                "Attack Bonus" | "Defense Bonus" | "Missile Defense Bonus" | "Magic Defense Bonus" => {
+                    Color::Green
+                }
+                "Mana Conv" => Color::Cyan,
+                "Crit Rate" => Color::Yellow,
+                "Elemental Damage" => Color::Magenta,
+                _ => Color::White,
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {}:  ", bonus.name), Style::default().fg(Color::Gray)),
+                Span::styled(value_display, Style::default().fg(color)),
             ]));
-        }
-
-        if let Some(bonus) = weapon.defense_bonus {
-            bonuses.push(Line::from(vec![
-                Span::styled("  Defense Bonus:  ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:+}%", (bonus * 100.0).round()),
-                    Style::default().fg(Color::Green),
-                ),
-            ]));
-        }
-
-        if let Some(bonus) = weapon.missile_defense_bonus {
-            bonuses.push(Line::from(vec![
-                Span::styled(
-                    "  Missile Defense Bonus:  ",
-                    Style::default().fg(Color::Gray),
-                ),
-                Span::styled(
-                    format!("{:+}%", (bonus * 100.0).round()),
-                    Style::default().fg(Color::Green),
-                ),
-            ]));
-        }
-
-        if let Some(bonus) = weapon.magic_defense_bonus {
-            bonuses.push(Line::from(vec![
-                Span::styled("  Magic Defense Bonus:  ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:+}%", (bonus * 100.0).round()),
-                    Style::default().fg(Color::Green),
-                ),
-            ]));
-        }
-
-        if let Some(bonus) = weapon.mana_conversion_mod {
-            bonuses.push(Line::from(vec![
-                Span::styled("  Mana Conv:  ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:+}%", (bonus * 100.0).round()),
-                    Style::default().fg(Color::Cyan),
-                ),
-            ]));
-        }
-
-        if let Some(bonus) = weapon.crit_rate {
-            bonuses.push(Line::from(vec![
-                Span::styled("  Crit Rate:  ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:+}%", (bonus * 100.0).round()),
-                    Style::default().fg(Color::Yellow),
-                ),
-            ]));
-        }
-
-        if let Some(bonus) = weapon.elemental_damage_mod {
-            bonuses.push(Line::from(vec![
-                Span::styled("  Elemental Damage:  ", Style::default().fg(Color::Gray)),
-                Span::styled(
-                    format!("{:+}%", (bonus * 100.0).round()),
-                    Style::default().fg(Color::Magenta),
-                ),
-            ]));
-        }
-
-        if !bonuses.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Bonuses:",
-                Style::default().add_modifier(Modifier::BOLD),
-            )));
-            lines.extend(bonuses);
         }
     }
 

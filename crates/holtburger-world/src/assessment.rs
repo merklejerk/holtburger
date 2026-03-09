@@ -18,17 +18,54 @@ pub struct Assessment {
     pub tinkering: Option<TinkeringInfo>,
     pub spellcraft: Option<i32>,
     pub mana: Option<ManaInfo>,
-    pub status_flags: Vec<StatusFlag>,
+    pub bonded: Option<BondedStatus>,
+    pub attuned: Option<AttunedStatus>,
+    pub is_retained: bool,
+    pub is_locked: bool,
+    pub is_sellable: bool,
     pub stack: Option<StackInfo>,
     pub uses: Option<UsesInfo>,
     pub armor: Option<i32>,
     pub weapon: Option<WeaponInfo>,
     pub creature: Option<CreatureInfo>,
     pub protections: Option<Protections>,
+    pub bonuses: Vec<Bonus>,
+    pub wield_requirements: Vec<WieldRequirement>,
     pub imbued_effects: Vec<String>,
     pub effects: Vec<Effect>,
     pub use_info: Option<String>,
     pub spells: Vec<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Bonus {
+    pub name: String,
+    pub value: f64,
+    pub is_multiplier: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WieldRequirement {
+    pub requirement_type: WieldRequirementType,
+    pub skill_id: u32,
+    pub difficulty: i32,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq)]
+pub enum WieldRequirementType {
+    Invalid = 0,
+    Skill = 1,
+    RawSkill = 2,
+    Attrib = 3,
+    RawAttrib = 4,
+    SecondaryAttrib = 5,
+    RawSecondaryAttrib = 6,
+    Level = 7,
+    Training = 8,
+    IntStat = 9,
+    BoolStat = 10,
+    CreatureType = 11,
+    HeritageType = 12,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Display)]
@@ -88,13 +125,56 @@ pub struct ManaInfo {
     pub seconds_left: Option<f64>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub enum StatusFlag {
-    Retained,
-    Bonded,
-    Attuned,
-    Sticky,
-    Locked,
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Display)]
+pub enum BondedStatus {
+    #[strum(serialize = "Destroy")]
+    Destroy = -2,
+    #[strum(serialize = "Slippery")]
+    Slippery = -1,
+    #[strum(serialize = "Normal")]
+    Normal = 0,
+    #[strum(serialize = "Bonded")]
+    Bonded = 1,
+    // Unused by ACE
+    // #[strum(serialize = "Sticky")]
+    // Sticky = 2,
+}
+
+impl BondedStatus {
+    fn from_entity(entity: &Entity) -> Option<Self> {
+        let val = entity.get_int_prop(PropertyInt::Bonded)?;
+        match val {
+            -2 => Some(BondedStatus::Destroy),
+            -1 => Some(BondedStatus::Slippery),
+            0 => Some(BondedStatus::Normal),
+            1 => Some(BondedStatus::Bonded),
+            // Unused by ACE
+            // 2 => Some(BondedStatus::Sticky),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, Display)]
+pub enum AttunedStatus {
+    #[strum(serialize = "Normal")]
+    Normal = 0,
+    #[strum(serialize = "Attuned")]
+    Attuned = 1,
+    #[strum(serialize = "Sticky")]
+    Sticky = 2,
+}
+
+impl AttunedStatus {
+    fn from_entity(entity: &Entity) -> Option<Self> {
+        let val = entity.get_int_prop(PropertyInt::Attuned)?;
+        match val {
+            0 => Some(AttunedStatus::Normal),
+            1 => Some(AttunedStatus::Attuned),
+            2 => Some(AttunedStatus::Sticky),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -116,15 +196,6 @@ pub struct WeaponInfo {
     pub damage_type: DamageType,
     pub speed: f32,
     pub weapon_type: Option<WeaponType>,
-    pub wield_skill_type: Option<SkillType>,
-    pub difficulty: i32,
-    pub attack_bonus: Option<f64>,
-    pub defense_bonus: Option<f64>,
-    pub missile_defense_bonus: Option<f64>,
-    pub magic_defense_bonus: Option<f64>,
-    pub mana_conversion_mod: Option<f64>,
-    pub crit_rate: Option<f64>,
-    pub elemental_damage_mod: Option<f64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -174,13 +245,19 @@ impl Assessment {
             tinkering: TinkeringInfo::from_entity(entity),
             spellcraft: entity.get_int_prop(PropertyInt::ItemSpellcraft),
             mana: ManaInfo::from_entity(entity),
-            status_flags: StatusFlag::from_entity(entity),
+            bonded: BondedStatus::from_entity(entity),
+            attuned: AttunedStatus::from_entity(entity),
+            is_retained: entity.get_bool_prop(PropertyBool::Retained),
+            is_locked: entity.is_locked(),
+            is_sellable: entity.is_sellable(),
             stack: StackInfo::from_entity(entity),
             uses: UsesInfo::from_entity(entity),
             armor: entity.get_int_prop(PropertyInt::ArmorLevel),
             weapon: WeaponInfo::from_entity(entity),
             creature: CreatureInfo::from_entity(entity),
             protections: Protections::from_entity(entity),
+            bonuses: get_bonuses(entity),
+            wield_requirements: get_wield_requirements(entity),
             imbued_effects: get_imbued_effects(entity),
             effects: Effect::from_entity(entity),
             use_info: entity
@@ -189,6 +266,139 @@ impl Assessment {
             spells: entity.spell_book.clone(),
         }
     }
+}
+
+fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
+    let mut reqs = Vec::new();
+
+    // Regular Wield Requirements
+    let configs = [
+        (
+            PropertyInt::WieldRequirements,
+            PropertyInt::WieldSkillType,
+            PropertyInt::WieldDifficulty,
+        ),
+        (
+            PropertyInt::WieldRequirements2,
+            PropertyInt::WieldSkillType2,
+            PropertyInt::WieldDifficulty2,
+        ),
+        (
+            PropertyInt::WieldRequirements3,
+            PropertyInt::WieldSkillType3,
+            PropertyInt::WieldDifficulty3,
+        ),
+        (
+            PropertyInt::WieldRequirements4,
+            PropertyInt::WieldSkillType4,
+            PropertyInt::WieldDifficulty4,
+        ),
+    ];
+
+    for (req_prop, skill_prop, diff_prop) in configs {
+        let req_type_id = entity.get_int_prop(req_prop).unwrap_or(0);
+        let requirement_type = match req_type_id {
+            1 => WieldRequirementType::Skill,
+            2 => WieldRequirementType::RawSkill,
+            3 => WieldRequirementType::Attrib,
+            4 => WieldRequirementType::RawAttrib,
+            5 => WieldRequirementType::SecondaryAttrib,
+            6 => WieldRequirementType::RawSecondaryAttrib,
+            7 => WieldRequirementType::Level,
+            8 => WieldRequirementType::Training,
+            9 => WieldRequirementType::IntStat,
+            10 => WieldRequirementType::BoolStat,
+            11 => WieldRequirementType::CreatureType,
+            12 => WieldRequirementType::HeritageType,
+            _ => {
+                // Default to Skill if skill_prop exists but req_prop doesn't
+                if entity.get_int_prop(skill_prop).is_some() {
+                    WieldRequirementType::Skill
+                } else {
+                    WieldRequirementType::Invalid
+                }
+            }
+        };
+
+        if requirement_type != WieldRequirementType::Invalid {
+            let skill_id = entity.get_int_prop(skill_prop).unwrap_or(0) as u32;
+            let difficulty = entity.get_int_prop(diff_prop).unwrap_or(0);
+
+            if difficulty > 0 || requirement_type == WieldRequirementType::Training {
+                reqs.push(WieldRequirement {
+                    requirement_type,
+                    skill_id,
+                    difficulty,
+                });
+            }
+        }
+    }
+
+    // Arcane Lore requirement from ItemDifficulty
+    if let Some(difficulty) = entity.get_int_prop(PropertyInt::ItemDifficulty) {
+        if difficulty > 0 {
+            reqs.push(WieldRequirement {
+                requirement_type: WieldRequirementType::Skill,
+                skill_id: SkillType::ArcaneLore as u32,
+                difficulty,
+            });
+        }
+    }
+
+    reqs
+}
+
+fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
+    let mut bonuses = Vec::new();
+
+    let mult_props = [
+        ("Attack Bonus", PropertyFloat::WeaponOffense),
+        ("Defense Bonus", PropertyFloat::WeaponDefense),
+        ("Missile Defense Bonus", PropertyFloat::WeaponMissileDefense),
+        ("Magic Defense Bonus", PropertyFloat::WeaponMagicDefense),
+        ("Elemental Damage", PropertyFloat::ElementalDamageMod),
+    ];
+
+    for (name, prop) in mult_props {
+        if let Some(val) = get_normalized_multiplier(entity, prop) {
+            bonuses.push(Bonus {
+                name: name.to_string(),
+                value: val,
+                is_multiplier: true,
+            });
+        }
+    }
+
+    // Fallback for weapon offense from profile
+    if !bonuses.iter().any(|b| b.name == "Attack Bonus") {
+        if let Some(p) = entity.weapon_profile.as_ref() {
+            let val = p.weapon_offense - 1.0;
+            if val.abs() > f64::EPSILON {
+                bonuses.push(Bonus {
+                    name: "Attack Bonus".to_string(),
+                    value: val,
+                    is_multiplier: true,
+                });
+            }
+        }
+    }
+
+    let mod_props = [
+        ("Mana Conv", PropertyFloat::ManaConversionMod),
+        ("Crit Rate", PropertyFloat::CriticalFrequency),
+    ];
+
+    for (name, prop) in mod_props {
+        if let Some(val) = get_nonzero_modifier(entity, prop) {
+            bonuses.push(Bonus {
+                name: name.to_string(),
+                value: val,
+                is_multiplier: false,
+            });
+        }
+    }
+
+    bonuses
 }
 
 impl MaterialInfo {
@@ -228,27 +438,6 @@ impl ManaInfo {
     }
 }
 
-impl StatusFlag {
-    fn from_entity(entity: &Entity) -> Vec<Self> {
-        let mut flags = Vec::new();
-        if entity.get_bool_prop(PropertyBool::Retained) {
-            flags.push(StatusFlag::Retained);
-        }
-        if entity.get_int_prop(PropertyInt::Bonded).unwrap_or(0) != 0 {
-            flags.push(StatusFlag::Bonded);
-        }
-        match entity.get_int_prop(PropertyInt::Attuned).unwrap_or(0) {
-            1 => flags.push(StatusFlag::Attuned),
-            2 => flags.push(StatusFlag::Sticky),
-            _ => {}
-        }
-        if entity.is_locked() {
-            flags.push(StatusFlag::Locked);
-        }
-        flags
-    }
-}
-
 impl StackInfo {
     fn from_entity(entity: &Entity) -> Option<Self> {
         entity
@@ -280,15 +469,6 @@ impl WeaponInfo {
 
         let range = compute_damage_range(entity)?;
 
-        // Use attack offense from profile as fallback for the bonus
-        let attack_bonus = get_normalized_multiplier(entity, PropertyFloat::WeaponOffense).or_else(|| {
-            entity
-                .weapon_profile
-                .as_ref()
-                .map(|p| p.weapon_offense - 1.0)
-                .filter(|&v| v.abs() > f64::EPSILON)
-        });
-
         Some(WeaponInfo {
             damage_min: range.min,
             damage_max: range.max,
@@ -301,17 +481,6 @@ impl WeaponInfo {
             weapon_type: entity
                 .get_int_prop(PropertyInt::WeaponType)
                 .and_then(|w| WeaponType::from_repr(w as u32)),
-            wield_skill_type: entity
-                .get_int_prop(PropertyInt::WieldSkillType)
-                .and_then(|s| SkillType::from_repr(s as u32)),
-            difficulty: entity.get_int_prop(PropertyInt::WieldDifficulty).unwrap_or(0),
-            attack_bonus,
-            defense_bonus: get_normalized_multiplier(entity, PropertyFloat::WeaponDefense),
-            missile_defense_bonus: get_normalized_multiplier(entity, PropertyFloat::WeaponMissileDefense),
-            magic_defense_bonus: get_normalized_multiplier(entity, PropertyFloat::WeaponMagicDefense),
-            mana_conversion_mod: get_nonzero_modifier(entity, PropertyFloat::ManaConversionMod),
-            crit_rate: get_nonzero_modifier(entity, PropertyFloat::CriticalFrequency),
-            elemental_damage_mod: get_normalized_multiplier(entity, PropertyFloat::ElementalDamageMod),
         })
     }
 }

@@ -1,12 +1,11 @@
 use holtburger_common::properties::{
-    AttackType, ImbuedEffectType, ItemType, PropertyBool, PropertyFloat, PropertyInt,
-    PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
+    AttackType, DamageType, ImbuedEffectType, ItemType, MaterialType, PropertyBool, PropertyFloat,
+    PropertyInt, PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
-use holtburger_common::stats::CreatureType;
+use holtburger_common::stats::{CreatureType, SkillType};
 use strum_macros::Display;
 use crate::entity::Entity;
 use crate::damage::compute_damage_range;
-use crate::crafting::salvage::get_material_name;
 use crate::magic::calculate_mana_time_left;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -73,7 +72,7 @@ pub enum Effect {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MaterialInfo {
-    pub name: String,
+    pub material_type: MaterialType,
     pub workmanship: i32,
 }
 
@@ -114,10 +113,10 @@ pub struct UsesInfo {
 pub struct WeaponInfo {
     pub damage_min: f64,
     pub damage_max: f64,
-    pub damage_types: Vec<String>,
+    pub damage_type: DamageType,
     pub speed: f32,
     pub weapon_type: Option<WeaponType>,
-    pub wield_skill_type: Option<u32>, // SkillType enum from stats.rs might be better but u32 is safe for now
+    pub wield_skill_type: Option<SkillType>,
     pub difficulty: i32,
     pub attack_bonus: Option<f64>,
     pub defense_bonus: Option<f64>,
@@ -198,7 +197,7 @@ impl MaterialInfo {
         let workmanship = entity.get_int_prop(PropertyInt::ItemWorkmanship)?;
 
         Some(MaterialInfo {
-            name: get_material_name(mat_type as u32).to_string(),
+            material_type: MaterialType::from_repr(mat_type as u32)?,
             workmanship,
         })
     }
@@ -293,11 +292,7 @@ impl WeaponInfo {
         Some(WeaponInfo {
             damage_min: range.min,
             damage_max: range.max,
-            damage_types: range
-                .damage_type
-                .iter_display_names()
-                .map(|s| s.to_string())
-                .collect(),
+            damage_type: range.damage_type,
             speed: entity
                 .weapon_profile
                 .as_ref()
@@ -306,7 +301,9 @@ impl WeaponInfo {
             weapon_type: entity
                 .get_int_prop(PropertyInt::WeaponType)
                 .and_then(|w| WeaponType::from_repr(w as u32)),
-            wield_skill_type: entity.get_int_prop(PropertyInt::WieldSkillType).map(|s| s as u32),
+            wield_skill_type: entity
+                .get_int_prop(PropertyInt::WieldSkillType)
+                .and_then(|s| SkillType::from_repr(s as u32)),
             difficulty: entity.get_int_prop(PropertyInt::WieldDifficulty).unwrap_or(0),
             attack_bonus,
             defense_bonus: get_normalized_multiplier(entity, PropertyFloat::WeaponDefense),

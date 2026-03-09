@@ -48,7 +48,7 @@ pub trait WorldContextExt: WorldContext {
             available |= Usable::VIEWED;
         }
 
-        if entity.position.landblock_id != Guid::NULL || entity.physics_parent_id.is_some() {
+        if entity.position.landblock_id != Guid::NULL {
             available |= Usable::REMOTE;
         }
 
@@ -467,6 +467,31 @@ mod tests {
             .insert(PropertyInt::ItemUseable, Usable::REMOTE.bits() as i32);
 
         assert!(world.can_use(item_guid));
+    }
+
+    #[test]
+    fn physics_parent_alone_does_not_make_item_remote() {
+        let player_guid = Guid(0x5000_0001);
+        let item_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            ..Default::default()
+        };
+
+        let mut attached_item = entity(item_guid, "Attached Item");
+        attached_item.physics_parent_id = Some(Guid(0x7000_0001));
+        attached_item
+            .properties
+            .ints
+            .insert(PropertyInt::ItemUseable, Usable::REMOTE.bits() as i32);
+        world.entities.insert(item_guid, attached_item);
+
+        assert!(!world.can_use(item_guid));
+        assert_eq!(
+            world.current_usable_location_flags(item_guid, None),
+            Usable::empty()
+        );
     }
 
     #[test]

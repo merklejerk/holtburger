@@ -9,6 +9,7 @@ use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::utils::format_item_name;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
 
 pub fn render_nearby_tab(

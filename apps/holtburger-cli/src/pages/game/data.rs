@@ -120,16 +120,6 @@ impl GameData {
         }
     }
 
-    pub fn get_container_counts(&self) -> HashMap<Guid, u32> {
-        let mut counts = HashMap::new();
-        for entity in self.entities.values() {
-            if let Some(container_id) = entity.container_id() {
-                *counts.entry(container_id).or_insert(0) += 1;
-            }
-        }
-        counts
-    }
-
     pub fn get_burden(&self) -> Option<f32> {
         let player_guid = self.player_guid?;
         let player_entity = self.entities.get(&player_guid)?;

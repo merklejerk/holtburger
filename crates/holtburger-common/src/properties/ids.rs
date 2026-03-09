@@ -1112,26 +1112,6 @@ pub enum PropertyDataId {
     PcapPhysicsDidDataTemplatedFrom = 8044,
 }
 
-pub enum Property {
-    Bool(PropertyBool),
-    Int(PropertyInt),
-    Int64(PropertyInt64),
-    Float(PropertyFloat),
-    String(PropertyString),
-    DataId(PropertyDataId),
-}
-
-pub fn get_property_to_fixed_effect_name(property: Property) -> Option<&'static str> {
-    match property {
-        Property::Float(PropertyFloat::IgnoreArmor) => Some("Armor Cleaving"),
-        Property::Float(PropertyFloat::CriticalFrequency) => Some("Biting Strike"),
-        Property::Float(PropertyFloat::CriticalMultiplier) => Some("Crushing Blow"),
-        Property::Float(PropertyFloat::ResistanceModifier) => Some("Resistance Cleaving"),
-        Property::Bool(PropertyBool::IgnoreMagicArmor) => Some("Hollow"),
-        _ => None,
-    }
-}
-
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, FromRepr, Display, Serialize, Deserialize,
 )]

@@ -1,4 +1,5 @@
 use crate::Guid;
+use bitflags::bitflags;
 
 use super::{
     AttunedStatus, EquipMask, HasProperties, ItemType, PropertyBool, PropertyDataId,
@@ -294,7 +295,7 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     fn has_active_pet(&self) -> bool {
         self.get_instance_prop(PropertyInstanceId::Pet)
             .is_some_and(|guid| guid != Guid::NULL)
-    }
+    } 
 }
 
 impl<T: HasProperties> WorldObjectExt for T {}

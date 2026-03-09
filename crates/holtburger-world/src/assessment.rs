@@ -1,7 +1,9 @@
 use holtburger_common::properties::{
-    ImbuedEffectType, ItemType, PropertyBool, PropertyFloat, PropertyInt, PropertyString,
-    WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
+    AttackType, ImbuedEffectType, ItemType, PropertyBool, PropertyFloat, PropertyInt,
+    PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
+use holtburger_common::stats::CreatureType;
+use strum_macros::Display;
 use crate::entity::Entity;
 use crate::damage::compute_damage_range;
 use crate::crafting::salvage::get_material_name;
@@ -25,8 +27,48 @@ pub struct Assessment {
     pub creature: Option<CreatureInfo>,
     pub protections: Option<Protections>,
     pub imbued_effects: Vec<String>,
+    pub effects: Vec<Effect>,
     pub use_info: Option<String>,
     pub spells: Vec<u32>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Display)]
+#[serde(tag = "type", content = "data")]
+pub enum Effect {
+    #[strum(serialize = "Armor Rending")]
+    ArmorRending,
+    #[strum(serialize = "Armor Cleaving")]
+    ArmorCleaving,
+    #[strum(serialize = "Slash Cleaving")]
+    SlashCleaving,
+    #[strum(serialize = "Pierce Cleaving")]
+    PierceCleaving,
+    #[strum(serialize = "Bludgeon Cleaving")]
+    BludgeonCleaving,
+    #[strum(serialize = "Acid Cleaving")]
+    AcidCleaving,
+    #[strum(serialize = "Cold Cleaving")]
+    ColdCleaving,
+    #[strum(serialize = "Electric Cleaving")]
+    ElectricCleaving,
+    #[strum(serialize = "Fire Cleaving")]
+    FireCleaving,
+    #[strum(serialize = "Nether Cleaving")]
+    NetherCleaving,
+    #[strum(serialize = "Magic Absorption")]
+    MagicAbsorption,
+    #[strum(serialize = "Biting Strike")]
+    BitingStrike(f64),
+    #[strum(serialize = "Crushing Blow")]
+    CrushingBlow(f64),
+    Slayer {
+        creature_type: CreatureType,
+        bonus: f64,
+    },
+    Multistrike,
+    Cleaving(i32),
+    #[strum(serialize = "Always Critical")]
+    AlwaysCritical,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -75,7 +117,7 @@ pub struct WeaponInfo {
     pub damage_types: Vec<String>,
     pub speed: f32,
     pub weapon_type: Option<WeaponType>,
-    pub skill_type: Option<u32>, // SkillType enum from stats.rs might be better but u32 is safe for now
+    pub wield_skill_type: Option<u32>, // SkillType enum from stats.rs might be better but u32 is safe for now
     pub difficulty: i32,
     pub attack_bonus: Option<f64>,
     pub defense_bonus: Option<f64>,
@@ -141,6 +183,7 @@ impl Assessment {
             creature: CreatureInfo::from_entity(entity),
             protections: Protections::from_entity(entity),
             imbued_effects: get_imbued_effects(entity),
+            effects: Effect::from_entity(entity),
             use_info: entity
                 .get_string_prop(PropertyString::Use)
                 .map(|s| s.to_string()),
@@ -263,7 +306,7 @@ impl WeaponInfo {
             weapon_type: entity
                 .get_int_prop(PropertyInt::WeaponType)
                 .and_then(|w| WeaponType::from_repr(w as u32)),
-            skill_type: entity.get_int_prop(PropertyInt::WieldSkillType).map(|s| s as u32),
+            wield_skill_type: entity.get_int_prop(PropertyInt::WieldSkillType).map(|s| s as u32),
             difficulty: entity.get_int_prop(PropertyInt::WieldDifficulty).unwrap_or(0),
             attack_bonus,
             defense_bonus: get_normalized_multiplier(entity, PropertyFloat::WeaponDefense),
@@ -324,6 +367,119 @@ impl Protections {
             lightning: ap.lightning,
             nether: ap.nether,
         })
+    }
+}
+
+impl Effect {
+    fn from_entity(entity: &Entity) -> Vec<Self> {
+        let mut effects = Vec::new();
+
+        // Float Detectors (Present if nonzero)
+        if entity.get_float_prop(PropertyFloat::IgnoreArmor).is_some() {
+            // Distinguish between Rending and Cleaving base on property values or context
+            // In ACE, Rending is usually 1.0/0.0 on the prop, Cleaving might be different
+            // But for now we'll just check existence as requested.
+            effects.push(Effect::ArmorRending);
+        }
+
+        if let Some(res_mod) = entity.get_float_prop(PropertyFloat::ResistanceModifier) {
+            if res_mod != 0.0 {
+                // ResistanceModifier is used for Cleaving.
+                // We'd need DamageType logic to know WHICH cleaving, but the prompt
+                // asks for them as separate variants. We'll use the weapon's damage type.
+                if let Some(range) = compute_damage_range(entity) {
+                    let dt = range.damage_type;
+                    if dt.contains(holtburger_common::properties::DamageType::SLASH) {
+                        effects.push(Effect::SlashCleaving);
+                    }
+                    if dt.contains(holtburger_common::properties::DamageType::PIERCE) {
+                        effects.push(Effect::PierceCleaving);
+                    }
+                    if dt.contains(holtburger_common::properties::DamageType::BLUDGEON) {
+                        effects.push(Effect::BludgeonCleaving);
+                    }
+                    if dt.contains(holtburger_common::properties::DamageType::ACID) {
+                        effects.push(Effect::AcidCleaving);
+                    }
+                    if dt.contains(holtburger_common::properties::DamageType::COLD) {
+                        effects.push(Effect::ColdCleaving);
+                    }
+                    if dt.contains(holtburger_common::properties::DamageType::ELECTRIC) {
+                        effects.push(Effect::ElectricCleaving);
+                    }
+                    if dt.contains(holtburger_common::properties::DamageType::FIRE) {
+                        effects.push(Effect::FireCleaving);
+                    }
+                    if dt.contains(holtburger_common::properties::DamageType::NETHER) {
+                        effects.push(Effect::NetherCleaving);
+                    }
+                }
+            }
+        }
+
+        if entity.get_float_prop(PropertyFloat::AbsorbMagicDamage).is_some() {
+            effects.push(Effect::MagicAbsorption);
+        }
+
+        // Float Properties (Strength attached)
+        if let Some(freq) = entity.get_float_prop(PropertyFloat::CriticalFrequency) {
+            if freq > 0.0 {
+                effects.push(Effect::BitingStrike(freq));
+            }
+        }
+        if let Some(mult) = entity.get_float_prop(PropertyFloat::CriticalMultiplier) {
+            if mult > 0.0 {
+                effects.push(Effect::CrushingBlow(mult));
+            }
+        }
+        if let Some(bonus) = entity.get_float_prop(PropertyFloat::SlayerDamageBonus) {
+            if bonus > 0.0 {
+                if let Some(creature_type) = entity
+                    .get_int_prop(PropertyInt::SlayerCreatureType)
+                    .and_then(|t| CreatureType::from_repr(t as u32))
+                {
+                    effects.push(Effect::Slayer {
+                        creature_type,
+                        bonus,
+                    });
+                }
+            }
+        }
+
+        // Int Properties
+        if let Some(at) = entity
+            .get_int_prop(PropertyInt::AttackType)
+            .map(|bits| AttackType::from_bits_truncate(bits as u32))
+        {
+            if at.intersects(AttackType::DoubleStrike | AttackType::TripleStrike) {
+                effects.push(Effect::Multistrike);
+            }
+        }
+
+        if let Some(cleave_targets) = entity.get_int_prop(PropertyInt::Cleaving) {
+            if cleave_targets > 0 {
+                effects.push(Effect::Cleaving(cleave_targets));
+            }
+        }
+
+        // Bitflags in ImbuedEffect (formerly thought as PropertyBool)
+        let bits = [
+            PropertyInt::ImbuedEffect,
+            PropertyInt::ImbuedEffect2,
+            PropertyInt::ImbuedEffect3,
+            PropertyInt::ImbuedEffect4,
+            PropertyInt::ImbuedEffect5,
+        ]
+        .into_iter()
+        .filter_map(|p| entity.get_int_prop(p))
+        .fold(0u32, |acc, val| acc | (val as u32));
+
+        let imbued = ImbuedEffectType::from_bits_truncate(bits);
+        if imbued.contains(ImbuedEffectType::AlwaysCritical) {
+            effects.push(Effect::AlwaysCritical);
+        }
+
+        effects
     }
 }
 

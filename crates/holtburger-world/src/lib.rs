@@ -7,6 +7,7 @@
 //! - [`handlers`] owns feature-based protocol orchestration that translates decoded messages into
 //!   narrow state mutations plus [`StateEvent`] emission.
 
+pub mod assessment;
 pub mod context;
 pub mod crafting;
 pub mod damage;

@@ -1,6 +1,6 @@
 use crate::entity::Entity;
 use crate::stats::{Skill, SkillType, TrainingLevel};
-use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectExt};
+use holtburger_common::properties::{ItemType, MaterialType, PropertyInt, WorldObjectExt};
 
 const MAX_SALVAGE_BAG_UNITS: u32 = 100;
 
@@ -14,7 +14,7 @@ pub struct SalvageSkillProfile {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SalvageItemInput {
     pub item_type: ItemType,
-    pub material_type: u32,
+    pub material_type: MaterialType,
     pub stack_size: u32,
     pub structure: u32,
     pub item_workmanship: u32,
@@ -29,14 +29,14 @@ pub struct SalvagePreview {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SalvagePreviewBag {
-    pub material_type: u32,
+    pub material_type: MaterialType,
     pub units: u32,
     pub workmanship: f64,
 }
 
 #[derive(Debug, Clone)]
 struct WorkingBag {
-    material_type: u32,
+    material_type: MaterialType,
     units: u32,
     item_workmanship: u32,
     num_items_in_material: u32,
@@ -67,7 +67,7 @@ impl SalvageItemInput {
 }
 
 impl WorkingBag {
-    fn new(material_type: u32) -> Self {
+    fn new(material_type: MaterialType) -> Self {
         Self {
             material_type,
             units: 0,
@@ -140,88 +140,8 @@ pub fn predict_salvage_preview(
     }
 }
 
-pub fn get_material_name(material_type: u32) -> &'static str {
-    match material_type {
-        0 => "Unknown",
-        1 => "Ceramic",
-        2 => "Porcelain",
-        3 => "Cloth",
-        4 => "Linen",
-        5 => "Satin",
-        6 => "Silk",
-        7 => "Velvet",
-        8 => "Wool",
-        9 => "Gem",
-        10 => "Agate",
-        11 => "Amber",
-        12 => "Amethyst",
-        13 => "Aquamarine",
-        14 => "Azurite",
-        15 => "Black Garnet",
-        16 => "Black Opal",
-        17 => "Bloodstone",
-        18 => "Carnelian",
-        19 => "Citrine",
-        20 => "Diamond",
-        21 => "Emerald",
-        22 => "Fire Opal",
-        23 => "Green Garnet",
-        24 => "Green Jade",
-        25 => "Hematite",
-        26 => "Imperial Topaz",
-        27 => "Jet",
-        28 => "Lapis Lazuli",
-        29 => "Lavender Jade",
-        30 => "Malachite",
-        31 => "Moonstone",
-        32 => "Onyx",
-        33 => "Opal",
-        34 => "Peridot",
-        35 => "Red Garnet",
-        36 => "Red Jade",
-        37 => "Rose Quartz",
-        38 => "Ruby",
-        39 => "Sapphire",
-        40 => "Smokey Quartz",
-        41 => "Sunstone",
-        42 => "Tiger Eye",
-        43 => "Tourmaline",
-        44 => "Turquoise",
-        45 => "White Jade",
-        46 => "White Quartz",
-        47 => "White Sapphire",
-        48 => "Yellow Garnet",
-        49 => "Yellow Topaz",
-        50 => "Zircon",
-        51 => "Ivory",
-        52 => "Leather",
-        53 => "Armoredillo Hide",
-        54 => "Gromnie Hide",
-        55 => "Reed Shark Hide",
-        56 => "Metal",
-        57 => "Brass",
-        58 => "Bronze",
-        59 => "Copper",
-        60 => "Gold",
-        61 => "Iron",
-        62 => "Pyreal",
-        63 => "Silver",
-        64 => "Steel",
-        65 => "Stone",
-        66 => "Alabaster",
-        67 => "Granite",
-        68 => "Marble",
-        69 => "Obsidian",
-        70 => "Sandstone",
-        71 => "Serpentine",
-        72 => "Wood",
-        73 => "Ebony",
-        74 => "Mahogany",
-        75 => "Oak",
-        76 => "Pine",
-        77 => "Teak",
-        _ => "Unknown",
-    }
+pub fn get_material_name(material_type: MaterialType) -> String {
+    material_type.to_string()
 }
 
 fn calc_num_units(skill: u32, workmanship: f64, num_augs: u32) -> u32 {
@@ -246,7 +166,7 @@ fn get_structure(item: &SalvageItemInput, skills: SalvageSkillProfile) -> u32 {
     salvage_amount.max(tinkering_amount)
 }
 
-fn get_or_create_bag(material_type: u32, bags: &mut Vec<WorkingBag>) -> &mut WorkingBag {
+fn get_or_create_bag(material_type: MaterialType, bags: &mut Vec<WorkingBag>) -> &mut WorkingBag {
     if let Some(index) = bags
         .iter()
         .position(|bag| bag.material_type == material_type && bag.has_space())
@@ -345,7 +265,7 @@ mod tests {
     fn preview_splits_large_salvage_output_into_multiple_bags() {
         let items = vec![SalvageItemInput {
             item_type: ItemType::MISSILE_WEAPON,
-            material_type: 64,
+            material_type: MaterialType::Steel,
             stack_size: 6,
             structure: 0,
             item_workmanship: 10,
@@ -356,7 +276,7 @@ mod tests {
 
         assert_eq!(preview.item_count, 1);
         assert_eq!(preview.bags.len(), 2);
-        assert_eq!(preview.bags[0].material_type, 64);
+        assert_eq!(preview.bags[0].material_type, MaterialType::Steel);
         assert_eq!(preview.bags[0].units, 100);
         assert!((preview.bags[0].workmanship - 10.0).abs() < f64::EPSILON);
         assert_eq!(preview.bags[1].units, 20);
@@ -368,7 +288,7 @@ mod tests {
         let items = vec![
             SalvageItemInput {
                 item_type: ItemType::MISSILE_WEAPON,
-                material_type: 64,
+                material_type: MaterialType::Steel,
                 stack_size: 3,
                 structure: 0,
                 item_workmanship: 10,
@@ -376,7 +296,7 @@ mod tests {
             },
             SalvageItemInput {
                 item_type: ItemType::TINKERING_MATERIAL,
-                material_type: 64,
+                material_type: MaterialType::Steel,
                 stack_size: 1,
                 structure: 80,
                 item_workmanship: 40,

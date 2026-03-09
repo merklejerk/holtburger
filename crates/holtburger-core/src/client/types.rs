@@ -1,5 +1,4 @@
 use holtburger_common::{Guid, Vector3};
-use holtburger_dat::file_type::spell_table::SpellBase;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::inventory::types::EquipMask;
@@ -7,12 +6,14 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsEventItem};
 use holtburger_world::entity::Entity;
+use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::TradeState;
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
 use holtburger_world::vendor::VendorState;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub use holtburger_world::StateEvent;
@@ -118,9 +119,11 @@ pub enum ClientViewEvent {
     PlayerVitalsUpdated {
         vitals: HashMap<VitalType, Vital>,
     },
+    SpellCatalogLoaded {
+        catalog: Arc<SpellCatalog>,
+    },
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
-        spells: HashMap<u32, SpellBase>,
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,

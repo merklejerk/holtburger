@@ -10,9 +10,8 @@ use crate::pages::game::{GameData, ViewState};
 use crate::theme;
 use crate::utils::format_item_name;
 use holtburger_common::Guid;
-use holtburger_common::properties::{EquipMask, ItemType, WorldObjectExt as _};
+use holtburger_common::properties::{EquipMask, WorldObjectExt as _};
 use holtburger_world::context::WorldContextExt;
-use holtburger_world::crafting::salvage::get_material_name;
 use holtburger_world::entity::Entity;
 use std::collections::HashMap;
 
@@ -128,37 +127,35 @@ fn render_inventory_item(
 
     let type_marker = class.emoji();
 
-    let mut display_name = format_item_name(e, e.guid);
+    let display_name = format_item_name(e, e.guid);
 
-    if e.item_type()
-        .is_some_and(|it| it.contains(ItemType::TINKERING_MATERIAL))
-        && let Some(mat_type) = e.material_type()
-    {
-        let mat_name = get_material_name(mat_type);
-        display_name = format!("{} {}", mat_name, display_name);
-    }
+    let mut display_name_with_status = display_name;
 
     if is_equipped {
-        display_name = format!("{} (EQUIPPED)", display_name);
+        display_name_with_status = format!("{} (EQUIPPED)", display_name_with_status);
     } else if is_offered {
-        display_name = format!("{} (OFFERED)", display_name);
+        display_name_with_status = format!("{} (OFFERED)", display_name_with_status);
     } else if is_salvaging {
-        display_name = format!("{} (SALVAGING)", display_name);
+        display_name_with_status = format!("{} (SALVAGING)", display_name_with_status);
     }
 
     if !class.is_creature() {
         if let Some(capacity) = e.items_capacity() {
             if capacity > 0 {
                 let count = container_count.unwrap_or(0);
-                display_name = format!("{} ({}/{})", display_name, count, capacity);
+                display_name_with_status =
+                    format!("{} ({}/{})", display_name_with_status, count, capacity);
             }
         } else if let Some(count) = container_count.filter(|&c| c > 0) {
-            display_name = format!("{} ({})", display_name, count);
+            display_name_with_status = format!("{} ({})", display_name_with_status, count);
         }
     }
 
     let indent = "  ".repeat(depth);
-    let text = format!("{}[{}] {:<15}", indent, type_marker, display_name);
+    let text = format!(
+        "{}[{}] {:<15}",
+        indent, type_marker, display_name_with_status
+    );
 
     ListItem::new(Line::styled(text, text_style)).style(item_style)
 }

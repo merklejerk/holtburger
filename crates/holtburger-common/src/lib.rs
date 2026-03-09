@@ -3,6 +3,7 @@ pub mod guid;
 pub mod math;
 pub mod properties;
 pub mod sequence;
+pub mod stats;
 pub mod time;
 pub mod traits;
 

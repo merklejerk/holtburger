@@ -69,6 +69,9 @@ impl GameState {
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
             }
+            ClientViewEvent::SpellCatalogLoaded { .. } => {
+                self.handle_reference_data_event(event);
+            }
             ClientViewEvent::EntityDebugInfoSnapshot { entity } => {
                 let entity_ref = entity.as_ref();
                 self.data
@@ -585,12 +588,9 @@ impl GameState {
         match event {
             ClientViewEvent::PlayerEnchantmentsUpdated {
                 enchantments,
-                resolved_names,
+                resolved_names: _,
             } => {
                 self.data.player_enchantments = enchantments;
-                for (id, name) in resolved_names {
-                    self.data.spell_names.insert(id, name);
-                }
             }
             ClientViewEvent::PlayerStatsSkillsUpdated {
                 attributes,
@@ -612,12 +612,8 @@ impl GameState {
                     self.data.vitals.insert(vt, v);
                 }
             }
-            ClientViewEvent::PlayerSpellsUpdated { spell_ids, spells } => {
+            ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
                 self.data.player_spells = spell_ids;
-                for (id, info) in spells {
-                    self.data.spell_names.insert(id, info.name.clone());
-                    self.data.spell_info.insert(id, Box::new(info));
-                }
             }
             ClientViewEvent::CombatModeUpdated { mode } => {
                 if mode != CombatMode::NonCombat {
@@ -627,6 +623,12 @@ impl GameState {
                 self.data.combat_mode = mode;
             }
             _ => {}
+        }
+    }
+
+    pub(crate) fn handle_reference_data_event(&mut self, event: ClientViewEvent) {
+        if let ClientViewEvent::SpellCatalogLoaded { catalog } = event {
+            self.data.spell_catalog = Some(catalog);
         }
     }
 

@@ -31,6 +31,7 @@ pub struct Assessment {
     pub protections: Option<Protections>,
     pub bonuses: Vec<Bonus>,
     pub wield_requirements: Vec<WieldRequirement>,
+    pub inscriptions: Option<InscriptionInfo>,
     pub imbued_effects: Vec<String>,
     pub effects: Vec<Effect>,
     pub use_info: Option<String>,
@@ -45,10 +46,26 @@ pub struct Bonus {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WieldRequirement {
-    pub requirement_type: WieldRequirementType,
-    pub skill_id: u32,
-    pub difficulty: i32,
+#[serde(tag = "type", content = "data")]
+pub enum WieldRequirement {
+    Skill { skill: SkillType, difficulty: i32 },
+    RawSkill { skill: SkillType, difficulty: i32 },
+    Attribute { attribute: AttributeType, difficulty: i32 },
+    RawAttribute { attribute: AttributeType, difficulty: i32 },
+    Vital { vital: VitalType, difficulty: i32 },
+    RawVital { vital: VitalType, difficulty: i32 },
+    Level { level: i32 },
+    Training { skill: SkillType, level: TrainingLevel },
+    IntStat { property: PropertyInt, value: i32 },
+    BoolStat { property: PropertyBool, value: bool },
+    CreatureType { creature_type: CreatureType },
+    Heritage { heritage: HeritageGroup },
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InscriptionInfo {
+    pub text: String,
+    pub scribe: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
@@ -306,6 +323,7 @@ impl Assessment {
             protections: Protections::from_entity(entity),
             bonuses: get_bonuses(entity),
             wield_requirements: get_wield_requirements(entity),
+            inscriptions: InscriptionInfo::from_entity(entity),
             imbued_effects: get_imbued_effects(entity),
             effects: Effect::from_entity(entity),
             use_info: entity
@@ -358,12 +376,48 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
             let skill_id = entity.get_int_prop(skill_prop).unwrap_or(0) as u32;
             let difficulty = entity.get_int_prop(diff_prop).unwrap_or(0);
 
-            if difficulty > 0 || requirement_type == WieldRequirementType::Training {
-                reqs.push(WieldRequirement {
-                    requirement_type,
-                    skill_id,
-                    difficulty,
-                });
+            let req = match requirement_type {
+                WieldRequirementType::Skill => SkillType::from_repr(skill_id).map(|skill| {
+                    WieldRequirement::Skill { skill, difficulty }
+                }),
+                WieldRequirementType::RawSkill => SkillType::from_repr(skill_id).map(|skill| {
+                    WieldRequirement::RawSkill { skill, difficulty }
+                }),
+                WieldRequirementType::Attrib => AttributeType::from_repr(skill_id as usize).map(|attribute| {
+                    WieldRequirement::Attribute { attribute, difficulty }
+                }),
+                WieldRequirementType::RawAttrib => AttributeType::from_repr(skill_id as usize).map(|attribute| {
+                    WieldRequirement::RawAttribute { attribute, difficulty }
+                }),
+                WieldRequirementType::SecondaryAttrib => VitalType::from_repr(skill_id as usize).map(|vital| {
+                    WieldRequirement::Vital { vital, difficulty }
+                }),
+                WieldRequirementType::RawSecondaryAttrib => VitalType::from_repr(skill_id as usize).map(|vital| {
+                    WieldRequirement::RawVital { vital, difficulty }
+                }),
+                WieldRequirementType::Level => Some(WieldRequirement::Level { level: difficulty }),
+                WieldRequirementType::Training => SkillType::from_repr(skill_id).and_then(|skill| {
+                    TrainingLevel::from_repr(difficulty as usize).map(|level| {
+                        WieldRequirement::Training { skill, level }
+                    })
+                }),
+                WieldRequirementType::IntStat => PropertyInt::from_repr(skill_id).map(|property| {
+                    WieldRequirement::IntStat { property, value: difficulty }
+                }),
+                WieldRequirementType::BoolStat => PropertyBool::from_repr(skill_id).map(|property| {
+                    WieldRequirement::BoolStat { property, value: difficulty != 0 }
+                }),
+                WieldRequirementType::CreatureType => CreatureType::from_repr(skill_id).map(|creature_type| {
+                    WieldRequirement::CreatureType { creature_type }
+                }),
+                WieldRequirementType::HeritageType => HeritageGroup::from_repr(skill_id as usize).map(|heritage| {
+                    WieldRequirement::Heritage { heritage }
+                }),
+                _ => None,
+            };
+
+            if let Some(r) = req {
+                reqs.push(r);
             }
         }
     }
@@ -371,9 +425,8 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
     // Arcane Lore requirement from ItemDifficulty
     if let Some(difficulty) = entity.get_int_prop(PropertyInt::ItemDifficulty) {
         if difficulty > 0 {
-            reqs.push(WieldRequirement {
-                requirement_type: WieldRequirementType::Skill,
-                skill_id: SkillType::ArcaneLore as u32,
+            reqs.push(WieldRequirement::Skill {
+                skill: SkillType::ArcaneLore,
                 difficulty,
             });
         }
@@ -433,6 +486,20 @@ fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
     }
 
     bonuses
+}
+
+impl InscriptionInfo {
+    fn from_entity(entity: &Entity) -> Option<Self> {
+        let text = entity.get_string_prop(PropertyString::Inscription)?;
+        let scribe = entity
+            .get_string_prop(PropertyString::ScribeName)
+            .map(|s| s.to_string());
+
+        Some(InscriptionInfo {
+            text: text.to_string(),
+            scribe,
+        })
+    }
 }
 
 impl MaterialInfo {

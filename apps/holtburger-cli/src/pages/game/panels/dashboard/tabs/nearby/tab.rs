@@ -194,9 +194,8 @@ impl TabController for NearbyTab {
                     return verbs;
                 }
                 Interaction::Healing { item_guid } => {
-                    let is_player = class == EntityClass::Player;
                     let is_healing_kit = e.guid == item_guid;
-                    if is_player || is_healing_kit {
+                    if data.can_use_with(item_guid, e.guid) {
                         let label = if is_self || is_healing_kit {
                             "Heal yourself".to_string()
                         } else {
@@ -303,17 +302,6 @@ impl TabController for NearbyTab {
                         "Talk",
                     ));
                 }
-                EntityClass::Portal
-                | EntityClass::Door
-                | EntityClass::LifeStone
-                | EntityClass::Consumable
-                | EntityClass::Tool
-                | EntityClass::Key
-                | EntityClass::Writable
-                | EntityClass::Money
-                | EntityClass::Item => {
-                    verbs.push(Verb::new(vec![AppAction::Use { guid: e.guid }], 'u', "Use"));
-                }
                 EntityClass::Chest | EntityClass::Container => {
                     if data.open_containers.contains(&e.guid) {
                         verbs.push(Verb::new(
@@ -321,7 +309,7 @@ impl TabController for NearbyTab {
                             'o',
                             "Close",
                         ));
-                    } else {
+                    } else if data.can_use(e.guid) {
                         verbs.push(Verb::new(
                             vec![AppAction::Use { guid: e.guid }],
                             'o',
@@ -336,16 +324,11 @@ impl TabController for NearbyTab {
                         "Trade",
                     ));
                 }
-                EntityClass::HealingKit => {
-                    verbs.push(Verb::new(
-                        vec![AppAction::BeginInteraction {
-                            interaction: Interaction::Healing { item_guid: e.guid },
-                        }],
-                        'u',
-                        "Use",
-                    ));
+                _ => {
+                    if data.can_use(e.guid) {
+                        verbs.push(Verb::new(vec![AppAction::Use { guid: e.guid }], 'u', "Use"));
+                    }
                 }
-                _ => {}
             }
         }
 

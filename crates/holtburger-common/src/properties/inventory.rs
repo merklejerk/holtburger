@@ -310,3 +310,26 @@ bitflags! {
         const SOURCE_REMOTE_TARGET_REMOTE_NEVER_WALK = 0x600020;
     }
 }
+
+impl Usable {
+    pub fn from_raw(bits: u32) -> Self {
+        Self::from_bits_retain(bits)
+    }
+
+    pub fn source_flags(self) -> Self {
+        self & Self::SOURCE_MASK
+    }
+
+    pub fn target_flags(self) -> Self {
+        Self::from_bits_retain(self.bits() >> 16)
+    }
+
+    pub fn location_flags(self) -> Self {
+        self & (Self::SELF
+            | Self::WIELDED
+            | Self::CONTAINED
+            | Self::VIEWED
+            | Self::REMOTE
+            | Self::OBJ_SELF)
+    }
+}

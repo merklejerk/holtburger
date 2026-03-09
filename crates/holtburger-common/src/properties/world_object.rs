@@ -2,7 +2,8 @@ use crate::Guid;
 
 use super::{
     AttunedStatus, EquipMask, HasProperties, ItemType, MaterialType, PropertyBool, PropertyDataId,
-    PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString, WorldObjectPropertyAccessors,
+    PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString, Usable,
+    WorldObjectPropertyAccessors,
 };
 
 pub trait WorldObjectExt: WorldObjectPropertyAccessors {
@@ -102,6 +103,10 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     fn usable(&self) -> Option<u32> {
         self.get_int_prop(PropertyInt::ItemUseable)
             .map(|value| value as u32)
+    }
+
+    fn usable_flags(&self) -> Usable {
+        self.usable().map(Usable::from_raw).unwrap_or_default()
     }
 
     fn use_radius(&self) -> Option<f64> {

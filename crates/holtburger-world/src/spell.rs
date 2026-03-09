@@ -39,7 +39,9 @@ pub struct SpellCatalog {
 
 impl SpellCatalog {
     pub fn get(&self, spell_id: u32) -> Option<&SpellInfo> {
-        self.spells.get(&spell_id)
+        // High bit (0x80000000) is used to mark enchantments in a spell book
+        let masked_id = spell_id & 0x7FFFFFFF;
+        self.spells.get(&masked_id)
     }
 
     pub fn resolve_name(&self, spell_id: u32) -> Option<&str> {

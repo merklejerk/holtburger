@@ -314,7 +314,10 @@ pub fn get_debug_info(
                     lines.push(Line::from(format!("  IconUnder: 0x{:08X}", v.0)));
                 }
                 if let Some(v) = e.material_type() {
-                    lines.push(Line::from(format!("  Material:  0x{:08X}", v)));
+                    lines.push(Line::from(format!(
+                        "  Material:  {} (0x{:08X})",
+                        v, v as u32
+                    )));
                 }
             }
 

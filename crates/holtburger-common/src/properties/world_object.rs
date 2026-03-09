@@ -1,8 +1,8 @@
 use crate::Guid;
 
 use super::{
-    AttunedStatus, EquipMask, HasProperties, ItemType, PropertyBool, PropertyDataId, PropertyFloat,
-    PropertyInstanceId, PropertyInt, PropertyString, WorldObjectPropertyAccessors,
+    AttunedStatus, EquipMask, HasProperties, ItemType, MaterialType, PropertyBool, PropertyDataId,
+    PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString, WorldObjectPropertyAccessors,
 };
 
 pub trait WorldObjectExt: WorldObjectPropertyAccessors {
@@ -217,9 +217,9 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
         self.get_data_prop(PropertyDataId::IconUnderlay)
     }
 
-    fn material_type(&self) -> Option<u32> {
+    fn material_type(&self) -> Option<MaterialType> {
         self.get_int_prop(PropertyInt::MaterialType)
-            .map(|value| value as u32)
+            .and_then(|value| MaterialType::from_repr(value as u32))
     }
 
     fn hook_type(&self) -> Option<u32> {

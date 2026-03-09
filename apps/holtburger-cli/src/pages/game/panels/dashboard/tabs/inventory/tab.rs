@@ -15,6 +15,7 @@ use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, CommandTarget, Interaction, TabController,
     UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
+use crate::utils::format_item_name;
 
 #[derive(Debug, Clone)]
 struct SplitSession {
@@ -76,7 +77,7 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     roots.sort_by(|&a, &b| {
         let ea = &entities[&a];
         let eb = &entities[&b];
-        ea.name().cmp(eb.name())
+        format_item_name(ea, ea.guid).cmp(&format_item_name(eb, eb.guid))
     });
 
     // Flatten with depth using DFS
@@ -93,7 +94,11 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
         result.push((e, dist, depth));
 
         if let Some(mut children) = children_map.remove(&guid) {
-            children.sort_by(|&a, &b| entities[&a].name().cmp(entities[&b].name()));
+            children.sort_by(|&a, &b| {
+                let ea = &entities[&a];
+                let eb = &entities[&b];
+                format_item_name(ea, ea.guid).cmp(&format_item_name(eb, eb.guid))
+            });
             for child_guid in children.into_iter().rev() {
                 stack.push((child_guid, depth + 1));
             }

@@ -10,6 +10,9 @@ pub const MONEY_FG: Color = Color::Yellow;
 
 pub const FOCUSED_COLOR: Color = Color::Yellow;
 
+pub const ERROR_FG: Color = Color::Red;
+pub const WARNING_FG: Color = Color::LightYellow;
+
 pub fn selection_style() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
 }

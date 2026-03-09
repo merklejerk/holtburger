@@ -2,7 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::{
+    PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
+};
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
@@ -116,6 +118,58 @@ impl GameData {
             }
             stack.extend(children);
         }
+    }
+
+    pub fn get_burden(&self) -> Option<f32> {
+        let player_guid = self.player_guid?;
+        let player_entity = self.entities.get(&player_guid)?;
+
+        // Sum up the burden of all items in player's possession.
+        // In the CLI, `inventory` tracking includes:
+        // 1. Items directly in the player's main pack (ContainerId == player_guid)
+        // 2. Items in sub-packs (ContainerId == subpack_guid, recursively tracked)
+        // 3. Items currently wielded/equipped (WielderId == player_guid)
+        //
+        // NOTE: ACE Server pre-calculates EncumbranceVal for containers to include all children.
+        // To avoid double-counting, we ONLY sum items that are NOT inside a container we've
+        // already counted (i.e. their container is the player_guid directly).
+        let mut encumbrance = 0.0;
+        for guid in self.inventory.iter() {
+            if let Some(item) = self.entities.get(guid) {
+                // If this item is inside another container that is also in our inventory,
+                // we skip it because the container's EncumbranceVal already includes it.
+                if let Some(container_id) = item.container_id()
+                    && self.inventory.contains(&container_id)
+                    && Some(container_id) != self.player_guid
+                {
+                    continue;
+                }
+                encumbrance += item.get_int_prop(PropertyInt::EncumbranceVal).unwrap_or(0) as f32;
+            }
+        }
+
+        let strength = self
+            .attributes
+            .get(&AttributeType::StrengthAttr)
+            .map(|a| a.current)
+            .unwrap_or(0) as f32;
+
+        if strength <= 0.0 {
+            return Some(3.0);
+        }
+
+        let num_augs = player_entity
+            .get_int_prop(PropertyInt::AugmentationIncreasedCarryingCapacity)
+            .unwrap_or(0)
+            .max(0) as f32;
+
+        let capacity = (150.0 * strength) + (num_augs * 30.0 * strength);
+
+        if capacity <= 0.0 {
+            return Some(3.0);
+        }
+
+        Some(encumbrance / capacity)
     }
 
     pub fn spell_name(&self, spell_id: u32) -> Option<&str> {

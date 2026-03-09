@@ -1,7 +1,6 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_world::assessment::{
-    Assessment, AttributeType, AttunedStatus, BondedStatus, Effect, HeritageGroup, TrainingLevel,
-    VitalType, WieldRequirementType,
+    Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
 use holtburger_world::entity::Entity;
 use ratatui::style::{Color, Modifier, Style};
@@ -10,58 +9,28 @@ use std::collections::HashMap;
 
 const LABEL_COLOR: Color = Color::Gray;
 
-fn format_wield_requirement(
-    req_type: WieldRequirementType,
-    skill_id: u32,
-    difficulty: i32,
-) -> String {
-    use holtburger_common::stats::SkillType;
+fn format_wield_requirement(req: &WieldRequirement) -> String {
+    use holtburger_world::assessment::WieldRequirement::*;
 
-    match req_type {
-        WieldRequirementType::Skill | WieldRequirementType::RawSkill => {
-            let skill = SkillType::from_repr(skill_id)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("Unknown Skill ({})", skill_id));
-            format!("{} ({}): {}", req_type, skill, difficulty)
-        }
-        WieldRequirementType::Attrib | WieldRequirementType::RawAttrib => {
-            let attr = AttributeType::from_repr(skill_id as usize)
-                .map(|a| a.to_string())
-                .unwrap_or_else(|| format!("Unknown Attribute ({})", skill_id));
-            format!("{} ({}): {}", req_type, attr, difficulty)
-        }
-        WieldRequirementType::SecondaryAttrib | WieldRequirementType::RawSecondaryAttrib => {
-            let vital = VitalType::from_repr(skill_id as usize)
-                .map(|v| v.to_string())
-                .unwrap_or_else(|| format!("Unknown Vital ({})", skill_id));
-            format!("{} ({}): {}", req_type, vital, difficulty)
-        }
-        WieldRequirementType::Level => {
-            format!("Level: {}", difficulty)
-        }
-        WieldRequirementType::Training => {
-            let skill = SkillType::from_repr(skill_id)
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("Unknown Skill ({})", skill_id));
-            let training = TrainingLevel::from_repr(difficulty as usize)
-                .map(|t| t.to_string())
-                .unwrap_or_else(|| format!("Unknown ({})", difficulty));
-            format!("Training ({}): {}", skill, training)
-        }
-        WieldRequirementType::CreatureType => {
-            use holtburger_common::stats::CreatureType;
-            let creature = CreatureType::from_repr(difficulty as u32)
-                .map(|c| c.to_string())
-                .unwrap_or_else(|| format!("Unknown Creature ({})", difficulty));
-            format!("Creature Type: {}", creature)
-        }
-        WieldRequirementType::HeritageType => {
-            let heritage = HeritageGroup::from_repr(difficulty as usize)
-                .map(|h| h.to_string())
-                .unwrap_or_else(|| format!("Unknown Heritage ({})", difficulty));
-            format!("Heritage: {}", heritage)
-        }
-        _ => format!("{}: {}", req_type, difficulty),
+    match req {
+        Skill { skill, difficulty } => format!("{}: {}", skill, difficulty),
+        RawSkill { skill, difficulty } => format!("Base {}: {}", skill, difficulty),
+        Attribute {
+            attribute,
+            difficulty,
+        } => format!("{}: {}", attribute, difficulty),
+        RawAttribute {
+            attribute,
+            difficulty,
+        } => format!("Base {}: {}", attribute, difficulty),
+        Vital { vital, difficulty } => format!("{}: {}", vital, difficulty),
+        RawVital { vital, difficulty } => format!("Base {}: {}", vital, difficulty),
+        Level { level } => format!("Level: {}", level),
+        Training { skill, level } => format!("{}: {}", skill, level),
+        IntStat { property, value } => format!("PropertyInt {:?}: {}", property, value),
+        BoolStat { property, value } => format!("PropertyBool {:?}: {}", property, value),
+        CreatureType { creature_type } => format!("Creature Type: {}", creature_type),
+        Heritage { heritage } => format!("Heritage: {}", heritage),
     }
 }
 
@@ -186,7 +155,7 @@ pub fn get_assess_info(
         status_spans.push(Span::styled("Locked", Style::default().fg(Color::Red)));
     }
     if !assess.is_sellable {
-        status_spans.push(Span::styled("Inscribed", Style::default().fg(Color::Red)));
+        status_spans.push(Span::styled("Not sellable", Style::default().fg(Color::Red)));
     }
 
     if !status_spans.is_empty() {
@@ -278,7 +247,7 @@ pub fn get_assess_info(
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default().fg(Color::Gray)),
                 Span::styled(
-                    format_wield_requirement(req.requirement_type, req.skill_id, req.difficulty),
+                    format_wield_requirement(req),
                     Style::default().fg(Color::White),
                 ),
             ]));
@@ -316,26 +285,20 @@ pub fn get_assess_info(
         }
     }
 
-    if !assess.imbued_effects.is_empty() {
+    if !assess.imbued_effects.is_empty() || !assess.effects.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
-            "Imbuements:",
+            "Effects:",
             Style::default().add_modifier(Modifier::BOLD),
         )));
+
         for name in &assess.imbued_effects {
             lines.push(Line::from(vec![
                 Span::styled("  - ", Style::default().fg(Color::Gray)),
                 Span::styled(name.clone(), Style::default().fg(Color::LightBlue)),
             ]));
         }
-    }
 
-    if !assess.effects.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "Effects:",
-            Style::default().add_modifier(Modifier::BOLD),
-        )));
         for effect in &assess.effects {
             let label = effect.to_string();
             let value = match effect {
@@ -494,5 +457,31 @@ pub fn get_assess_info(
         }
     }
 
+    // Inscriptions
+    if let Some(ins) = &assess.inscriptions {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Inscription:",
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+
+        for wrapped in wrap_text(&ins.text, 36) {
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().fg(LABEL_COLOR)),
+                Span::styled(
+                    format!("{}", wrapped),
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+        }
+
+        lines.push(Line::from(vec![
+            Span::styled(
+                    format!("      -- {}", ins.scribe.clone().unwrap_or_default()),
+                    Style::default().fg(Color::Gray),
+                ),
+        ]));
+    }
+
     lines
-}
+}   

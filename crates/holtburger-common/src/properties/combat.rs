@@ -28,87 +28,27 @@ bitflags! {
 }
 
 impl ImbuedEffectType {
-    pub fn name(&self) -> Option<&'static str> {
-        match *self {
-            Self::CriticalStrike => Some("Critical Strike"),
-            Self::CripplingBlow => Some("Crippling Blow"),
-            Self::ArmorRending => Some("Armor Rending"),
-            Self::SlashRending => Some("Slash Rending"),
-            Self::PierceRending => Some("Pierce Rending"),
-            Self::BludgeonRending => Some("Bludgeon Rending"),
-            Self::AcidRending => Some("Acid Rending"),
-            Self::ColdRending => Some("Cold Rending"),
-            Self::ElectricRending => Some("Electric Rending"),
-            Self::FireRending => Some("Fire Rending"),
-            Self::MeleeDefense => Some("Melee Defense"),
-            Self::MissileDefense => Some("Missile Defense"),
-            Self::MagicDefense => Some("Magic Defense"),
-            Self::Spellbook => Some("Spellbook"),
-            Self::NetherRending => Some("Nether Rending"),
-            Self::IgnoreSomeMagicProjectileDamage => Some("Ignore Some Magic Projectile Damage"),
-            Self::AlwaysCritical => Some("Always Critical"),
-            Self::IgnoreAllArmor => Some("Ignore All Armor"),
-            _ => None,
-        }
-    }
-
-    pub fn names(&self) -> Vec<&'static str> {
-        let mut names = Vec::new();
-        if self.contains(Self::CriticalStrike) {
-            names.push("Critical Strike");
-        }
-        if self.contains(Self::CripplingBlow) {
-            names.push("Crippling Blow");
-        }
-        if self.contains(Self::ArmorRending) {
-            names.push("Armor Rending");
-        }
-        if self.contains(Self::SlashRending) {
-            names.push("Slash Rending");
-        }
-        if self.contains(Self::PierceRending) {
-            names.push("Pierce Rending");
-        }
-        if self.contains(Self::BludgeonRending) {
-            names.push("Bludgeon Rending");
-        }
-        if self.contains(Self::AcidRending) {
-            names.push("Acid Rending");
-        }
-        if self.contains(Self::ColdRending) {
-            names.push("Cold Rending");
-        }
-        if self.contains(Self::ElectricRending) {
-            names.push("Electric Rending");
-        }
-        if self.contains(Self::FireRending) {
-            names.push("Fire Rending");
-        }
-        if self.contains(Self::MeleeDefense) {
-            names.push("Melee Defense");
-        }
-        if self.contains(Self::MissileDefense) {
-            names.push("Missile Defense");
-        }
-        if self.contains(Self::MagicDefense) {
-            names.push("Magic Defense");
-        }
-        if self.contains(Self::Spellbook) {
-            names.push("Spellbook");
-        }
-        if self.contains(Self::NetherRending) {
-            names.push("Nether Rending");
-        }
-        if self.contains(Self::IgnoreSomeMagicProjectileDamage) {
-            names.push("Ignore Some Magic Projectile Damage");
-        }
-        if self.contains(Self::AlwaysCritical) {
-            names.push("Always Critical");
-        }
-        if self.contains(Self::IgnoreAllArmor) {
-            names.push("Ignore All Armor");
-        }
-        names
+    pub fn iter_display_names(&self) -> impl Iterator<Item = &'static str> {
+        self.iter_names().map(|(name, _)| match name {
+            "CriticalStrike" => "Critical Strike",
+            "CripplingBlow" => "Crippling Blow",
+            "ArmorRending" => "Armor Rending",
+            "SlashRending" => "Slash Rending",
+            "PierceRending" => "Pierce Rending",
+            "BludgeonRending" => "Bludgeon Rending",
+            "AcidRending" => "Acid Rending",
+            "ColdRending" => "Cold Rending",
+            "ElectricRending" => "Electric Rending",
+            "FireRending" => "Fire Rending",
+            "MeleeDefense" => "Melee Defense",
+            "MissileDefense" => "Missile Defense",
+            "MagicDefense" => "Magic Defense",
+            "NetherRending" => "Nether Rending",
+            "IgnoreSomeMagicProjectileDamage" => "Ignore Some Magic Projectile Damage",
+            "AlwaysCritical" => "Always Critical",
+            "IgnoreAllArmor" => "Ignore All Armor",
+            _ => name,
+        })
     }
 }
 
@@ -135,44 +75,22 @@ bitflags! {
 }
 
 impl DamageType {
-    pub fn name(&self) -> Option<&'static str> {
-        if self.contains(Self::SLASH) {
-            return Some("Slashing");
-        }
-        if self.contains(Self::PIERCE) {
-            return Some("Piercing");
-        }
-        if self.contains(Self::BLUDGEON) {
-            return Some("Bludgeoning");
-        }
-        if self.contains(Self::COLD) {
-            return Some("Cold");
-        }
-        if self.contains(Self::FIRE) {
-            return Some("Fire");
-        }
-        if self.contains(Self::ACID) {
-            return Some("Acid");
-        }
-        if self.contains(Self::ELECTRIC) {
-            return Some("Electric");
-        }
-        if self.contains(Self::HEALTH) {
-            return Some("Health");
-        }
-        if self.contains(Self::STAMINA) {
-            return Some("Stamina");
-        }
-        if self.contains(Self::MANA) {
-            return Some("Mana");
-        }
-        if self.contains(Self::NETHER) {
-            return Some("Nether");
-        }
-        if self.contains(Self::BASE) {
-            return Some("Base");
-        }
-        None
+    pub fn iter_display_names(&self) -> impl Iterator<Item = &'static str> {
+        self.iter_names().map(|(name, _)| match name {
+            "SLASH" => "Slashing",
+            "PIERCE" => "Piercing",
+            "BLUDGEON" => "Bludgeoning",
+            "COLD" => "Cold",
+            "FIRE" => "Fire",
+            "ACID" => "Acid",
+            "ELECTRIC" => "Electric",
+            "HEALTH" => "Health",
+            "STAMINA" => "Stamina",
+            "MANA" => "Mana",
+            "NETHER" => "Nether",
+            "BASE" => "Base",
+            _ => name,
+        })
     }
 }
 
@@ -246,6 +164,25 @@ bitflags! {
         const Punches             = Self::Punch.bits() | Self::OffhandPunch.bits();
 
         const MultiStrike         = Self::DoubleStrike.bits() | Self::TripleStrike.bits();
+    }
+}
+
+impl AttackType {
+    pub fn iter_display_names(&self) -> impl Iterator<Item = &'static str> {
+        self.iter_names().map(|(name, _)| match name {
+            "OffhandPunch" => "Offhand Punch",
+            "DoubleSlash" => "Double Slash",
+            "TripleSlash" => "Triple Slash",
+            "DoubleThrust" => "Double Thrust",
+            "TripleThrust" => "Triple Thrust",
+            "OffhandThrust" => "Offhand Thrust",
+            "OffhandSlash" => "Offhand Slash",
+            "OffhandDoubleSlash" => "Offhand Double Slash",
+            "OffhandTripleSlash" => "Offhand Triple Slash",
+            "OffhandDoubleThrust" => "Offhand Double Thrust",
+            "OffhandTripleThrust" => "Offhand Triple Thrust",
+            _ => name,
+        })
     }
 }
 

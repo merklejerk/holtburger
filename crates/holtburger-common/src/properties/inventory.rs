@@ -191,6 +191,45 @@ bitflags! {
     }
 }
 
+impl EquipMask {
+    pub fn iter_display_names(&self) -> impl Iterator<Item = &'static str> {
+        self.iter_names().map(|(name, _)| match name {
+            "HEAD_WEAR" => "Head wear",
+            "CHEST_WEAR" => "Chest wear",
+            "ABDOMEN_WEAR" => "Abdomen wear",
+            "UPPER_ARM_WEAR" => "Upper arm wear",
+            "LOWER_ARM_WEAR" => "Lower arm wear",
+            "HAND_WEAR" => "Hand wear",
+            "UPPER_LEG_WEAR" => "Upper leg wear",
+            "LOWER_LEG_WEAR" => "Lower leg wear",
+            "FOOT_WEAR" => "Foot wear",
+            "CHEST_ARMOR" => "Chest armor",
+            "ABDOMEN_ARMOR" => "Abdomen armor",
+            "UPPER_ARM_ARMOR" => "Upper arm armor",
+            "LOWER_ARM_ARMOR" => "Lower arm armor",
+            "UPPER_LEG_ARMOR" => "Upper leg armor",
+            "LOWER_LEG_ARMOR" => "Lower leg armor",
+            "NECK_WEAR" => "Neck wear",
+            "WRIST_WEAR_LEFT" => "Left wrist wear",
+            "WRIST_WEAR_RIGHT" => "Right wrist wear",
+            "FINGER_WEAR_LEFT" => "Left finger wear",
+            "FINGER_WEAR_RIGHT" => "Right finger wear",
+            "MELEE_WEAPON" => "Melee weapon",
+            "SHIELD" => "Shield",
+            "MISSILE_WEAPON" => "Missile weapon",
+            "MISSILE_AMMO" => "Missile ammo",
+            "CASTER" => "Caster",
+            "TWO_HANDED" => "Two-handed",
+            "TRINKET_ONE" => "Trinket 1",
+            "CLOAK" => "Cloak",
+            "SIGIL_ONE" => "Sigil 1",
+            "SIGIL_TWO" => "Sigil 2",
+            "SIGIL_THREE" => "Sigil 3",
+            _ => name,
+        })
+    }
+}
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default)]
     pub struct PseudoEquipMask: u32 {

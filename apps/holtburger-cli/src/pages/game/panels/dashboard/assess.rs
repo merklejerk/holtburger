@@ -87,7 +87,7 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
                 Style::default().fg(Color::White),
             ),
             Span::styled(
-                format!(" ({})", mat.workmanship),
+                format!(" ({:.1})", mat.workmanship),
                 Style::default().fg(Color::White),
             ),
         ]));

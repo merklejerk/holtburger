@@ -218,7 +218,7 @@ pub enum Effect {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MaterialInfo {
     pub material_type: MaterialType,
-    pub workmanship: i32,
+    pub workmanship: f32,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -560,7 +560,7 @@ impl InscriptionInfo {
 impl MaterialInfo {
     fn from_entity(entity: &Entity) -> Option<Self> {
         let mat_type = entity.get_int_prop(PropertyInt::MaterialType)?;
-        let workmanship = entity.get_int_prop(PropertyInt::ItemWorkmanship)?;
+        let workmanship = entity.effective_workmanship()? as f32;
 
         Some(MaterialInfo {
             material_type: MaterialType::from_repr(mat_type as u32)?,

@@ -165,8 +165,8 @@
     - [x] Do not show salvage verb for full salvage bags.
     - [x] Show material type of salvage bags in inventory tab.
 - [x] Augment assess output with stored entity properties.
-- [ ] Display properties only provided in assess results in assess screen:
-    - [ ] Show salvage workmanship as float (`ItemWorkmanship / NumItemsInMaterial`).
+- [x] Display properties only provided in assess results in assess screen:
+    - [x] Show salvage workmanship as float (`ItemWorkmanship / NumItemsInMaterial`).
     - [x] Mana charge + time left.
     - [x] Locked/Unlocked status.
 - [ ] Melee combat.
@@ -187,6 +187,7 @@
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] Display encumbrance (sticky line in inv tab?).
 - [ ] Add intelligent entity context scanners.
+- [ ] Altered names (like salvage) break inventory sorting.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

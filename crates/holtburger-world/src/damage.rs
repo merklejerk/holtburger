@@ -1,5 +1,7 @@
-use holtburger_common::properties::{DamageType, PropertyFloat, PropertyInt, WorldObjectPropertyAccessors};
 use crate::entity::Entity;
+use holtburger_common::properties::{
+    DamageType, PropertyFloat, PropertyInt, WorldObjectPropertyAccessors,
+};
 
 pub struct DamageRange {
     pub min: f64,
@@ -8,7 +10,7 @@ pub struct DamageRange {
 }
 
 /// Computes the damage range for a weapon entity.
-/// 
+///
 /// Based on ACE Server logic:
 /// MinDamage = MaxDamage * (1.0 - Variance)
 pub fn compute_damage_range(entity: &Entity) -> Option<DamageRange> {

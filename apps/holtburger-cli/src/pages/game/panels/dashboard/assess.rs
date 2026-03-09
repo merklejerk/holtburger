@@ -1,6 +1,7 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::{
-    ImbuedEffectType, ItemType, PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors
+    ImbuedEffectType, ItemType, PropertyBool, PropertyFloat, PropertyInt, PropertyString,
+    WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 
 use holtburger_world::crafting::salvage::get_material_name;
@@ -74,7 +75,10 @@ pub fn get_assess_info(
                     get_material_name(mat_type as u32),
                     Style::default().fg(Color::White),
                 ),
-                Span::styled(format!(" ({})", workmanship), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!(" ({})", workmanship),
+                    Style::default().fg(Color::White),
+                ),
             ]));
         }
     }
@@ -84,11 +88,14 @@ pub fn get_assess_info(
         if tinkers > 0 {
             lines.push(Line::from(vec![
                 Span::styled("Tinkered:  ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(format!("{} times", tinkers), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{} times", tinkers),
+                    Style::default().fg(Color::White),
+                ),
             ]));
         }
     }
-    
+
     // Spellcraft
     if let Some(sc) = entity.get_int_prop(PropertyInt::ItemSpellcraft) {
         lines.push(Line::from(vec![
@@ -101,13 +108,13 @@ pub fn get_assess_info(
     let max_mana = entity.get_int_prop(PropertyInt::ItemMaxMana);
     if let Some(max) = max_mana {
         let cur = cur_mana.unwrap_or(0);
-        
+
         // Time left (if it has a rate)
-        let time_left =  if let Some(rate) = entity.get_float_prop(PropertyFloat::ManaRate) {
+        let time_left = if let Some(rate) = entity.get_float_prop(PropertyFloat::ManaRate) {
             if let Some(seconds_left) = calculate_mana_time_left(cur, rate) {
                 Some(format_duration(seconds_left))
             } else {
-                None 
+                None
             }
         } else {
             None
@@ -116,8 +123,8 @@ pub fn get_assess_info(
         lines.push(Line::from(vec![
             Span::styled("Mana:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(format!("{}/{}", cur, max), Style::default().fg(Color::Blue)),
-            if let  Some(t) = time_left {
-                 Span::styled(format!(" ({} left)", t), Style::default().fg(Color::Blue))
+            if let Some(t) = time_left {
+                Span::styled(format!(" ({} left)", t), Style::default().fg(Color::Blue))
             } else {
                 Span::raw("")
             },
@@ -131,7 +138,10 @@ pub fn get_assess_info(
 
     let mut states = Vec::new();
     if is_retained {
-        states.push(Span::styled("Retained", Style::default().fg(Color::Magenta)));
+        states.push(Span::styled(
+            "Retained",
+            Style::default().fg(Color::Magenta),
+        ));
     }
     if is_bonded {
         states.push(Span::styled("Bonded", Style::default().fg(Color::Magenta)));
@@ -156,13 +166,16 @@ pub fn get_assess_info(
         lines.push(Line::from(line));
     }
 
-    // Stack 
+    // Stack
     if let Some(max_stack_size) = entity.max_stack_size() {
         let stack_size = entity.stack_size();
         if stack_size > 1 {
             lines.push(Line::from(vec![
                 Span::styled("Count:  ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(format!("{}/{}", stack_size, max_stack_size), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{}/{}", stack_size, max_stack_size),
+                    Style::default().fg(Color::White),
+                ),
             ]));
         }
     }
@@ -172,7 +185,10 @@ pub fn get_assess_info(
         let structure = entity.structure().unwrap_or(0);
         lines.push(Line::from(vec![
             Span::styled("Uses:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(format!("{}/{}", structure, max_structure), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{}/{}", structure, max_structure),
+                Style::default().fg(Color::White),
+            ),
         ]));
     }
 
@@ -185,7 +201,9 @@ pub fn get_assess_info(
     }
 
     // Weapon
-    if entity.item_type().is_some_and(|it| it.intersects(ItemType::MELEE_WEAPON | ItemType::CASTER | ItemType::MISSILE_WEAPON)) {
+    if entity.item_type().is_some_and(|it| {
+        it.intersects(ItemType::MELEE_WEAPON | ItemType::CASTER | ItemType::MISSILE_WEAPON)
+    }) {
         if let Some(range) = compute_damage_range(entity) {
             let mut display = if range.min.round() == range.max.round() {
                 format!("{:.1}", range.max)
@@ -226,7 +244,9 @@ pub fn get_assess_info(
         }
         if let Some(skill_type_raw) = entity.get_int_prop(PropertyInt::WieldSkillType) {
             if let Some(skill_type) = SkillType::from_repr(skill_type_raw as u32) {
-                let difficulty = entity.get_int_prop(PropertyInt::WieldDifficulty).unwrap_or(0);
+                let difficulty = entity
+                    .get_int_prop(PropertyInt::WieldDifficulty)
+                    .unwrap_or(0);
                 lines.push(Line::from(vec![
                     Span::styled("Skill:  ", Style::default().fg(Color::Gray)),
                     Span::styled(
@@ -275,7 +295,10 @@ pub fn get_assess_info(
             .unwrap_or(1.0);
         if (1.0 - defense).abs() > f64::EPSILON {
             bonuses.push(Line::from(vec![
-                Span::styled("  Missile Defense Bonus:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    "  Missile Defense Bonus:  ",
+                    Style::default().fg(Color::Gray),
+                ),
                 Span::styled(
                     format!("{:+}%", ((defense - 1.0) * 100.0).round()),
                     Style::default().fg(Color::Green),
@@ -485,9 +508,10 @@ pub fn get_assess_info(
 
     // Use info
     if let Some(use_msg) = entity.get_string_prop(PropertyString::Use) {
-        lines.push(Line::from(vec![
-            Span::styled("Use:    ", Style::default().fg(LABEL_COLOR)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Use:    ",
+            Style::default().fg(LABEL_COLOR),
+        )]));
         for wrapped in wrap_text(use_msg, 36) {
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default().fg(Color::DarkGray)),
@@ -516,11 +540,13 @@ pub fn get_assess_info(
             }
             lines.push(Line::from(vec![
                 Span::styled("  - ", Style::default().fg(Color::DarkGray)),
-                Span::styled(format!("Unknown Spell ({})", spell_id), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("Unknown Spell ({})", spell_id),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ]));
         }
     }
 
     lines
 }
-

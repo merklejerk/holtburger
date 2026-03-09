@@ -53,11 +53,13 @@ pub trait WorldObjectPropertyAccessors: HasProperties {
 
 pub trait WorldObjectPropertyAccessorsMut: HasPropertiesMut {
     fn set_int_prop(&mut self, prop: PropertyInt, value: i32) {
-        self.properties_mut().apply(PropertyUpdate::Int(prop, value));
+        self.properties_mut()
+            .apply(PropertyUpdate::Int(prop, value));
     }
 
     fn set_bool_prop(&mut self, prop: PropertyBool, value: bool) {
-        self.properties_mut().apply(PropertyUpdate::Bool(prop, value));
+        self.properties_mut()
+            .apply(PropertyUpdate::Bool(prop, value));
     }
 
     fn set_iid_prop(&mut self, prop: PropertyInstanceId, value: Guid) {

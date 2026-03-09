@@ -1,9 +1,8 @@
 use crate::Guid;
-use bitflags::bitflags;
 
 use super::{
-    AttunedStatus, EquipMask, HasProperties, ItemType, PropertyBool, PropertyDataId,
-    PropertyFloat, PropertyInstanceId, PropertyInt, PropertyString, WorldObjectPropertyAccessors,
+    AttunedStatus, EquipMask, HasProperties, ItemType, PropertyBool, PropertyDataId, PropertyFloat,
+    PropertyInstanceId, PropertyInt, PropertyString, WorldObjectPropertyAccessors,
 };
 
 pub trait WorldObjectExt: WorldObjectPropertyAccessors {
@@ -67,7 +66,8 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     }
 
     fn mass(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::Mass).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::Mass)
+            .map(|value| value as u32)
     }
 
     fn workmanship(&self) -> Option<f64> {
@@ -81,11 +81,13 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     }
 
     fn item_type_int(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::ItemType).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::ItemType)
+            .map(|value| value as u32)
     }
 
     fn ammo_type(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::AmmoType).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::AmmoType)
+            .map(|value| value as u32)
     }
 
     fn usable(&self) -> Option<u32> {
@@ -98,7 +100,8 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     }
 
     fn target_type(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::TargetType).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::TargetType)
+            .map(|value| value as u32)
     }
 
     fn target_item_type(&self) -> Option<ItemType> {
@@ -106,15 +109,18 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     }
 
     fn ui_effects(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::UiEffects).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::UiEffects)
+            .map(|value| value as u32)
     }
 
     fn combat_use(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::CombatUse).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::CombatUse)
+            .map(|value| value as u32)
     }
 
     fn structure(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::Structure).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::Structure)
+            .map(|value| value as u32)
     }
 
     fn max_structure(&self) -> Option<u32> {
@@ -209,7 +215,8 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     }
 
     fn hook_type(&self) -> Option<u32> {
-        self.get_int_prop(PropertyInt::HookType).map(|value| value as u32)
+        self.get_int_prop(PropertyInt::HookType)
+            .map(|value| value as u32)
     }
 
     fn hook_item_types(&self) -> Option<u32> {
@@ -224,7 +231,7 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
 
     fn valid_locations(&self) -> EquipMask {
         EquipMask::from_bits_truncate(
-            self.get_int_prop(PropertyInt::ValidLocations).unwrap_or(0) as u32,
+            self.get_int_prop(PropertyInt::ValidLocations).unwrap_or(0) as u32
         )
     }
 
@@ -295,7 +302,7 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
     fn has_active_pet(&self) -> bool {
         self.get_instance_prop(PropertyInstanceId::Pet)
             .is_some_and(|guid| guid != Guid::NULL)
-    } 
+    }
 }
 
 impl<T: HasProperties> WorldObjectExt for T {}

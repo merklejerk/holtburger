@@ -3,9 +3,9 @@ use holtburger_world::assessment::{
     Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
 use holtburger_world::entity::Entity;
+use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use std::collections::HashMap;
 
 const LABEL_COLOR: Color = Color::Gray;
 
@@ -35,10 +35,7 @@ fn format_wield_requirement(req: &WieldRequirement) -> String {
 }
 
 /// Generates a list of strings representing human-friendly assessment information for an entity.
-pub fn get_assess_info(
-    entity: &Entity,
-    spell_lookup: Option<&HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>>,
-) -> Vec<Line<'static>> {
+pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> Vec<Line<'static>> {
     let assess = Assessment::from_entity(entity);
     let mut lines = Vec::new();
 
@@ -68,7 +65,10 @@ pub fn get_assess_info(
     if assess.value > 0 {
         lines.push(Line::from(vec![
             Span::styled("Value:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(format!("{}", assess.value), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{}", assess.value),
+                Style::default().fg(Color::White),
+            ),
         ]));
     }
     if let Some(burden) = assess.burden {
@@ -82,7 +82,10 @@ pub fn get_assess_info(
     if let Some(mat) = &assess.material {
         lines.push(Line::from(vec![
             Span::styled("Material:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(mat.material_type.to_string(), Style::default().fg(Color::White)),
+            Span::styled(
+                mat.material_type.to_string(),
+                Style::default().fg(Color::White),
+            ),
             Span::styled(
                 format!(" ({})", mat.workmanship),
                 Style::default().fg(Color::White),
@@ -130,32 +133,38 @@ pub fn get_assess_info(
     // Item Status/Bonding
     let mut status_spans = Vec::new();
 
-    if let Some(bonded) = assess.bonded {
-        if bonded != BondedStatus::Normal {
-            status_spans.push(Span::styled(
-                bonded.to_string(),
-                Style::default().fg(Color::Magenta),
-            ));
-        }
+    if let Some(bonded) = assess.bonded
+        && bonded != BondedStatus::Normal
+    {
+        status_spans.push(Span::styled(
+            bonded.to_string(),
+            Style::default().fg(Color::Magenta),
+        ));
     }
 
-    if let Some(attuned) = assess.attuned {
-        if attuned != AttunedStatus::Normal {
-            status_spans.push(Span::styled(
-                attuned.to_string(),
-                Style::default().fg(Color::Magenta),
-            ));
-        }
+    if let Some(attuned) = assess.attuned
+        && attuned != AttunedStatus::Normal
+    {
+        status_spans.push(Span::styled(
+            attuned.to_string(),
+            Style::default().fg(Color::Magenta),
+        ));
     }
 
     if assess.is_retained {
-        status_spans.push(Span::styled("Retained", Style::default().fg(Color::Magenta)));
+        status_spans.push(Span::styled(
+            "Retained",
+            Style::default().fg(Color::Magenta),
+        ));
     }
     if assess.is_locked {
         status_spans.push(Span::styled("Locked", Style::default().fg(Color::Red)));
     }
     if !assess.is_sellable {
-        status_spans.push(Span::styled("Not sellable", Style::default().fg(Color::Red)));
+        status_spans.push(Span::styled(
+            "Not sellable",
+            Style::default().fg(Color::Red),
+        ));
     }
 
     if !status_spans.is_empty() {
@@ -223,16 +232,19 @@ pub fn get_assess_info(
 
         lines.push(Line::from(vec![
             Span::styled("Speed:  ", Style::default().fg(Color::Gray)),
-            Span::styled(format!("{}", weapon.speed), Style::default().fg(Color::White)),
+            Span::styled(
+                format!("{}", weapon.speed),
+                Style::default().fg(Color::White),
+            ),
         ]));
 
-        if let Some(wt) = weapon.weapon_type {
-            if wt != holtburger_common::properties::WeaponType::Undef {
-                lines.push(Line::from(vec![
-                    Span::styled("Type:   ", Style::default().fg(Color::Gray)),
-                    Span::styled(wt.to_string(), Style::default().fg(Color::White)),
-                ]));
-            }
+        if let Some(wt) = weapon.weapon_type
+            && wt != holtburger_common::properties::WeaponType::Undef
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Type:   ", Style::default().fg(Color::Gray)),
+                Span::styled(wt.to_string(), Style::default().fg(Color::White)),
+            ]));
         }
     }
 
@@ -269,9 +281,10 @@ pub fn get_assess_info(
             };
 
             let color = match bonus.name.as_str() {
-                "Attack Bonus" | "Defense Bonus" | "Missile Defense Bonus" | "Magic Defense Bonus" => {
-                    Color::Green
-                }
+                "Attack Bonus"
+                | "Defense Bonus"
+                | "Missile Defense Bonus"
+                | "Magic Defense Bonus" => Color::Green,
                 "Mana Conv" => Color::Cyan,
                 "Crit Rate" => Color::Yellow,
                 "Elemental Damage" => Color::Magenta,
@@ -279,7 +292,10 @@ pub fn get_assess_info(
             };
 
             lines.push(Line::from(vec![
-                Span::styled(format!("  {}:  ", bonus.name), Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("  {}:  ", bonus.name),
+                    Style::default().fg(Color::Gray),
+                ),
                 Span::styled(value_display, Style::default().fg(color)),
             ]));
         }
@@ -358,7 +374,10 @@ pub fn get_assess_info(
             )));
             lines.push(Line::from(vec![
                 Span::styled("  Strength:     ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(format!("{}", attr.strength), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{}", attr.strength),
+                    Style::default().fg(Color::White),
+                ),
             ]));
             lines.push(Line::from(vec![
                 Span::styled("  Endurance:    ", Style::default().fg(LABEL_COLOR)),
@@ -387,7 +406,10 @@ pub fn get_assess_info(
             ]));
             lines.push(Line::from(vec![
                 Span::styled("  Self:         ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(format!("{}", attr.self_attr), Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{}", attr.self_attr),
+                    Style::default().fg(Color::White),
+                ),
             ]));
         }
     }
@@ -399,8 +421,14 @@ pub fn get_assess_info(
             "Protections:",
             Style::default().add_modifier(Modifier::BOLD),
         )));
-        lines.push(Line::from(format!("  Slashing:    {:.2}", profile.slashing)));
-        lines.push(Line::from(format!("  Piercing:    {:.2}", profile.piercing)));
+        lines.push(Line::from(format!(
+            "  Slashing:    {:.2}",
+            profile.slashing
+        )));
+        lines.push(Line::from(format!(
+            "  Piercing:    {:.2}",
+            profile.piercing
+        )));
         lines.push(Line::from(format!(
             "  Bludgeoning: {:.2}",
             profile.bludgeoning
@@ -438,14 +466,14 @@ pub fn get_assess_info(
         )));
 
         for spell_id in &assess.spells {
-            if let Some(lookup) = spell_lookup {
-                if let Some(info) = lookup.get(spell_id) {
-                    lines.push(Line::from(vec![
-                        Span::styled("  - ", Style::default().fg(LABEL_COLOR)),
-                        Span::styled(info.name.clone(), Style::default().fg(Color::Cyan)),
-                    ]));
-                    continue;
-                }
+            if let Some(lookup) = spell_lookup
+                && let Some(info) = lookup.get(*spell_id)
+            {
+                lines.push(Line::from(vec![
+                    Span::styled("  - ", Style::default().fg(LABEL_COLOR)),
+                    Span::styled(info.name.clone(), Style::default().fg(Color::Cyan)),
+                ]));
+                continue;
             }
             lines.push(Line::from(vec![
                 Span::styled("  - ", Style::default().fg(Color::DarkGray)),
@@ -469,19 +497,19 @@ pub fn get_assess_info(
             lines.push(Line::from(vec![
                 Span::styled("  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
-                    format!("{}", wrapped),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC),
+                    wrapped.to_string(),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::ITALIC),
                 ),
             ]));
         }
 
-        lines.push(Line::from(vec![
-            Span::styled(
-                    format!("      -- {}", ins.scribe.clone().unwrap_or_default()),
-                    Style::default().fg(Color::Gray),
-                ),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            format!("      -- {}", ins.scribe.clone().unwrap_or_default()),
+            Style::default().fg(Color::Gray),
+        )]));
     }
 
     lines
-}   
+}

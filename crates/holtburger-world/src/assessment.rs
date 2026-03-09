@@ -1,12 +1,12 @@
+use crate::damage::compute_damage_range;
+use crate::entity::Entity;
+use crate::magic::calculate_mana_time_left;
 use holtburger_common::properties::{
     AttackType, DamageType, ImbuedEffectType, ItemType, MaterialType, PropertyBool, PropertyFloat,
     PropertyInt, PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_common::stats::{CreatureType, SkillType};
 use strum_macros::{Display, FromRepr};
-use crate::entity::Entity;
-use crate::damage::compute_damage_range;
-use crate::magic::calculate_mana_time_left;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Assessment {
@@ -48,18 +48,51 @@ pub struct Bonus {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum WieldRequirement {
-    Skill { skill: SkillType, difficulty: i32 },
-    RawSkill { skill: SkillType, difficulty: i32 },
-    Attribute { attribute: AttributeType, difficulty: i32 },
-    RawAttribute { attribute: AttributeType, difficulty: i32 },
-    Vital { vital: VitalType, difficulty: i32 },
-    RawVital { vital: VitalType, difficulty: i32 },
-    Level { level: i32 },
-    Training { skill: SkillType, level: TrainingLevel },
-    IntStat { property: PropertyInt, value: i32 },
-    BoolStat { property: PropertyBool, value: bool },
-    CreatureType { creature_type: CreatureType },
-    Heritage { heritage: HeritageGroup },
+    Skill {
+        skill: SkillType,
+        difficulty: i32,
+    },
+    RawSkill {
+        skill: SkillType,
+        difficulty: i32,
+    },
+    Attribute {
+        attribute: AttributeType,
+        difficulty: i32,
+    },
+    RawAttribute {
+        attribute: AttributeType,
+        difficulty: i32,
+    },
+    Vital {
+        vital: VitalType,
+        difficulty: i32,
+    },
+    RawVital {
+        vital: VitalType,
+        difficulty: i32,
+    },
+    Level {
+        level: i32,
+    },
+    Training {
+        skill: SkillType,
+        level: TrainingLevel,
+    },
+    IntStat {
+        property: PropertyInt,
+        value: i32,
+    },
+    BoolStat {
+        property: PropertyBool,
+        value: bool,
+    },
+    CreatureType {
+        creature_type: CreatureType,
+    },
+    Heritage {
+        heritage: HeritageGroup,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -68,7 +101,9 @@ pub struct InscriptionInfo {
     pub scribe: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+#[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
+)]
 pub enum WieldRequirementType {
     Invalid = 0,
     Skill = 1,
@@ -85,7 +120,9 @@ pub enum WieldRequirementType {
     HeritageType = 12,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+#[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
+)]
 pub enum AttributeType {
     Undef = 0,
     Strength = 1,
@@ -96,7 +133,9 @@ pub enum AttributeType {
     SelfAttr = 6,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+#[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
+)]
 pub enum VitalType {
     Undef = 0,
     MaxHealth = 1,
@@ -107,7 +146,9 @@ pub enum VitalType {
     Mana = 6,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+#[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
+)]
 pub enum TrainingLevel {
     Inactive = 0,
     Untrained = 1,
@@ -115,7 +156,9 @@ pub enum TrainingLevel {
     Specialized = 3,
 }
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr)]
+#[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, Display, PartialEq, Eq, FromRepr,
+)]
 pub enum HeritageGroup {
     Invalid = 0,
     Aluvian = 1,
@@ -304,7 +347,7 @@ impl Assessment {
                 .get_string_prop(PropertyString::LongDesc)
                 .or_else(|| entity.get_string_prop(PropertyString::ShortDesc))
                 .map(|s| s.to_string()),
-            value: entity.item_value() as u32,
+            value: entity.item_value(),
             burden: entity.burden(),
             material: MaterialInfo::from_entity(entity),
             tinkering: TinkeringInfo::from_entity(entity),
@@ -363,56 +406,68 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
 
     for (req_prop, skill_prop, diff_prop) in configs {
         let req_type_id = entity.get_int_prop(req_prop).unwrap_or(0);
-        let requirement_type = if let Some(rt) = WieldRequirementType::from_repr(req_type_id as usize) {
-            rt
-        } else if entity.get_int_prop(skill_prop).is_some() {
-            // Default to Skill if skill_prop exists but req_prop doesn't
-            WieldRequirementType::Skill
-        } else {
-            WieldRequirementType::Invalid
-        };
+        let requirement_type =
+            if let Some(rt) = WieldRequirementType::from_repr(req_type_id as usize) {
+                rt
+            } else if entity.get_int_prop(skill_prop).is_some() {
+                // Default to Skill if skill_prop exists but req_prop doesn't
+                WieldRequirementType::Skill
+            } else {
+                WieldRequirementType::Invalid
+            };
 
         if requirement_type != WieldRequirementType::Invalid {
             let skill_id = entity.get_int_prop(skill_prop).unwrap_or(0) as u32;
             let difficulty = entity.get_int_prop(diff_prop).unwrap_or(0);
 
             let req = match requirement_type {
-                WieldRequirementType::Skill => SkillType::from_repr(skill_id).map(|skill| {
-                    WieldRequirement::Skill { skill, difficulty }
-                }),
-                WieldRequirementType::RawSkill => SkillType::from_repr(skill_id).map(|skill| {
-                    WieldRequirement::RawSkill { skill, difficulty }
-                }),
-                WieldRequirementType::Attrib => AttributeType::from_repr(skill_id as usize).map(|attribute| {
-                    WieldRequirement::Attribute { attribute, difficulty }
-                }),
-                WieldRequirementType::RawAttrib => AttributeType::from_repr(skill_id as usize).map(|attribute| {
-                    WieldRequirement::RawAttribute { attribute, difficulty }
-                }),
-                WieldRequirementType::SecondaryAttrib => VitalType::from_repr(skill_id as usize).map(|vital| {
-                    WieldRequirement::Vital { vital, difficulty }
-                }),
-                WieldRequirementType::RawSecondaryAttrib => VitalType::from_repr(skill_id as usize).map(|vital| {
-                    WieldRequirement::RawVital { vital, difficulty }
-                }),
-                WieldRequirementType::Level => Some(WieldRequirement::Level { level: difficulty }),
-                WieldRequirementType::Training => SkillType::from_repr(skill_id).and_then(|skill| {
-                    TrainingLevel::from_repr(difficulty as usize).map(|level| {
-                        WieldRequirement::Training { skill, level }
+                WieldRequirementType::Skill => SkillType::from_repr(skill_id)
+                    .map(|skill| WieldRequirement::Skill { skill, difficulty }),
+                WieldRequirementType::RawSkill => SkillType::from_repr(skill_id)
+                    .map(|skill| WieldRequirement::RawSkill { skill, difficulty }),
+                WieldRequirementType::Attrib => {
+                    AttributeType::from_repr(skill_id as usize).map(|attribute| {
+                        WieldRequirement::Attribute {
+                            attribute,
+                            difficulty,
+                        }
                     })
-                }),
-                WieldRequirementType::IntStat => PropertyInt::from_repr(skill_id).map(|property| {
-                    WieldRequirement::IntStat { property, value: difficulty }
-                }),
-                WieldRequirementType::BoolStat => PropertyBool::from_repr(skill_id).map(|property| {
-                    WieldRequirement::BoolStat { property, value: difficulty != 0 }
-                }),
-                WieldRequirementType::CreatureType => CreatureType::from_repr(skill_id).map(|creature_type| {
-                    WieldRequirement::CreatureType { creature_type }
-                }),
-                WieldRequirementType::HeritageType => HeritageGroup::from_repr(skill_id as usize).map(|heritage| {
-                    WieldRequirement::Heritage { heritage }
-                }),
+                }
+                WieldRequirementType::RawAttrib => {
+                    AttributeType::from_repr(skill_id as usize).map(|attribute| {
+                        WieldRequirement::RawAttribute {
+                            attribute,
+                            difficulty,
+                        }
+                    })
+                }
+                WieldRequirementType::SecondaryAttrib => VitalType::from_repr(skill_id as usize)
+                    .map(|vital| WieldRequirement::Vital { vital, difficulty }),
+                WieldRequirementType::RawSecondaryAttrib => VitalType::from_repr(skill_id as usize)
+                    .map(|vital| WieldRequirement::RawVital { vital, difficulty }),
+                WieldRequirementType::Level => Some(WieldRequirement::Level { level: difficulty }),
+                WieldRequirementType::Training => {
+                    SkillType::from_repr(skill_id).and_then(|skill| {
+                        TrainingLevel::from_repr(difficulty as usize)
+                            .map(|level| WieldRequirement::Training { skill, level })
+                    })
+                }
+                WieldRequirementType::IntStat => {
+                    PropertyInt::from_repr(skill_id).map(|property| WieldRequirement::IntStat {
+                        property,
+                        value: difficulty,
+                    })
+                }
+                WieldRequirementType::BoolStat => {
+                    PropertyBool::from_repr(skill_id).map(|property| WieldRequirement::BoolStat {
+                        property,
+                        value: difficulty != 0,
+                    })
+                }
+                WieldRequirementType::CreatureType => CreatureType::from_repr(skill_id)
+                    .map(|creature_type| WieldRequirement::CreatureType { creature_type }),
+                WieldRequirementType::HeritageType => HeritageGroup::from_repr(skill_id as usize)
+                    .map(|heritage| WieldRequirement::Heritage { heritage }),
                 _ => None,
             };
 
@@ -423,13 +478,13 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
     }
 
     // Arcane Lore requirement from ItemDifficulty
-    if let Some(difficulty) = entity.get_int_prop(PropertyInt::ItemDifficulty) {
-        if difficulty > 0 {
-            reqs.push(WieldRequirement::Skill {
-                skill: SkillType::ArcaneLore,
-                difficulty,
-            });
-        }
+    if let Some(difficulty) = entity.get_int_prop(PropertyInt::ItemDifficulty)
+        && difficulty > 0
+    {
+        reqs.push(WieldRequirement::Skill {
+            skill: SkillType::ArcaneLore,
+            difficulty,
+        });
     }
 
     reqs
@@ -457,16 +512,16 @@ fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
     }
 
     // Fallback for weapon offense from profile
-    if !bonuses.iter().any(|b| b.name == "Attack Bonus") {
-        if let Some(p) = entity.weapon_profile.as_ref() {
-            let val = p.weapon_offense - 1.0;
-            if val.abs() > f64::EPSILON {
-                bonuses.push(Bonus {
-                    name: "Attack Bonus".to_string(),
-                    value: val,
-                    is_multiplier: true,
-                });
-            }
+    if !bonuses.iter().any(|b| b.name == "Attack Bonus")
+        && let Some(p) = entity.weapon_profile.as_ref()
+    {
+        let val = p.weapon_offense - 1.0;
+        if val.abs() > f64::EPSILON {
+            bonuses.push(Bonus {
+                name: "Attack Bonus".to_string(),
+                value: val,
+                is_multiplier: true,
+            });
         }
     }
 
@@ -649,84 +704,84 @@ impl Effect {
             effects.push(Effect::ArmorRending);
         }
 
-        if let Some(res_mod) = entity.get_float_prop(PropertyFloat::ResistanceModifier) {
-            if res_mod != 0.0 {
-                // ResistanceModifier is used for Cleaving.
-                // We'd need DamageType logic to know WHICH cleaving, but the prompt
-                // asks for them as separate variants. We'll use the weapon's damage type.
-                if let Some(range) = compute_damage_range(entity) {
-                    let dt = range.damage_type;
-                    if dt.contains(holtburger_common::properties::DamageType::SLASH) {
-                        effects.push(Effect::SlashCleaving);
-                    }
-                    if dt.contains(holtburger_common::properties::DamageType::PIERCE) {
-                        effects.push(Effect::PierceCleaving);
-                    }
-                    if dt.contains(holtburger_common::properties::DamageType::BLUDGEON) {
-                        effects.push(Effect::BludgeonCleaving);
-                    }
-                    if dt.contains(holtburger_common::properties::DamageType::ACID) {
-                        effects.push(Effect::AcidCleaving);
-                    }
-                    if dt.contains(holtburger_common::properties::DamageType::COLD) {
-                        effects.push(Effect::ColdCleaving);
-                    }
-                    if dt.contains(holtburger_common::properties::DamageType::ELECTRIC) {
-                        effects.push(Effect::ElectricCleaving);
-                    }
-                    if dt.contains(holtburger_common::properties::DamageType::FIRE) {
-                        effects.push(Effect::FireCleaving);
-                    }
-                    if dt.contains(holtburger_common::properties::DamageType::NETHER) {
-                        effects.push(Effect::NetherCleaving);
-                    }
+        if let Some(res_mod) = entity.get_float_prop(PropertyFloat::ResistanceModifier)
+            && res_mod != 0.0
+        {
+            // ResistanceModifier is used for Cleaving.
+            // We'd need DamageType logic to know WHICH cleaving, but the prompt
+            // asks for them as separate variants. We'll use the weapon's damage type.
+            if let Some(range) = compute_damage_range(entity) {
+                let dt = range.damage_type;
+                if dt.contains(holtburger_common::properties::DamageType::SLASH) {
+                    effects.push(Effect::SlashCleaving);
+                }
+                if dt.contains(holtburger_common::properties::DamageType::PIERCE) {
+                    effects.push(Effect::PierceCleaving);
+                }
+                if dt.contains(holtburger_common::properties::DamageType::BLUDGEON) {
+                    effects.push(Effect::BludgeonCleaving);
+                }
+                if dt.contains(holtburger_common::properties::DamageType::ACID) {
+                    effects.push(Effect::AcidCleaving);
+                }
+                if dt.contains(holtburger_common::properties::DamageType::COLD) {
+                    effects.push(Effect::ColdCleaving);
+                }
+                if dt.contains(holtburger_common::properties::DamageType::ELECTRIC) {
+                    effects.push(Effect::ElectricCleaving);
+                }
+                if dt.contains(holtburger_common::properties::DamageType::FIRE) {
+                    effects.push(Effect::FireCleaving);
+                }
+                if dt.contains(holtburger_common::properties::DamageType::NETHER) {
+                    effects.push(Effect::NetherCleaving);
                 }
             }
         }
 
-        if entity.get_float_prop(PropertyFloat::AbsorbMagicDamage).is_some() {
+        if entity
+            .get_float_prop(PropertyFloat::AbsorbMagicDamage)
+            .is_some()
+        {
             effects.push(Effect::MagicAbsorption);
         }
 
         // Float Properties (Strength attached)
-        if let Some(freq) = entity.get_float_prop(PropertyFloat::CriticalFrequency) {
-            if freq > 0.0 {
-                effects.push(Effect::BitingStrike(freq));
-            }
+        if let Some(freq) = entity.get_float_prop(PropertyFloat::CriticalFrequency)
+            && freq > 0.0
+        {
+            effects.push(Effect::BitingStrike(freq));
         }
-        if let Some(mult) = entity.get_float_prop(PropertyFloat::CriticalMultiplier) {
-            if mult > 0.0 {
-                effects.push(Effect::CrushingBlow(mult));
-            }
+        if let Some(mult) = entity.get_float_prop(PropertyFloat::CriticalMultiplier)
+            && mult > 0.0
+        {
+            effects.push(Effect::CrushingBlow(mult));
         }
-        if let Some(bonus) = entity.get_float_prop(PropertyFloat::SlayerDamageBonus) {
-            if bonus > 0.0 {
-                if let Some(creature_type) = entity
-                    .get_int_prop(PropertyInt::SlayerCreatureType)
-                    .and_then(|t| CreatureType::from_repr(t as u32))
-                {
-                    effects.push(Effect::Slayer {
-                        creature_type,
-                        bonus,
-                    });
-                }
-            }
+        if let Some(bonus) = entity.get_float_prop(PropertyFloat::SlayerDamageBonus)
+            && bonus > 0.0
+            && let Some(creature_type) = entity
+                .get_int_prop(PropertyInt::SlayerCreatureType)
+                .and_then(|t| CreatureType::from_repr(t as u32))
+        {
+            effects.push(Effect::Slayer {
+                creature_type,
+                bonus,
+            });
         }
 
         // Int Properties
         if let Some(at) = entity
             .get_int_prop(PropertyInt::AttackType)
             .map(|bits| AttackType::from_bits_truncate(bits as u32))
+            && at.intersects(AttackType::DoubleStrike | AttackType::TripleStrike)
         {
-            if at.intersects(AttackType::DoubleStrike | AttackType::TripleStrike) {
-                effects.push(Effect::Multistrike);
-            }
+            effects.push(Effect::Multistrike);
         }
 
-        if let Some(cleave_targets) = entity.get_int_prop(PropertyInt::Cleaving) {
-            if cleave_targets > 0 {
-                effects.push(Effect::Cleaving(cleave_targets));
-            }
+        if let Some(cleave_targets) = entity.get_int_prop(PropertyInt::Cleaving)
+            && cleave_targets > 0
+        {
+            effects.push(Effect::Cleaving(cleave_targets));
         }
 
         // Bitflags in ImbuedEffect (formerly thought as PropertyBool)

@@ -18,6 +18,7 @@ pub mod hydration;
 pub mod magic;
 pub mod player;
 pub mod spatial;
+pub mod spell;
 pub mod state;
 pub mod stats;
 pub mod vendor;

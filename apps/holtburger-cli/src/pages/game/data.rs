@@ -8,9 +8,11 @@ use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
+use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct GameData {
@@ -38,10 +40,8 @@ pub struct GameData {
     pub player_enchantments: Vec<Enchantment>,
     /// List of learned spell IDs.
     pub player_spells: Vec<u32>,
-    /// User-friendly names for spells.
-    pub spell_names: HashMap<u32, String>,
-    /// Details about spell effects.
-    pub spell_info: HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
+    /// Full spell catalog loaded from portal.dat.
+    pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Local cache of nearby entities.
     pub entities: HashMap<Guid, Entity>,
     /// Server name (e.g. "Morningthaw").
@@ -75,8 +75,7 @@ impl Default for GameData {
             player_pos: None,
             player_enchantments: Vec::new(),
             player_spells: Vec::new(),
-            spell_names: HashMap::new(),
-            spell_info: HashMap::new(),
+            spell_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
@@ -117,6 +116,18 @@ impl GameData {
             }
             stack.extend(children);
         }
+    }
+
+    pub fn spell_name(&self, spell_id: u32) -> Option<&str> {
+        self.spell_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.resolve_name(spell_id))
+    }
+
+    pub fn spell_name_or_fallback(&self, spell_id: u32) -> String {
+        self.spell_name(spell_id)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Spell #{}", spell_id))
     }
 }
 

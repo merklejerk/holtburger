@@ -7,6 +7,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use ratatui::text::Line;
 use std::collections::HashMap;
@@ -24,9 +25,7 @@ pub fn get_debug_info(
     view: Option<&ViewState>,
     target: &CommandTarget,
     name_lookup: impl Fn(Guid) -> Option<String>,
-    spell_lookup: Option<
-        &std::collections::HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
-    >,
+    spell_lookup: Option<&SpellCatalog>,
     player_info: Option<PlayerDebugInfo>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
@@ -315,7 +314,10 @@ pub fn get_debug_info(
                     lines.push(Line::from(format!("  IconUnder: 0x{:08X}", v.0)));
                 }
                 if let Some(v) = e.material_type() {
-                    lines.push(Line::from(format!("  Material:  0x{:08X}", v)));
+                    lines.push(Line::from(format!(
+                        "  Material:  {} (0x{:08X})",
+                        v, v as u32
+                    )));
                 }
             }
 
@@ -422,7 +424,7 @@ pub fn get_debug_info(
                 lines.push(Line::from("-- Spell Book --"));
                 for &spell_id in &e.spell_book {
                     let name = spell_lookup
-                        .and_then(|m| m.get(&spell_id))
+                        .and_then(|m| m.get(spell_id))
                         .map(|s| s.name.as_str())
                         .unwrap_or("Unknown");
                     lines.push(Line::from(format!("  #{} - {}", spell_id, name)));
@@ -546,7 +548,7 @@ pub fn get_debug_info(
                     lines.push(Line::from("-- Player Enchantments --"));
                     for enc in info.enchantments {
                         let name = spell_lookup
-                            .and_then(|m| m.get(&(enc.spell_id as u32)))
+                            .and_then(|m| m.get(enc.spell_id as u32))
                             .map(|s| s.name.as_str())
                             .unwrap_or("Unknown Spell");
                         lines.push(Line::from(format!(
@@ -619,7 +621,7 @@ pub fn get_debug_info(
             lines.push(Line::from(format!("DEBUG INFO: Spell {}", spell_id)));
             lines.push(Line::from(format!("Spell ID:   {}", spell_id)));
 
-            if let Some(info) = spell_lookup.and_then(|m| m.get(spell_id)) {
+            if let Some(info) = spell_lookup.and_then(|m| m.get(*spell_id)) {
                 lines.push(Line::from(format!("Name:       {}", info.name)));
                 lines.push(Line::from(format!("Level:      {}", info.power)));
                 lines.push(Line::from(format!("Mana:       {}", info.base_mana)));
@@ -633,7 +635,7 @@ pub fn get_debug_info(
 
                 // Components (8 slots)
                 let comps: Vec<String> = info
-                    .raw_components
+                    .components
                     .iter()
                     .map(|id| format!("{:#X}", id))
                     .collect();
@@ -651,15 +653,13 @@ pub fn get_debug_info(
 pub fn get_details_info(
     _data: &GameData,
     target: &CommandTarget,
-    spell_lookup: Option<
-        &std::collections::HashMap<u32, Box<holtburger_dat::file_type::spell_table::SpellBase>>,
-    >,
+    spell_lookup: Option<&SpellCatalog>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     match target {
         CommandTarget::Spell(spell_id) => {
-            if let Some(info) = spell_lookup.and_then(|m| m.get(spell_id)) {
+            if let Some(info) = spell_lookup.and_then(|m| m.get(*spell_id)) {
                 lines.push(Line::from(info.name.clone()));
                 lines.push(Line::from(format!("ID: {}", spell_id)));
                 lines.push(Line::from(format!("School: {:?}", info.school)));
@@ -679,7 +679,7 @@ pub fn get_details_info(
         }
         CommandTarget::Enchantment(enchant) => {
             let spell_name = spell_lookup
-                .and_then(|m| m.get(&(enchant.spell_id as u32)))
+                .and_then(|m| m.get(enchant.spell_id as u32))
                 .map(|s| s.name.clone())
                 .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
 

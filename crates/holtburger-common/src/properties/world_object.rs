@@ -79,6 +79,7 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
         let workmanship = self.workmanship()?;
         let num_items = self
             .get_int_prop(PropertyInt::NumItemsInMaterial)
+            .map(|value| if value <= 0 { 1 } else { value })
             .unwrap_or(1) as f64;
         Some(workmanship / num_items)
     }

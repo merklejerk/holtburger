@@ -75,6 +75,14 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
             .map(|value| value as f64)
     }
 
+    fn effective_workmanship(&self) -> Option<f64> {
+        let workmanship = self.workmanship()?;
+        let num_items = self
+            .get_int_prop(PropertyInt::NumItemsInMaterial)
+            .unwrap_or(1) as f64;
+        Some(workmanship / num_items)
+    }
+
     fn burden(&self) -> Option<u32> {
         self.get_int_prop(PropertyInt::EncumbranceVal)
             .map(|value| value as u32)

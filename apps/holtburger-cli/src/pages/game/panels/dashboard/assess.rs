@@ -1,7 +1,6 @@
 use crate::utils::{format_duration, wrap_text};
 use holtburger_world::assessment::{Assessment, Effect, StatusFlag};
 use holtburger_world::entity::Entity;
-use holtburger_world::stats::SkillType;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::collections::HashMap;
@@ -56,7 +55,7 @@ pub fn get_assess_info(
     if let Some(mat) = &assess.material {
         lines.push(Line::from(vec![
             Span::styled("Material:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(mat.name.clone(), Style::default().fg(Color::White)),
+            Span::styled(mat.material_type.to_string(), Style::default().fg(Color::White)),
             Span::styled(
                 format!(" ({})", mat.workmanship),
                 Style::default().fg(Color::White),
@@ -157,7 +156,12 @@ pub fn get_assess_info(
 
     // Weapon
     if let Some(weapon) = &assess.weapon {
-        let damage_type_display = weapon.damage_types.join(" / ");
+        let damage_type_display = weapon
+            .damage_type
+            .iter_display_names()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(" / ");
         let display = if weapon.damage_min.round() == weapon.damage_max.round() {
             format!("{:.1} {}", weapon.damage_max, damage_type_display)
         } else {
@@ -186,16 +190,14 @@ pub fn get_assess_info(
             }
         }
 
-        if let Some(st_raw) = weapon.wield_skill_type {
-            if let Some(st) = SkillType::from_repr(st_raw) {
-                lines.push(Line::from(vec![
-                    Span::styled("Skill:  ", Style::default().fg(Color::Gray)),
-                    Span::styled(
-                        format!("{} ({})", st, weapon.difficulty),
-                        Style::default().fg(Color::White),
-                    ),
-                ]));
-            }
+        if let Some(st) = weapon.wield_skill_type {
+            lines.push(Line::from(vec![
+                Span::styled("Skill:  ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    format!("{} ({})", st, weapon.difficulty),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
         }
 
         // --- Weapon Bonuses ---

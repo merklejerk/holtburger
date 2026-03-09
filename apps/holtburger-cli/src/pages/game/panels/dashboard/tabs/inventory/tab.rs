@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_common::Guid;
-use holtburger_common::properties::{ItemType, ObjectDescriptionFlag, WorldObjectExt as _};
+use holtburger_common::properties::{ObjectDescriptionFlag, WorldObjectExt as _};
 use holtburger_world::context::{WorldContext, WorldContextExt};
 use holtburger_world::entity::Entity;
 use ratatui::Frame;
@@ -194,6 +194,7 @@ impl TabController for InventoryTab {
                     } => {
                         if cur_entity.guid == *interact_guid
                             && let Some(pguid) = player_guid
+                            && data.can_use_with(*interact_guid, pguid)
                         {
                             verbs.push(Verb::new(
                                 vec![
@@ -336,34 +337,6 @@ impl TabController for InventoryTab {
             }
 
             match class {
-                EntityClass::Tool
-                | EntityClass::Container
-                | EntityClass::Consumable
-                | EntityClass::Key
-                | EntityClass::Writable
-                | EntityClass::Money
-                | EntityClass::Item => {
-                    let is_gem = cur_entity.item_type().is_some_and(|t| t == ItemType::GEM);
-                    if !is_gem && cur_entity.target_item_type().is_some() {
-                        verbs.push(Verb::new(
-                            vec![AppAction::BeginInteraction {
-                                interaction: Interaction::Combining {
-                                    item_guid: cur_entity.guid,
-                                },
-                            }],
-                            'c',
-                            "Combine",
-                        ));
-                    } else {
-                        verbs.push(Verb::new(
-                            vec![AppAction::Use {
-                                guid: cur_entity.guid,
-                            }],
-                            'u',
-                            "Use",
-                        ));
-                    }
-                }
                 EntityClass::Apparel | EntityClass::Wand | EntityClass::Weapon => {
                     verbs.push(Verb::new(
                         vec![AppAction::BeginInteraction {
@@ -376,17 +349,39 @@ impl TabController for InventoryTab {
                     ));
                 }
                 EntityClass::HealingKit => {
-                    verbs.push(Verb::new(
-                        vec![AppAction::BeginInteraction {
-                            interaction: Interaction::Healing {
-                                item_guid: cur_entity.guid,
-                            },
-                        }],
-                        'h',
-                        "Heal",
-                    ));
+                    if data.can_begin_use_with(cur_entity.guid) {
+                        verbs.push(Verb::new(
+                            vec![AppAction::BeginInteraction {
+                                interaction: Interaction::Healing {
+                                    item_guid: cur_entity.guid,
+                                },
+                            }],
+                            'h',
+                            "Heal",
+                        ));
+                    }
                 }
-                _ => {}
+                _ => {
+                    if data.can_begin_use_with(cur_entity.guid) {
+                        verbs.push(Verb::new(
+                            vec![AppAction::BeginInteraction {
+                                interaction: Interaction::Combining {
+                                    item_guid: cur_entity.guid,
+                                },
+                            }],
+                            'c',
+                            "Combine",
+                        ));
+                    } else if data.can_use(cur_entity.guid) {
+                        verbs.push(Verb::new(
+                            vec![AppAction::Use {
+                                guid: cur_entity.guid,
+                            }],
+                            'u',
+                            "Use",
+                        ));
+                    }
+                }
             }
 
             if data.find_salvage_tool_guid().is_some() && data.is_salvage_candidate(cur_entity.guid)

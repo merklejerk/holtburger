@@ -41,11 +41,26 @@ pub fn render_inventory_tab(
         let top_area = chunks[0];
         bottom_area = chunks[1];
 
-        let text = format!("Main Pack ({}/{})", count, capacity);
-        let summary = Paragraph::new(Line::from(vec![Span::styled(
-            text,
+        let mut summary_spans = vec![Span::styled(
+            format!("Main Pack ({}/{})", count, capacity),
             Style::default().fg(theme::SUMMARY_FG),
-        )]));
+        )];
+
+        if let Some(burden) = data.get_burden() {
+            summary_spans.push(Span::raw(" | "));
+            summary_spans.push(Span::styled(
+                format!("Burden {:.0}%", burden * 100.0),
+                Style::default().fg(if burden > 1.25 {
+                    theme::ERROR_FG
+                } else if burden > 0.8 {
+                    theme::WARNING_FG
+                } else {
+                    theme::SUMMARY_FG
+                }),
+            ));
+        }
+
+        let summary = Paragraph::new(Line::from(summary_spans));
         f.render_widget(summary, top_area);
     }
 

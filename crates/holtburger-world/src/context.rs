@@ -1,7 +1,7 @@
 use crate::entity::Entity;
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
-use holtburger_common::properties::{ItemType, WorldObjectExt};
+use holtburger_common::properties::{ItemType, Usable, WorldObjectExt};
 use holtburger_protocol::messages::combat::CombatMode;
 
 /// Provides access to the world state for common logic.
@@ -16,6 +16,101 @@ pub trait WorldContext {
 
 /// Common game logic shared across all clients.
 pub trait WorldContextExt: WorldContext {
+    fn is_in_player_inventory(&self, guid: Guid) -> bool {
+        self.iter_inventory().any(|candidate| candidate == guid)
+    }
+
+    fn is_equipped_item(&self, guid: Guid) -> bool {
+        self.iter_equipment().any(|candidate| candidate == guid)
+    }
+
+    fn current_usable_location_flags(&self, guid: Guid, source_guid: Option<Guid>) -> Usable {
+        let Some(entity) = self.get_entity(guid) else {
+            return Usable::empty();
+        };
+
+        let mut available = Usable::empty();
+        let is_equipped = self.is_equipped_item(guid);
+        let is_owned = is_equipped || self.is_in_player_inventory(guid);
+
+        if is_owned {
+            available |= Usable::CONTAINED;
+        }
+
+        if is_equipped {
+            available |= Usable::WIELDED;
+        }
+
+        if entity
+            .container_id()
+            .is_some_and(|container_guid| self.is_open_container(container_guid))
+        {
+            available |= Usable::VIEWED;
+        }
+
+        if entity.position.landblock_id != Guid::NULL {
+            available |= Usable::REMOTE;
+        }
+
+        if Some(guid) == self.get_player_guid() {
+            available |= Usable::SELF;
+        }
+
+        if Some(guid) == source_guid {
+            available |= Usable::OBJ_SELF;
+        }
+
+        available
+    }
+
+    fn matches_current_usable_location(
+        &self,
+        guid: Guid,
+        required: Usable,
+        source_guid: Option<Guid>,
+    ) -> bool {
+        let required = required.location_flags();
+        if required.is_empty() {
+            return false;
+        }
+
+        self.current_usable_location_flags(guid, source_guid)
+            .intersects(required)
+    }
+
+    fn can_use(&self, guid: Guid) -> bool {
+        let Some(item) = self.get_entity(guid) else {
+            return false;
+        };
+
+        let usable = item.usable_flags();
+        if usable.is_empty() {
+            return true;
+        }
+
+        let source_flags = usable.source_flags();
+        if source_flags == Usable::NO {
+            return false;
+        }
+
+        let location_flags = source_flags.location_flags();
+        if location_flags.is_empty() {
+            return true;
+        }
+
+        self.matches_current_usable_location(guid, source_flags, Some(guid))
+    }
+
+    fn can_begin_use_with(&self, item_guid: Guid) -> bool {
+        let Some(item) = self.get_entity(item_guid) else {
+            return false;
+        };
+
+        let target_locations = item.usable_flags().target_flags().location_flags();
+
+        item.target_item_type().is_some() && !target_locations.is_empty() && self.can_use(item_guid)
+    }
+
     fn get_pyreal_balance(&self) -> u32 {
         self.iter_inventory()
             .filter_map(|guid| self.get_entity(guid))
@@ -272,9 +367,214 @@ pub trait WorldContextExt: WorldContext {
             Some(e) => e,
             None => return false,
         };
-        item.target_item_type()
+
+        if !self.can_begin_use_with(item_guid) {
+            return false;
+        }
+
+        if !item
+            .target_item_type()
             .is_some_and(|t| target.item_type().unwrap_or_default().intersects(t))
+        {
+            return false;
+        }
+
+        self.matches_current_usable_location(
+            target_guid,
+            item.usable_flags().target_flags(),
+            Some(item_guid),
+        )
     }
 }
 
 impl<T: WorldContext + ?Sized> WorldContextExt for T {}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{HashMap, HashSet};
+
+    use super::{WorldContext, WorldContextExt};
+    use crate::entity::Entity;
+    use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyInt, Usable};
+
+    #[derive(Default)]
+    struct TestWorld {
+        player_guid: Option<Guid>,
+        entities: HashMap<Guid, Entity>,
+        inventory: HashSet<Guid>,
+        equipment: HashSet<Guid>,
+        open_containers: HashSet<Guid>,
+    }
+
+    impl WorldContext for TestWorld {
+        fn get_player_guid(&self) -> Option<Guid> {
+            self.player_guid
+        }
+
+        fn get_entity(&self, guid: Guid) -> Option<&Entity> {
+            self.entities.get(&guid)
+        }
+
+        fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_ {
+            self.inventory.iter().copied()
+        }
+
+        fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_ {
+            self.equipment.iter().copied()
+        }
+
+        fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
+            self.entities.values()
+        }
+
+        fn is_open_container(&self, guid: Guid) -> bool {
+            self.open_containers.contains(&guid)
+        }
+    }
+
+    fn entity(guid: Guid, name: &str) -> Entity {
+        Entity::new(guid, name.to_string(), WorldPosition::default())
+    }
+
+    #[test]
+    fn nearby_use_requires_matching_source_location() {
+        let player_guid = Guid(0x5000_0001);
+        let item_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            ..Default::default()
+        };
+
+        let mut ground_item = entity(item_guid, "Ground Item");
+        ground_item.position.landblock_id = Guid(0x1234_0001);
+        ground_item
+            .properties
+            .ints
+            .insert(PropertyInt::ItemUseable, Usable::CONTAINED.bits() as i32);
+        world.entities.insert(item_guid, ground_item.clone());
+
+        assert!(!world.can_use(item_guid));
+
+        world
+            .entities
+            .get_mut(&item_guid)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemUseable, Usable::REMOTE.bits() as i32);
+
+        assert!(world.can_use(item_guid));
+    }
+
+    #[test]
+    fn physics_parent_alone_does_not_make_item_remote() {
+        let player_guid = Guid(0x5000_0001);
+        let item_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            ..Default::default()
+        };
+
+        let mut attached_item = entity(item_guid, "Attached Item");
+        attached_item.physics_parent_id = Some(Guid(0x7000_0001));
+        attached_item
+            .properties
+            .ints
+            .insert(PropertyInt::ItemUseable, Usable::REMOTE.bits() as i32);
+        world.entities.insert(item_guid, attached_item);
+
+        assert!(!world.can_use(item_guid));
+        assert_eq!(
+            world.current_usable_location_flags(item_guid, None),
+            Usable::empty()
+        );
+    }
+
+    #[test]
+    fn combine_requires_non_empty_target_location_bits() {
+        let player_guid = Guid(0x5000_0001);
+        let item_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            inventory: HashSet::from([item_guid]),
+            ..Default::default()
+        };
+
+        let mut inventory_item = entity(item_guid, "Tool");
+        inventory_item
+            .properties
+            .ints
+            .insert(PropertyInt::TargetType, ItemType::MISC.bits() as i32);
+        inventory_item
+            .properties
+            .ints
+            .insert(PropertyInt::ItemUseable, Usable::CONTAINED.bits() as i32);
+        world.entities.insert(item_guid, inventory_item);
+
+        assert!(!world.can_begin_use_with(item_guid));
+
+        world
+            .entities
+            .get_mut(&item_guid)
+            .unwrap()
+            .properties
+            .ints
+            .insert(
+                PropertyInt::ItemUseable,
+                Usable::SOURCE_CONTAINED_TARGET_REMOTE.bits() as i32,
+            );
+
+        assert!(world.can_begin_use_with(item_guid));
+    }
+
+    #[test]
+    fn combine_respects_target_viewed_location() {
+        let player_guid = Guid(0x5000_0001);
+        let source_guid = Guid(0x8000_0001);
+        let container_guid = Guid(0x8000_0002);
+        let target_guid = Guid(0x8000_0003);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            inventory: HashSet::from([source_guid]),
+            open_containers: HashSet::from([container_guid]),
+            ..Default::default()
+        };
+
+        let mut source = entity(source_guid, "Salve");
+        source
+            .properties
+            .ints
+            .insert(PropertyInt::TargetType, ItemType::MISC.bits() as i32);
+        source.properties.ints.insert(
+            PropertyInt::ItemUseable,
+            Usable::SOURCE_CONTAINED_TARGET_VIEWED.bits() as i32,
+        );
+        world.entities.insert(source_guid, source);
+
+        let mut container = entity(container_guid, "Chest");
+        container.position.landblock_id = Guid(0x1234_0001);
+        world.entities.insert(container_guid, container);
+
+        let mut target = entity(target_guid, "Target");
+        target
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::MISC.bits() as i32);
+        target
+            .properties
+            .iids
+            .insert(PropertyInstanceId::Container, container_guid);
+        world.entities.insert(target_guid, target);
+
+        assert!(world.can_use_with(source_guid, target_guid));
+
+        world.open_containers.clear();
+        assert!(!world.can_use_with(source_guid, target_guid));
+    }
+}

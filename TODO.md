@@ -71,6 +71,7 @@
 - [x] Exit combat mode when trying to trade.
 - [x] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 - [x] Context panel should reset to scroll offset 0.
+- [x] Resolve Spellbook entries in debug info.
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -84,7 +85,6 @@
 - [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
-- [ ] Resolve Spellbook entries in debug info.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
@@ -164,11 +164,11 @@
     - [x] Exit salvaging interaction mode when queue is empty.
     - [x] Do not show salvage verb for full salvage bags.
     - [x] Show material type of salvage bags in inventory tab.
-- [~] Augment assess output with stored entity properties.
+- [x] Augment assess output with stored entity properties.
 - [ ] Display properties only provided in assess results in assess screen:
     - [ ] Show salvage workmanship as float (`ItemWorkmanship / NumItemsInMaterial`).
-    - [ ] Mana charge + time left.
-    - [ ] Locked/Unlocked status.
+    - [x] Mana charge + time left.
+    - [x] Locked/Unlocked status.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
@@ -187,7 +187,6 @@
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] Display encumbrance (sticky line in inv tab?).
 - [ ] Add intelligent entity context scanners.
-- [ ] Salvage preview output is duplicated and wrong (maybe not?).
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -208,3 +207,4 @@
 - [x] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
 - [x] Is `WorldObjectPropertyAccessors` a pointless abstraction?
+- [ ] Salvage preview output is duplicated and wrong (maybe not?).

@@ -274,11 +274,7 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
             Style::default().add_modifier(Modifier::BOLD),
         )));
         for bonus in &assess.bonuses {
-            let value_display = if bonus.is_multiplier {
-                format!("{:+}%", (bonus.value * 100.0).round())
-            } else {
-                format!("{:+}%", (bonus.value * 100.0).round()) // Both are % based in display
-            };
+            let value_display = format!("{:+}%", (bonus.value * 100.0).round());
 
             let color = match bonus.name.as_str() {
                 "Attack Bonus"

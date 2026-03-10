@@ -357,10 +357,10 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Support reopen/edit/clear semantics, including `Esc` on already-active filters.
 
 ### Slice 5: Footer Active-Filter UX
-- [ ] Render the active-filter header in the footer.
-- [ ] Ensure the visible `Filter` verb disappears while active.
-- [ ] Ensure `f` still works while active.
-- [ ] Resolve the two-line footer budget cleanly.
+- [x] Render the active-filter header in the footer.
+- [x] Ensure the visible `Filter` verb disappears while active.
+- [x] Ensure `f` still works while active.
+- [x] Resolve the two-line footer budget cleanly.
 
 ### Slice 6: Nearby Visible-List Unification
 - [ ] Build one filtered visible-list helper for Nearby.
@@ -403,7 +403,7 @@ The dry run says the work should execute in small slices, but the phase structur
 ### Task Checklist
 - [x] Complete Phase 1.
 - [x] Complete Phase 2.
-- [ ] Complete Phase 3.
+- [x] Complete Phase 3.
 - [ ] Complete Phase 4.
 - [ ] Complete Phase 5.
 - [ ] Complete Phase 6.
@@ -415,6 +415,7 @@ The dry run says the work should execute in small slices, but the phase structur
 - Phase 2 keeps `Filter` in tab verb dispatch even when a filter is active; Phase 3 will hide it in footer rendering only, so `f` remains live without adding tab-specific shortcut fast paths.
 - Phase 2 added tab-local `active_filter` plus `filter_input` session state to Nearby, Inventory, and Spells, and seeded reopened editors from the committed raw pattern.
 - `Esc` in filter edit mode now clears the committed filter only when the editor was opened from an already-active filter; otherwise it behaves as a pure cancel.
+- Phase 3 resolves the active-filter footer budget by rendering a fixed two-line footer state (`header` + `verbs`) without relying on wrap behavior, while leaving the normal one-line verb bar unchanged.
 - Default fuzzy behavior is case-insensitive subsequence matching, not substring-only matching.
 - Multiple space-separated tokens combine by union.
 - Filtering is inclusion-only and must never reorder a tab's canonical sequence.
@@ -425,6 +426,8 @@ The dry run says the work should execute in small slices, but the phase structur
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/types.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/render.rs`, or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`.
 - 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 2 filter plumbing and tab session wiring changes.
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/types.rs`, `apps/holtburger-cli/src/utils.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/state.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`, or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/tab.rs`.
+- 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 3 footer/header active-filter rendering changes.
+- 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/render.rs`.
 
 ### Open Questions
 - Do we want filter matching to stay limited to visible names/labels, or should Nearby/Inventory also match secondary metadata such as container status or item class names later?

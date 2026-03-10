@@ -186,8 +186,10 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 list_items.push(ListItem::new(Line::from(spans)).style(style));
             }
             CharTabLine::Enchantment(enchant) => {
-                let beneficial =
-                    (enchant.stat_mod_type & EnchantmentTypeFlags::BENEFICIAL.bits()) != 0;
+                let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
+                let beneficial = flags.contains(EnchantmentTypeFlags::BENEFICIAL);
+                let multiplicative = flags.contains(EnchantmentTypeFlags::MULTIPLICATIVE);
+
                 let color = if beneficial { Color::Green } else { Color::Red };
                 let highlight_fg = if highlight {
                     Color::White
@@ -199,6 +201,12 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
 
                 let spell_name = data.spell_name_or_fallback(enchant.spell_id as u32);
 
+                let val_str = if multiplicative {
+                    format!("x{:.2}", enchant.stat_mod_value)
+                } else {
+                    format!("{:+.2}", enchant.stat_mod_value)
+                };
+
                 list_items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw("    "),
@@ -208,10 +216,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                                 .fg(highlight_fg)
                                 .add_modifier(Modifier::ITALIC),
                         ),
-                        Span::styled(
-                            format!("{:+}", enchant.stat_mod_value),
-                            Style::default().fg(val_color),
-                        ),
+                        Span::styled(val_str, Style::default().fg(val_color)),
                         Span::styled(
                             format!(" [{}]", time_str),
                             Style::default().fg(highlight_fg),
@@ -221,6 +226,9 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 );
             }
             CharTabLine::Miscellaneous(enchant) => {
+                let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
+                let multiplicative = flags.contains(EnchantmentTypeFlags::MULTIPLICATIVE);
+
                 let highlight_fg = if highlight {
                     Color::White
                 } else {
@@ -228,14 +236,18 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 };
                 let name = data.spell_name_or_fallback(enchant.spell_id as u32);
                 let time_str = format_duration(enchant.start_time, enchant.duration);
+
+                let val_str = if multiplicative {
+                    format!("x{:.2}", enchant.stat_mod_value)
+                } else {
+                    format!("{:+.2}", enchant.stat_mod_value)
+                };
+
                 list_items.push(
                     ListItem::new(Line::from(vec![
                         Span::raw("  "),
                         Span::styled(format!("{:<15} ", name), Style::default().fg(Color::Yellow)),
-                        Span::styled(
-                            format!("{:+}", enchant.stat_mod_value),
-                            Style::default().fg(Color::Cyan),
-                        ),
+                        Span::styled(val_str, Style::default().fg(Color::Cyan)),
                         Span::styled(
                             format!(" [{}]", time_str),
                             Style::default().fg(highlight_fg),

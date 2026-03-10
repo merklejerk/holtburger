@@ -159,6 +159,20 @@ impl WorldState {
     }
 
     pub fn get_player_enchanted_float(&self, key: PropertyFloat) -> f32 {
+        if matches!(
+            key,
+            PropertyFloat::ResistSlash
+                | PropertyFloat::ResistPierce
+                | PropertyFloat::ResistBludgeon
+                | PropertyFloat::ResistFire
+                | PropertyFloat::ResistCold
+                | PropertyFloat::ResistAcid
+                | PropertyFloat::ResistElectric
+                | PropertyFloat::ResistNether
+        ) {
+            return self.player.get_resistance_current(key);
+        }
+
         let base = self
             .entities
             .get(self.player.guid)

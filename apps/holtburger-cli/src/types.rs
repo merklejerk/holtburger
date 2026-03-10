@@ -22,6 +22,7 @@ pub type VerbSet = Vec<Verb>;
 pub enum AppUiAction {
     SetDashboardActiveTab(DashboardTab),
     InventoryBeginSplitInput { item_guid: Guid, max_amount: u32 },
+    BeginTabFilterInput { tab: DashboardTab },
 }
 
 #[derive(Debug, Clone)]
@@ -29,11 +30,20 @@ pub struct Verb {
     pub action: AppAction,
     pub shortcut: char,
     pub label: Cow<'static, str>,
+    pub footer_visibility: FooterVerbVisibility,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FooterVerbVisibility {
+    #[default]
+    Visible,
+    Hidden,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerbInputKind {
     Quantity,
+    Text,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,7 +68,8 @@ impl VerbInputError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerbInputEvent {
     Changed,
-    Submitted(u32),
+    SubmittedQuantity(u32),
+    SubmittedText(String),
     Cancelled,
     Invalid(VerbInputError),
     Ignored,
@@ -69,8 +80,8 @@ pub struct VerbInputState {
     pub kind: VerbInputKind,
     pub prompt: Cow<'static, str>,
     pub input: String,
-    pub min: u32,
-    pub max: u32,
+    pub min: Option<u32>,
+    pub max: Option<u32>,
 }
 
 impl VerbInputState {
@@ -79,8 +90,18 @@ impl VerbInputState {
             kind: VerbInputKind::Quantity,
             prompt: prompt.into(),
             input: String::new(),
-            min,
-            max,
+            min: Some(min),
+            max: Some(max),
+        }
+    }
+
+    pub fn text(prompt: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            kind: VerbInputKind::Text,
+            prompt: prompt.into(),
+            input: String::new(),
+            min: None,
+            max: None,
         }
     }
 
@@ -94,12 +115,11 @@ impl VerbInputState {
             .parse::<u32>()
             .map_err(|_| VerbInputError::InvalidNumber)?;
 
-        if value < self.min || value > self.max {
-            return Err(VerbInputError::OutOfRange {
-                value,
-                min: self.min,
-                max: self.max,
-            });
+        let min = self.min.unwrap_or(0);
+        let max = self.max.unwrap_or(u32::MAX);
+
+        if value < min || value > max {
+            return Err(VerbInputError::OutOfRange { value, min, max });
         }
 
         Ok(value)
@@ -108,9 +128,12 @@ impl VerbInputState {
     pub fn handle_key(&mut self, key: KeyEvent) -> VerbInputEvent {
         match key.code {
             KeyCode::Esc => VerbInputEvent::Cancelled,
-            KeyCode::Enter => match self.parse_value() {
-                Ok(value) => VerbInputEvent::Submitted(value),
-                Err(err) => VerbInputEvent::Invalid(err),
+            KeyCode::Enter => match self.kind {
+                VerbInputKind::Quantity => match self.parse_value() {
+                    Ok(value) => VerbInputEvent::SubmittedQuantity(value),
+                    Err(err) => VerbInputEvent::Invalid(err),
+                },
+                VerbInputKind::Text => VerbInputEvent::SubmittedText(self.input.clone()),
             },
             KeyCode::Backspace => {
                 if self.input.pop().is_some() {
@@ -119,13 +142,32 @@ impl VerbInputState {
                     VerbInputEvent::Ignored
                 }
             }
-            KeyCode::Char(c) if c.is_ascii_digit() => {
-                self.input.push(c);
-                VerbInputEvent::Changed
-            }
+            KeyCode::Char(c) => match self.kind {
+                VerbInputKind::Quantity if c.is_ascii_digit() => {
+                    self.input.push(c);
+                    VerbInputEvent::Changed
+                }
+                VerbInputKind::Text if !c.is_control() => {
+                    self.input.push(c);
+                    VerbInputEvent::Changed
+                }
+                _ => VerbInputEvent::Ignored,
+            },
             _ => VerbInputEvent::Ignored,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabFilterState {
+    pub raw_pattern: String,
+    pub tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilterInputSession {
+    pub input: VerbInputState,
+    pub clears_active_filter_on_cancel: bool,
 }
 
 impl Verb {
@@ -138,7 +180,17 @@ impl Verb {
             action: action.into(),
             shortcut,
             label: label.into(),
+            footer_visibility: FooterVerbVisibility::Visible,
         }
+    }
+
+    pub fn with_footer_visibility(mut self, footer_visibility: FooterVerbVisibility) -> Self {
+        self.footer_visibility = footer_visibility;
+        self
+    }
+
+    pub fn is_visible_in_footer(&self) -> bool {
+        self.footer_visibility == FooterVerbVisibility::Visible
     }
 
     pub fn display_label(&self) -> String {
@@ -540,6 +592,10 @@ pub trait TabController {
     }
 
     fn footer_input(&self) -> Option<&VerbInputState> {
+        None
+    }
+
+    fn footer_header(&self) -> Option<String> {
         None
     }
 

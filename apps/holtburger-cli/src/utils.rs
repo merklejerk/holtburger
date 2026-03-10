@@ -2,6 +2,7 @@ use crate::types::FocusedPane;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, WorldObjectExt};
 use holtburger_world::crafting::salvage::get_material_name;
+use std::collections::HashSet;
 use unicode_width::UnicodeWidthStr;
 
 /// Formats an item's display name, including stack size and structure/durability if present.
@@ -65,6 +66,66 @@ pub fn format_cost(n: u64) -> String {
     } else {
         n.to_string()
     }
+}
+
+pub fn normalize_filter_tokens(pattern: &str) -> Vec<String> {
+    pattern
+        .split_whitespace()
+        .map(|token| token.to_ascii_lowercase())
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+pub fn fuzzy_subsequence_match(needle: &str, haystack: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+
+    let mut needle_chars = needle.chars().map(|c| c.to_ascii_lowercase());
+    let mut current = needle_chars.next();
+
+    for haystack_char in haystack.chars().map(|c| c.to_ascii_lowercase()) {
+        if Some(haystack_char) == current {
+            current = needle_chars.next();
+            if current.is_none() {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+pub fn retain_matching_hierarchy<T, FGuid, FDepth, FMatch>(
+    items: Vec<T>,
+    guid_of: FGuid,
+    depth_of: FDepth,
+    mut matches: FMatch,
+) -> Vec<T>
+where
+    FGuid: Fn(&T) -> Guid,
+    FDepth: Fn(&T) -> usize,
+    FMatch: FnMut(&T) -> bool,
+{
+    let mut included_guids = HashSet::new();
+    let mut ancestor_path = Vec::new();
+
+    for item in &items {
+        let depth = depth_of(item);
+        ancestor_path.truncate(depth);
+
+        if matches(item) {
+            included_guids.insert(guid_of(item));
+            included_guids.extend(ancestor_path.iter().copied());
+        }
+
+        ancestor_path.push(guid_of(item));
+    }
+
+    items
+        .into_iter()
+        .filter(|item| included_guids.contains(&guid_of(item)))
+        .collect()
 }
 
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
@@ -179,5 +240,73 @@ fn get_pane_order(width: u16) -> [FocusedPane; 4] {
             FocusedPane::Context,
             FocusedPane::Dynamic,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct TestHierarchyEntry {
+        guid: Guid,
+        depth: usize,
+        name: &'static str,
+    }
+
+    #[test]
+    fn normalize_filter_tokens_lowercases_and_skips_empty_segments() {
+        assert_eq!(
+            normalize_filter_tokens("  HeL   wor LD  "),
+            vec!["hel", "wor", "ld"]
+        );
+    }
+
+    #[test]
+    fn fuzzy_subsequence_match_is_case_insensitive() {
+        assert!(fuzzy_subsequence_match("hlg", "Healing Kit"));
+        assert!(fuzzy_subsequence_match("KIT", "healing kit"));
+        assert!(!fuzzy_subsequence_match("hzk", "Healing Kit"));
+    }
+
+    #[test]
+    fn retain_matching_hierarchy_keeps_ancestor_chain_only_for_matches() {
+        let items = vec![
+            TestHierarchyEntry {
+                guid: Guid(1),
+                depth: 0,
+                name: "Pack",
+            },
+            TestHierarchyEntry {
+                guid: Guid(2),
+                depth: 1,
+                name: "Nested Pack",
+            },
+            TestHierarchyEntry {
+                guid: Guid(3),
+                depth: 2,
+                name: "Healing Kit",
+            },
+            TestHierarchyEntry {
+                guid: Guid(4),
+                depth: 1,
+                name: "Mana Stone",
+            },
+        ];
+
+        let visible = retain_matching_hierarchy(
+            items,
+            |item| item.guid,
+            |item| item.depth,
+            |item| item.name == "Healing Kit",
+        );
+
+        assert_eq!(
+            visible
+                .into_iter()
+                .map(|item| item.guid)
+                .collect::<Vec<_>>(),
+            vec![Guid(1), Guid(2), Guid(3)]
+        );
     }
 }

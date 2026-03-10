@@ -1,10 +1,10 @@
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::pane_block;
-use crate::types::{DashboardTab, FocusedPane, VerbInputState};
+use crate::types::{DashboardTab, FocusedPane, Verb, VerbInputState};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -103,11 +103,12 @@ fn render_verb_bar(
     data: &GameData,
     view: &ViewState,
 ) -> Paragraph<'static> {
-    let mut verbs = dashboard
-        .active_tab()
-        .get_verbs(data, view, &view.active_interaction);
-
-    verbs.sort_by(|a, b| a.label.cmp(&b.label));
+    let footer_header = dashboard.active_tab_footer_header();
+    let verbs = visible_footer_verbs(dashboard.active_tab().get_verbs(
+        data,
+        view,
+        &view.active_interaction,
+    ));
 
     let mut spans = Vec::new();
     for (i, verb) in verbs.iter().enumerate() {
@@ -117,9 +118,25 @@ fn render_verb_bar(
         spans.push(Span::raw(verb.display_label().to_string()));
     }
 
-    Paragraph::new(Line::from(spans))
-        .block(Block::default().borders(Borders::TOP))
+    let verb_line = Line::from(spans);
+
+    let mut block = Block::default().borders(Borders::TOP);
+    if let Some(header) = footer_header {
+        block = block
+            .title(format!(" {} ", header))
+            .title_style(Style::default().italic())
+            .title_alignment(ratatui::layout::Alignment::Center);
+    }
+
+    Paragraph::new(verb_line)
+        .block(block)
         .wrap(ratatui::widgets::Wrap { trim: true })
+}
+
+fn visible_footer_verbs(mut verbs: Vec<Verb>) -> Vec<Verb> {
+    verbs.retain(Verb::is_visible_in_footer);
+    verbs.sort_by(|a, b| a.label.cmp(&b.label));
+    verbs
 }
 
 fn render_footer_text_input(input: &VerbInputState) -> Paragraph<'static> {
@@ -130,11 +147,16 @@ fn render_footer_text_input(input: &VerbInputState) -> Paragraph<'static> {
         input.input.clone()
     };
 
-    let value_line = Line::from(vec![
+    let mut value_spans = vec![
         Span::raw(format!("{}: ", prompt)),
         Span::styled(value, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(format!("  [{}-{}]", input.min, input.max)),
-    ]);
+    ];
+
+    if let (Some(min), Some(max)) = (input.min, input.max) {
+        value_spans.push(Span::raw(format!("  [{}-{}]", min, max)));
+    }
+
+    let value_line = Line::from(value_spans);
 
     let hint_line = Line::from(vec![Span::raw("[ENTER] Submit  [ESC] Cancel")])
         .alignment(ratatui::layout::Alignment::Right);
@@ -153,4 +175,38 @@ fn footer_text_input_cursor_offset(input: &VerbInputState) -> u16 {
     };
 
     (UnicodeWidthStr::width(prompt_text.as_str()) + UnicodeWidthStr::width(value)) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::visible_footer_verbs;
+    use crate::types::{AppAction, Verb};
+
+    #[test]
+    fn visible_footer_verbs_hides_footer_hidden_verbs() {
+        let verbs = vec![
+            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter")
+                .with_footer_visibility(crate::types::FooterVerbVisibility::Hidden),
+            Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
+        ];
+
+        let visible = visible_footer_verbs(verbs);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].label, "Use");
+    }
+
+    #[test]
+    fn visible_footer_verbs_keeps_footer_visible_verbs_sorted() {
+        let verbs = vec![
+            Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
+            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter"),
+        ];
+
+        let visible = visible_footer_verbs(verbs);
+
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].label, "Filter");
+        assert_eq!(visible[1].label, "Use");
+    }
 }

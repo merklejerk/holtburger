@@ -677,7 +677,10 @@ fn push_object_debug_info(
         if !wrote_extra_header {
             lines.push(Line::from("-- Extra --"));
         }
-        lines.push(Line::from(format!("  Material:  {} (0x{:08X})", v, v as u32)));
+        lines.push(Line::from(format!(
+            "  Material:  {} (0x{:08X})",
+            v, v as u32
+        )));
     }
 
     if let Some(profile) = object.creature_profile {
@@ -687,8 +690,14 @@ fn push_object_debug_info(
             profile.health, profile.health_max
         )));
         if let Some(attr) = &profile.attributes {
-            lines.push(Line::from(format!("  Stamina: {}/{}", attr.stamina, attr.stamina_max)));
-            lines.push(Line::from(format!("  Mana:    {}/{}", attr.mana, attr.mana_max)));
+            lines.push(Line::from(format!(
+                "  Stamina: {}/{}",
+                attr.stamina, attr.stamina_max
+            )));
+            lines.push(Line::from(format!(
+                "  Mana:    {}/{}",
+                attr.mana, attr.mana_max
+            )));
             lines.push(Line::from(format!("  STR: {}", attr.strength)));
             lines.push(Line::from(format!("  END: {}", attr.endurance)));
             lines.push(Line::from(format!("  COR: {}", attr.coordination)));
@@ -785,7 +794,10 @@ fn push_object_debug_info(
     }
 }
 
-pub fn get_spell_debug_info(spell_id: u32, spell_lookup: Option<&SpellCatalog>) -> Vec<Line<'static>> {
+pub fn get_spell_debug_info(
+    spell_id: u32,
+    spell_lookup: Option<&SpellCatalog>,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
     lines.push(Line::from(format!("DEBUG INFO: Spell {}", spell_id)));

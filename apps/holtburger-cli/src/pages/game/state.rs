@@ -14,8 +14,8 @@ use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
-    InspectTarget, Interaction, UpdateResult,
+    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
+    Interaction, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
@@ -137,11 +137,10 @@ impl GameState {
             ClientViewEvent::VendorItemIdentified { vendor_guid, item } => {
                 if let Some(vendor) = self.view.vendor.as_mut()
                     && vendor.vendor_guid == vendor_guid
+                    && let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid)
                 {
-                    if let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid) {
-                        *existing = *item.clone();
-                        result.needs_redraw = true;
-                    }
+                    *existing = *item.clone();
+                    result.needs_redraw = true;
                 }
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
@@ -389,7 +388,7 @@ impl GameState {
                         self.handle_action(AppAction::ChangeContextView {
                             view: ContextView::Debug(InspectTarget::Entity(guid)),
                         })
-                            .unwrap_or_default(),
+                        .unwrap_or_default(),
                     );
                 }
                 InspectTarget::VendorItem(guid) => {

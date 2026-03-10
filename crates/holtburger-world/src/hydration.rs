@@ -26,6 +26,19 @@ pub trait WorldObjectPropertiesHydrationExt {
     fn hydrate_from_vendor_item(&mut self, data: &VendorItemEventData);
 }
 
+/// Decodes the packed vendor supply value from an `ApproachVendor` item entry.
+///
+/// The lower 24 bits are a signed integer. `-1` means unlimited stock, while
+/// non-negative values represent finite vendor supply.
+pub fn decode_vendor_item_supply(packed_stack_size: u32) -> Option<u32> {
+    let vendor_supply = ((packed_stack_size << 8) as i32) >> 8;
+    if vendor_supply < 0 {
+        None
+    } else {
+        Some(vendor_supply as u32)
+    }
+}
+
 impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
     fn hydrate_from_pwd(&mut self, pwd: &PublicWeenieDescription) {
         let flags = pwd.obj_desc_flags;
@@ -229,13 +242,6 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
 
     fn hydrate_from_vendor_item(&mut self, data: &VendorItemEventData) {
         self.hydrate_from_pwd(&data.description);
-
-        // packed_stack_size contains both stack size and type.
-        // The lower 24 bits are a signed integer for stack size (-1 = unlimited).
-        // The upper 8 bits are the pwdType flag.
-        // We shift left by 8 and arithmetic shift right by 8 to sign-extend the 24-bit value.
-        let stack_size = ((data.packed_stack_size << 8) as i32) >> 8;
-        self.ints.insert(PropertyInt::StackSize, stack_size);
     }
 
     fn hydrate_from_physics_state(&mut self, pstate: PhysicsState) {
@@ -304,5 +310,22 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
 
     fn hydrate_from_set_state(&mut self, data: &SetStateData) {
         self.hydrate_from_physics_state(data.physics_state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_vendor_item_supply;
+
+    #[test]
+    fn decode_vendor_item_supply_handles_unlimited_stock() {
+        let packed = (-1i32 << 24 | (-1i32 & 0x00FF_FFFF)) as u32;
+        assert_eq!(decode_vendor_item_supply(packed), None);
+    }
+
+    #[test]
+    fn decode_vendor_item_supply_handles_finite_stock() {
+        let packed = (-1i32 << 24 | 135) as u32;
+        assert_eq!(decode_vendor_item_supply(packed), Some(135));
     }
 }

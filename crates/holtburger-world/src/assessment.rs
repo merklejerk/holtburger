@@ -642,7 +642,9 @@ impl WeaponInfo {
         let range = compute_damage_range(
             object.get_int_prop(PropertyInt::Damage),
             object.get_float_prop(PropertyFloat::DamageVariance),
-            object.get_int_prop(PropertyInt::DamageType).map(|v| v as u32),
+            object
+                .get_int_prop(PropertyInt::DamageType)
+                .map(|v| v as u32),
             object.weapon_profile,
         )?;
 
@@ -734,7 +736,9 @@ impl Effect {
             if let Some(range) = compute_damage_range(
                 object.get_int_prop(PropertyInt::Damage),
                 object.get_float_prop(PropertyFloat::DamageVariance),
-                object.get_int_prop(PropertyInt::DamageType).map(|v| v as u32),
+                object
+                    .get_int_prop(PropertyInt::DamageType)
+                    .map(|v| v as u32),
                 object.weapon_profile,
             ) {
                 let dt = range.damage_type;

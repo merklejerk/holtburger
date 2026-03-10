@@ -12,8 +12,8 @@ use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, InspectTarget, Interaction,
-    TabController, UpdateResult, Verb, VerbInputEvent, VerbInputState,
+    AppAction, AppUiAction, ChatMessageKind, InspectTarget, Interaction, TabController,
+    UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
 use crate::utils::format_item_name;
 

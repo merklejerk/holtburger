@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn decode_vendor_item_supply_handles_unlimited_stock() {
-        let packed = (-1i32 << 24 | (-1i32 & 0x00FF_FFFF)) as u32;
+        let packed = (-1i32 << 24 | 0x00FF_FFFF) as u32;
         assert_eq!(decode_vendor_item_supply(packed), None);
     }
 

@@ -174,6 +174,7 @@
 - [x] Armor tailoring kits do not show combine verb and the use verb just makes them disappear.
 - [x] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them. The client says that item cannot be used though!
 - [x] Display encumbrance (sticky line in inv tab?).
+- [x] Vendor list is janky: assess/debug do nothing and all have max u32 qty.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
@@ -191,7 +192,6 @@
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] Add intelligent entity context scanners.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
-- [ ] Vendor list is janky: assess/debug do nothing and all have max u32 qty.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

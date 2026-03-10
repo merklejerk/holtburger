@@ -46,6 +46,10 @@ impl DashboardState {
         self.active_tab().footer_input()
     }
 
+    pub fn active_tab_footer_header(&self) -> Option<String> {
+        self.active_tab().footer_header()
+    }
+
     pub fn handle_active_tab_footer_input(
         &mut self,
         key: KeyEvent,

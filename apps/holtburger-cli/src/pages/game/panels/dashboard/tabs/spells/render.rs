@@ -15,14 +15,18 @@ pub fn render_spells_tab(
     _view: &ViewState,
     area: Rect,
 ) {
-    let items = get_list_items(tab.selected_index, data);
+    let items = get_list_items(tab, data);
     let content_len = items.len();
 
     let dashboard_list = List::new(items)
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
-    let selected_index = tab.selected_index;
+    let selected_index = if content_len == 0 {
+        0
+    } else {
+        tab.selected_index.min(content_len - 1)
+    };
     let list_state = &mut tab.list_state;
     list_state.select(Some(selected_index));
 
@@ -33,9 +37,8 @@ pub fn render_spells_tab(
     let _height = area.height as usize;
 }
 
-fn get_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<'static>> {
-    let mut spells = data.player_spells.clone();
-    spells.sort_by_key(|&sid| data.spell_name_or_fallback(sid));
+fn get_list_items(tab: &SpellsTab, data: &GameData) -> Vec<ListItem<'static>> {
+    let spells = tab.visible_spell_ids(data);
 
     spells
         .iter()
@@ -46,7 +49,7 @@ fn get_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<'stati
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("Unknown Spell {}", spell_id));
 
-            let is_selected = i == selected_index;
+            let is_selected = i == tab.selected_index;
 
             let name_style = theme::list_item_style(is_selected);
 

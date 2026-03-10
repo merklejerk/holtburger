@@ -88,6 +88,7 @@
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
+- [ ] Additive resist buffs make the final derived resistance LOWER? ResistBludgeon goes from 1.0 to 0.67 when `Bludgeon Shield` (+0.67) is applied. Is the base resistance supposed to be 0?
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -174,6 +175,7 @@
 - [x] Armor tailoring kits do not show combine verb and the use verb just makes them disappear.
 - [x] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them. The client says that item cannot be used though!
 - [x] Display encumbrance (sticky line in inv tab?).
+- [x] Vendor list is janky: assess/debug do nothing and all have max u32 qty.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.

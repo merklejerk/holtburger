@@ -72,6 +72,7 @@
 - [x] `holtburger-world` needs a refactor. Unclear where responsibility lines are between `player/` and `updates/` modules. 
 - [x] Context panel should reset to scroll offset 0.
 - [x] Resolve Spellbook entries in debug info.
+- [x] Additive resist buffs make the final derived resistance LOWER? ResistBludgeon goes from 1.0 to 0.67 when `Bludgeon Shield` (+0.67) is applied. Is the base resistance supposed to be 0?
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
@@ -88,7 +89,8 @@
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
-- [ ] Additive resist buffs make the final derived resistance LOWER? ResistBludgeon goes from 1.0 to 0.67 when `Bludgeon Shield` (+0.67) is applied. Is the base resistance supposed to be 0?
+- [ ] Add intelligent entity context scanners.
+- [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
 
 ### High
 - [x] Fail when spell/attack distance is too far.
@@ -191,8 +193,6 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] Add intelligent entity context scanners.
-- [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

@@ -170,20 +170,48 @@ impl PlayerState {
         crate::magic::get_total_vitae(&self.enchantments)
     }
 
-    pub fn resistances(&self) -> stats::Resistances {
-        let get_r = |prop: PropertyFloat| {
-            let base = self.get_float_prop(prop).unwrap_or(1.0);
-            crate::magic::get_enchanted_resistance(base as f32, &self.enchantments, prop as u32)
+    pub(crate) fn get_resistance_augmentation(&self, prop: PropertyFloat) -> i32 {
+        let augmentation_prop = match prop {
+            PropertyFloat::ResistSlash => PropertyInt::AugmentationResistanceSlash,
+            PropertyFloat::ResistPierce => PropertyInt::AugmentationResistancePierce,
+            PropertyFloat::ResistBludgeon => PropertyInt::AugmentationResistanceBlunt,
+            PropertyFloat::ResistFire => PropertyInt::AugmentationResistanceFire,
+            PropertyFloat::ResistCold => PropertyInt::AugmentationResistanceFrost,
+            PropertyFloat::ResistAcid => PropertyInt::AugmentationResistanceAcid,
+            PropertyFloat::ResistElectric => PropertyInt::AugmentationResistanceLightning,
+            PropertyFloat::ResistNether => PropertyInt::AugmentationResistanceNether,
+            _ => return 0,
         };
+
+        self.get_int_prop(augmentation_prop).unwrap_or(0)
+    }
+
+    pub fn get_resistance_current(&self, prop: PropertyFloat) -> f32 {
+        let base = self.get_float_prop(prop).unwrap_or(1.0) as f32;
+        let strength_base = self.get_attribute_base(stats::AttributeType::StrengthAttr);
+        let endurance_base = self.get_attribute_base(stats::AttributeType::EnduranceAttr);
+        let augmentation_resistance = self.get_resistance_augmentation(prop);
+
+        crate::magic::get_player_enchanted_resistance(
+            base,
+            &self.enchantments,
+            prop as u32,
+            strength_base,
+            endurance_base,
+            augmentation_resistance,
+        )
+    }
+
+    pub fn resistances(&self) -> stats::Resistances {
         stats::Resistances {
-            slash: get_r(PropertyFloat::ResistSlash),
-            pierce: get_r(PropertyFloat::ResistPierce),
-            bludgeon: get_r(PropertyFloat::ResistBludgeon),
-            fire: get_r(PropertyFloat::ResistFire),
-            cold: get_r(PropertyFloat::ResistCold),
-            acid: get_r(PropertyFloat::ResistAcid),
-            electric: get_r(PropertyFloat::ResistElectric),
-            nether: get_r(PropertyFloat::ResistNether),
+            slash: self.get_resistance_current(PropertyFloat::ResistSlash),
+            pierce: self.get_resistance_current(PropertyFloat::ResistPierce),
+            bludgeon: self.get_resistance_current(PropertyFloat::ResistBludgeon),
+            fire: self.get_resistance_current(PropertyFloat::ResistFire),
+            cold: self.get_resistance_current(PropertyFloat::ResistCold),
+            acid: self.get_resistance_current(PropertyFloat::ResistAcid),
+            electric: self.get_resistance_current(PropertyFloat::ResistElectric),
+            nether: self.get_resistance_current(PropertyFloat::ResistNether),
         }
     }
 }

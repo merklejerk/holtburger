@@ -25,6 +25,13 @@ pub fn render_inventory_tab(
     let mut bottom_area = area;
 
     let counts = data.get_container_counts();
+    let entities = tab.visible_entities(data);
+    let content_len = entities.len();
+    let selected_index = if content_len == 0 {
+        0
+    } else {
+        tab.selected_index.min(content_len - 1)
+    };
 
     // Sticky summary line for the player's main inventory container
     if let Some(player_guid) = data.player_guid
@@ -64,14 +71,7 @@ pub fn render_inventory_tab(
         f.render_widget(summary, top_area);
     }
 
-    let items = get_list_items(tab, data, view, &counts);
-    let content_len = items.len();
-
-    let selected_index = if content_len == 0 {
-        0
-    } else {
-        tab.selected_index.min(content_len - 1)
-    };
+    let items = get_list_items(entities, data, view, &counts, selected_index);
     let list_state = &mut tab.list_state;
     list_state.select(Some(selected_index));
 
@@ -87,12 +87,12 @@ pub fn render_inventory_tab(
 }
 
 fn get_list_items(
-    tab: &InventoryTab,
+    entities: Vec<(&Entity, f32, usize)>,
     data: &GameData,
     view: &ViewState,
     container_counts: &HashMap<Guid, u32>,
+    selected_index: usize,
 ) -> Vec<ListItem<'static>> {
-    let entities = tab.visible_entities(data);
     let mut list_items = Vec::new();
 
     let equipment = &data.equipment;
@@ -114,7 +114,7 @@ fn get_list_items(
         list_items.push(render_inventory_item(
             e,
             *depth,
-            i == tab.selected_index,
+            i == selected_index,
             is_equipped,
             is_offered,
             is_salvaging,

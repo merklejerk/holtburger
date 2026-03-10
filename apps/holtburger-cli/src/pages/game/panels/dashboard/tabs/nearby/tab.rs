@@ -12,12 +12,20 @@ use ratatui::layout::Rect;
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, AppUiAction, DashboardTab, FilterInputSession, FooterVerbVisibility, InspectTarget,
+    Interaction, TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
+};
+use crate::utils::{
+    format_item_name, fuzzy_subsequence_match, normalize_filter_tokens, retain_matching_hierarchy,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct NearbyTab {
     pub selected_index: usize,
     pub list_state: ratatui::widgets::ListState,
+    active_filter: Option<TabFilterState>,
+    filter_input: Option<FilterInputSession>,
 }
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
@@ -119,13 +127,75 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
 }
 
 impl NearbyTab {
-    fn get_selected_guid(&self, data: &GameData) -> Option<Guid> {
+    pub(crate) fn visible_entities<'a>(&self, data: &'a GameData) -> Vec<(&'a Entity, f32, usize)> {
         let entities = get_entities(data);
+        let Some(active_filter) = &self.active_filter else {
+            return entities;
+        };
+
+        if active_filter.tokens.is_empty() {
+            return entities;
+        }
+
+        retain_matching_hierarchy(
+            entities,
+            |(entity, _, _)| entity.guid,
+            |(_, _, depth)| *depth,
+            |(entity, _, _)| {
+                let display_name = format_item_name(*entity, entity.guid);
+                active_filter
+                    .tokens
+                    .iter()
+                    .any(|token| fuzzy_subsequence_match(token, &display_name))
+            },
+        )
+    }
+
+    fn clamp_selected_index(&mut self, data: &GameData) {
+        let count = self.visible_entities(data).len();
+        if count == 0 {
+            self.selected_index = 0;
+        } else {
+            self.selected_index = self.selected_index.min(count - 1);
+        }
+    }
+
+    fn begin_filter_input(&mut self, _view: &ViewState) -> Option<UpdateResult> {
+        let mut input = VerbInputState::text("Filter");
+        if let Some(active_filter) = &self.active_filter {
+            input.input = active_filter.raw_pattern.clone();
+        }
+
+        self.filter_input = Some(FilterInputSession {
+            input,
+            clears_active_filter_on_cancel: self.active_filter.is_some(),
+        });
+
+        Some(UpdateResult::new().with_redraw(true))
+    }
+
+    fn apply_filter_input(&mut self, raw_pattern: String, data: &GameData) -> UpdateResult {
+        let trimmed = raw_pattern.trim().to_string();
+        self.active_filter = if trimmed.is_empty() {
+            None
+        } else {
+            Some(TabFilterState {
+                tokens: normalize_filter_tokens(&trimmed),
+                raw_pattern: trimmed,
+            })
+        };
+        self.filter_input = None;
+        self.clamp_selected_index(data);
+        UpdateResult::new().with_redraw(true)
+    }
+
+    fn get_selected_guid(&self, data: &GameData) -> Option<Guid> {
+        let entities = self.visible_entities(data);
         entities.get(self.selected_index).map(|(e, _, _)| e.guid)
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
-        get_entities(data).len()
+        self.visible_entities(data).len()
     }
 }
 
@@ -334,6 +404,23 @@ impl TabController for NearbyTab {
             }
         }
 
+        verbs.push(
+            Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Nearby,
+                    },
+                },
+                'f',
+                "Filter",
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }),
+        );
+
         verbs
     }
 
@@ -386,6 +473,59 @@ impl TabController for NearbyTab {
                 Some(UpdateResult::new().with_action(verb.action))
             }
             _ => None,
+        }
+    }
+
+    fn handle_ui_action(
+        &mut self,
+        action: &AppUiAction,
+        _data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        match action {
+            AppUiAction::BeginTabFilterInput {
+                tab: DashboardTab::Nearby,
+            } => self.begin_filter_input(view),
+            _ => None,
+        }
+    }
+
+    fn footer_input(&self) -> Option<&VerbInputState> {
+        self.filter_input.as_ref().map(|session| &session.input)
+    }
+
+    fn footer_header(&self) -> Option<String> {
+        self.active_filter
+            .as_ref()
+            .map(|filter| format!("[F]ilter: {}", filter.raw_pattern))
+    }
+
+    fn handle_footer_input(
+        &mut self,
+        key: KeyEvent,
+        data: &GameData,
+        _view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let session = self.filter_input.as_mut()?;
+
+        match session.input.handle_key(key) {
+            VerbInputEvent::Changed | VerbInputEvent::Ignored => {
+                Some(UpdateResult::new().with_redraw(true))
+            }
+            VerbInputEvent::Cancelled => {
+                if session.clears_active_filter_on_cancel {
+                    self.active_filter = None;
+                    self.clamp_selected_index(data);
+                }
+                self.filter_input = None;
+                Some(UpdateResult::new().with_redraw(true))
+            }
+            VerbInputEvent::SubmittedText(raw_pattern) => {
+                Some(self.apply_filter_input(raw_pattern, data))
+            }
+            VerbInputEvent::Invalid(_) | VerbInputEvent::SubmittedQuantity(_) => {
+                Some(UpdateResult::new().with_redraw(true))
+            }
         }
     }
 }

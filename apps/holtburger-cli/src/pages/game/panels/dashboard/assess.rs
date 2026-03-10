@@ -1,4 +1,5 @@
 use crate::utils::{format_duration, wrap_text};
+use holtburger_common::properties::WorldObjectExt;
 use holtburger_world::assessment::{
     Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
@@ -78,21 +79,6 @@ pub fn get_assess_info(
         lines.push(Line::from(vec![
             Span::styled("Burden:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(format!("{}bu", burden), Style::default().fg(Color::White)),
-        ]));
-    }
-    if let Some(item_capacity) = assess.item_capacity && item_capacity > 0 {
-        lines.push(Line::from(vec![
-            Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(item_capacity.to_string(), Style::default().fg(Color::White)),
-        ]));
-    }
-    if let Some(container_capacity) = assess.container_capacity && container_capacity > 0 {
-        lines.push(Line::from(vec![
-            Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                container_capacity.to_string(),
-                Style::default().fg(Color::White),
-            ),
         ]));
     }
 
@@ -219,6 +205,32 @@ pub fn get_assess_info(
                 Style::default().fg(Color::White),
             ),
         ]));
+    }
+
+    // Only show these for non-creatures.
+    if object.properties.item_type().is_some_and(|t| !t.contains(holtburger_common::properties::ItemType::CREATURE)) {
+        // Item Capacity
+        if let Some(item_capacity) = assess.item_capacity
+            && item_capacity > 0
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
+                Span::styled(item_capacity.to_string(), Style::default().fg(Color::White)),
+            ]));
+        }
+
+        // Container Capacity
+        if let Some(container_capacity) = assess.container_capacity
+            && container_capacity > 0
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
+                Span::styled(
+                    container_capacity.to_string(),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+        }
     }
 
     // Armor

@@ -5,13 +5,14 @@ use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{
-    AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb,
-};
+use crate::types::{AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb};
 
 #[derive(Debug, Clone, Copy)]
 enum EquipSelection {
-    Item { guid: holtburger_common::Guid, slot: TargetSlot },
+    Item {
+        guid: holtburger_common::Guid,
+        slot: TargetSlot,
+    },
     None,
 }
 

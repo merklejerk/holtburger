@@ -12,9 +12,7 @@ use ratatui::layout::Rect;
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{
-    AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb,
-};
+use crate::types::{AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb};
 
 #[derive(Default, Debug, Clone)]
 pub struct NearbyTab {

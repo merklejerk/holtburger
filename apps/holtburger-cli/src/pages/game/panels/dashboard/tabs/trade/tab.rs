@@ -6,8 +6,7 @@ use ratatui::layout::Rect;
 use super::render::render_trade_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, InspectTarget, Interaction, TabController, TradeFocus,
-    UpdateResult, Verb,
+    AppAction, InspectTarget, Interaction, TabController, TradeFocus, UpdateResult, Verb,
 };
 
 #[derive(Debug, Clone, Copy)]

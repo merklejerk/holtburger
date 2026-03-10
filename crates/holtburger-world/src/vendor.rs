@@ -1,4 +1,4 @@
-use crate::hydration::WorldObjectPropertiesHydrationExt;
+use crate::hydration::{WorldObjectPropertiesHydrationExt, decode_vendor_item_supply};
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     HasProperties, HasPropertiesMut, PropertyUpdate, WorldObjectProperties,
@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct CoreVendorItem {
     pub guid: Guid,
     pub wcid: u32,
+    pub vendor_supply: Option<u32>,
     pub properties: WorldObjectProperties,
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
@@ -50,6 +51,7 @@ impl CoreVendorItem {
         Self {
             guid: item.description.guid,
             wcid: item.description.wcid,
+            vendor_supply: decode_vendor_item_supply(item.packed_stack_size),
             properties,
             armor_profile: None,
             creature_profile: None,

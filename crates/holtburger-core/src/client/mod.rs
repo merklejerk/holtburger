@@ -326,13 +326,10 @@ impl Client {
                         vendor: vendor.clone(),
                     });
             }
-            StateEvent::VendorItemIdentified { vendor_guid, item } => {
+            StateEvent::VendorItemIdentified(item) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::VendorItemIdentified {
-                        vendor_guid: *vendor_guid,
-                        item: item.clone(),
-                    });
+                    .send(ClientViewEvent::VendorItemIdentified(item.clone()));
             }
             StateEvent::TradeStateUpdated(trade) => {
                 let _ = self

@@ -160,10 +160,7 @@ pub(crate) fn handle_event(
                 && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
             {
                 item.apply_identify_response(data);
-                events.push(StateEvent::VendorItemIdentified {
-                    vendor_guid: vendor.vendor_guid,
-                    item: Box::new(item.clone()),
-                });
+                events.push(StateEvent::VendorItemIdentified(Box::new(item.clone())));
                 true
             } else {
                 false

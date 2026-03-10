@@ -134,9 +134,8 @@ impl GameState {
                     });
                 }
             }
-            ClientViewEvent::VendorItemIdentified { vendor_guid, item } => {
+            ClientViewEvent::VendorItemIdentified(item) => {
                 if let Some(vendor) = self.view.vendor.as_mut()
-                    && vendor.vendor_guid == vendor_guid
                     && let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid)
                 {
                     *existing = *item.clone();
@@ -894,10 +893,9 @@ mod tests {
             "NEW NAME"
         ));
 
-        let result = state.handle_view_event(ClientViewEvent::VendorItemIdentified {
-            vendor_guid,
-            item: Box::new(vendor_item_named(item_guid, 1, "New Name")),
-        });
+        let result = state.handle_view_event(ClientViewEvent::VendorItemIdentified(Box::new(
+            vendor_item_named(item_guid, 1, "New Name"),
+        )));
 
         assert!(result.needs_redraw);
         assert!(context_buffer_contains(

@@ -133,6 +133,16 @@ impl GameState {
                     });
                 }
             }
+            ClientViewEvent::VendorItemIdentified { vendor_guid, item } => {
+                if let Some(vendor) = self.view.vendor.as_mut()
+                    && vendor.vendor_guid == vendor_guid
+                {
+                    if let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid) {
+                        *existing = *item.clone();
+                        result.needs_redraw = true;
+                    }
+                }
+            }
             ClientViewEvent::TradeStateUpdated { trade } => {
                 let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
                 // Cancel vendor session.

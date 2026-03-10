@@ -152,33 +152,7 @@ pub(crate) fn handle_event(
         GameEvent::IdentifyObjectResponse(data) => {
             let guid = data.object_guid;
             if let Some(entity) = state.entities.get_mut(guid) {
-                entity.properties.merge(data.properties.clone());
-
-                if data.armor_profile.is_some() {
-                    entity.armor_profile = data.armor_profile.clone();
-                }
-                if data.creature_profile.is_some() {
-                    entity.creature_profile = data.creature_profile.clone();
-                }
-                if data.weapon_profile.is_some() {
-                    entity.weapon_profile = data.weapon_profile.clone();
-                }
-                if data.hook_profile.is_some() {
-                    entity.hook_profile = data.hook_profile.clone();
-                }
-                if data.armor_levels.is_some() {
-                    entity.armor_levels = data.armor_levels.clone();
-                }
-                if !data.spell_book.is_empty() {
-                    entity.spell_book = data.spell_book.clone();
-                }
-
-                entity.armor_highlight = data.armor_highlight;
-                entity.armor_color = data.armor_color;
-                entity.weapon_highlight = data.weapon_highlight;
-                entity.weapon_color = data.weapon_color;
-                entity.resist_highlight = data.resist_highlight;
-                entity.resist_color = data.resist_color;
+                entity.apply_identify_response(data);
 
                 events.push(StateEvent::EntityIdentified(Box::new(entity.clone())));
                 true
@@ -186,7 +160,10 @@ pub(crate) fn handle_event(
                 && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
             {
                 item.apply_identify_response(data);
-                events.push(StateEvent::VendorStateUpdated(Some(vendor.clone())));
+                events.push(StateEvent::VendorItemIdentified {
+                    vendor_guid: vendor.vendor_guid,
+                    item: Box::new(item.clone()),
+                });
                 true
             } else {
                 false

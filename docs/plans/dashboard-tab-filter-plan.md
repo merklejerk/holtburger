@@ -344,17 +344,17 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Confirm no changes are needed in `GameState::render(...)`.
 
 ### Slice 3: Shared Filter Plumbing
-- [ ] Add `BeginTabFilterInput { tab: DashboardTab }` to `AppUiAction`.
-- [ ] Add shared raw-pattern normalization and token parsing helpers.
-- [ ] Add shared fuzzy subsequence helper.
-- [ ] Decide and implement the render-only hiding strategy for active `Filter` verbs.
+- [x] Add `BeginTabFilterInput { tab: DashboardTab }` to `AppUiAction`.
+- [x] Add shared raw-pattern normalization and token parsing helpers.
+- [x] Add shared fuzzy subsequence helper.
+- [x] Decide and implement the render-only hiding strategy for active `Filter` verbs.
 
 ### Slice 4: Tab Session Wiring
-- [ ] Add a generic footer-header hook to `TabController`.
-- [ ] Add committed filter state to Nearby, Inventory, and Spells tabs.
-- [ ] Add filter edit-session state to Nearby, Inventory, and Spells tabs.
-- [ ] Wire the filter `UIAction` into each in-scope tab.
-- [ ] Support reopen/edit/clear semantics, including `Esc` on already-active filters.
+- [x] Add a generic footer-header hook to `TabController`.
+- [x] Add committed filter state to Nearby, Inventory, and Spells tabs.
+- [x] Add filter edit-session state to Nearby, Inventory, and Spells tabs.
+- [x] Wire the filter `UIAction` into each in-scope tab.
+- [x] Support reopen/edit/clear semantics, including `Esc` on already-active filters.
 
 ### Slice 5: Footer Active-Filter UX
 - [ ] Render the active-filter header in the footer.
@@ -402,7 +402,7 @@ The dry run says the work should execute in small slices, but the phase structur
 
 ### Task Checklist
 - [x] Complete Phase 1.
-- [ ] Complete Phase 2.
+- [x] Complete Phase 2.
 - [ ] Complete Phase 3.
 - [ ] Complete Phase 4.
 - [ ] Complete Phase 5.
@@ -412,6 +412,9 @@ The dry run says the work should execute in small slices, but the phase structur
 ### Decisions Log
 - Phase 1 uses a single `VerbInputState` for both quantity and text entry, with optional numeric bounds instead of a second parallel footer-input type.
 - `VerbInputEvent` now distinguishes quantity and text submission explicitly, which keeps numeric flows type-safe while allowing empty text submission later for filter-clear semantics.
+- Phase 2 keeps `Filter` in tab verb dispatch even when a filter is active; Phase 3 will hide it in footer rendering only, so `f` remains live without adding tab-specific shortcut fast paths.
+- Phase 2 added tab-local `active_filter` plus `filter_input` session state to Nearby, Inventory, and Spells, and seeded reopened editors from the committed raw pattern.
+- `Esc` in filter edit mode now clears the committed filter only when the editor was opened from an already-active filter; otherwise it behaves as a pure cancel.
 - Default fuzzy behavior is case-insensitive subsequence matching, not substring-only matching.
 - Multiple space-separated tokens combine by union.
 - Filtering is inclusion-only and must never reorder a tab's canonical sequence.
@@ -420,6 +423,8 @@ The dry run says the work should execute in small slices, but the phase structur
 ### Verification Log
 - 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 1 changes.
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/types.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/render.rs`, or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`.
+- 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 2 filter plumbing and tab session wiring changes.
+- 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/types.rs`, `apps/holtburger-cli/src/utils.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/state.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`, or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/tab.rs`.
 
 ### Open Questions
 - Do we want filter matching to stay limited to visible names/labels, or should Nearby/Inventory also match secondary metadata such as container status or item class names later?

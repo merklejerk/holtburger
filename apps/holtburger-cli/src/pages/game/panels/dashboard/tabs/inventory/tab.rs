@@ -12,10 +12,11 @@ use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, InspectTarget, Interaction, TabController,
-    UpdateResult, Verb, VerbInputEvent, VerbInputState,
+    AppAction, AppUiAction, ChatMessageKind, DashboardTab, FilterInputSession, InspectTarget,
+    Interaction, TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent,
+    VerbInputState,
 };
-use crate::utils::format_item_name;
+use crate::utils::{format_item_name, normalize_filter_tokens};
 
 #[derive(Debug, Clone)]
 struct SplitSession {
@@ -29,6 +30,8 @@ pub struct InventoryTab {
     pub selected_index: usize,
     pub list_state: ratatui::widgets::ListState,
     split_session: Option<SplitSession>,
+    active_filter: Option<TabFilterState>,
+    filter_input: Option<FilterInputSession>,
 }
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
@@ -118,7 +121,7 @@ impl InventoryTab {
         data: &GameData,
         view: &ViewState,
     ) -> Option<UpdateResult> {
-        if self.split_session.is_some() || view.active_interaction.is_some() {
+        if self.split_session.is_some() || self.filter_input.is_some() || view.active_interaction.is_some() {
             return None;
         }
 
@@ -149,6 +152,38 @@ impl InventoryTab {
         }
 
         Some(UpdateResult::new().with_redraw(true))
+    }
+
+    fn begin_filter_input(&mut self, view: &ViewState) -> Option<UpdateResult> {
+        if self.split_session.is_some() || view.active_interaction.is_some() {
+            return None;
+        }
+
+        let mut input = VerbInputState::text("Filter");
+        if let Some(active_filter) = &self.active_filter {
+            input.input = active_filter.raw_pattern.clone();
+        }
+
+        self.filter_input = Some(FilterInputSession {
+            input,
+            clears_active_filter_on_cancel: self.active_filter.is_some(),
+        });
+
+        Some(UpdateResult::new().with_redraw(true))
+    }
+
+    fn apply_filter_input(&mut self, raw_pattern: String) -> UpdateResult {
+        let trimmed = raw_pattern.trim().to_string();
+        self.active_filter = if trimmed.is_empty() {
+            None
+        } else {
+            Some(TabFilterState {
+                tokens: normalize_filter_tokens(&trimmed),
+                raw_pattern: trimmed,
+            })
+        };
+        self.filter_input = None;
+        UpdateResult::new().with_redraw(true)
     }
 }
 
@@ -471,6 +506,19 @@ impl TabController for InventoryTab {
                     "Sell",
                 ));
             }
+
+        }
+
+        if interaction.is_none() {
+            verbs.push(Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Inventory,
+                    },
+                },
+                'f',
+                "Filter",
+            ));
         }
 
         verbs
@@ -529,7 +577,16 @@ impl TabController for InventoryTab {
     }
 
     fn footer_input(&self) -> Option<&VerbInputState> {
-        self.split_session.as_ref().map(|session| &session.input)
+        self.split_session
+            .as_ref()
+            .map(|session| &session.input)
+            .or_else(|| self.filter_input.as_ref().map(|session| &session.input))
+    }
+
+    fn footer_header(&self) -> Option<String> {
+        self.active_filter
+            .as_ref()
+            .map(|filter| format!("[F]ilter: {}", filter.raw_pattern))
     }
 
     fn handle_ui_action(
@@ -543,6 +600,9 @@ impl TabController for InventoryTab {
                 item_guid,
                 max_amount,
             } => self.begin_split_session(*item_guid, *max_amount, data, view),
+            AppUiAction::BeginTabFilterInput {
+                tab: DashboardTab::Inventory,
+            } => self.begin_filter_input(view),
             _ => None,
         }
     }
@@ -553,41 +613,58 @@ impl TabController for InventoryTab {
         _data: &GameData,
         _view: &ViewState,
     ) -> Option<UpdateResult> {
-        let session = self.split_session.as_mut()?;
+        if let Some(session) = self.split_session.as_mut() {
+            return match session.input.handle_key(key) {
+                VerbInputEvent::Changed | VerbInputEvent::Ignored => {
+                    Some(UpdateResult::new().with_redraw(true))
+                }
+                VerbInputEvent::Cancelled => {
+                    self.split_session = None;
+                    Some(UpdateResult::new().with_redraw(true))
+                }
+                VerbInputEvent::Invalid(err) => Some(
+                    UpdateResult::new()
+                        .with_redraw(true)
+                        .with_action(AppAction::Log {
+                            kind: ChatMessageKind::System,
+                            message: err.message(),
+                        }),
+                ),
+                VerbInputEvent::SubmittedQuantity(amount) => {
+                    let item = session.item_guid;
+                    let container = session.container_guid;
+                    self.split_session = None;
+                    Some(
+                        UpdateResult::new()
+                            .with_redraw(true)
+                            .with_action(AppAction::SplitItem {
+                                item,
+                                container,
+                                amount,
+                            }),
+                    )
+                }
+                VerbInputEvent::SubmittedText(_) => Some(UpdateResult::new().with_redraw(true)),
+            };
+        }
 
-        let event = session.input.handle_key(key);
+        let session = self.filter_input.as_mut()?;
 
-        match event {
+        match session.input.handle_key(key) {
             VerbInputEvent::Changed | VerbInputEvent::Ignored => {
                 Some(UpdateResult::new().with_redraw(true))
             }
             VerbInputEvent::Cancelled => {
-                self.split_session = None;
+                if session.clears_active_filter_on_cancel {
+                    self.active_filter = None;
+                }
+                self.filter_input = None;
                 Some(UpdateResult::new().with_redraw(true))
             }
-            VerbInputEvent::Invalid(err) => Some(
-                UpdateResult::new()
-                    .with_redraw(true)
-                    .with_action(AppAction::Log {
-                        kind: ChatMessageKind::System,
-                        message: err.message(),
-                    }),
-            ),
-            VerbInputEvent::SubmittedQuantity(amount) => {
-                let item = session.item_guid;
-                let container = session.container_guid;
-                self.split_session = None;
-                Some(
-                    UpdateResult::new()
-                        .with_redraw(true)
-                        .with_action(AppAction::SplitItem {
-                            item,
-                            container,
-                            amount,
-                        }),
-                )
+            VerbInputEvent::SubmittedText(raw_pattern) => Some(self.apply_filter_input(raw_pattern)),
+            VerbInputEvent::Invalid(_) | VerbInputEvent::SubmittedQuantity(_) => {
+                Some(UpdateResult::new().with_redraw(true))
             }
-            VerbInputEvent::SubmittedText(_) => Some(UpdateResult::new().with_redraw(true)),
         }
     }
 }

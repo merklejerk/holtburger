@@ -22,6 +22,7 @@ pub type VerbSet = Vec<Verb>;
 pub enum AppUiAction {
     SetDashboardActiveTab(DashboardTab),
     InventoryBeginSplitInput { item_guid: Guid, max_amount: u32 },
+    BeginTabFilterInput { tab: DashboardTab },
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +152,18 @@ impl VerbInputState {
             _ => VerbInputEvent::Ignored,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TabFilterState {
+    pub raw_pattern: String,
+    pub tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilterInputSession {
+    pub input: VerbInputState,
+    pub clears_active_filter_on_cancel: bool,
 }
 
 impl Verb {
@@ -565,6 +578,10 @@ pub trait TabController {
     }
 
     fn footer_input(&self) -> Option<&VerbInputState> {
+        None
+    }
+
+    fn footer_header(&self) -> Option<String> {
         None
     }
 

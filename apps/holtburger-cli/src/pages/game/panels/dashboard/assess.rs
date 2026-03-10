@@ -1,5 +1,5 @@
 use crate::utils::{format_duration, wrap_text};
-use holtburger_common::properties::WorldObjectExt;
+use holtburger_common::properties::{ItemType, WorldObjectExt};
 use holtburger_world::assessment::{
     Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
@@ -73,6 +73,12 @@ pub fn get_assess_info(
                 format!("{}", assess.value),
                 Style::default().fg(Color::White),
             ),
+        ]));
+    }
+    if let Some(level) = assess.level {
+        lines.push(Line::from(vec![
+            Span::styled("Level:  ", Style::default().fg(LABEL_COLOR)),
+            Span::styled(format!("{}", level), Style::default().fg(Color::White)),
         ]));
     }
     if let Some(burden) = assess.burden {
@@ -208,7 +214,11 @@ pub fn get_assess_info(
     }
 
     // Only show these for non-creatures.
-    if object.properties.item_type().is_some_and(|t| !t.contains(holtburger_common::properties::ItemType::CREATURE)) {
+    if object
+        .properties
+        .item_type()
+        .is_none_or(|t| !t.contains(ItemType::CREATURE))
+    {
         // Item Capacity
         if let Some(item_capacity) = assess.item_capacity
             && item_capacity > 0

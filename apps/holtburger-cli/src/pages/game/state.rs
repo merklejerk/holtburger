@@ -140,6 +140,7 @@ impl GameState {
                     && let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid)
                 {
                     *existing = *item.clone();
+                    self.refresh_vendor_item_context_if_visible(item.guid);
                     result.needs_redraw = true;
                 }
             }
@@ -670,6 +671,17 @@ impl GameState {
         self.refresh_context_buffer();
     }
 
+    fn refresh_vendor_item_context_if_visible(&mut self, guid: Guid) {
+        if matches!(
+            self.view.context_view,
+            ContextView::Assess(InspectTarget::VendorItem(target_guid))
+                | ContextView::Debug(InspectTarget::VendorItem(target_guid))
+                if target_guid == guid
+        ) {
+            self.refresh_context_buffer();
+        }
+    }
+
     fn update_inventory_and_equipment(&mut self, entity: &Entity) {
         let guid = entity.guid;
         let pguid = self.data.player_guid;
@@ -815,6 +827,8 @@ impl ViewState {
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyString, WorldObjectProperties};
+    use holtburger_world::vendor::{CoreVendorItem, VendorState};
 
     #[test]
     fn test_entity_replaced_updates_cached_entity_state() {
@@ -849,5 +863,69 @@ mod tests {
                 .map(|entity| entity.name()),
             Some("New Name")
         );
+    }
+
+    #[test]
+    fn vendor_item_identified_refreshes_visible_assess_context() {
+        let player_guid = Guid(0x50000001);
+        let vendor_guid = Guid(0x60000001);
+        let item_guid = Guid(0x70000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.view.vendor = Some(VendorState {
+            vendor_guid,
+            items: vec![vendor_item_named(item_guid, 1, "Old Name")],
+            buy_multiplier: 1.0,
+            sell_multiplier: 1.0,
+            merchandise_item_types: 0,
+            alternate_currency_wcid: 0,
+            alternate_currency_amount: 0,
+            alternate_currency_name: String::new(),
+        });
+        state.view.context_view = ContextView::Assess(InspectTarget::VendorItem(item_guid));
+        state.refresh_context_buffer();
+
+        assert!(context_buffer_contains(
+            &state.view.context_buffer,
+            "OLD NAME"
+        ));
+        assert!(!context_buffer_contains(
+            &state.view.context_buffer,
+            "NEW NAME"
+        ));
+
+        let result = state.handle_view_event(ClientViewEvent::VendorItemIdentified {
+            vendor_guid,
+            item: Box::new(vendor_item_named(item_guid, 1, "New Name")),
+        });
+
+        assert!(result.needs_redraw);
+        assert!(context_buffer_contains(
+            &state.view.context_buffer,
+            "NEW NAME"
+        ));
+        assert!(!context_buffer_contains(
+            &state.view.context_buffer,
+            "OLD NAME"
+        ));
+    }
+
+    fn vendor_item_named(guid: Guid, wcid: u32, name: &str) -> CoreVendorItem {
+        let mut properties = WorldObjectProperties::default();
+        properties
+            .strings
+            .insert(PropertyString::Name, name.to_string());
+
+        CoreVendorItem {
+            guid,
+            wcid,
+            vendor_supply: None,
+            properties,
+            ..CoreVendorItem::default()
+        }
+    }
+
+    fn context_buffer_contains(buffer: &[Line<'static>], needle: &str) -> bool {
+        buffer.iter().any(|line| line.to_string().contains(needle))
     }
 }

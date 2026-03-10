@@ -4,7 +4,7 @@ use crate::theme::pane_block;
 use crate::types::{DashboardTab, FocusedPane, Verb, VerbInputState};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -104,11 +104,11 @@ fn render_verb_bar(
     view: &ViewState,
 ) -> Paragraph<'static> {
     let footer_header = dashboard.active_tab_footer_header();
-    let verbs = visible_footer_verbs(
-        dashboard
-            .active_tab()
-            .get_verbs(data, view, &view.active_interaction),
-    );
+    let verbs = visible_footer_verbs(dashboard.active_tab().get_verbs(
+        data,
+        view,
+        &view.active_interaction,
+    ));
 
     let mut spans = Vec::new();
     for (i, verb) in verbs.iter().enumerate() {
@@ -120,13 +120,16 @@ fn render_verb_bar(
 
     let verb_line = Line::from(spans);
 
+    let mut block = Block::default().borders(Borders::TOP);
     if let Some(header) = footer_header {
-        return Paragraph::new(vec![Line::from(header), verb_line])
-            .block(Block::default().borders(Borders::TOP));
+        block = block
+            .title(format!(" {} ", header))
+            .title_style(Style::default().italic())
+            .title_alignment(ratatui::layout::Alignment::Center);
     }
 
     Paragraph::new(verb_line)
-        .block(Block::default().borders(Borders::TOP))
+        .block(block)
         .wrap(ratatui::widgets::Wrap { trim: true })
 }
 

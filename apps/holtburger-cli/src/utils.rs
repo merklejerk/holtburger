@@ -302,7 +302,10 @@ mod tests {
         );
 
         assert_eq!(
-            visible.into_iter().map(|item| item.guid).collect::<Vec<_>>(),
+            visible
+                .into_iter()
+                .map(|item| item.guid)
+                .collect::<Vec<_>>(),
             vec![Guid(1), Guid(2), Guid(3)]
         );
     }

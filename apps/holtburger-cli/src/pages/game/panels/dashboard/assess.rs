@@ -1,8 +1,9 @@
 use crate::utils::{format_duration, wrap_text};
+use holtburger_common::properties::{ItemType, WorldObjectExt};
 use holtburger_world::assessment::{
     Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
-use holtburger_world::entity::Entity;
+use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -34,9 +35,12 @@ fn format_wield_requirement(req: &WieldRequirement) -> String {
     }
 }
 
-/// Generates a list of strings representing human-friendly assessment information for an entity.
-pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> Vec<Line<'static>> {
-    let assess = Assessment::from_entity(entity);
+/// Generates a list of strings representing human-friendly assessment information for an object.
+pub fn get_assess_info(
+    object: &InspectableObject<'_>,
+    spell_lookup: Option<&SpellCatalog>,
+) -> Vec<Line<'static>> {
+    let assess = Assessment::from_object(object);
     let mut lines = Vec::new();
 
     // Header - Prominent
@@ -69,6 +73,12 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
                 format!("{}", assess.value),
                 Style::default().fg(Color::White),
             ),
+        ]));
+    }
+    if let Some(level) = assess.level {
+        lines.push(Line::from(vec![
+            Span::styled("Level:  ", Style::default().fg(LABEL_COLOR)),
+            Span::styled(format!("{}", level), Style::default().fg(Color::White)),
         ]));
     }
     if let Some(burden) = assess.burden {
@@ -166,6 +176,9 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
             Style::default().fg(Color::Red),
         ));
     }
+    if assess.is_ivoryable {
+        status_spans.push(Span::styled("Ivoryable", Style::default().fg(Color::Green)));
+    }
 
     if !status_spans.is_empty() {
         let mut line = vec![Span::styled("Status:  ", Style::default().fg(LABEL_COLOR))];
@@ -198,6 +211,36 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
                 Style::default().fg(Color::White),
             ),
         ]));
+    }
+
+    // Only show these for non-creatures.
+    if object
+        .properties
+        .item_type()
+        .is_none_or(|t| !t.contains(ItemType::CREATURE))
+    {
+        // Item Capacity
+        if let Some(item_capacity) = assess.item_capacity
+            && item_capacity > 0
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
+                Span::styled(item_capacity.to_string(), Style::default().fg(Color::White)),
+            ]));
+        }
+
+        // Container Capacity
+        if let Some(container_capacity) = assess.container_capacity
+            && container_capacity > 0
+        {
+            lines.push(Line::from(vec![
+                Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
+                Span::styled(
+                    container_capacity.to_string(),
+                    Style::default().fg(Color::White),
+                ),
+            ]));
+        }
     }
 
     // Armor

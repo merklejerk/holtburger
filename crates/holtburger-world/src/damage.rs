@@ -1,7 +1,5 @@
-use crate::entity::Entity;
-use holtburger_common::properties::{
-    DamageType, PropertyFloat, PropertyInt, WorldObjectPropertyAccessors,
-};
+use holtburger_common::properties::DamageType;
+use holtburger_protocol::messages::object::types::WeaponProfile;
 
 pub struct DamageRange {
     pub min: f64,
@@ -13,26 +11,31 @@ pub struct DamageRange {
 ///
 /// Based on ACE Server logic:
 /// MinDamage = MaxDamage * (1.0 - Variance)
-pub fn compute_damage_range(entity: &Entity) -> Option<DamageRange> {
-    let max_damage = if let Some(damage) = entity.get_int_prop(PropertyInt::Damage) {
+pub fn compute_damage_range(
+    max_damage: Option<i32>,
+    variance: Option<f64>,
+    damage_type_bits: Option<u32>,
+    weapon_profile: Option<&WeaponProfile>,
+) -> Option<DamageRange> {
+    let max_damage = if let Some(damage) = max_damage {
         damage as f64
-    } else if let Some(profile) = &entity.weapon_profile {
+    } else if let Some(profile) = weapon_profile {
         profile.damage as f64
     } else {
         return None;
     };
 
-    let variance = if let Some(v) = entity.get_float_prop(PropertyFloat::DamageVariance) {
+    let variance = if let Some(v) = variance {
         v
-    } else if let Some(profile) = &entity.weapon_profile {
+    } else if let Some(profile) = weapon_profile {
         profile.damage_variance
     } else {
         0.0
     };
 
-    let damage_type_raw = if let Some(dt) = entity.get_int_prop(PropertyInt::DamageType) {
-        dt as u32
-    } else if let Some(profile) = &entity.weapon_profile {
+    let damage_type_raw = if let Some(dt) = damage_type_bits {
+        dt
+    } else if let Some(profile) = weapon_profile {
         profile.damage_type
     } else {
         DamageType::SLASH.bits()

@@ -1,12 +1,20 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_protocol::messages::magic::Enchantment;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{CharTabLine, get_char_tab_lines, render_character_tab};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, CommandTarget, ContextView, Interaction, StatType, TabController, UpdateResult, Verb,
+    AppAction, ContextView, Interaction, StatType, TabController, UpdateResult, Verb,
 };
+
+#[derive(Debug, Clone)]
+enum CharacterSelection {
+    Enchantment(Enchantment),
+    Stat(StatType, Option<u64>, Option<u32>),
+    None,
+}
 
 #[derive(Default, Debug, Clone)]
 pub struct CharacterTab {
@@ -15,8 +23,8 @@ pub struct CharacterTab {
 }
 
 impl CharacterTab {
-    fn get_target(&self, data: &GameData) -> CommandTarget {
-        get_command_target_at_index(data, self.selected_index).unwrap_or(CommandTarget::None)
+    fn get_selection(&self, data: &GameData) -> CharacterSelection {
+        get_selection_at_index(data, self.selected_index).unwrap_or(CharacterSelection::None)
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
@@ -35,7 +43,7 @@ impl TabController for CharacterTab {
         _view: &ViewState,
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
-        let target = self.get_target(data);
+        let target = self.get_selection(data);
         let mut verbs = Vec::new();
 
         if let Some(interaction) = interaction {
@@ -48,7 +56,7 @@ impl TabController for CharacterTab {
         }
 
         match target {
-            CommandTarget::Enchantment(enchant) => {
+            CharacterSelection::Enchantment(enchant) => {
                 verbs.push(Verb::new(
                     vec![AppAction::ViewDetails {
                         view: ContextView::Enchantment(enchant),
@@ -57,14 +65,14 @@ impl TabController for CharacterTab {
                     "Details",
                 ));
                 verbs.push(Verb::new(
-                    vec![AppAction::QueryDebugInfo {
-                        target: CommandTarget::Enchantment(enchant),
+                    vec![AppAction::ChangeContextView {
+                        view: ContextView::DebugEnchantment(enchant),
                     }],
                     'g',
                     "Debug",
                 ));
             }
-            CommandTarget::Stat(st, Some(xp_cost), _sp_cost) => {
+            CharacterSelection::Stat(st, Some(xp_cost), _sp_cost) => {
                 let xp_spent = xp_cost as u32;
                 let is_unassigned_xp_enough = data
                     .level_info
@@ -84,7 +92,7 @@ impl TabController for CharacterTab {
                     ));
                 }
             }
-            CommandTarget::Stat(StatType::Skill(skill), None, Some(credits_cost)) => {
+            CharacterSelection::Stat(StatType::Skill(skill), None, Some(credits_cost)) => {
                 let is_skill_credits_enough = data
                     .level_info
                     .as_ref()
@@ -160,18 +168,18 @@ impl TabController for CharacterTab {
     }
 }
 
-fn get_command_target_at_index(data: &GameData, index: usize) -> Option<CommandTarget> {
+fn get_selection_at_index(data: &GameData, index: usize) -> Option<CharacterSelection> {
     let lines = get_char_tab_lines(data);
     lines.get(index).map(|line| match line {
         CharTabLine::Enchantment(e) | CharTabLine::Miscellaneous(e) => {
-            CommandTarget::Enchantment(*e)
+            CharacterSelection::Enchantment(*e)
         }
         CharTabLine::Stat {
             stat_type: Some(st),
             xp_cost,
             sp_cost,
             ..
-        } => CommandTarget::Stat(st.clone(), *xp_cost, *sp_cost),
-        _ => CommandTarget::None,
+        } => CharacterSelection::Stat(st.clone(), *xp_cost, *sp_cost),
+        _ => CharacterSelection::None,
     })
 }

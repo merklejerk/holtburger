@@ -1,10 +1,20 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_core::client::types::TargetSlot;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb};
+
+#[derive(Debug, Clone, Copy)]
+enum EquipSelection {
+    Item {
+        guid: holtburger_common::Guid,
+        slot: TargetSlot,
+    },
+    None,
+}
 
 #[derive(Default, Debug, Clone)]
 pub struct EquipTab {
@@ -13,11 +23,14 @@ pub struct EquipTab {
 }
 
 impl EquipTab {
-    fn get_target(&self, data: &GameData) -> CommandTarget {
+    fn get_selection(&self, data: &GameData) -> EquipSelection {
         let lines = get_lines(data);
         match lines.get(self.selected_index) {
-            Some(EquipTabLine::Item(e, _, _, slot)) => CommandTarget::EntityWithSlot(e.guid, *slot),
-            _ => CommandTarget::None,
+            Some(EquipTabLine::Item(e, _, _, slot)) => EquipSelection::Item {
+                guid: e.guid,
+                slot: *slot,
+            },
+            _ => EquipSelection::None,
         }
     }
 
@@ -38,11 +51,11 @@ impl TabController for EquipTab {
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let lines = get_lines(data);
-        let target = self.get_target(data);
+        let selection = self.get_selection(data);
         let mut verbs = Vec::new();
 
         if let Some(interaction) = interaction
-            && matches!(&target, CommandTarget::EntityWithSlot(_, _))
+            && matches!(&selection, EquipSelection::Item { .. })
         {
             match interaction {
                 Interaction::Targeting { .. } => {}
@@ -52,8 +65,8 @@ impl TabController for EquipTab {
             }
         }
 
-        match target {
-            CommandTarget::EntityWithSlot(guid, slot) => {
+        match selection {
+            EquipSelection::Item { guid, slot } => {
                 let is_here = if let Some(EquipTabLine::Item(_, here, _, _)) =
                     lines.get(self.selected_index)
                 {
@@ -62,7 +75,13 @@ impl TabController for EquipTab {
                     false
                 };
 
-                verbs.push(Verb::new(vec![AppAction::Assess { guid }], 'a', "Assess"));
+                verbs.push(Verb::new(
+                    vec![AppAction::Assess {
+                        target: InspectTarget::Entity(guid),
+                    }],
+                    'a',
+                    "Assess",
+                ));
 
                 if interaction.is_none()
                     || matches!(interaction, Some(Interaction::Targeting { target_guid }) if *target_guid != guid)
@@ -90,7 +109,7 @@ impl TabController for EquipTab {
 
                 verbs.push(Verb::new(
                     vec![AppAction::QueryDebugInfo {
-                        target: CommandTarget::Entity(guid),
+                        target: InspectTarget::Entity(guid),
                     }],
                     'g',
                     "Debug",

@@ -36,7 +36,13 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+impl Default for IdentifyResponseFlags {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct IdentifyObjectResponseEventData {
     pub object_guid: Guid,
     pub flags: IdentifyResponseFlags,

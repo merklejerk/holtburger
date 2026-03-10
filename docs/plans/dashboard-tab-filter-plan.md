@@ -375,9 +375,9 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Keep existing inventory sort and status rendering intact.
 
 ### Slice 8: Spells Visible-List Unification
-- [ ] Build one filtered visible spell list helper.
-- [ ] Reuse it for `get_selected_spell_id(...)` and render.
-- [ ] Preserve alphabetical ordering.
+- [x] Build one filtered visible spell list helper.
+- [x] Reuse it for `get_selected_spell_id(...)` and render.
+- [x] Preserve alphabetical ordering.
 
 ### Slice 9: Regression Coverage
 - [ ] Add unit tests for tokenization.
@@ -406,7 +406,7 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Complete Phase 3.
 - [x] Complete Phase 4.
 - [x] Complete Phase 5.
-- [ ] Complete Phase 6.
+- [x] Complete Phase 6.
 - [ ] Complete Phase 7.
 
 ### Decisions Log
@@ -420,6 +420,8 @@ The dry run says the work should execute in small slices, but the phase structur
 - Phase 4 clamps Nearby selection after filter changes instead of attempting semantic reselection; preserving the exact prior entity remains optional follow-up polish.
 - Phase 5 implements Inventory filtering with the same retain-pass ancestor-inclusion pattern as Nearby, preserving the canonical formatted-name ordering and container hierarchy.
 - Phase 5 keeps filter matching scoped to base `format_item_name(...)` output only; rendered status suffixes like `(EQUIPPED)`, `(OFFERED)`, `(SALVAGING)`, and container counts remain presentation-only and do not affect matches.
+- Phase 6 implements Spells filtering through one shared visible spell-id list used by both selection and rendering, so acted-on spells always match the rendered filtered rows.
+- Phase 6 keeps Spells matching scoped to resolved spell names only; rendered spell power remains presentation-only and does not participate in filtering.
 - Default fuzzy behavior is case-insensitive subsequence matching, not substring-only matching.
 - Multiple space-separated tokens combine by union.
 - Filtering is inclusion-only and must never reorder a tab's canonical sequence.
@@ -436,6 +438,8 @@ The dry run says the work should execute in small slices, but the phase structur
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs` or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/render.rs`.
 - 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 5 Inventory filtering changes.
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs` or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/render.rs`.
+- 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 6 Spells filtering changes.
+- 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/tab.rs` or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/render.rs`.
 
 ### Open Questions
 - Do we want filter matching to stay limited to visible names/labels, or should Nearby/Inventory also match secondary metadata such as container status or item class names later?

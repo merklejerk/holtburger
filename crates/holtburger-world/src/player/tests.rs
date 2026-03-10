@@ -1,6 +1,6 @@
 use super::*;
 use holtburger_common::properties::{
-    EnchantmentTypeFlags, PropertyInt, WorldObjectPropertyAccessorsMut,
+    EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
@@ -63,6 +63,56 @@ fn test_stat_calculations() {
         player.derive_skill_value(stats::SkillType::Run, 5, 0, false),
         105
     );
+}
+
+#[test]
+fn test_resistance_derivation_matches_ace_player_rules() {
+    let mut player = PlayerState::new();
+
+    set_attr(&mut player, stats::AttributeType::StrengthAttr, 200);
+    set_attr(&mut player, stats::AttributeType::EnduranceAttr, 200);
+    player.set_float_prop(PropertyFloat::ResistFire, 1.0);
+    player.set_int_prop(PropertyInt::AugmentationResistanceFire, 1);
+
+    player.enchantments.push(Enchantment {
+        spell_category: 10,
+        power_level: 100,
+        stat_mod_type: (EnchantmentTypeFlags::FLOAT
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::MULTIPLICATIVE)
+            .bits(),
+        stat_mod_key: PropertyFloat::ResistFire as u32,
+        stat_mod_value: 0.8,
+        ..Default::default()
+    });
+
+    player.enchantments.push(Enchantment {
+        spell_category: 20,
+        power_level: 100,
+        stat_mod_type: (EnchantmentTypeFlags::FLOAT
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::MULTIPLICATIVE)
+            .bits(),
+        stat_mod_key: PropertyFloat::ResistFire as u32,
+        stat_mod_value: 1.2,
+        ..Default::default()
+    });
+
+    player.enchantments.push(Enchantment {
+        spell_category: 30,
+        power_level: 100,
+        stat_mod_type: (EnchantmentTypeFlags::FLOAT
+            | EnchantmentTypeFlags::SINGLE_STAT
+            | EnchantmentTypeFlags::ADDITIVE)
+            .bits(),
+        stat_mod_key: PropertyFloat::ResistFire as u32,
+        stat_mod_value: 0.67,
+        ..Default::default()
+    });
+
+    let resistance = player.get_resistance_current(PropertyFloat::ResistFire);
+
+    assert!((resistance - 0.72).abs() < 0.0001);
 }
 
 #[test]

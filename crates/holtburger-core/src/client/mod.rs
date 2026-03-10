@@ -202,10 +202,44 @@ impl Client {
                             resolved_names: self.world.get_player_spell_names(),
                         });
             }
+            StateEvent::DerivedStatsUpdated(data) => {
+                let level_info = self.world.get_level_info().unwrap_or_default();
+                let attributes = data
+                    .attributes
+                    .iter()
+                    .cloned()
+                    .map(|attribute| (attribute.attr_type, attribute))
+                    .collect();
+                let skills = data
+                    .skills
+                    .iter()
+                    .cloned()
+                    .map(|skill| (skill.skill_type, skill))
+                    .collect();
+                let vitals = data
+                    .vitals
+                    .iter()
+                    .cloned()
+                    .map(|vital| (vital.vital_type, vital))
+                    .collect();
+
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
+                        attributes,
+                        skills,
+                        resistances: data.resistances.clone(),
+                        armor: data.armor,
+                        vitae: data.vitae,
+                        level_info,
+                    });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
+            }
             StateEvent::AttributeUpdated(_)
             | StateEvent::SkillUpdated(_)
-            | StateEvent::LevelInfoUpdated(_)
-            | StateEvent::DerivedStatsUpdated(_) => {
+            | StateEvent::LevelInfoUpdated(_) => {
                 let level_info = self.world.get_level_info().unwrap_or_default();
                 let _ = self
                     .client_view_event_tx

@@ -12,7 +12,9 @@ use ratatui::layout::Rect;
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, CommandTarget, InspectTarget, Interaction, TabController, UpdateResult, Verb,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct NearbyTab {
@@ -268,7 +270,13 @@ impl TabController for NearbyTab {
             }
 
             verbs.extend([
-                Verb::new(vec![AppAction::Assess { guid: e.guid }], 'a', "Assess"),
+                Verb::new(
+                    vec![AppAction::Assess {
+                        target: InspectTarget::Entity(e.guid),
+                    }],
+                    'a',
+                    "Assess",
+                ),
                 Verb::new(
                     vec![AppAction::BeginInteraction {
                         interaction: Interaction::Targeting {

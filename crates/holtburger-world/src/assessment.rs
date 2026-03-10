@@ -1,6 +1,8 @@
 use crate::damage::compute_damage_range;
 use crate::entity::Entity;
+use crate::inspect::InspectableObject;
 use crate::magic::calculate_mana_time_left;
+use crate::vendor::CoreVendorItem;
 use holtburger_common::properties::{
     AttackType, DamageType, ImbuedEffectType, ItemType, MaterialType, PropertyBool, PropertyFloat,
     PropertyInt, PropertyString, WeaponType, WorldObjectExt as _, WorldObjectPropertyAccessors,
@@ -14,6 +16,8 @@ pub struct Assessment {
     pub description: Option<String>,
     pub value: u32,
     pub burden: Option<u32>,
+    pub item_capacity: Option<u32>,
+    pub container_capacity: Option<u32>,
     pub material: Option<MaterialInfo>,
     pub tinkering: Option<TinkeringInfo>,
     pub spellcraft: Option<i32>,
@@ -250,8 +254,8 @@ pub enum BondedStatus {
 }
 
 impl BondedStatus {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        let val = entity.get_int_prop(PropertyInt::Bonded)?;
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        let val = object.get_int_prop(PropertyInt::Bonded)?;
         match val {
             -2 => Some(BondedStatus::Destroy),
             -1 => Some(BondedStatus::Slippery),
@@ -275,8 +279,8 @@ pub enum AttunedStatus {
 }
 
 impl AttunedStatus {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        let val = entity.get_int_prop(PropertyInt::Attuned)?;
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        let val = object.get_int_prop(PropertyInt::Attuned)?;
         match val {
             0 => Some(AttunedStatus::Normal),
             1 => Some(AttunedStatus::Attuned),
@@ -341,45 +345,55 @@ pub struct Protections {
 }
 
 impl Assessment {
-    pub fn from_entity(entity: &Entity) -> Self {
+    pub fn from_object(object: &InspectableObject<'_>) -> Self {
         Assessment {
-            name: entity.name().to_string(),
-            description: entity
+            name: object.name().to_string(),
+            description: object
                 .get_string_prop(PropertyString::LongDesc)
-                .or_else(|| entity.get_string_prop(PropertyString::ShortDesc))
+                .or_else(|| object.get_string_prop(PropertyString::ShortDesc))
                 .map(|s| s.to_string()),
-            value: entity.item_value(),
-            burden: entity.burden(),
-            material: MaterialInfo::from_entity(entity),
-            tinkering: TinkeringInfo::from_entity(entity),
-            spellcraft: entity.get_int_prop(PropertyInt::ItemSpellcraft),
-            mana: ManaInfo::from_entity(entity),
-            bonded: BondedStatus::from_entity(entity),
-            attuned: AttunedStatus::from_entity(entity),
-            is_retained: entity.get_bool_prop(PropertyBool::Retained),
-            is_locked: entity.is_locked(),
-            is_sellable: entity.is_sellable(),
-            is_ivoryable: entity.get_bool_prop(PropertyBool::Ivoryable),
-            stack: StackInfo::from_entity(entity),
-            uses: UsesInfo::from_entity(entity),
-            armor: entity.get_int_prop(PropertyInt::ArmorLevel),
-            weapon: WeaponInfo::from_entity(entity),
-            creature: CreatureInfo::from_entity(entity),
-            protections: Protections::from_entity(entity),
-            bonuses: get_bonuses(entity),
-            wield_requirements: get_wield_requirements(entity),
-            inscriptions: InscriptionInfo::from_entity(entity),
-            imbued_effects: get_imbued_effects(entity),
-            effects: Effect::from_entity(entity),
-            use_info: entity
+            value: object.item_value(),
+            burden: object.burden(),
+            item_capacity: object.items_capacity(),
+            container_capacity: object.containers_capacity(),
+            material: MaterialInfo::from_object(object),
+            tinkering: TinkeringInfo::from_object(object),
+            spellcraft: object.get_int_prop(PropertyInt::ItemSpellcraft),
+            mana: ManaInfo::from_object(object),
+            bonded: BondedStatus::from_object(object),
+            attuned: AttunedStatus::from_object(object),
+            is_retained: object.get_bool_prop(PropertyBool::Retained),
+            is_locked: object.is_locked(),
+            is_sellable: object.is_sellable(),
+            is_ivoryable: object.get_bool_prop(PropertyBool::Ivoryable),
+            stack: StackInfo::from_object(object),
+            uses: UsesInfo::from_object(object),
+            armor: object.get_int_prop(PropertyInt::ArmorLevel),
+            weapon: WeaponInfo::from_object(object),
+            creature: CreatureInfo::from_object(object),
+            protections: Protections::from_object(object),
+            bonuses: get_bonuses(object),
+            wield_requirements: get_wield_requirements(object),
+            inscriptions: InscriptionInfo::from_object(object),
+            imbued_effects: get_imbued_effects(object),
+            effects: Effect::from_object(object),
+            use_info: object
                 .get_string_prop(PropertyString::Use)
                 .map(|s| s.to_string()),
-            spells: entity.spell_book.clone(),
+            spells: object.spell_book.to_vec(),
         }
+    }
+
+    pub fn from_entity(entity: &Entity) -> Self {
+        Self::from_object(&InspectableObject::from_entity(entity))
+    }
+
+    pub fn from_vendor_item(item: &CoreVendorItem) -> Self {
+        Self::from_object(&InspectableObject::from_vendor_item(item))
     }
 }
 
-fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
+fn get_wield_requirements(object: &InspectableObject<'_>) -> Vec<WieldRequirement> {
     let mut reqs = Vec::new();
 
     // Regular Wield Requirements
@@ -407,11 +421,11 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
     ];
 
     for (req_prop, skill_prop, diff_prop) in configs {
-        let req_type_id = entity.get_int_prop(req_prop).unwrap_or(0);
+        let req_type_id = object.get_int_prop(req_prop).unwrap_or(0);
         let requirement_type =
             if let Some(rt) = WieldRequirementType::from_repr(req_type_id as usize) {
                 rt
-            } else if entity.get_int_prop(skill_prop).is_some() {
+            } else if object.get_int_prop(skill_prop).is_some() {
                 // Default to Skill if skill_prop exists but req_prop doesn't
                 WieldRequirementType::Skill
             } else {
@@ -419,8 +433,8 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
             };
 
         if requirement_type != WieldRequirementType::Invalid {
-            let skill_id = entity.get_int_prop(skill_prop).unwrap_or(0) as u32;
-            let difficulty = entity.get_int_prop(diff_prop).unwrap_or(0);
+            let skill_id = object.get_int_prop(skill_prop).unwrap_or(0) as u32;
+            let difficulty = object.get_int_prop(diff_prop).unwrap_or(0);
 
             let req = match requirement_type {
                 WieldRequirementType::Skill => SkillType::from_repr(skill_id)
@@ -480,7 +494,7 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
     }
 
     // Arcane Lore requirement from ItemDifficulty
-    if let Some(difficulty) = entity.get_int_prop(PropertyInt::ItemDifficulty)
+    if let Some(difficulty) = object.get_int_prop(PropertyInt::ItemDifficulty)
         && difficulty > 0
     {
         reqs.push(WieldRequirement::Skill {
@@ -492,7 +506,7 @@ fn get_wield_requirements(entity: &Entity) -> Vec<WieldRequirement> {
     reqs
 }
 
-fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
+fn get_bonuses(object: &InspectableObject<'_>) -> Vec<Bonus> {
     let mut bonuses = Vec::new();
 
     let mult_props = [
@@ -504,7 +518,7 @@ fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
     ];
 
     for (name, prop) in mult_props {
-        if let Some(val) = get_normalized_multiplier(entity, prop) {
+        if let Some(val) = get_normalized_multiplier(object, prop) {
             bonuses.push(Bonus {
                 name: name.to_string(),
                 value: val,
@@ -515,7 +529,7 @@ fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
 
     // Fallback for weapon offense from profile
     if !bonuses.iter().any(|b| b.name == "Attack Bonus")
-        && let Some(p) = entity.weapon_profile.as_ref()
+        && let Some(p) = object.weapon_profile
     {
         let val = p.weapon_offense - 1.0;
         if val.abs() > f64::EPSILON {
@@ -533,7 +547,7 @@ fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
     ];
 
     for (name, prop) in mod_props {
-        if let Some(val) = get_nonzero_modifier(entity, prop) {
+        if let Some(val) = get_nonzero_modifier(object, prop) {
             bonuses.push(Bonus {
                 name: name.to_string(),
                 value: val,
@@ -546,9 +560,9 @@ fn get_bonuses(entity: &Entity) -> Vec<Bonus> {
 }
 
 impl InscriptionInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        let text = entity.get_string_prop(PropertyString::Inscription)?;
-        let scribe = entity
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        let text = object.get_string_prop(PropertyString::Inscription)?;
+        let scribe = object
             .get_string_prop(PropertyString::ScribeName)
             .map(|s| s.to_string());
 
@@ -560,9 +574,9 @@ impl InscriptionInfo {
 }
 
 impl MaterialInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        let mat_type = entity.get_int_prop(PropertyInt::MaterialType)?;
-        let workmanship = entity.effective_workmanship()? as f32;
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        let mat_type = object.get_int_prop(PropertyInt::MaterialType)?;
+        let workmanship = object.effective_workmanship()? as f32;
 
         Some(MaterialInfo {
             material_type: MaterialType::from_repr(mat_type as u32)?,
@@ -572,8 +586,8 @@ impl MaterialInfo {
 }
 
 impl TinkeringInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        entity
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        object
             .get_int_prop(PropertyInt::NumTimesTinkered)
             .filter(|&t| t > 0)
             .map(|count| TinkeringInfo { count })
@@ -581,10 +595,10 @@ impl TinkeringInfo {
 }
 
 impl ManaInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        let max = entity.get_int_prop(PropertyInt::ItemMaxMana)?;
-        let current = entity.get_int_prop(PropertyInt::ItemCurMana).unwrap_or(0);
-        let seconds_left = entity
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        let max = object.get_int_prop(PropertyInt::ItemMaxMana)?;
+        let current = object.get_int_prop(PropertyInt::ItemCurMana).unwrap_or(0);
+        let seconds_left = object
             .get_float_prop(PropertyFloat::ManaRate)
             .and_then(|rate| calculate_mana_time_left(current, rate));
 
@@ -597,46 +611,51 @@ impl ManaInfo {
 }
 
 impl StackInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        entity
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        object
             .max_stack_size()
             .filter(|&max| max > 1)
             .map(|max| StackInfo {
-                current: entity.stack_size(),
+                current: object.stack_size(),
                 max,
             })
     }
 }
 
 impl UsesInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        entity.max_structure().map(|max| UsesInfo {
-            current: entity.structure().unwrap_or(0),
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        object.max_structure().map(|max| UsesInfo {
+            current: object.structure().unwrap_or(0),
             max,
         })
     }
 }
 
 impl WeaponInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        if !entity.item_type().is_some_and(|it| {
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        if !object.item_type().is_some_and(|it| {
             it.intersects(ItemType::MELEE_WEAPON | ItemType::CASTER | ItemType::MISSILE_WEAPON)
         }) {
             return None;
         }
 
-        let range = compute_damage_range(entity)?;
+        let range = compute_damage_range(
+            object.get_int_prop(PropertyInt::Damage),
+            object.get_float_prop(PropertyFloat::DamageVariance),
+            object.get_int_prop(PropertyInt::DamageType).map(|v| v as u32),
+            object.weapon_profile,
+        )?;
 
         Some(WeaponInfo {
             damage_min: range.min,
             damage_max: range.max,
             damage_type: range.damage_type,
-            speed: entity
+            speed: object
                 .weapon_profile
                 .as_ref()
                 .map(|p| p.weapon_time as f32)
                 .unwrap_or(0.0),
-            weapon_type: entity
+            weapon_type: object
                 .get_int_prop(PropertyInt::WeaponType)
                 .and_then(|w| WeaponType::from_repr(w as u32)),
         })
@@ -644,21 +663,21 @@ impl WeaponInfo {
 }
 
 /// Extracts a multiplier-based property (baseline 1.0) and returns it normalized to 0.0.
-fn get_normalized_multiplier(entity: &Entity, prop: PropertyFloat) -> Option<f64> {
-    entity
+fn get_normalized_multiplier(object: &InspectableObject<'_>, prop: PropertyFloat) -> Option<f64> {
+    object
         .get_float_prop(prop)
         .map(|v| v - 1.0)
         .filter(|&v| v.abs() > f64::EPSILON)
 }
 
 /// Extracts a modifier-based property (baseline 0.0) and returns it if it is non-zero.
-fn get_nonzero_modifier(entity: &Entity, prop: PropertyFloat) -> Option<f64> {
-    entity.get_float_prop(prop).filter(|&v| v != 0.0)
+fn get_nonzero_modifier(object: &InspectableObject<'_>, prop: PropertyFloat) -> Option<f64> {
+    object.get_float_prop(prop).filter(|&v| v != 0.0)
 }
 
 impl CreatureInfo {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        let cp = entity.creature_profile.as_ref()?;
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        let cp = object.creature_profile?;
         Some(CreatureInfo {
             health: cp.health,
             health_max: cp.health_max,
@@ -679,8 +698,8 @@ impl CreatureInfo {
 }
 
 impl Protections {
-    fn from_entity(entity: &Entity) -> Option<Self> {
-        let ap = entity.armor_profile.as_ref()?;
+    fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
+        let ap = object.armor_profile?;
         Some(Protections {
             slashing: ap.slashing,
             piercing: ap.piercing,
@@ -695,24 +714,29 @@ impl Protections {
 }
 
 impl Effect {
-    fn from_entity(entity: &Entity) -> Vec<Self> {
+    fn from_object(object: &InspectableObject<'_>) -> Vec<Self> {
         let mut effects = Vec::new();
 
         // Float Detectors (Present if nonzero)
-        if entity.get_float_prop(PropertyFloat::IgnoreArmor).is_some() {
+        if object.get_float_prop(PropertyFloat::IgnoreArmor).is_some() {
             // Distinguish between Rending and Cleaving base on property values or context
             // In ACE, Rending is usually 1.0/0.0 on the prop, Cleaving might be different
             // But for now we'll just check existence as requested.
             effects.push(Effect::ArmorRending);
         }
 
-        if let Some(res_mod) = entity.get_float_prop(PropertyFloat::ResistanceModifier)
+        if let Some(res_mod) = object.get_float_prop(PropertyFloat::ResistanceModifier)
             && res_mod != 0.0
         {
             // ResistanceModifier is used for Cleaving.
             // We'd need DamageType logic to know WHICH cleaving, but the prompt
             // asks for them as separate variants. We'll use the weapon's damage type.
-            if let Some(range) = compute_damage_range(entity) {
+            if let Some(range) = compute_damage_range(
+                object.get_int_prop(PropertyInt::Damage),
+                object.get_float_prop(PropertyFloat::DamageVariance),
+                object.get_int_prop(PropertyInt::DamageType).map(|v| v as u32),
+                object.weapon_profile,
+            ) {
                 let dt = range.damage_type;
                 if dt.contains(holtburger_common::properties::DamageType::SLASH) {
                     effects.push(Effect::SlashCleaving);
@@ -741,7 +765,7 @@ impl Effect {
             }
         }
 
-        if entity
+        if object
             .get_float_prop(PropertyFloat::AbsorbMagicDamage)
             .is_some()
         {
@@ -749,19 +773,19 @@ impl Effect {
         }
 
         // Float Properties (Strength attached)
-        if let Some(freq) = entity.get_float_prop(PropertyFloat::CriticalFrequency)
+        if let Some(freq) = object.get_float_prop(PropertyFloat::CriticalFrequency)
             && freq > 0.0
         {
             effects.push(Effect::BitingStrike(freq));
         }
-        if let Some(mult) = entity.get_float_prop(PropertyFloat::CriticalMultiplier)
+        if let Some(mult) = object.get_float_prop(PropertyFloat::CriticalMultiplier)
             && mult > 0.0
         {
             effects.push(Effect::CrushingBlow(mult));
         }
-        if let Some(bonus) = entity.get_float_prop(PropertyFloat::SlayerDamageBonus)
+        if let Some(bonus) = object.get_float_prop(PropertyFloat::SlayerDamageBonus)
             && bonus > 0.0
-            && let Some(creature_type) = entity
+            && let Some(creature_type) = object
                 .get_int_prop(PropertyInt::SlayerCreatureType)
                 .and_then(|t| CreatureType::from_repr(t as u32))
         {
@@ -772,7 +796,7 @@ impl Effect {
         }
 
         // Int Properties
-        if let Some(at) = entity
+        if let Some(at) = object
             .get_int_prop(PropertyInt::AttackType)
             .map(|bits| AttackType::from_bits_truncate(bits as u32))
             && at.intersects(AttackType::DoubleStrike | AttackType::TripleStrike)
@@ -780,7 +804,7 @@ impl Effect {
             effects.push(Effect::Multistrike);
         }
 
-        if let Some(cleave_targets) = entity.get_int_prop(PropertyInt::Cleaving)
+        if let Some(cleave_targets) = object.get_int_prop(PropertyInt::Cleaving)
             && cleave_targets > 0
         {
             effects.push(Effect::Cleaving(cleave_targets));
@@ -795,7 +819,7 @@ impl Effect {
             PropertyInt::ImbuedEffect5,
         ]
         .into_iter()
-        .filter_map(|p| entity.get_int_prop(p))
+        .filter_map(|p| object.get_int_prop(p))
         .fold(0u32, |acc, val| acc | (val as u32));
 
         let imbued = ImbuedEffectType::from_bits_truncate(bits);
@@ -807,7 +831,7 @@ impl Effect {
     }
 }
 
-fn get_imbued_effects(entity: &Entity) -> Vec<String> {
+fn get_imbued_effects(object: &InspectableObject<'_>) -> Vec<String> {
     let bits = [
         PropertyInt::ImbuedEffect,
         PropertyInt::ImbuedEffect2,
@@ -816,7 +840,7 @@ fn get_imbued_effects(entity: &Entity) -> Vec<String> {
         PropertyInt::ImbuedEffect5,
     ]
     .into_iter()
-    .filter_map(|p| entity.get_int_prop(p))
+    .filter_map(|p| object.get_int_prop(p))
     .fold(0u32, |acc, val| acc | (val as u32));
 
     ImbuedEffectType::from_bits_truncate(bits)

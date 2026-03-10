@@ -7,6 +7,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
 use ratatui::text::Line;
@@ -38,10 +39,9 @@ pub fn get_debug_info(
             else {
                 return lines;
             };
-            lines.push(Line::from(format!("DEBUG VENDOR ITEM: {}", v.name())));
-            lines.push(Line::from(format!("GUID:   {:08X}", v.guid)));
-            lines.push(Line::from(format!("Value:  {}", v.item_value())));
-            lines.push(Line::from(format!("WCID:   {}", v.wcid)));
+            let object = InspectableObject::from_vendor_item(v);
+            lines.push(Line::from(format!("ITEM: {}", v.name())));
+            push_object_debug_info(&mut lines, &object, spell_lookup);
         }
         CommandTarget::Entity(guid) | CommandTarget::EntityWithSlot(guid, _) => {
             let Some(e) = data.entities.get(guid) else {
@@ -648,6 +648,225 @@ pub fn get_debug_info(
     }
 
     lines
+}
+
+fn push_object_debug_info(
+    lines: &mut Vec<Line<'static>>,
+    object: &InspectableObject<'_>,
+    spell_lookup: Option<&SpellCatalog>,
+) {
+    lines.push(Line::from(format!("GUID:   {:08X}", object.guid)));
+    lines.push(Line::from(format!("Value:  {}", object.item_value())));
+    lines.push(Line::from(format!("WCID:   {:?}", object.wcid)));
+
+    if object.plural_name().is_some()
+        || object.items_capacity().is_some()
+        || object.containers_capacity().is_some()
+        || object.ammo_type().is_some()
+        || object.item_value() > 0
+        || object.usable().is_some()
+        || object.use_radius().is_some()
+        || object.workmanship().is_some()
+        || object.burden().is_some()
+        || object.target_type().is_some()
+        || object.ui_effects().is_some()
+        || object.combat_use().is_some()
+        || object.stack_size() > 1
+        || !object.valid_locations().is_empty()
+        || !object.wield_location().is_empty()
+    {
+        lines.push(Line::from("-- Weenie Data --"));
+        if let Some(p) = &object.plural_name() {
+            lines.push(Line::from(format!("  Plural:    {}", p)));
+        }
+        if let Some(v) = object.items_capacity() {
+            lines.push(Line::from(format!("  ICapacity: {}", v)));
+        }
+        if let Some(v) = object.containers_capacity() {
+            lines.push(Line::from(format!("  CCapacity: {}", v)));
+        }
+        if let Some(v) = object.ammo_type() {
+            lines.push(Line::from(format!("  AmmoType:  {}", v)));
+        }
+        if object.item_value() > 0 {
+            lines.push(Line::from(format!("  Value:     {}", object.item_value())));
+        }
+        if let Some(v) = object.usable() {
+            lines.push(Line::from(format!("  Usable:    0x{:08X}", v)));
+        }
+        if let Some(v) = object.use_radius() {
+            lines.push(Line::from(format!("  UseRadius: {:.2}", v)));
+        }
+        if let Some(v) = object.workmanship() {
+            lines.push(Line::from(format!("  Work:      {:.2}", v)));
+        }
+        if let Some(v) = object.burden() {
+            lines.push(Line::from(format!("  Burden:    {}", v)));
+        }
+        if let Some(v) = object.target_type() {
+            lines.push(Line::from(format!("  TargetTyp: 0x{:08X}", v)));
+        }
+        if let Some(v) = object.ui_effects() {
+            lines.push(Line::from(format!("  UIEffects: 0x{:08X}", v)));
+        }
+        if let Some(v) = object.combat_use() {
+            lines.push(Line::from(format!("  CombatUse: {} ({:02X})", v, v)));
+        }
+        if let Some(v) = object.structure() {
+            lines.push(Line::from(format!(
+                "  Struct:    {}/{}",
+                v,
+                object.max_structure().unwrap_or(0)
+            )));
+        }
+        if object.stack_size() > 1 || object.max_stack_size().unwrap_or(0) > 1 {
+            lines.push(Line::from(format!(
+                "  Stack:     {}/{}",
+                object.stack_size(),
+                object.max_stack_size().unwrap_or(0)
+            )));
+        }
+        let valid = object.valid_locations();
+        if !valid.is_empty() {
+            lines.push(Line::from(format!("  ValidLocs: {:08X}", valid.bits())));
+            for (name, _) in valid.iter_names() {
+                lines.push(Line::from(format!("    - {}", name)));
+            }
+        }
+        let wield = object.wield_location();
+        if !wield.is_empty() {
+            lines.push(Line::from(format!("  WieldLoc:  {:08X}", wield.bits())));
+            for (name, _) in wield.iter_names() {
+                lines.push(Line::from(format!("    - {}", name)));
+            }
+        }
+    }
+
+    let mut wrote_extra_header = false;
+    if let Some(v) = object.icon_overlay_id() {
+        if !wrote_extra_header {
+            lines.push(Line::from("-- Extra --"));
+            wrote_extra_header = true;
+        }
+        lines.push(Line::from(format!("  IconOver:  0x{:08X}", v.0)));
+    }
+    if let Some(v) = object.icon_underlay_id() {
+        if !wrote_extra_header {
+            lines.push(Line::from("-- Extra --"));
+            wrote_extra_header = true;
+        }
+        lines.push(Line::from(format!("  IconUnder: 0x{:08X}", v.0)));
+    }
+    if let Some(v) = object.material_type() {
+        if !wrote_extra_header {
+            lines.push(Line::from("-- Extra --"));
+        }
+        lines.push(Line::from(format!("  Material:  {} (0x{:08X})", v, v as u32)));
+    }
+
+    if let Some(profile) = object.creature_profile {
+        lines.push(Line::from("-- Creature Profile --"));
+        lines.push(Line::from(format!(
+            "  Health:  {}/{}",
+            profile.health, profile.health_max
+        )));
+        if let Some(attr) = &profile.attributes {
+            lines.push(Line::from(format!("  Stamina: {}/{}", attr.stamina, attr.stamina_max)));
+            lines.push(Line::from(format!("  Mana:    {}/{}", attr.mana, attr.mana_max)));
+            lines.push(Line::from(format!("  STR: {}", attr.strength)));
+            lines.push(Line::from(format!("  END: {}", attr.endurance)));
+            lines.push(Line::from(format!("  COR: {}", attr.coordination)));
+            lines.push(Line::from(format!("  QUI: {}", attr.quickness)));
+            lines.push(Line::from(format!("  FOC: {}", attr.focus)));
+            lines.push(Line::from(format!("  SEL: {}", attr.self_attr)));
+        }
+    }
+
+    if let Some(profile) = object.armor_profile {
+        lines.push(Line::from("-- Armor Profile --"));
+        lines.push(Line::from(format!(
+            "  Slash: {:.2}, Pierce: {:.2}, Blunt: {:.2}",
+            profile.slashing, profile.piercing, profile.bludgeoning
+        )));
+        lines.push(Line::from(format!(
+            "  Fire: {:.2}, Cold: {:.2}, Acid: {:.2}, Light: {:.2}, Nether: {:.2}",
+            profile.fire, profile.cold, profile.acid, profile.lightning, profile.nether
+        )));
+    }
+
+    if let Some(profile) = object.weapon_profile {
+        lines.push(Line::from("-- Weapon Profile --"));
+        lines.push(Line::from(format!(
+            "  DType:  0x{:08X}, Speed: {}, Skill: {}",
+            profile.damage_type, profile.weapon_time, profile.weapon_skill
+        )));
+        lines.push(Line::from(format!(
+            "  Damage: {}, Var: {:.2}, Mod: {:.2}",
+            profile.damage, profile.damage_variance, profile.damage_mod
+        )));
+        lines.push(Line::from(format!(
+            "  Range: {:.2}, MaxVel: {:.2}, Offense: {:.2}",
+            profile.weapon_length, profile.max_velocity, profile.weapon_offense
+        )));
+        lines.push(Line::from(format!(
+            "  MaxVelEst: {}",
+            profile.max_velocity_estimated
+        )));
+    }
+
+    if !object.spell_book.is_empty() {
+        lines.push(Line::from("-- Spell Book --"));
+        for &spell_id in object.spell_book {
+            let name = spell_lookup
+                .and_then(|m| m.get(spell_id))
+                .map(|s| s.name.as_str())
+                .unwrap_or("Unknown");
+            lines.push(Line::from(format!("  #{} - {}", spell_id, name)));
+        }
+    }
+
+    if !object.properties.ints.0.is_empty() {
+        lines.push(Line::from("-- Int Properties --"));
+        for (k, v) in object.properties.ints.iter() {
+            lines.push(Line::from(format!("  {:?}: {}", k, v)));
+        }
+    }
+    if !object.properties.int64s.0.is_empty() {
+        lines.push(Line::from("-- Int64 Properties --"));
+        for (k, v) in object.properties.int64s.iter() {
+            lines.push(Line::from(format!("  {:?}: {}", k, v)));
+        }
+    }
+    if !object.properties.bools.0.is_empty() {
+        lines.push(Line::from("-- Bool Properties --"));
+        for (k, v) in object.properties.bools.iter() {
+            lines.push(Line::from(format!("  {:?}: {}", k, v)));
+        }
+    }
+    if !object.properties.floats.0.is_empty() {
+        lines.push(Line::from("-- Float Properties --"));
+        for (k, v) in object.properties.floats.iter() {
+            lines.push(Line::from(format!("  {:?}: {:.4}", k, v)));
+        }
+    }
+    if !object.properties.strings.0.is_empty() {
+        lines.push(Line::from("-- String Properties --"));
+        for (k, v) in object.properties.strings.iter() {
+            lines.push(Line::from(format!("  {:?}: {}", k, v)));
+        }
+    }
+    if !object.properties.dids.0.is_empty() {
+        lines.push(Line::from("-- DataID Properties --"));
+        for (k, v) in object.properties.dids.iter() {
+            lines.push(Line::from(format!("  {:?}: {}", k, v)));
+        }
+    }
+    if !object.properties.iids.0.is_empty() {
+        lines.push(Line::from("-- InstanceID Properties --"));
+        for (k, v) in object.properties.iids.iter() {
+            lines.push(Line::from(format!("  {:?}: {}", k, v)));
+        }
+    }
 }
 
 pub fn get_details_info(

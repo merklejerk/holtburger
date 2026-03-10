@@ -15,6 +15,7 @@ pub mod entity;
 pub mod events;
 pub mod handlers;
 pub mod hydration;
+pub mod inspect;
 pub mod magic;
 pub mod player;
 pub mod spatial;

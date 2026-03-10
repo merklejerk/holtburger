@@ -4,7 +4,9 @@ use ratatui::layout::Rect;
 
 use super::render::{EquipTabLine, get_lines, render_equip_tab};
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, CommandTarget, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, CommandTarget, InspectTarget, Interaction, TabController, UpdateResult, Verb,
+};
 
 #[derive(Default, Debug, Clone)]
 pub struct EquipTab {
@@ -62,7 +64,13 @@ impl TabController for EquipTab {
                     false
                 };
 
-                verbs.push(Verb::new(vec![AppAction::Assess { guid }], 'a', "Assess"));
+                verbs.push(Verb::new(
+                    vec![AppAction::Assess {
+                        target: InspectTarget::Entity(guid),
+                    }],
+                    'a',
+                    "Assess",
+                ));
 
                 if interaction.is_none()
                     || matches!(interaction, Some(Interaction::Targeting { target_guid }) if *target_guid != guid)

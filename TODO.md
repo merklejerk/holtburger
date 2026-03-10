@@ -76,7 +76,7 @@
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
-- [ ] Search/filter on list tabs.
+- [ ] Search/filter on list tabs. (Plan: [docs/plans/dashboard-tab-filter-plan.md](docs/plans/dashboard-tab-filter-plan.md))
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
@@ -193,6 +193,7 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] Enter shortcut to use mana charge on self.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

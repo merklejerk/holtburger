@@ -333,15 +333,15 @@ The dry run says the work should execute in small slices, but the phase structur
 ## Execution Checklist
 
 ### Slice 1: Footer Input Foundation
-- [ ] Add `Text` support to `VerbInputKind`.
-- [ ] Extend `VerbInputEvent` so text submission does not require numeric parsing.
-- [ ] Update `VerbInputState` constructors/handlers for free-text input.
-- [ ] Verify Inventory Split still compiles and behaves the same.
+- [x] Add `Text` support to `VerbInputKind`.
+- [x] Extend `VerbInputEvent` so text submission does not require numeric parsing.
+- [x] Update `VerbInputState` constructors/handlers for free-text input.
+- [x] Verify Inventory Split still compiles and behaves the same.
 
 ### Slice 2: Footer Rendering Foundation
-- [ ] Teach `render_footer_text_input(...)` to render both quantity and text prompts.
-- [ ] Keep dashboard cursor placement correct for empty and non-empty text input.
-- [ ] Confirm no changes are needed in `GameState::render(...)`.
+- [x] Teach `render_footer_text_input(...)` to render both quantity and text prompts.
+- [x] Keep dashboard cursor placement correct for empty and non-empty text input.
+- [x] Confirm no changes are needed in `GameState::render(...)`.
 
 ### Slice 3: Shared Filter Plumbing
 - [ ] Add `BeginTabFilterInput { tab: DashboardTab }` to `AppUiAction`.
@@ -401,7 +401,7 @@ The dry run says the work should execute in small slices, but the phase structur
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Complete Phase 1.
+- [x] Complete Phase 1.
 - [ ] Complete Phase 2.
 - [ ] Complete Phase 3.
 - [ ] Complete Phase 4.
@@ -410,10 +410,16 @@ The dry run says the work should execute in small slices, but the phase structur
 - [ ] Complete Phase 7.
 
 ### Decisions Log
+- Phase 1 uses a single `VerbInputState` for both quantity and text entry, with optional numeric bounds instead of a second parallel footer-input type.
+- `VerbInputEvent` now distinguishes quantity and text submission explicitly, which keeps numeric flows type-safe while allowing empty text submission later for filter-clear semantics.
 - Default fuzzy behavior is case-insensitive subsequence matching, not substring-only matching.
 - Multiple space-separated tokens combine by union.
 - Filtering is inclusion-only and must never reorder a tab's canonical sequence.
 - Active filter state is tab-local, not global.
+
+### Verification Log
+- 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 1 changes.
+- 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/types.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/render.rs`, or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`.
 
 ### Open Questions
 - Do we want filter matching to stay limited to visible names/labels, or should Nearby/Inventory also match secondary metadata such as container status or item class names later?

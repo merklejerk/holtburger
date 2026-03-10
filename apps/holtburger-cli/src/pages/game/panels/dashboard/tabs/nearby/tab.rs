@@ -13,8 +13,9 @@ use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, DashboardTab, FilterInputSession, InspectTarget, Interaction,
-    TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
+    AppAction, AppUiAction, DashboardTab, FilterInputSession, FooterVerbVisibility,
+    InspectTarget, Interaction, TabController, TabFilterState, UpdateResult, Verb,
+    VerbInputEvent, VerbInputState,
 };
 use crate::utils::{
     format_item_name, fuzzy_subsequence_match, normalize_filter_tokens,
@@ -418,7 +419,11 @@ impl TabController for NearbyTab {
             },
             'f',
             "Filter",
-        ));
+        ).with_footer_visibility(if self.active_filter.is_some() {
+            FooterVerbVisibility::Hidden
+        } else {
+            FooterVerbVisibility::Visible
+        }));
 
         verbs
     }

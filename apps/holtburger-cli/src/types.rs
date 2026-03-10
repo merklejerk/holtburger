@@ -30,6 +30,14 @@ pub struct Verb {
     pub action: AppAction,
     pub shortcut: char,
     pub label: Cow<'static, str>,
+    pub footer_visibility: FooterVerbVisibility,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FooterVerbVisibility {
+    #[default]
+    Visible,
+    Hidden,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +184,17 @@ impl Verb {
             action: action.into(),
             shortcut,
             label: label.into(),
+            footer_visibility: FooterVerbVisibility::Visible,
         }
+    }
+
+    pub fn with_footer_visibility(mut self, footer_visibility: FooterVerbVisibility) -> Self {
+        self.footer_visibility = footer_visibility;
+        self
+    }
+
+    pub fn is_visible_in_footer(&self) -> bool {
+        self.footer_visibility == FooterVerbVisibility::Visible
     }
 
     pub fn display_label(&self) -> String {

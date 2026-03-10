@@ -1,4 +1,5 @@
 use crate::hydration::WorldObjectPropertiesHydrationExt;
+use crate::identify::{self, IdentifyTarget};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PhysicsState, PropertyInstanceId,
@@ -6,7 +7,7 @@ use holtburger_common::properties::{
     WorldObjectProperties, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{Guid, Vector3};
-use holtburger_protocol::messages::IdentifyObjectResponseEventData;
+use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
@@ -67,6 +68,27 @@ impl Entity {
         self.properties.apply(update);
     }
 
+    pub fn apply_identify_response(&mut self, data: &IdentifyObjectResponseEventData) -> bool {
+        identify::apply_identify_response(
+            IdentifyTarget {
+                properties: &mut self.properties,
+                armor_profile: &mut self.armor_profile,
+                creature_profile: &mut self.creature_profile,
+                weapon_profile: &mut self.weapon_profile,
+                hook_profile: &mut self.hook_profile,
+                armor_levels: &mut self.armor_levels,
+                spell_book: &mut self.spell_book,
+                armor_highlight: &mut self.armor_highlight,
+                armor_color: &mut self.armor_color,
+                weapon_highlight: &mut self.weapon_highlight,
+                weapon_color: &mut self.weapon_color,
+                resist_highlight: &mut self.resist_highlight,
+                resist_color: &mut self.resist_color,
+            },
+            data,
+        )
+    }
+
     pub fn set_container_id(&mut self, val: Option<Guid>) {
         self.set_iid_prop(PropertyInstanceId::Container, val.unwrap_or(Guid::NULL))
     }
@@ -108,36 +130,6 @@ impl Entity {
 
         // Hydrate properties from the description (using common mapping logic)
         self.properties.hydrate_from_odd(data);
-    }
-
-    pub fn apply_identify_response(&mut self, data: &IdentifyObjectResponseEventData) {
-        self.properties.merge(data.properties.clone());
-
-        if data.armor_profile.is_some() {
-            self.armor_profile = data.armor_profile.clone();
-        }
-        if data.creature_profile.is_some() {
-            self.creature_profile = data.creature_profile.clone();
-        }
-        if data.weapon_profile.is_some() {
-            self.weapon_profile = data.weapon_profile.clone();
-        }
-        if data.hook_profile.is_some() {
-            self.hook_profile = data.hook_profile.clone();
-        }
-        if data.armor_levels.is_some() {
-            self.armor_levels = data.armor_levels.clone();
-        }
-        if !data.spell_book.is_empty() {
-            self.spell_book = data.spell_book.clone();
-        }
-
-        self.armor_highlight = data.armor_highlight;
-        self.armor_color = data.armor_color;
-        self.weapon_highlight = data.weapon_highlight;
-        self.weapon_color = data.weapon_color;
-        self.resist_highlight = data.resist_highlight;
-        self.resist_color = data.resist_color;
     }
 
     pub fn new(guid: Guid, name: String, position: WorldPosition) -> Self {

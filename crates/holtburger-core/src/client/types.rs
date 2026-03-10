@@ -166,10 +166,7 @@ pub enum ClientViewEvent {
     VendorStateUpdated {
         vendor: Option<VendorState>,
     },
-    VendorItemIdentified {
-        vendor_guid: Guid,
-        item: Box<holtburger_world::vendor::CoreVendorItem>,
-    },
+    VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
     TradeStateUpdated {
         trade: Option<TradeState>,
     },

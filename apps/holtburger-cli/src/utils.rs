@@ -67,6 +67,34 @@ pub fn format_cost(n: u64) -> String {
     }
 }
 
+pub fn normalize_filter_tokens(pattern: &str) -> Vec<String> {
+    pattern
+        .split_whitespace()
+        .map(|token| token.to_ascii_lowercase())
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+pub fn fuzzy_subsequence_match(needle: &str, haystack: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+
+    let mut needle_chars = needle.chars().map(|c| c.to_ascii_lowercase());
+    let mut current = needle_chars.next();
+
+    for haystack_char in haystack.chars().map(|c| c.to_ascii_lowercase()) {
+        if Some(haystack_char) == current {
+            current = needle_chars.next();
+            if current.is_none() {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![text.to_string()];

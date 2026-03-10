@@ -12,12 +12,18 @@ use ratatui::layout::Rect;
 use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb};
+use crate::types::{
+    AppAction, AppUiAction, DashboardTab, FilterInputSession, InspectTarget, Interaction,
+    TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
+};
+use crate::utils::normalize_filter_tokens;
 
 #[derive(Default, Debug, Clone)]
 pub struct NearbyTab {
     pub selected_index: usize,
     pub list_state: ratatui::widgets::ListState,
+    active_filter: Option<TabFilterState>,
+    filter_input: Option<FilterInputSession>,
 }
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
@@ -119,6 +125,38 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
 }
 
 impl NearbyTab {
+    fn begin_filter_input(&mut self, view: &ViewState) -> Option<UpdateResult> {
+        if view.active_interaction.is_some() {
+            return None;
+        }
+
+        let mut input = VerbInputState::text("Filter");
+        if let Some(active_filter) = &self.active_filter {
+            input.input = active_filter.raw_pattern.clone();
+        }
+
+        self.filter_input = Some(FilterInputSession {
+            input,
+            clears_active_filter_on_cancel: self.active_filter.is_some(),
+        });
+
+        Some(UpdateResult::new().with_redraw(true))
+    }
+
+    fn apply_filter_input(&mut self, raw_pattern: String) -> UpdateResult {
+        let trimmed = raw_pattern.trim().to_string();
+        self.active_filter = if trimmed.is_empty() {
+            None
+        } else {
+            Some(TabFilterState {
+                tokens: normalize_filter_tokens(&trimmed),
+                raw_pattern: trimmed,
+            })
+        };
+        self.filter_input = None;
+        UpdateResult::new().with_redraw(true)
+    }
+
     fn get_selected_guid(&self, data: &GameData) -> Option<Guid> {
         let entities = get_entities(data);
         entities.get(self.selected_index).map(|(e, _, _)| e.guid)
@@ -332,7 +370,18 @@ impl TabController for NearbyTab {
                     }
                 }
             }
+
         }
+
+        verbs.push(Verb::new(
+            AppAction::UiAction {
+                action: AppUiAction::BeginTabFilterInput {
+                    tab: DashboardTab::Nearby,
+                },
+            },
+            'f',
+            "Filter",
+        ));
 
         verbs
     }
@@ -386,6 +435,56 @@ impl TabController for NearbyTab {
                 Some(UpdateResult::new().with_action(verb.action))
             }
             _ => None,
+        }
+    }
+
+    fn handle_ui_action(
+        &mut self,
+        action: &AppUiAction,
+        _data: &GameData,
+        view: &ViewState,
+    ) -> Option<UpdateResult> {
+        match action {
+            AppUiAction::BeginTabFilterInput {
+                tab: DashboardTab::Nearby,
+            } => self.begin_filter_input(view),
+            _ => None,
+        }
+    }
+
+    fn footer_input(&self) -> Option<&VerbInputState> {
+        self.filter_input.as_ref().map(|session| &session.input)
+    }
+
+    fn footer_header(&self) -> Option<String> {
+        self.active_filter
+            .as_ref()
+            .map(|filter| format!("[F]ilter: {}", filter.raw_pattern))
+    }
+
+    fn handle_footer_input(
+        &mut self,
+        key: KeyEvent,
+        _data: &GameData,
+        _view: &ViewState,
+    ) -> Option<UpdateResult> {
+        let session = self.filter_input.as_mut()?;
+
+        match session.input.handle_key(key) {
+            VerbInputEvent::Changed | VerbInputEvent::Ignored => {
+                Some(UpdateResult::new().with_redraw(true))
+            }
+            VerbInputEvent::Cancelled => {
+                if session.clears_active_filter_on_cancel {
+                    self.active_filter = None;
+                }
+                self.filter_input = None;
+                Some(UpdateResult::new().with_redraw(true))
+            }
+            VerbInputEvent::SubmittedText(raw_pattern) => Some(self.apply_filter_input(raw_pattern)),
+            VerbInputEvent::Invalid(_) | VerbInputEvent::SubmittedQuantity(_) => {
+                Some(UpdateResult::new().with_redraw(true))
+            }
         }
     }
 }

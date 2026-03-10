@@ -204,7 +204,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 let val_str = if multiplicative {
                     format!("x{:.2}", enchant.stat_mod_value)
                 } else {
-                    format!("{:+}", enchant.stat_mod_value)
+                    format!("{:+.2}", enchant.stat_mod_value)
                 };
 
                 list_items.push(
@@ -240,7 +240,7 @@ fn get_stats_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<
                 let val_str = if multiplicative {
                     format!("x{:.2}", enchant.stat_mod_value)
                 } else {
-                    format!("{:+}", enchant.stat_mod_value)
+                    format!("{:+.2}", enchant.stat_mod_value)
                 };
 
                 list_items.push(

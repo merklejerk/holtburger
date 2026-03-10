@@ -215,3 +215,4 @@
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
 - [x] Is `WorldObjectPropertyAccessors` a pointless abstraction?
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
+- [ ] Do tabs need to expose `item_count()`?

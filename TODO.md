@@ -73,10 +73,10 @@
 - [x] Context panel should reset to scroll offset 0.
 - [x] Resolve Spellbook entries in debug info.
 - [x] Additive resist buffs make the final derived resistance LOWER? ResistBludgeon goes from 1.0 to 0.67 when `Bludgeon Shield` (+0.67) is applied. Is the base resistance supposed to be 0?
+- [x] Search/filter on list tabs. (Plan: [docs/plans/dashboard-tab-filter-plan.md](docs/plans/dashboard-tab-filter-plan.md))
 - [ ] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
-- [ ] Search/filter on list tabs. (Plan: [docs/plans/dashboard-tab-filter-plan.md](docs/plans/dashboard-tab-filter-plan.md))
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
@@ -178,6 +178,7 @@
 - [x] Some items (E.g., Ancient Falatacot Trinket) can be Used, but they just get destroyed and do nothing. USABLE flag is not enough to signal if we should offer Use verb on them. The client says that item cannot be used though!
 - [x] Display encumbrance (sticky line in inv tab?).
 - [x] Vendor list is janky: assess/debug do nothing and all have max u32 qty.
+- [x] Enter shortcut to use mana charge on self.
 - [ ] Melee combat.
     - [ ] Auto-attack on target.
 - [ ] Missile combat.
@@ -193,7 +194,6 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] Enter shortcut to use mana charge on self.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -214,5 +214,5 @@
 - [x] Split `holtburger-core` up into `holtburger-transport` (networking) and `holtburger-session` (world/player session state management)?
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
 - [x] Is `WorldObjectPropertyAccessors` a pointless abstraction?
+- [x] Do tabs need to expose `item_count()`?
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
-- [ ] Do tabs need to expose `item_count()`?

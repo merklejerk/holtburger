@@ -1,7 +1,7 @@
 use super::tabs::classification;
 use crate::pages::game::GameData;
 use crate::pages::game::ViewState;
-use crate::types::CommandTarget;
+use crate::types::InspectTarget;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
@@ -24,7 +24,7 @@ pub struct PlayerDebugInfo<'a> {
 pub fn get_debug_info(
     data: &GameData,
     view: Option<&ViewState>,
-    target: &CommandTarget,
+    target: InspectTarget,
     name_lookup: impl Fn(Guid) -> Option<String>,
     spell_lookup: Option<&SpellCatalog>,
     player_info: Option<PlayerDebugInfo>,
@@ -32,10 +32,10 @@ pub fn get_debug_info(
     let mut lines = Vec::new();
 
     match target {
-        CommandTarget::VendorItem(guid) => {
+        InspectTarget::VendorItem(guid) => {
             let Some(v) = view
                 .and_then(|v| v.vendor.as_ref())
-                .and_then(|vendor| vendor.items.iter().find(|i| i.guid == *guid))
+                .and_then(|vendor| vendor.items.iter().find(|i| i.guid == guid))
             else {
                 return lines;
             };
@@ -43,8 +43,8 @@ pub fn get_debug_info(
             lines.push(Line::from(format!("ITEM: {}", v.name())));
             push_object_debug_info(&mut lines, &object, spell_lookup);
         }
-        CommandTarget::Entity(guid) | CommandTarget::EntityWithSlot(guid, _) => {
-            let Some(e) = data.entities.get(guid) else {
+        InspectTarget::Entity(guid) => {
+            let Some(e) = data.entities.get(&guid) else {
                 return lines;
             };
             lines.push(Line::from(format!("DEBUG INFO: {}", e.name())));
@@ -561,90 +561,6 @@ pub fn get_debug_info(
                 }
             }
         }
-        CommandTarget::Enchantment(enchant) => {
-            lines.push(Line::from(format!(
-                "DEBUG ENCHANTMENT: Spell #{}",
-                enchant.spell_id
-            )));
-            lines.push(Line::from(format!("Layer:          {}", enchant.layer)));
-            lines.push(Line::from(format!(
-                "Category:       {}",
-                enchant.spell_category
-            )));
-            lines.push(Line::from(format!(
-                "Power Level:    {}",
-                enchant.power_level
-            )));
-            lines.push(Line::from(format!(
-                "Duration:       {}",
-                format_duration(enchant.duration)
-            )));
-            lines.push(Line::from(format!(
-                "Stat Mod Type:  0x{:08X}",
-                enchant.stat_mod_type
-            )));
-            let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-            for (name, _) in flags.iter_names() {
-                lines.push(Line::from(format!("  [X] {}", name)));
-            }
-
-            let key_name = enchantment_stat_key_name(enchant, flags);
-
-            let key_display = key_name.unwrap_or_else(|| format!("{}", enchant.stat_mod_key));
-            lines.push(Line::from(format!("Stat Mod Key:   {}", key_display)));
-            lines.push(Line::from(format!(
-                "Stat Mod Value: {:.2}",
-                enchant.stat_mod_value
-            )));
-            if let Some(set_id) = enchant.spell_set_id {
-                lines.push(Line::from(format!("Spell Set ID:   {}", set_id)));
-            }
-            lines.push(Line::from(format!(
-                "Caster GUID:    {:08X}",
-                enchant.caster_guid
-            )));
-            lines.push(Line::from(format!(
-                "Degrade Limit:  {:.2}",
-                enchant.degrade_limit
-            )));
-            lines.push(Line::from(format!(
-                "Last Degraded:  {:.1}",
-                enchant.last_time_degraded
-            )));
-        }
-        CommandTarget::Stat(st, xp_cost, sp_cost) => {
-            lines.push(Line::from(format!("DEBUG INFO: {:?}", st)));
-            lines.push(Line::from(format!("XP Cost:    {:?}", xp_cost)));
-            lines.push(Line::from(format!("SP Cost:    {:?}", sp_cost)));
-        }
-        CommandTarget::Spell(spell_id) => {
-            lines.push(Line::from(format!("DEBUG INFO: Spell {}", spell_id)));
-            lines.push(Line::from(format!("Spell ID:   {}", spell_id)));
-
-            if let Some(info) = spell_lookup.and_then(|m| m.get(*spell_id)) {
-                lines.push(Line::from(format!("Name:       {}", info.name)));
-                lines.push(Line::from(format!("Level:      {}", info.power)));
-                lines.push(Line::from(format!("Mana:       {}", info.base_mana)));
-                lines.push(Line::from(format!("School:     {:?}", info.school)));
-                lines.push(Line::from(format!("Category:   {}", info.category)));
-                lines.push(Line::from(format!("Desc:       {}", info.description)));
-                lines.push(Line::from(format!("Mana Mod:   {}", info.mana_mod)));
-
-                // Formula Version: 1=I, 2=II, etc.
-                lines.push(Line::from(format!("Formula V:  {}", info.formula_version)));
-
-                // Components (8 slots)
-                let comps: Vec<String> = info
-                    .components
-                    .iter()
-                    .map(|id| format!("{:#X}", id))
-                    .collect();
-                lines.push(Line::from(format!("Comps:      {}", comps.join(", "))));
-            } else {
-                lines.push(Line::from("Info:       (Loading...)".to_string()));
-            }
-        }
-        CommandTarget::None => {}
     }
 
     lines
@@ -869,63 +785,152 @@ fn push_object_debug_info(
     }
 }
 
-pub fn get_details_info(
-    _data: &GameData,
-    target: &CommandTarget,
+pub fn get_spell_debug_info(spell_id: u32, spell_lookup: Option<&SpellCatalog>) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(format!("DEBUG INFO: Spell {}", spell_id)));
+    lines.push(Line::from(format!("Spell ID:   {}", spell_id)));
+
+    if let Some(info) = spell_lookup.and_then(|m| m.get(spell_id)) {
+        lines.push(Line::from(format!("Name:       {}", info.name)));
+        lines.push(Line::from(format!("Level:      {}", info.power)));
+        lines.push(Line::from(format!("Mana:       {}", info.base_mana)));
+        lines.push(Line::from(format!("School:     {:?}", info.school)));
+        lines.push(Line::from(format!("Category:   {}", info.category)));
+        lines.push(Line::from(format!("Desc:       {}", info.description)));
+        lines.push(Line::from(format!("Mana Mod:   {}", info.mana_mod)));
+        lines.push(Line::from(format!("Formula V:  {}", info.formula_version)));
+
+        let comps: Vec<String> = info
+            .components
+            .iter()
+            .map(|id| format!("{:#X}", id))
+            .collect();
+        lines.push(Line::from(format!("Comps:      {}", comps.join(", "))));
+    } else {
+        lines.push(Line::from("Info:       (Loading...)".to_string()));
+    }
+
+    lines
+}
+
+pub fn get_enchantment_debug_info(
+    enchant: &Enchantment,
+    _spell_lookup: Option<&SpellCatalog>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(format!(
+        "DEBUG ENCHANTMENT: Spell #{}",
+        enchant.spell_id
+    )));
+    lines.push(Line::from(format!("Layer:          {}", enchant.layer)));
+    lines.push(Line::from(format!(
+        "Category:       {}",
+        enchant.spell_category
+    )));
+    lines.push(Line::from(format!(
+        "Power Level:    {}",
+        enchant.power_level
+    )));
+    lines.push(Line::from(format!(
+        "Duration:       {}",
+        format_duration(enchant.duration)
+    )));
+    lines.push(Line::from(format!(
+        "Stat Mod Type:  0x{:08X}",
+        enchant.stat_mod_type
+    )));
+    let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
+    for (name, _) in flags.iter_names() {
+        lines.push(Line::from(format!("  [X] {}", name)));
+    }
+
+    let key_name = enchantment_stat_key_name(enchant, flags);
+    let key_display = key_name.unwrap_or_else(|| format!("{}", enchant.stat_mod_key));
+    lines.push(Line::from(format!("Stat Mod Key:   {}", key_display)));
+    lines.push(Line::from(format!(
+        "Stat Mod Value: {:.2}",
+        enchant.stat_mod_value
+    )));
+    if let Some(set_id) = enchant.spell_set_id {
+        lines.push(Line::from(format!("Spell Set ID:   {}", set_id)));
+    }
+    lines.push(Line::from(format!(
+        "Caster GUID:    {:08X}",
+        enchant.caster_guid
+    )));
+    lines.push(Line::from(format!(
+        "Degrade Limit:  {:.2}",
+        enchant.degrade_limit
+    )));
+    lines.push(Line::from(format!(
+        "Last Degraded:  {:.1}",
+        enchant.last_time_degraded
+    )));
+
+    lines
+}
+
+pub fn get_spell_details_info(
+    spell_id: u32,
     spell_lookup: Option<&SpellCatalog>,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
 
-    match target {
-        CommandTarget::Spell(spell_id) => {
-            if let Some(info) = spell_lookup.and_then(|m| m.get(*spell_id)) {
-                lines.push(Line::from(info.name.clone()));
-                lines.push(Line::from(format!("ID: {}", spell_id)));
-                lines.push(Line::from(format!("School: {:?}", info.school)));
-                lines.push(Line::from(format!("Power: {}", info.power)));
-                lines.push(Line::from(format!("Mana Cost: {}", info.base_mana)));
+    if let Some(info) = spell_lookup.and_then(|m| m.get(spell_id)) {
+        lines.push(Line::from(info.name.clone()));
+        lines.push(Line::from(format!("ID: {}", spell_id)));
+        lines.push(Line::from(format!("School: {:?}", info.school)));
+        lines.push(Line::from(format!("Power: {}", info.power)));
+        lines.push(Line::from(format!("Mana Cost: {}", info.base_mana)));
 
-                if !info.description.trim().is_empty() {
-                    lines.push(Line::from(""));
-                    lines.push(Line::from(info.description.clone()));
-                }
-            } else {
-                lines.push(Line::from(format!("Spell #{}", spell_id)));
-                lines.push(Line::from(
-                    "Details unavailable (spell data still loading).",
-                ));
-            }
+        if !info.description.trim().is_empty() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(info.description.clone()));
         }
-        CommandTarget::Enchantment(enchant) => {
-            let spell_name = spell_lookup
-                .and_then(|m| m.get(enchant.spell_id as u32))
-                .map(|s| s.name.clone())
-                .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
-
-            lines.push(Line::from(spell_name));
-            lines.push(Line::from(format!(
-                "Duration: {}",
-                format_duration(enchant.duration)
-            )));
-
-            let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
-            if let Some(key_display) = enchantment_stat_key_name(enchant, flags) {
-                let sign = if enchant.stat_mod_value >= 0.0 {
-                    "+"
-                } else {
-                    ""
-                };
-                lines.push(Line::from(format!(
-                    "Effect: {}{} {}",
-                    sign, enchant.stat_mod_value, key_display
-                )));
-            }
-
-            lines.push(Line::from(format!("Layer: {}", enchant.layer)));
-            lines.push(Line::from(format!("Category: {}", enchant.spell_category)));
-        }
-        _ => {}
+    } else {
+        lines.push(Line::from(format!("Spell #{}", spell_id)));
+        lines.push(Line::from(
+            "Details unavailable (spell data still loading).",
+        ));
     }
+
+    lines
+}
+
+pub fn get_enchantment_details_info(
+    enchant: &Enchantment,
+    spell_lookup: Option<&SpellCatalog>,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    let spell_name = spell_lookup
+        .and_then(|m| m.get(enchant.spell_id as u32))
+        .map(|s| s.name.clone())
+        .unwrap_or_else(|| format!("Spell #{}", enchant.spell_id));
+
+    lines.push(Line::from(spell_name));
+    lines.push(Line::from(format!(
+        "Duration: {}",
+        format_duration(enchant.duration)
+    )));
+
+    let flags = EnchantmentTypeFlags::from_bits_truncate(enchant.stat_mod_type);
+    if let Some(key_display) = enchantment_stat_key_name(enchant, flags) {
+        let sign = if enchant.stat_mod_value >= 0.0 {
+            "+"
+        } else {
+            ""
+        };
+        lines.push(Line::from(format!(
+            "Effect: {}{} {}",
+            sign, enchant.stat_mod_value, key_display
+        )));
+    }
+
+    lines.push(Line::from(format!("Layer: {}", enchant.layer)));
+    lines.push(Line::from(format!("Category: {}", enchant.spell_category)));
 
     lines
 }

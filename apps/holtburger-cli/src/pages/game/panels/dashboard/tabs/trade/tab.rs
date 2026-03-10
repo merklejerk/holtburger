@@ -1,13 +1,21 @@
 use crossterm::event::{KeyCode, KeyEvent};
+use holtburger_common::Guid;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 
 use super::render::render_trade_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, CommandTarget, InspectTarget, Interaction, TabController, TradeFocus,
+    AppAction, InspectTarget, Interaction, TabController, TradeFocus,
     UpdateResult, Verb,
 };
+
+#[derive(Debug, Clone, Copy)]
+enum TradeSelection {
+    Entity(Guid),
+    VendorItem(Guid),
+    None,
+}
 
 #[derive(Default, Debug, Clone)]
 pub struct TradeTab {
@@ -17,7 +25,7 @@ pub struct TradeTab {
 }
 
 impl TradeTab {
-    fn get_target(&self, data: &GameData, view: &ViewState) -> CommandTarget {
+    fn get_selection(&self, data: &GameData, view: &ViewState) -> TradeSelection {
         if let Some(trade) = &data.trade {
             let items = match self.trade_focus {
                 TradeFocus::Local => &trade.self_side.items,
@@ -26,14 +34,14 @@ impl TradeTab {
             if let Some(&guid) = items.get(self.selected_index)
                 && let Some(entity) = data.entities.get(&guid)
             {
-                return CommandTarget::Entity(entity.guid);
+                return TradeSelection::Entity(entity.guid);
             }
         } else if let Some(vendor) = &view.vendor
             && let Some(m) = vendor.items.get(self.selected_index)
         {
-            return CommandTarget::VendorItem(m.guid);
+            return TradeSelection::VendorItem(m.guid);
         }
-        CommandTarget::None
+        TradeSelection::None
     }
 
     fn item_count(&self, data: &GameData, view: &ViewState) -> usize {
@@ -62,7 +70,7 @@ impl TabController for TradeTab {
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
-        let target = self.get_target(data, view);
+        let selection = self.get_selection(data, view);
 
         match interaction {
             None | Some(Interaction::Targeting { .. }) => {}
@@ -71,9 +79,9 @@ impl TabController for TradeTab {
             }
         }
 
-        if let Some(target_item) = match &target {
-            CommandTarget::VendorItem(guid) => Some(InspectTarget::VendorItem(*guid)),
-            CommandTarget::Entity(guid) => Some(InspectTarget::Entity(*guid)),
+        if let Some(target_item) = match selection {
+            TradeSelection::VendorItem(guid) => Some(InspectTarget::VendorItem(guid)),
+            TradeSelection::Entity(guid) => Some(InspectTarget::Entity(guid)),
             _ => None,
         } {
             verbs.push(Verb::new(
@@ -85,7 +93,7 @@ impl TabController for TradeTab {
             ));
             verbs.push(Verb::new(
                 vec![AppAction::QueryDebugInfo {
-                    target: target_item.as_command_target(),
+                    target: target_item,
                 }],
                 'g',
                 "Debug",
@@ -93,7 +101,7 @@ impl TabController for TradeTab {
         }
 
         if let Some(vendor) = &view.vendor {
-            if let CommandTarget::VendorItem(guid) = target {
+            if let TradeSelection::VendorItem(guid) = selection {
                 verbs.push(Verb::new(
                     vec![AppAction::BuyFromVendor {
                         vendor: vendor.vendor_guid,

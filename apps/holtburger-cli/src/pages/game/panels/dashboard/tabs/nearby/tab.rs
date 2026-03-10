@@ -16,7 +16,7 @@ use crate::types::{
     AppAction, AppUiAction, DashboardTab, FilterInputSession, InspectTarget, Interaction,
     TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
-use crate::utils::normalize_filter_tokens;
+use crate::utils::{format_item_name, fuzzy_subsequence_match, normalize_filter_tokens};
 
 #[derive(Default, Debug, Clone)]
 pub struct NearbyTab {
@@ -125,6 +125,51 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
 }
 
 impl NearbyTab {
+    pub(crate) fn visible_entities<'a>(&self, data: &'a GameData) -> Vec<(&'a Entity, f32, usize)> {
+        let entities = get_entities(data);
+        let Some(active_filter) = &self.active_filter else {
+            return entities;
+        };
+
+        if active_filter.tokens.is_empty() {
+            return entities;
+        }
+
+        let mut included_guids = HashSet::new();
+        let mut ancestor_path = Vec::new();
+
+        for (entity, _, depth) in &entities {
+            ancestor_path.truncate(*depth);
+
+            let display_name = format_item_name(*entity, entity.guid);
+            let matches_filter = active_filter
+                .tokens
+                .iter()
+                .any(|token| fuzzy_subsequence_match(token, &display_name));
+
+            if matches_filter {
+                included_guids.insert(entity.guid);
+                included_guids.extend(ancestor_path.iter().copied());
+            }
+
+            ancestor_path.push(entity.guid);
+        }
+
+        entities
+            .into_iter()
+            .filter(|(entity, _, _)| included_guids.contains(&entity.guid))
+            .collect()
+    }
+
+    fn clamp_selected_index(&mut self, data: &GameData) {
+        let count = self.visible_entities(data).len();
+        if count == 0 {
+            self.selected_index = 0;
+        } else {
+            self.selected_index = self.selected_index.min(count - 1);
+        }
+    }
+
     fn begin_filter_input(&mut self, view: &ViewState) -> Option<UpdateResult> {
         if view.active_interaction.is_some() {
             return None;
@@ -143,7 +188,7 @@ impl NearbyTab {
         Some(UpdateResult::new().with_redraw(true))
     }
 
-    fn apply_filter_input(&mut self, raw_pattern: String) -> UpdateResult {
+    fn apply_filter_input(&mut self, raw_pattern: String, data: &GameData) -> UpdateResult {
         let trimmed = raw_pattern.trim().to_string();
         self.active_filter = if trimmed.is_empty() {
             None
@@ -154,16 +199,17 @@ impl NearbyTab {
             })
         };
         self.filter_input = None;
+        self.clamp_selected_index(data);
         UpdateResult::new().with_redraw(true)
     }
 
     fn get_selected_guid(&self, data: &GameData) -> Option<Guid> {
-        let entities = get_entities(data);
+        let entities = self.visible_entities(data);
         entities.get(self.selected_index).map(|(e, _, _)| e.guid)
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
-        get_entities(data).len()
+        self.visible_entities(data).len()
     }
 }
 
@@ -465,7 +511,7 @@ impl TabController for NearbyTab {
     fn handle_footer_input(
         &mut self,
         key: KeyEvent,
-        _data: &GameData,
+        data: &GameData,
         _view: &ViewState,
     ) -> Option<UpdateResult> {
         let session = self.filter_input.as_mut()?;
@@ -477,11 +523,14 @@ impl TabController for NearbyTab {
             VerbInputEvent::Cancelled => {
                 if session.clears_active_filter_on_cancel {
                     self.active_filter = None;
+                    self.clamp_selected_index(data);
                 }
                 self.filter_input = None;
                 Some(UpdateResult::new().with_redraw(true))
             }
-            VerbInputEvent::SubmittedText(raw_pattern) => Some(self.apply_filter_input(raw_pattern)),
+            VerbInputEvent::SubmittedText(raw_pattern) => {
+                Some(self.apply_filter_input(raw_pattern, data))
+            }
             VerbInputEvent::Invalid(_) | VerbInputEvent::SubmittedQuantity(_) => {
                 Some(UpdateResult::new().with_redraw(true))
             }

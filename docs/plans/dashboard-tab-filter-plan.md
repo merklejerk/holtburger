@@ -363,10 +363,10 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Resolve the two-line footer budget cleanly.
 
 ### Slice 6: Nearby Visible-List Unification
-- [ ] Build one filtered visible-list helper for Nearby.
-- [ ] Reuse it for selection lookup, verb resolution, and render.
-- [ ] Include ancestor chains for matching descendants.
-- [ ] Clamp selection safely when the filtered list shrinks.
+- [x] Build one filtered visible-list helper for Nearby.
+- [x] Reuse it for selection lookup, verb resolution, and render.
+- [x] Include ancestor chains for matching descendants.
+- [x] Clamp selection safely when the filtered list shrinks.
 
 ### Slice 7: Inventory Visible-List Unification
 - [ ] Build one filtered visible-list helper for Inventory.
@@ -404,7 +404,7 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Complete Phase 1.
 - [x] Complete Phase 2.
 - [x] Complete Phase 3.
-- [ ] Complete Phase 4.
+- [x] Complete Phase 4.
 - [ ] Complete Phase 5.
 - [ ] Complete Phase 6.
 - [ ] Complete Phase 7.
@@ -416,6 +416,8 @@ The dry run says the work should execute in small slices, but the phase structur
 - Phase 2 added tab-local `active_filter` plus `filter_input` session state to Nearby, Inventory, and Spells, and seeded reopened editors from the committed raw pattern.
 - `Esc` in filter edit mode now clears the committed filter only when the editor was opened from an already-active filter; otherwise it behaves as a pure cancel.
 - Phase 3 resolves the active-filter footer budget by rendering a fixed two-line footer state (`header` + `verbs`) without relying on wrap behavior, while leaving the normal one-line verb bar unchanged.
+- Phase 4 implements Nearby filtering as a retain-pass over the canonical preorder entity list, matching on `format_item_name(...)` and including ancestor GUIDs for matched descendants so hierarchy and ordering stay intact.
+- Phase 4 clamps Nearby selection after filter changes instead of attempting semantic reselection; preserving the exact prior entity remains optional follow-up polish.
 - Default fuzzy behavior is case-insensitive subsequence matching, not substring-only matching.
 - Multiple space-separated tokens combine by union.
 - Filtering is inclusion-only and must never reorder a tab's canonical sequence.
@@ -428,6 +430,8 @@ The dry run says the work should execute in small slices, but the phase structur
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/types.rs`, `apps/holtburger-cli/src/utils.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/state.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`, or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/tab.rs`.
 - 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 3 footer/header active-filter rendering changes.
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/render.rs`.
+- 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 4 Nearby filtering changes.
+- 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs` or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/render.rs`.
 
 ### Open Questions
 - Do we want filter matching to stay limited to visible names/labels, or should Nearby/Inventory also match secondary metadata such as container status or item class names later?

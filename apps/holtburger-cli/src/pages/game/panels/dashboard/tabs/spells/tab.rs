@@ -8,7 +8,7 @@ use crate::types::{
     AppAction, AppUiAction, ContextView, DashboardTab, FilterInputSession, Interaction,
     TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
-use crate::utils::normalize_filter_tokens;
+use crate::utils::{fuzzy_subsequence_match, normalize_filter_tokens};
 
 #[derive(Default, Debug, Clone)]
 pub struct SpellsTab {
@@ -19,6 +19,39 @@ pub struct SpellsTab {
 }
 
 impl SpellsTab {
+    pub(crate) fn visible_spell_ids(&self, data: &GameData) -> Vec<u32> {
+        let mut spells = data.player_spells.clone();
+        spells.sort_by_key(|&sid| data.spell_name_or_fallback(sid));
+
+        let Some(active_filter) = &self.active_filter else {
+            return spells;
+        };
+
+        if active_filter.tokens.is_empty() {
+            return spells;
+        }
+
+        spells
+            .into_iter()
+            .filter(|&spell_id| {
+                let spell_name = data.spell_name_or_fallback(spell_id);
+                active_filter
+                    .tokens
+                    .iter()
+                    .any(|token| fuzzy_subsequence_match(token, &spell_name))
+            })
+            .collect()
+    }
+
+    fn clamp_selected_index(&mut self, data: &GameData) {
+        let count = self.visible_spell_ids(data).len();
+        if count == 0 {
+            self.selected_index = 0;
+        } else {
+            self.selected_index = self.selected_index.min(count - 1);
+        }
+    }
+
     fn begin_filter_input(&mut self, view: &ViewState) -> Option<UpdateResult> {
         if view.active_interaction.is_some() {
             return None;
@@ -37,7 +70,7 @@ impl SpellsTab {
         Some(UpdateResult::new().with_redraw(true))
     }
 
-    fn apply_filter_input(&mut self, raw_pattern: String) -> UpdateResult {
+    fn apply_filter_input(&mut self, raw_pattern: String, data: &GameData) -> UpdateResult {
         let trimmed = raw_pattern.trim().to_string();
         self.active_filter = if trimmed.is_empty() {
             None
@@ -48,17 +81,17 @@ impl SpellsTab {
             })
         };
         self.filter_input = None;
+        self.clamp_selected_index(data);
         UpdateResult::new().with_redraw(true)
     }
 
     fn get_selected_spell_id(&self, data: &GameData) -> Option<u32> {
-        let mut spells = data.player_spells.clone();
-        spells.sort_by_key(|&sid| data.spell_name_or_fallback(sid));
+        let spells = self.visible_spell_ids(data);
         spells.get(self.selected_index).copied()
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
-        data.player_spells.len()
+        self.visible_spell_ids(data).len()
     }
 }
 
@@ -227,7 +260,7 @@ impl TabController for SpellsTab {
     fn handle_footer_input(
         &mut self,
         key: KeyEvent,
-        _data: &GameData,
+        data: &GameData,
         _view: &ViewState,
     ) -> Option<UpdateResult> {
         let session = self.filter_input.as_mut()?;
@@ -239,11 +272,14 @@ impl TabController for SpellsTab {
             VerbInputEvent::Cancelled => {
                 if session.clears_active_filter_on_cancel {
                     self.active_filter = None;
+                    self.clamp_selected_index(data);
                 }
                 self.filter_input = None;
                 Some(UpdateResult::new().with_redraw(true))
             }
-            VerbInputEvent::SubmittedText(raw_pattern) => Some(self.apply_filter_input(raw_pattern)),
+            VerbInputEvent::SubmittedText(raw_pattern) => {
+                Some(self.apply_filter_input(raw_pattern, data))
+            }
             VerbInputEvent::Invalid(_) | VerbInputEvent::SubmittedQuantity(_) => {
                 Some(UpdateResult::new().with_redraw(true))
             }

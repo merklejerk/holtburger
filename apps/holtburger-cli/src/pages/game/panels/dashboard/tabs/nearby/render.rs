@@ -19,8 +19,15 @@ pub fn render_nearby_tab(
     _view: &ViewState,
     area: Rect,
 ) {
-    let items = get_list_items(tab, data);
-    let content_len = items.len();
+    let entities = tab.visible_entities(data);
+    let content_len = entities.len();
+    let selected_index = if content_len == 0 {
+        0
+    } else {
+        tab.selected_index.min(content_len - 1)
+    };
+
+    let items = get_list_items(data, entities, selected_index);
 
     let _height = area.height as usize;
 
@@ -28,11 +35,6 @@ pub fn render_nearby_tab(
         .highlight_style(theme::selection_style())
         .highlight_symbol(theme::SELECTION_SYMBOL);
 
-    let selected_index = if content_len == 0 {
-        0
-    } else {
-        tab.selected_index.min(content_len - 1)
-    };
     let list_state = &mut tab.list_state;
     list_state.select(Some(selected_index));
 
@@ -41,8 +43,11 @@ pub fn render_nearby_tab(
     crate::components::scroll::render_scrollbar(f, area, content_len, offset);
 }
 
-fn get_list_items(tab: &NearbyTab, data: &GameData) -> Vec<ListItem<'static>> {
-    let entities = tab.visible_entities(data);
+fn get_list_items(
+    data: &GameData,
+    entities: Vec<(&Entity, f32, usize)>,
+    selected_index: usize,
+) -> Vec<ListItem<'static>> {
     let container_counts = data.get_container_counts();
     let mut list_items = Vec::new();
 
@@ -56,7 +61,7 @@ fn get_list_items(tab: &NearbyTab, data: &GameData) -> Vec<ListItem<'static>> {
             e,
             display_dist,
             *depth,
-            i == tab.selected_index,
+            i == selected_index,
             container_count,
             data.open_containers.contains(&e.guid),
         ));

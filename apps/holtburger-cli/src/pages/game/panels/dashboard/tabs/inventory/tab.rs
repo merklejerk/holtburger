@@ -12,9 +12,9 @@ use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, DashboardTab, FilterInputSession, InspectTarget,
-    Interaction, TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent,
-    VerbInputState,
+    AppAction, AppUiAction, ChatMessageKind, DashboardTab, FilterInputSession,
+    FooterVerbVisibility, InspectTarget, Interaction, TabController, TabFilterState,
+    UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
 use crate::utils::{
     format_item_name, fuzzy_subsequence_match, normalize_filter_tokens,
@@ -555,7 +555,11 @@ impl TabController for InventoryTab {
                 },
                 'f',
                 "Filter",
-            ));
+            ).with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }));
         }
 
         verbs

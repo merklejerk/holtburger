@@ -6,7 +6,8 @@ use super::render::render_spells_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, AppUiAction, ContextView, DashboardTab, FilterInputSession, Interaction,
-    TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
+        TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState, 
+        FooterVerbVisibility,
 };
 use crate::utils::{fuzzy_subsequence_match, normalize_filter_tokens};
 
@@ -176,7 +177,11 @@ impl TabController for SpellsTab {
             },
             'f',
             "Filter",
-        ));
+            ).with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }));
 
         verbs
     }

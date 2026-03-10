@@ -1,7 +1,7 @@
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::pane_block;
-use crate::types::{DashboardTab, FocusedPane, VerbInputState};
+use crate::types::{DashboardTab, FocusedPane, Verb, VerbInputState};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -108,7 +108,6 @@ fn render_verb_bar(
         dashboard
             .active_tab()
             .get_verbs(data, view, &view.active_interaction),
-        footer_header.is_some(),
     );
 
     let mut spans = Vec::new();
@@ -131,11 +130,8 @@ fn render_verb_bar(
         .wrap(ratatui::widgets::Wrap { trim: true })
 }
 
-fn visible_footer_verbs(mut verbs: Vec<crate::types::Verb>, has_footer_header: bool) -> Vec<crate::types::Verb> {
-    if has_footer_header {
-        verbs.retain(|verb| !(verb.shortcut.eq_ignore_ascii_case(&'f') && verb.label == "Filter"));
-    }
-
+fn visible_footer_verbs(mut verbs: Vec<Verb>) -> Vec<Verb> {
+    verbs.retain(Verb::is_visible_in_footer);
     verbs.sort_by(|a, b| a.label.cmp(&b.label));
     verbs
 }
@@ -184,26 +180,27 @@ mod tests {
     use crate::types::{AppAction, Verb};
 
     #[test]
-    fn visible_footer_verbs_hides_filter_when_active_header_is_present() {
+    fn visible_footer_verbs_hides_footer_hidden_verbs() {
         let verbs = vec![
-            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter"),
+            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter")
+                .with_footer_visibility(crate::types::FooterVerbVisibility::Hidden),
             Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
         ];
 
-        let visible = visible_footer_verbs(verbs, true);
+        let visible = visible_footer_verbs(verbs);
 
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].label, "Use");
     }
 
     #[test]
-    fn visible_footer_verbs_keeps_filter_when_no_active_header_is_present() {
+    fn visible_footer_verbs_keeps_footer_visible_verbs_sorted() {
         let verbs = vec![
             Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
             Verb::new(AppAction::DisplayClientInfo, 'f', "Filter"),
         ];
 
-        let visible = visible_footer_verbs(verbs, false);
+        let visible = visible_footer_verbs(verbs);
 
         assert_eq!(visible.len(), 2);
         assert_eq!(visible[0].label, "Filter");

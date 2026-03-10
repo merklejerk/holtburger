@@ -103,9 +103,14 @@ fn render_verb_bar(
     data: &GameData,
     view: &ViewState,
 ) -> Paragraph<'static> {
+    let footer_header = dashboard.active_tab_footer_header();
     let mut verbs = dashboard
         .active_tab()
         .get_verbs(data, view, &view.active_interaction);
+
+    if footer_header.is_some() {
+        verbs.retain(|verb| !(verb.shortcut.eq_ignore_ascii_case(&'f') && verb.label == "Filter"));
+    }
 
     verbs.sort_by(|a, b| a.label.cmp(&b.label));
 
@@ -117,7 +122,14 @@ fn render_verb_bar(
         spans.push(Span::raw(verb.display_label().to_string()));
     }
 
-    Paragraph::new(Line::from(spans))
+    let verb_line = Line::from(spans);
+
+    if let Some(header) = footer_header {
+        return Paragraph::new(vec![Line::from(header), verb_line])
+            .block(Block::default().borders(Borders::TOP));
+    }
+
+    Paragraph::new(verb_line)
         .block(Block::default().borders(Borders::TOP))
         .wrap(ratatui::widgets::Wrap { trim: true })
 }

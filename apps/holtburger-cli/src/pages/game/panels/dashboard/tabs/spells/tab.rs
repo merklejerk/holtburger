@@ -5,9 +5,8 @@ use ratatui::layout::Rect;
 use super::render::render_spells_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, ContextView, DashboardTab, FilterInputSession, Interaction,
-        TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState, 
-        FooterVerbVisibility,
+    AppAction, AppUiAction, ContextView, DashboardTab, FilterInputSession, FooterVerbVisibility,
+    Interaction, TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
 use crate::utils::{fuzzy_subsequence_match, normalize_filter_tokens};
 
@@ -53,11 +52,7 @@ impl SpellsTab {
         }
     }
 
-    fn begin_filter_input(&mut self, view: &ViewState) -> Option<UpdateResult> {
-        if view.active_interaction.is_some() {
-            return None;
-        }
-
+    fn begin_filter_input(&mut self, _view: &ViewState) -> Option<UpdateResult> {
         let mut input = VerbInputState::text("Filter");
         if let Some(active_filter) = &self.active_filter {
             input.input = active_filter.raw_pattern.clone();
@@ -166,22 +161,24 @@ impl TabController for SpellsTab {
                 'g',
                 "Debug",
             ));
-
         }
 
-        verbs.push(Verb::new(
-            AppAction::UiAction {
-                action: AppUiAction::BeginTabFilterInput {
-                    tab: DashboardTab::Spells,
+        verbs.push(
+            Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Spells,
+                    },
                 },
-            },
-            'f',
-            "Filter",
-            ).with_footer_visibility(if self.active_filter.is_some() {
+                'f',
+                "Filter",
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
                 FooterVerbVisibility::Hidden
             } else {
                 FooterVerbVisibility::Visible
-            }));
+            }),
+        );
 
         verbs
     }

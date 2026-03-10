@@ -13,12 +13,11 @@ use super::render::render_inventory_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, DashboardTab, FilterInputSession,
-    FooterVerbVisibility, InspectTarget, Interaction, TabController, TabFilterState,
-    UpdateResult, Verb, VerbInputEvent, VerbInputState,
+    FooterVerbVisibility, InspectTarget, Interaction, TabController, TabFilterState, UpdateResult,
+    Verb, VerbInputEvent, VerbInputState,
 };
 use crate::utils::{
-    format_item_name, fuzzy_subsequence_match, normalize_filter_tokens,
-    retain_matching_hierarchy,
+    format_item_name, fuzzy_subsequence_match, normalize_filter_tokens, retain_matching_hierarchy,
 };
 
 #[derive(Debug, Clone)]
@@ -157,7 +156,10 @@ impl InventoryTab {
         data: &GameData,
         view: &ViewState,
     ) -> Option<UpdateResult> {
-        if self.split_session.is_some() || self.filter_input.is_some() || view.active_interaction.is_some() {
+        if self.split_session.is_some()
+            || self.filter_input.is_some()
+            || view.active_interaction.is_some()
+        {
             return None;
         }
 
@@ -190,8 +192,8 @@ impl InventoryTab {
         Some(UpdateResult::new().with_redraw(true))
     }
 
-    fn begin_filter_input(&mut self, view: &ViewState) -> Option<UpdateResult> {
-        if self.split_session.is_some() || view.active_interaction.is_some() {
+    fn begin_filter_input(&mut self, _view: &ViewState) -> Option<UpdateResult> {
+        if self.split_session.is_some() {
             return None;
         }
 
@@ -543,11 +545,10 @@ impl TabController for InventoryTab {
                     "Sell",
                 ));
             }
-
         }
 
-        if interaction.is_none() {
-            verbs.push(Verb::new(
+        verbs.push(
+            Verb::new(
                 AppAction::UiAction {
                     action: AppUiAction::BeginTabFilterInput {
                         tab: DashboardTab::Inventory,
@@ -555,12 +556,13 @@ impl TabController for InventoryTab {
                 },
                 'f',
                 "Filter",
-            ).with_footer_visibility(if self.active_filter.is_some() {
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
                 FooterVerbVisibility::Hidden
             } else {
                 FooterVerbVisibility::Visible
-            }));
-        }
+            }),
+        );
 
         verbs
     }

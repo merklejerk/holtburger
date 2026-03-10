@@ -13,13 +13,11 @@ use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, DashboardTab, FilterInputSession, FooterVerbVisibility,
-    InspectTarget, Interaction, TabController, TabFilterState, UpdateResult, Verb,
-    VerbInputEvent, VerbInputState,
+    AppAction, AppUiAction, DashboardTab, FilterInputSession, FooterVerbVisibility, InspectTarget,
+    Interaction, TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
 use crate::utils::{
-    format_item_name, fuzzy_subsequence_match, normalize_filter_tokens,
-    retain_matching_hierarchy,
+    format_item_name, fuzzy_subsequence_match, normalize_filter_tokens, retain_matching_hierarchy,
 };
 
 #[derive(Default, Debug, Clone)]
@@ -162,11 +160,7 @@ impl NearbyTab {
         }
     }
 
-    fn begin_filter_input(&mut self, view: &ViewState) -> Option<UpdateResult> {
-        if view.active_interaction.is_some() {
-            return None;
-        }
-
+    fn begin_filter_input(&mut self, _view: &ViewState) -> Option<UpdateResult> {
         let mut input = VerbInputState::text("Filter");
         if let Some(active_filter) = &self.active_filter {
             input.input = active_filter.raw_pattern.clone();
@@ -408,22 +402,24 @@ impl TabController for NearbyTab {
                     }
                 }
             }
-
         }
 
-        verbs.push(Verb::new(
-            AppAction::UiAction {
-                action: AppUiAction::BeginTabFilterInput {
-                    tab: DashboardTab::Nearby,
+        verbs.push(
+            Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Nearby,
+                    },
                 },
-            },
-            'f',
-            "Filter",
-        ).with_footer_visibility(if self.active_filter.is_some() {
-            FooterVerbVisibility::Hidden
-        } else {
-            FooterVerbVisibility::Visible
-        }));
+                'f',
+                "Filter",
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }),
+        );
 
         verbs
     }

@@ -119,11 +119,7 @@ impl VerbInputState {
         let max = self.max.unwrap_or(u32::MAX);
 
         if value < min || value > max {
-            return Err(VerbInputError::OutOfRange {
-                value,
-                min,
-                max,
-            });
+            return Err(VerbInputError::OutOfRange { value, min, max });
         }
 
         Ok(value)

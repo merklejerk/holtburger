@@ -182,6 +182,12 @@ pub(crate) fn handle_event(
 
                 events.push(StateEvent::EntityIdentified(Box::new(entity.clone())));
                 true
+            } else if let Some(vendor) = state.vendor.as_mut()
+                && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
+            {
+                item.apply_identify_response(data);
+                events.push(StateEvent::VendorStateUpdated(Some(vendor.clone())));
+                true
             } else {
                 false
             }

@@ -10,6 +10,7 @@ use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::inspect::InspectableObject;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -189,6 +190,21 @@ pub enum CommandTarget {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectTarget {
+    Entity(Guid),
+    VendorItem(Guid),
+}
+
+impl InspectTarget {
+    pub fn as_command_target(self) -> CommandTarget {
+        match self {
+            InspectTarget::Entity(guid) => CommandTarget::Entity(guid),
+            InspectTarget::VendorItem(guid) => CommandTarget::VendorItem(guid),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Modal {
     Retry { message: String, end_time: Instant },
@@ -245,8 +261,8 @@ pub enum FocusedPane {
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ContextView {
     Default,
-    Custom,
-    Assess(Guid),
+    Assess(InspectTarget),
+    Debug(InspectTarget),
     Spell(u32),
     Enchantment(Enchantment),
     DebugSpell(u32),
@@ -369,7 +385,7 @@ pub enum AppAction {
         name: String,
     },
     Assess {
-        guid: Guid,
+        target: InspectTarget,
     },
     Use {
         guid: Guid,
@@ -468,9 +484,7 @@ pub enum AppAction {
     ChangeContextView {
         view: ContextView,
     },
-    RequestDebugContext {
-        guid: Option<Guid>,
-    },
+    RequestDebugContext { target: InspectTarget },
     ClearVendor,
     DisplayClientInfo,
     Sequence {
@@ -566,34 +580,31 @@ pub trait TabController {
     /// Returns the content to be displayed in the context panel for the current selection.
     fn get_context_panel_content(&self, data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
         match view.context_view {
-            ContextView::Assess(guid) => {
-                if let Some(e) = data.entities.get(&guid) {
-                    return assess::get_assess_info(e, data.spell_catalog.as_deref());
+            ContextView::Assess(target) => {
+                if let Some(object) = resolve_inspectable_target(data, view, target) {
+                    return assess::get_assess_info(&object, data.spell_catalog.as_deref());
                 }
                 vec![]
             }
-            ContextView::Custom => {
+            ContextView::Debug(target) => {
                 let player_guid = data.player_guid;
-                let target_guid = view.current_debug_guid.or(player_guid);
-
-                if let Some(e) = target_guid.and_then(|guid| data.entities.get(&guid)) {
-                    let guid = e.guid;
-                    let target = CommandTarget::Entity(guid);
-                    let player_info = if Some(guid) == player_guid {
+                let player_info = match target {
+                    InspectTarget::Entity(guid) if Some(guid) == player_guid => {
                         Some(debug::PlayerDebugInfo {
                             attributes: &data.attributes,
                             vitals: &data.vitals,
                             skills: &data.skills,
                             enchantments: &data.player_enchantments,
                         })
-                    } else {
-                        None
-                    };
+                    }
+                    _ => None,
+                };
 
+                if resolve_inspectable_target(data, view, target).is_some() {
                     return debug::get_debug_info(
                         data,
                         Some(view),
-                        &target,
+                        &target.as_command_target(),
                         |id| {
                             data.entities
                                 .get(&id)
@@ -644,5 +655,20 @@ pub trait TabController {
             }
             _ => vec![],
         }
+    }
+}
+
+fn resolve_inspectable_target<'a>(
+    data: &'a GameData,
+    view: &'a ViewState,
+    target: InspectTarget,
+) -> Option<InspectableObject<'a>> {
+    match target {
+        InspectTarget::Entity(guid) => data.entities.get(&guid).map(InspectableObject::from_entity),
+        InspectTarget::VendorItem(guid) => view
+            .vendor
+            .as_ref()
+            .and_then(|vendor| vendor.items.iter().find(|item| item.guid == guid))
+            .map(InspectableObject::from_vendor_item),
     }
 }

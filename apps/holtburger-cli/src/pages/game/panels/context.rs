@@ -33,8 +33,8 @@ pub fn render_context_pane(
 
     let base_title = match context_view {
         ContextView::Default => "Context Information",
-        ContextView::Custom => "Debug Information",
         ContextView::Assess(_) => "Object Appraisal",
+        ContextView::Debug(_) => "Debug Information",
         ContextView::Spell(_) => "Spell Details",
         ContextView::Enchantment(_) => "Enchantment Details",
         ContextView::DebugSpell(_) => "Debug Information",

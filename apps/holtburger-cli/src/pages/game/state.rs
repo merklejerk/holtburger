@@ -13,8 +13,8 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Interaction,
-    UpdateResult,
+    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
+    InspectTarget, Interaction, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
@@ -172,11 +172,14 @@ impl GameState {
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = UpdateResult::new();
         match action {
-            AppAction::Assess { guid } => {
+            AppAction::Assess { target } => {
+                let guid = match target {
+                    InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid) => guid,
+                };
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
                     self.handle_action(AppAction::ChangeContextView {
-                        view: crate::types::ContextView::Assess(guid),
+                        view: crate::types::ContextView::Assess(target),
                     })
                     .unwrap_or_default(),
                 );
@@ -373,11 +376,30 @@ impl GameState {
                         .commands
                         .push(ClientCommand::QueryEntityDebugInfo(guid));
                     result.merge(
-                        self.handle_action(AppAction::RequestDebugContext { guid: Some(guid) })
+                        self.handle_action(AppAction::RequestDebugContext {
+                            target: InspectTarget::Entity(guid),
+                        })
                             .unwrap_or_default(),
                     );
                 }
+                crate::types::CommandTarget::VendorItem(guid) => {
+                    result.commands.push(ClientCommand::Identify(guid));
+                    result.merge(
+                        self.handle_action(AppAction::RequestDebugContext {
+                            target: InspectTarget::VendorItem(guid),
+                        })
+                        .unwrap_or_default(),
+                    );
+                }
                 crate::types::CommandTarget::Spell(spell_id) => {
+                    if matches!(
+                        self.view.context_view,
+                        ContextView::Assess(InspectTarget::VendorItem(_))
+                            | ContextView::Debug(InspectTarget::VendorItem(_))
+                    ) {
+                        result.needs_redraw = true;
+                        self.refresh_context_buffer();
+                    }
                     result.merge(
                         self.handle_action(AppAction::ChangeContextView {
                             view: crate::types::ContextView::DebugSpell(spell_id),
@@ -493,9 +515,8 @@ impl GameState {
                 result.needs_redraw = true;
                 self.refresh_context_buffer();
             }
-            AppAction::RequestDebugContext { guid } => {
-                self.view.current_debug_guid = guid;
-                self.view.context_view = crate::types::ContextView::Custom;
+            AppAction::RequestDebugContext { target } => {
+                self.view.context_view = crate::types::ContextView::Debug(target);
                 self.view.context_scroll_offset = 0;
                 result.needs_redraw = true;
                 self.refresh_context_buffer();
@@ -673,7 +694,7 @@ impl GameState {
     fn handle_entity_identified(&mut self, entity: &Entity) {
         let guid = entity.guid;
         self.data.entities.insert(guid, entity.clone());
-        self.view.context_view = ContextView::Assess(guid);
+        self.view.context_view = ContextView::Assess(InspectTarget::Entity(guid));
         self.refresh_context_buffer();
     }
 
@@ -723,8 +744,14 @@ impl GameState {
         self.data.update_inventory_recursive(guid, false);
         self.data.entities.remove(&guid);
         self.data.equipment.remove(&guid);
-        if self.view.current_debug_guid == Some(guid) {
-            self.view.current_debug_guid = None;
+        if matches!(
+            self.view.context_view,
+            ContextView::Assess(InspectTarget::Entity(target_guid))
+                | ContextView::Debug(InspectTarget::Entity(target_guid))
+                if target_guid == guid
+        ) {
+            self.view.context_view = ContextView::Default;
+            self.refresh_context_buffer();
         }
         if let Some(session) = self.view.salvaging.as_mut() {
             session
@@ -769,8 +796,6 @@ pub struct ViewState {
     pub context_scroll_offset: usize,
     /// What information should be displayed in the context panel.
     pub context_view: ContextView,
-    /// GUID of the entity we are currently "debugging".
-    pub current_debug_guid: Option<Guid>,
     /// Current vendor state (inventory and multipliers) - note: pseudo-client state.
     pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// State of current interaction like vendor transactions.
@@ -799,7 +824,6 @@ impl Default for ViewState {
             context_buffer: Vec::new(),
             context_scroll_offset: 0,
             context_view: ContextView::Default,
-            current_debug_guid: None,
             vendor: None,
             active_interaction: None,
             salvaging: None,

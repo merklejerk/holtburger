@@ -191,6 +191,7 @@
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] Add intelligent entity context scanners.
 - [ ] `get_verbs() -> get_entities(self.selected_index)` pattern in tabs is inefficient because `get_entities()` is not cheap. We should store `selected_guid` when we update `selected_index` for tabs with entity content.
+- [ ] Vendor list is janky: assess/debug do nothing and all have max u32 qty.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

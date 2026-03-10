@@ -2,7 +2,7 @@ use crate::utils::{format_duration, wrap_text};
 use holtburger_world::assessment::{
     Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
-use holtburger_world::entity::Entity;
+use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -34,9 +34,12 @@ fn format_wield_requirement(req: &WieldRequirement) -> String {
     }
 }
 
-/// Generates a list of strings representing human-friendly assessment information for an entity.
-pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> Vec<Line<'static>> {
-    let assess = Assessment::from_entity(entity);
+/// Generates a list of strings representing human-friendly assessment information for an object.
+pub fn get_assess_info(
+    object: &InspectableObject<'_>,
+    spell_lookup: Option<&SpellCatalog>,
+) -> Vec<Line<'static>> {
+    let assess = Assessment::from_object(object);
     let mut lines = Vec::new();
 
     // Header - Prominent
@@ -75,6 +78,21 @@ pub fn get_assess_info(entity: &Entity, spell_lookup: Option<&SpellCatalog>) -> 
         lines.push(Line::from(vec![
             Span::styled("Burden:  ", Style::default().fg(LABEL_COLOR)),
             Span::styled(format!("{}bu", burden), Style::default().fg(Color::White)),
+        ]));
+    }
+    if let Some(item_capacity) = assess.item_capacity && item_capacity > 0 {
+        lines.push(Line::from(vec![
+            Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
+            Span::styled(item_capacity.to_string(), Style::default().fg(Color::White)),
+        ]));
+    }
+    if let Some(container_capacity) = assess.container_capacity && container_capacity > 0 {
+        lines.push(Line::from(vec![
+            Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
+            Span::styled(
+                container_capacity.to_string(),
+                Style::default().fg(Color::White),
+            ),
         ]));
     }
 

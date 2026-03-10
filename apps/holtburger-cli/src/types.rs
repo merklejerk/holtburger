@@ -34,6 +34,7 @@ pub struct Verb {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerbInputKind {
     Quantity,
+    Text,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,7 +59,8 @@ impl VerbInputError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VerbInputEvent {
     Changed,
-    Submitted(u32),
+    SubmittedQuantity(u32),
+    SubmittedText(String),
     Cancelled,
     Invalid(VerbInputError),
     Ignored,
@@ -69,8 +71,8 @@ pub struct VerbInputState {
     pub kind: VerbInputKind,
     pub prompt: Cow<'static, str>,
     pub input: String,
-    pub min: u32,
-    pub max: u32,
+    pub min: Option<u32>,
+    pub max: Option<u32>,
 }
 
 impl VerbInputState {
@@ -79,8 +81,18 @@ impl VerbInputState {
             kind: VerbInputKind::Quantity,
             prompt: prompt.into(),
             input: String::new(),
-            min,
-            max,
+            min: Some(min),
+            max: Some(max),
+        }
+    }
+
+    pub fn text(prompt: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            kind: VerbInputKind::Text,
+            prompt: prompt.into(),
+            input: String::new(),
+            min: None,
+            max: None,
         }
     }
 
@@ -94,11 +106,14 @@ impl VerbInputState {
             .parse::<u32>()
             .map_err(|_| VerbInputError::InvalidNumber)?;
 
-        if value < self.min || value > self.max {
+        let min = self.min.unwrap_or(0);
+        let max = self.max.unwrap_or(u32::MAX);
+
+        if value < min || value > max {
             return Err(VerbInputError::OutOfRange {
                 value,
-                min: self.min,
-                max: self.max,
+                min,
+                max,
             });
         }
 
@@ -108,9 +123,12 @@ impl VerbInputState {
     pub fn handle_key(&mut self, key: KeyEvent) -> VerbInputEvent {
         match key.code {
             KeyCode::Esc => VerbInputEvent::Cancelled,
-            KeyCode::Enter => match self.parse_value() {
-                Ok(value) => VerbInputEvent::Submitted(value),
-                Err(err) => VerbInputEvent::Invalid(err),
+            KeyCode::Enter => match self.kind {
+                VerbInputKind::Quantity => match self.parse_value() {
+                    Ok(value) => VerbInputEvent::SubmittedQuantity(value),
+                    Err(err) => VerbInputEvent::Invalid(err),
+                },
+                VerbInputKind::Text => VerbInputEvent::SubmittedText(self.input.clone()),
             },
             KeyCode::Backspace => {
                 if self.input.pop().is_some() {
@@ -119,10 +137,17 @@ impl VerbInputState {
                     VerbInputEvent::Ignored
                 }
             }
-            KeyCode::Char(c) if c.is_ascii_digit() => {
-                self.input.push(c);
-                VerbInputEvent::Changed
-            }
+            KeyCode::Char(c) => match self.kind {
+                VerbInputKind::Quantity if c.is_ascii_digit() => {
+                    self.input.push(c);
+                    VerbInputEvent::Changed
+                }
+                VerbInputKind::Text if !c.is_control() => {
+                    self.input.push(c);
+                    VerbInputEvent::Changed
+                }
+                _ => VerbInputEvent::Ignored,
+            },
             _ => VerbInputEvent::Ignored,
         }
     }

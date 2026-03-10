@@ -573,7 +573,7 @@ impl TabController for InventoryTab {
                         message: err.message(),
                     }),
             ),
-            VerbInputEvent::Submitted(amount) => {
+            VerbInputEvent::SubmittedQuantity(amount) => {
                 let item = session.item_guid;
                 let container = session.container_guid;
                 self.split_session = None;
@@ -587,6 +587,7 @@ impl TabController for InventoryTab {
                         }),
                 )
             }
+            VerbInputEvent::SubmittedText(_) => Some(UpdateResult::new().with_redraw(true)),
         }
     }
 }

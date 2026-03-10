@@ -130,11 +130,16 @@ fn render_footer_text_input(input: &VerbInputState) -> Paragraph<'static> {
         input.input.clone()
     };
 
-    let value_line = Line::from(vec![
+    let mut value_spans = vec![
         Span::raw(format!("{}: ", prompt)),
         Span::styled(value, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw(format!("  [{}-{}]", input.min, input.max)),
-    ]);
+    ];
+
+    if let (Some(min), Some(max)) = (input.min, input.max) {
+        value_spans.push(Span::raw(format!("  [{}-{}]", min, max)));
+    }
+
+    let value_line = Line::from(value_spans);
 
     let hint_line = Line::from(vec![Span::raw("[ENTER] Submit  [ESC] Cancel")])
         .alignment(ratatui::layout::Alignment::Right);

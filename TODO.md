@@ -88,6 +88,7 @@
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
+- [ ] Additive resist buffs make the final derived resistance LOWER? ResistBludgeon goes from 1.0 to 0.67 when `Bludgeon Shield` (+0.67) is applied. Is the base resistance supposed to be 0?
 
 ### High
 - [x] Fail when spell/attack distance is too far.

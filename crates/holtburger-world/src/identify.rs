@@ -1,5 +1,7 @@
 use holtburger_common::properties::WorldObjectProperties;
-use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
+use holtburger_protocol::messages::object::events::{
+    IdentifyObjectResponseEventData, IdentifyResponseFlags,
+};
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
@@ -44,33 +46,41 @@ pub(crate) fn apply_identify_response(
         return false;
     }
 
+    let flags = data.flags;
+
     properties.merge(data.properties.clone());
 
-    if data.armor_profile.is_some() {
+    if flags.contains(IdentifyResponseFlags::ARMOR_PROFILE) {
         *armor_profile = data.armor_profile.clone();
     }
-    if data.creature_profile.is_some() {
+    if flags.contains(IdentifyResponseFlags::CREATURE_PROFILE) {
         *creature_profile = data.creature_profile.clone();
     }
-    if data.weapon_profile.is_some() {
+    if flags.contains(IdentifyResponseFlags::WEAPON_PROFILE) {
         *weapon_profile = data.weapon_profile.clone();
     }
-    if data.hook_profile.is_some() {
+    if flags.contains(IdentifyResponseFlags::HOOK_PROFILE) {
         *hook_profile = data.hook_profile.clone();
     }
-    if data.armor_levels.is_some() {
+    if flags.contains(IdentifyResponseFlags::ARMOR_LEVELS) {
         *armor_levels = data.armor_levels.clone();
     }
-    if !data.spell_book.is_empty() {
+    if flags.contains(IdentifyResponseFlags::SPELL_BOOK) {
         *spell_book = data.spell_book.clone();
     }
 
-    *armor_highlight = data.armor_highlight;
-    *armor_color = data.armor_color;
-    *weapon_highlight = data.weapon_highlight;
-    *weapon_color = data.weapon_color;
-    *resist_highlight = data.resist_highlight;
-    *resist_color = data.resist_color;
+    if flags.contains(IdentifyResponseFlags::ARMOR_ENCHANTMENT_BITFIELD) {
+        *armor_highlight = data.armor_highlight;
+        *armor_color = data.armor_color;
+    }
+    if flags.contains(IdentifyResponseFlags::WEAPON_ENCHANTMENT_BITFIELD) {
+        *weapon_highlight = data.weapon_highlight;
+        *weapon_color = data.weapon_color;
+    }
+    if flags.contains(IdentifyResponseFlags::RESIST_ENCHANTMENT_BITFIELD) {
+        *resist_highlight = data.resist_highlight;
+        *resist_color = data.resist_color;
+    }
 
     true
 }

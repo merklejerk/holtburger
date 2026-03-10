@@ -152,16 +152,21 @@ pub(crate) fn handle_event(
         GameEvent::IdentifyObjectResponse(data) => {
             let guid = data.object_guid;
             if let Some(entity) = state.entities.get_mut(guid) {
-                entity.apply_identify_response(data);
-
-                events.push(StateEvent::EntityIdentified(Box::new(entity.clone())));
-                true
+                if entity.apply_identify_response(data) {
+                    events.push(StateEvent::EntityIdentified(Box::new(entity.clone())));
+                    true
+                } else {
+                    false
+                }
             } else if let Some(vendor) = state.vendor.as_mut()
                 && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
             {
-                item.apply_identify_response(data);
-                events.push(StateEvent::VendorItemIdentified(Box::new(item.clone())));
-                true
+                if item.apply_identify_response(data) {
+                    events.push(StateEvent::VendorItemIdentified(Box::new(item.clone())));
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }

@@ -179,6 +179,7 @@ impl PlayerState {
             PropertyFloat::ResistCold => PropertyInt::AugmentationResistanceFrost,
             PropertyFloat::ResistAcid => PropertyInt::AugmentationResistanceAcid,
             PropertyFloat::ResistElectric => PropertyInt::AugmentationResistanceLightning,
+            PropertyFloat::ResistNether => PropertyInt::AugmentationResistanceNether,
             _ => return 0,
         };
 

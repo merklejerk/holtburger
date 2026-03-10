@@ -94,6 +94,7 @@ pub enum StateEvent {
     ContainerOpened(Guid),
     ContainerClosed(Guid),
     VendorStateUpdated(Option<vendor::VendorState>),
+    VendorItemIdentified(Box<vendor::CoreVendorItem>),
     TradeStateUpdated(Option<state::TradeState>),
 }
 

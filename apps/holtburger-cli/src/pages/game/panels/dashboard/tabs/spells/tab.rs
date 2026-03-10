@@ -4,9 +4,7 @@ use ratatui::layout::Rect;
 
 use super::render::render_spells_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{
-    AppAction, CommandTarget, ContextView, Interaction, TabController, UpdateResult, Verb,
-};
+use crate::types::{AppAction, ContextView, Interaction, TabController, UpdateResult, Verb};
 
 #[derive(Default, Debug, Clone)]
 pub struct SpellsTab {
@@ -15,14 +13,10 @@ pub struct SpellsTab {
 }
 
 impl SpellsTab {
-    fn get_target(&self, data: &GameData) -> CommandTarget {
+    fn get_selected_spell_id(&self, data: &GameData) -> Option<u32> {
         let mut spells = data.player_spells.clone();
         spells.sort_by_key(|&sid| data.spell_name_or_fallback(sid));
-        if let Some(&sid) = spells.get(self.selected_index) {
-            CommandTarget::Spell(sid)
-        } else {
-            CommandTarget::None
-        }
+        spells.get(self.selected_index).copied()
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
@@ -42,11 +36,11 @@ impl TabController for SpellsTab {
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
-        let target = self.get_target(data);
+        let spell_id = self.get_selected_spell_id(data);
 
         match interaction {
             Some(Interaction::Targeting { target_guid }) => {
-                if let CommandTarget::Spell(spell_id) = target {
+                if let Some(spell_id) = spell_id {
                     verbs.push(Verb::new(
                         vec![AppAction::CastSpell {
                             spell_id,
@@ -65,7 +59,7 @@ impl TabController for SpellsTab {
             _ => {}
         }
 
-        if let CommandTarget::Spell(spell_id) = target {
+        if let Some(spell_id) = spell_id {
             if let Some(player_guid) = data.player_guid {
                 verbs.push(Verb::new(
                     vec![AppAction::CastSpell {
@@ -94,8 +88,8 @@ impl TabController for SpellsTab {
                 "Details",
             ));
             verbs.push(Verb::new(
-                vec![AppAction::QueryDebugInfo {
-                    target: CommandTarget::Spell(spell_id),
+                vec![AppAction::ChangeContextView {
+                    view: ContextView::DebugSpell(spell_id),
                 }],
                 'g',
                 "Debug",

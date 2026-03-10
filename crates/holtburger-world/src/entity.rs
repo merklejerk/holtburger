@@ -1,4 +1,5 @@
 use crate::hydration::WorldObjectPropertiesHydrationExt;
+use crate::identify::{self, IdentifyTarget};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PhysicsState, PropertyInstanceId,
@@ -6,6 +7,7 @@ use holtburger_common::properties::{
     WorldObjectProperties, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{Guid, Vector3};
+use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
@@ -64,6 +66,27 @@ impl HasPropertiesMut for Entity {
 impl Entity {
     pub fn set_property(&mut self, update: PropertyUpdate) {
         self.properties.apply(update);
+    }
+
+    pub fn apply_identify_response(&mut self, data: &IdentifyObjectResponseEventData) -> bool {
+        identify::apply_identify_response(
+            IdentifyTarget {
+                properties: &mut self.properties,
+                armor_profile: &mut self.armor_profile,
+                creature_profile: &mut self.creature_profile,
+                weapon_profile: &mut self.weapon_profile,
+                hook_profile: &mut self.hook_profile,
+                armor_levels: &mut self.armor_levels,
+                spell_book: &mut self.spell_book,
+                armor_highlight: &mut self.armor_highlight,
+                armor_color: &mut self.armor_color,
+                weapon_highlight: &mut self.weapon_highlight,
+                weapon_color: &mut self.weapon_color,
+                resist_highlight: &mut self.resist_highlight,
+                resist_color: &mut self.resist_color,
+            },
+            data,
+        )
     }
 
     pub fn set_container_id(&mut self, val: Option<Guid>) {

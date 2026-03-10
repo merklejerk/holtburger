@@ -287,9 +287,22 @@ impl TabController for InventoryTab {
                     Interaction::Combining {
                         item_guid: interact_guid,
                     } => {
-                        if cur_entity.guid != *interact_guid
-                            && data.can_use_with(*interact_guid, cur_entity.guid)
+                        if cur_entity.guid == *interact_guid
+                            && let Some(pguid) = player_guid
+                            && data.can_use_with(*interact_guid, pguid)
                         {
+                            verbs.push(Verb::new(
+                                vec![
+                                    AppAction::UseWith {
+                                        item: *interact_guid,
+                                        target: pguid,
+                                    },
+                                    AppAction::CancelInteraction,
+                                ],
+                                '\r',
+                                "Use on self",
+                            ));
+                        } else if data.can_use_with(*interact_guid, cur_entity.guid) {
                             verbs.push(Verb::new(
                                 vec![
                                     AppAction::UseWith {

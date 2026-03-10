@@ -11,10 +11,11 @@ use std::time::Instant;
 use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
+use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, Interaction,
-    UpdateResult,
+    AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
+    Interaction, UpdateResult,
 };
 use holtburger_common::properties::WorldObjectExt as _;
 
@@ -133,6 +134,15 @@ impl GameState {
                     });
                 }
             }
+            ClientViewEvent::VendorItemIdentified(item) => {
+                if let Some(vendor) = self.view.vendor.as_mut()
+                    && let Some(existing) = vendor.items.iter_mut().find(|i| i.guid == item.guid)
+                {
+                    *existing = *item.clone();
+                    self.refresh_vendor_item_context_if_visible(item.guid);
+                    result.needs_redraw = true;
+                }
+            }
             ClientViewEvent::TradeStateUpdated { trade } => {
                 let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
                 // Cancel vendor session.
@@ -172,11 +182,14 @@ impl GameState {
     pub fn handle_action(&mut self, action: AppAction) -> Option<UpdateResult> {
         let mut result = UpdateResult::new();
         match action {
-            AppAction::Assess { guid } => {
+            AppAction::Assess { target } => {
+                let guid = match target {
+                    InspectTarget::Entity(guid) | InspectTarget::VendorItem(guid) => guid,
+                };
                 result.commands.push(ClientCommand::Identify(guid));
                 result.merge(
                     self.handle_action(AppAction::ChangeContextView {
-                        view: crate::types::ContextView::Assess(guid),
+                        view: crate::types::ContextView::Assess(target),
                     })
                     .unwrap_or_default(),
                 );
@@ -367,33 +380,26 @@ impl GameState {
                 }
             }
             AppAction::QueryDebugInfo { target } => match target {
-                crate::types::CommandTarget::Entity(guid)
-                | crate::types::CommandTarget::EntityWithSlot(guid, _) => {
+                InspectTarget::Entity(guid) => {
                     result
                         .commands
                         .push(ClientCommand::QueryEntityDebugInfo(guid));
                     result.merge(
-                        self.handle_action(AppAction::RequestDebugContext { guid: Some(guid) })
-                            .unwrap_or_default(),
-                    );
-                }
-                crate::types::CommandTarget::Spell(spell_id) => {
-                    result.merge(
                         self.handle_action(AppAction::ChangeContextView {
-                            view: crate::types::ContextView::DebugSpell(spell_id),
+                            view: ContextView::Debug(InspectTarget::Entity(guid)),
                         })
                         .unwrap_or_default(),
                     );
                 }
-                crate::types::CommandTarget::Enchantment(enchant) => {
+                InspectTarget::VendorItem(guid) => {
+                    result.commands.push(ClientCommand::Identify(guid));
                     result.merge(
                         self.handle_action(AppAction::ChangeContextView {
-                            view: crate::types::ContextView::DebugEnchantment(enchant),
+                            view: ContextView::Debug(InspectTarget::VendorItem(guid)),
                         })
                         .unwrap_or_default(),
                     );
                 }
-                _ => {}
             },
             AppAction::CastSpell { spell_id, target } => {
                 match self.try_enter_combat_mode(CombatMode::Magic) {
@@ -493,13 +499,6 @@ impl GameState {
                 result.needs_redraw = true;
                 self.refresh_context_buffer();
             }
-            AppAction::RequestDebugContext { guid } => {
-                self.view.current_debug_guid = guid;
-                self.view.context_view = crate::types::ContextView::Custom;
-                self.view.context_scroll_offset = 0;
-                result.needs_redraw = true;
-                self.refresh_context_buffer();
-            }
             AppAction::BeginInteraction { interaction } => {
                 if interaction == Interaction::Salvaging {
                     if !self.reset_salvaging_state(&mut result) {
@@ -574,13 +573,7 @@ impl GameState {
             self.view.context_buffer.clear();
             return;
         }
-        let content = {
-            let data = &self.data;
-            let view = &self.view;
-            self.dashboard
-                .active_tab_mut()
-                .get_context_panel_content(data, view)
-        };
+        let content = build_context_panel_content(&self.data, &self.view);
         self.view.context_buffer = content;
     }
 
@@ -673,8 +666,19 @@ impl GameState {
     fn handle_entity_identified(&mut self, entity: &Entity) {
         let guid = entity.guid;
         self.data.entities.insert(guid, entity.clone());
-        self.view.context_view = ContextView::Assess(guid);
+        self.view.context_view = ContextView::Assess(InspectTarget::Entity(guid));
         self.refresh_context_buffer();
+    }
+
+    fn refresh_vendor_item_context_if_visible(&mut self, guid: Guid) {
+        if matches!(
+            self.view.context_view,
+            ContextView::Assess(InspectTarget::VendorItem(target_guid))
+                | ContextView::Debug(InspectTarget::VendorItem(target_guid))
+                if target_guid == guid
+        ) {
+            self.refresh_context_buffer();
+        }
     }
 
     fn update_inventory_and_equipment(&mut self, entity: &Entity) {
@@ -723,8 +727,14 @@ impl GameState {
         self.data.update_inventory_recursive(guid, false);
         self.data.entities.remove(&guid);
         self.data.equipment.remove(&guid);
-        if self.view.current_debug_guid == Some(guid) {
-            self.view.current_debug_guid = None;
+        if matches!(
+            self.view.context_view,
+            ContextView::Assess(InspectTarget::Entity(target_guid))
+                | ContextView::Debug(InspectTarget::Entity(target_guid))
+                if target_guid == guid
+        ) {
+            self.view.context_view = ContextView::Default;
+            self.refresh_context_buffer();
         }
         if let Some(session) = self.view.salvaging.as_mut() {
             session
@@ -769,8 +779,6 @@ pub struct ViewState {
     pub context_scroll_offset: usize,
     /// What information should be displayed in the context panel.
     pub context_view: ContextView,
-    /// GUID of the entity we are currently "debugging".
-    pub current_debug_guid: Option<Guid>,
     /// Current vendor state (inventory and multipliers) - note: pseudo-client state.
     pub vendor: Option<holtburger_world::vendor::VendorState>,
     /// State of current interaction like vendor transactions.
@@ -799,7 +807,6 @@ impl Default for ViewState {
             context_buffer: Vec::new(),
             context_scroll_offset: 0,
             context_view: ContextView::Default,
-            current_debug_guid: None,
             vendor: None,
             active_interaction: None,
             salvaging: None,
@@ -819,6 +826,8 @@ impl ViewState {
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::properties::{PropertyString, WorldObjectProperties};
+    use holtburger_world::vendor::{CoreVendorItem, VendorState};
 
     #[test]
     fn test_entity_replaced_updates_cached_entity_state() {
@@ -853,5 +862,68 @@ mod tests {
                 .map(|entity| entity.name()),
             Some("New Name")
         );
+    }
+
+    #[test]
+    fn vendor_item_identified_refreshes_visible_assess_context() {
+        let player_guid = Guid(0x50000001);
+        let vendor_guid = Guid(0x60000001);
+        let item_guid = Guid(0x70000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.view.vendor = Some(VendorState {
+            vendor_guid,
+            items: vec![vendor_item_named(item_guid, 1, "Old Name")],
+            buy_multiplier: 1.0,
+            sell_multiplier: 1.0,
+            merchandise_item_types: 0,
+            alternate_currency_wcid: 0,
+            alternate_currency_amount: 0,
+            alternate_currency_name: String::new(),
+        });
+        state.view.context_view = ContextView::Assess(InspectTarget::VendorItem(item_guid));
+        state.refresh_context_buffer();
+
+        assert!(context_buffer_contains(
+            &state.view.context_buffer,
+            "OLD NAME"
+        ));
+        assert!(!context_buffer_contains(
+            &state.view.context_buffer,
+            "NEW NAME"
+        ));
+
+        let result = state.handle_view_event(ClientViewEvent::VendorItemIdentified(Box::new(
+            vendor_item_named(item_guid, 1, "New Name"),
+        )));
+
+        assert!(result.needs_redraw);
+        assert!(context_buffer_contains(
+            &state.view.context_buffer,
+            "NEW NAME"
+        ));
+        assert!(!context_buffer_contains(
+            &state.view.context_buffer,
+            "OLD NAME"
+        ));
+    }
+
+    fn vendor_item_named(guid: Guid, wcid: u32, name: &str) -> CoreVendorItem {
+        let mut properties = WorldObjectProperties::default();
+        properties
+            .strings
+            .insert(PropertyString::Name, name.to_string());
+
+        CoreVendorItem {
+            guid,
+            wcid,
+            vendor_supply: None,
+            properties,
+            ..CoreVendorItem::default()
+        }
+    }
+
+    fn context_buffer_contains(buffer: &[Line<'static>], needle: &str) -> bool {
+        buffer.iter().any(|line| line.to_string().contains(needle))
     }
 }

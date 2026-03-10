@@ -1,11 +1,9 @@
 use crate::pages::game::GameState;
-use crate::pages::game::panels::dashboard::{assess, debug};
 use crate::pages::game::{GameData, ViewState};
 use crate::pages::selection::SelectionState;
 use crate::state::RenderContext;
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_common::Guid;
-use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_core::client::types::TargetSlot;
 use holtburger_core::{ClientCommand, ClientViewEvent};
 use holtburger_protocol::messages::combat::CombatMode;
@@ -13,7 +11,6 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
 use std::borrow::Cow;
 use std::time::Instant;
 
@@ -178,15 +175,10 @@ pub enum StatType {
     Skill(SkillType),
 }
 
-#[derive(Debug, Clone)]
-pub enum CommandTarget {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InspectTarget {
     Entity(Guid),
-    EntityWithSlot(Guid, TargetSlot),
     VendorItem(Guid),
-    Enchantment(Enchantment),
-    Stat(StatType, Option<u64>, Option<u32>),
-    Spell(u32),
-    None,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -245,8 +237,8 @@ pub enum FocusedPane {
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ContextView {
     Default,
-    Custom,
-    Assess(Guid),
+    Assess(InspectTarget),
+    Debug(InspectTarget),
     Spell(u32),
     Enchantment(Enchantment),
     DebugSpell(u32),
@@ -369,7 +361,7 @@ pub enum AppAction {
         name: String,
     },
     Assess {
-        guid: Guid,
+        target: InspectTarget,
     },
     Use {
         guid: Guid,
@@ -434,7 +426,7 @@ pub enum AppAction {
         item_guids: Vec<Guid>,
     },
     QueryDebugInfo {
-        target: CommandTarget,
+        target: InspectTarget,
     },
     CastSpell {
         spell_id: u32,
@@ -467,9 +459,6 @@ pub enum AppAction {
     },
     ChangeContextView {
         view: ContextView,
-    },
-    RequestDebugContext {
-        guid: Option<Guid>,
     },
     ClearVendor,
     DisplayClientInfo,
@@ -561,88 +550,5 @@ pub trait TabController {
         _view: &ViewState,
     ) -> Option<UpdateResult> {
         None
-    }
-
-    /// Returns the content to be displayed in the context panel for the current selection.
-    fn get_context_panel_content(&self, data: &GameData, view: &ViewState) -> Vec<Line<'static>> {
-        match view.context_view {
-            ContextView::Assess(guid) => {
-                if let Some(e) = data.entities.get(&guid) {
-                    return assess::get_assess_info(e, data.spell_catalog.as_deref());
-                }
-                vec![]
-            }
-            ContextView::Custom => {
-                let player_guid = data.player_guid;
-                let target_guid = view.current_debug_guid.or(player_guid);
-
-                if let Some(e) = target_guid.and_then(|guid| data.entities.get(&guid)) {
-                    let guid = e.guid;
-                    let target = CommandTarget::Entity(guid);
-                    let player_info = if Some(guid) == player_guid {
-                        Some(debug::PlayerDebugInfo {
-                            attributes: &data.attributes,
-                            vitals: &data.vitals,
-                            skills: &data.skills,
-                            enchantments: &data.player_enchantments,
-                        })
-                    } else {
-                        None
-                    };
-
-                    return debug::get_debug_info(
-                        data,
-                        Some(view),
-                        &target,
-                        |id| {
-                            data.entities
-                                .get(&id)
-                                .map(|e| e.name().to_string())
-                                .or_else(|| {
-                                    if Some(id) == player_guid {
-                                        Some("You".to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                        },
-                        data.spell_catalog.as_deref(),
-                        player_info,
-                    );
-                }
-                vec![]
-            }
-            ContextView::Spell(spell_id) => {
-                let target = CommandTarget::Spell(spell_id);
-                debug::get_details_info(data, &target, data.spell_catalog.as_deref())
-            }
-            ContextView::Enchantment(enchant) => {
-                let target = CommandTarget::Enchantment(enchant);
-                debug::get_details_info(data, &target, data.spell_catalog.as_deref())
-            }
-            ContextView::DebugSpell(spell_id) => {
-                let target = CommandTarget::Spell(spell_id);
-                debug::get_debug_info(
-                    data,
-                    Some(view),
-                    &target,
-                    |_| None,
-                    data.spell_catalog.as_deref(),
-                    None,
-                )
-            }
-            ContextView::DebugEnchantment(enchant) => {
-                let target = CommandTarget::Enchantment(enchant);
-                debug::get_debug_info(
-                    data,
-                    Some(view),
-                    &target,
-                    |_| None,
-                    data.spell_catalog.as_deref(),
-                    None,
-                )
-            }
-            _ => vec![],
-        }
     }
 }

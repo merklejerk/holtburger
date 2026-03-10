@@ -1,5 +1,4 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
-use holtburger_common::Guid;
 use holtburger_core::ClientCommand;
 use holtburger_world::context::WorldContextExt;
 
@@ -159,66 +158,6 @@ impl GameState {
                         self.chat_input.input.clear();
                         return result.with_redraw(true);
                     }
-                    if command == "/ping" {
-                        result.commands.push(ClientCommand::Ping);
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command == "/jump" {
-                        result.commands.push(ClientCommand::Jump {
-                            extent: 10.0,
-                            velocity: holtburger_common::Vector3::default(),
-                        });
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command.starts_with("/tell ") {
-                        let parts: Vec<&str> = command.splitn(3, ' ').collect();
-                        if parts.len() == 3 {
-                            result.commands.push(ClientCommand::Tell {
-                                target: parts[1].to_string(),
-                                message: parts[2].to_string(),
-                            });
-                        }
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command == "/sit" {
-                        result.commands.push(ClientCommand::SetState(0x13));
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command == "/stand" {
-                        result.commands.push(ClientCommand::SetState(0x04));
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if let Some(args) = command.strip_prefix("/turn ") {
-                        if let Ok(heading) = args.parse::<f32>() {
-                            result.commands.push(ClientCommand::TurnTo { heading });
-                        }
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command == "/sync" {
-                        result.commands.push(ClientCommand::SyncPosition);
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
                     if command == "/combat" {
                         use holtburger_protocol::messages::combat::CombatMode;
                         let mode = if self.data.combat_mode != CombatMode::NonCombat {
@@ -233,86 +172,11 @@ impl GameState {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if command == "/noclip" || command.starts_with("/noclip ") {
-                        let enabled = if command == "/noclip" {
-                            !self.data.noclip
-                        } else {
-                            match command.strip_prefix("/noclip ").unwrap_or("").trim() {
-                                "on" => true,
-                                "off" => false,
-                                _ => !self.data.noclip,
-                            }
-                        };
-                        result.commands.push(ClientCommand::SetNoClip(enabled));
-                        self.data.noclip = enabled;
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command.starts_with("/stack ") {
-                        let parts: Vec<&str> = command.split_whitespace().collect();
-                        if parts.len() >= 3 {
-                            let source = parts[1].strip_prefix("0x").unwrap_or(parts[1]);
-                            let dest = parts[2].strip_prefix("0x").unwrap_or(parts[2]);
-                            let amount = if parts.len() > 3 {
-                                parts[3].parse::<u32>().unwrap_or(1)
-                            } else {
-                                1
-                            };
-
-                            if let (Ok(s), Ok(d)) = (
-                                u32::from_str_radix(source, 16),
-                                u32::from_str_radix(dest, 16),
-                            ) {
-                                result.commands.push(ClientCommand::Stack {
-                                    source: Guid(s),
-                                    destination: Guid(d),
-                                    amount,
-                                });
-                            }
-                        }
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command.starts_with("/split ") {
-                        let parts: Vec<&str> = command.split_whitespace().collect();
-                        if parts.len() >= 3 {
-                            let item_str = parts[1].strip_prefix("0x").unwrap_or(parts[1]);
-                            let amount = parts[2].parse::<u32>().unwrap_or(1);
-
-                            if let Ok(item) = u32::from_str_radix(item_str, 16)
-                                && let Some(player_guid) = self.data.player_guid
-                            {
-                                result.commands.push(ClientCommand::Split {
-                                    item: Guid(item),
-                                    container: player_guid,
-                                    amount,
-                                });
-                            }
-                        }
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command == "/info" {
-                        result
-                            .actions
-                            .push(crate::types::AppAction::DisplayClientInfo);
-
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
                     if command == "/help" {
                         use crate::types::ChatMessageKind;
                         self.chat.log(
                             ChatMessageKind::System,
-                            "Available commands: /quit, /exit, /clear, /help, /info, /ping, /jump, /sit, /stand, /tell <name> <msg>, /turn <heading>, /sync, /combat, /noclip <on|off>, /stack <src> <dst> [amount], /split <item> <amount>".to_string()
+                            "Available commands: /quit, /exit, /clear, /help, /combat".to_string(),
                         );
                         self.chat.log(
                             ChatMessageKind::System,

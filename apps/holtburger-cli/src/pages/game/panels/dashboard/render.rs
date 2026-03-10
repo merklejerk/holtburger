@@ -104,15 +104,12 @@ fn render_verb_bar(
     view: &ViewState,
 ) -> Paragraph<'static> {
     let footer_header = dashboard.active_tab_footer_header();
-    let mut verbs = dashboard
-        .active_tab()
-        .get_verbs(data, view, &view.active_interaction);
-
-    if footer_header.is_some() {
-        verbs.retain(|verb| !(verb.shortcut.eq_ignore_ascii_case(&'f') && verb.label == "Filter"));
-    }
-
-    verbs.sort_by(|a, b| a.label.cmp(&b.label));
+    let verbs = visible_footer_verbs(
+        dashboard
+            .active_tab()
+            .get_verbs(data, view, &view.active_interaction),
+        footer_header.is_some(),
+    );
 
     let mut spans = Vec::new();
     for (i, verb) in verbs.iter().enumerate() {
@@ -132,6 +129,15 @@ fn render_verb_bar(
     Paragraph::new(verb_line)
         .block(Block::default().borders(Borders::TOP))
         .wrap(ratatui::widgets::Wrap { trim: true })
+}
+
+fn visible_footer_verbs(mut verbs: Vec<crate::types::Verb>, has_footer_header: bool) -> Vec<crate::types::Verb> {
+    if has_footer_header {
+        verbs.retain(|verb| !(verb.shortcut.eq_ignore_ascii_case(&'f') && verb.label == "Filter"));
+    }
+
+    verbs.sort_by(|a, b| a.label.cmp(&b.label));
+    verbs
 }
 
 fn render_footer_text_input(input: &VerbInputState) -> Paragraph<'static> {
@@ -170,4 +176,37 @@ fn footer_text_input_cursor_offset(input: &VerbInputState) -> u16 {
     };
 
     (UnicodeWidthStr::width(prompt_text.as_str()) + UnicodeWidthStr::width(value)) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::visible_footer_verbs;
+    use crate::types::{AppAction, Verb};
+
+    #[test]
+    fn visible_footer_verbs_hides_filter_when_active_header_is_present() {
+        let verbs = vec![
+            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter"),
+            Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
+        ];
+
+        let visible = visible_footer_verbs(verbs, true);
+
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].label, "Use");
+    }
+
+    #[test]
+    fn visible_footer_verbs_keeps_filter_when_no_active_header_is_present() {
+        let verbs = vec![
+            Verb::new(AppAction::DisplayClientInfo, 'u', "Use"),
+            Verb::new(AppAction::DisplayClientInfo, 'f', "Filter"),
+        ];
+
+        let visible = visible_footer_verbs(verbs, false);
+
+        assert_eq!(visible.len(), 2);
+        assert_eq!(visible[0].label, "Filter");
+        assert_eq!(visible[1].label, "Use");
+    }
 }

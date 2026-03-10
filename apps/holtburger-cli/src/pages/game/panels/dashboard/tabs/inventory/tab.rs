@@ -16,7 +16,10 @@ use crate::types::{
     Interaction, TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent,
     VerbInputState,
 };
-use crate::utils::{format_item_name, fuzzy_subsequence_match, normalize_filter_tokens};
+use crate::utils::{
+    format_item_name, fuzzy_subsequence_match, normalize_filter_tokens,
+    retain_matching_hierarchy,
+};
 
 #[derive(Debug, Clone)]
 struct SplitSession {
@@ -120,30 +123,18 @@ impl InventoryTab {
             return entities;
         }
 
-        let mut included_guids = HashSet::new();
-        let mut ancestor_path = Vec::new();
-
-        for (entity, _, depth) in &entities {
-            ancestor_path.truncate(*depth);
-
-            let display_name = format_item_name(*entity, entity.guid);
-            let matches_filter = active_filter
-                .tokens
-                .iter()
-                .any(|token| fuzzy_subsequence_match(token, &display_name));
-
-            if matches_filter {
-                included_guids.insert(entity.guid);
-                included_guids.extend(ancestor_path.iter().copied());
-            }
-
-            ancestor_path.push(entity.guid);
-        }
-
-        entities
-            .into_iter()
-            .filter(|(entity, _, _)| included_guids.contains(&entity.guid))
-            .collect()
+        retain_matching_hierarchy(
+            entities,
+            |(entity, _, _)| entity.guid,
+            |(_, _, depth)| *depth,
+            |(entity, _, _)| {
+                let display_name = format_item_name(*entity, entity.guid);
+                active_filter
+                    .tokens
+                    .iter()
+                    .any(|token| fuzzy_subsequence_match(token, &display_name))
+            },
+        )
     }
 
     fn clamp_selected_index(&mut self, data: &GameData) {

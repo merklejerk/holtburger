@@ -380,10 +380,10 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Preserve alphabetical ordering.
 
 ### Slice 9: Regression Coverage
-- [ ] Add unit tests for tokenization.
-- [ ] Add unit tests for fuzzy subsequence matching.
-- [ ] Add unit tests for Nearby/Inventory ancestor inclusion.
-- [ ] Add targeted tests for active-filter footer behavior where practical.
+- [x] Add unit tests for tokenization.
+- [x] Add unit tests for fuzzy subsequence matching.
+- [x] Add unit tests for Nearby/Inventory ancestor inclusion.
+- [x] Add targeted tests for active-filter footer behavior where practical.
 
 ## Definition of Done
 
@@ -407,7 +407,7 @@ The dry run says the work should execute in small slices, but the phase structur
 - [x] Complete Phase 4.
 - [x] Complete Phase 5.
 - [x] Complete Phase 6.
-- [ ] Complete Phase 7.
+- [x] Complete Phase 7.
 
 ### Decisions Log
 - Phase 1 uses a single `VerbInputState` for both quantity and text entry, with optional numeric bounds instead of a second parallel footer-input type.
@@ -422,6 +422,8 @@ The dry run says the work should execute in small slices, but the phase structur
 - Phase 5 keeps filter matching scoped to base `format_item_name(...)` output only; rendered status suffixes like `(EQUIPPED)`, `(OFFERED)`, `(SALVAGING)`, and container counts remain presentation-only and do not affect matches.
 - Phase 6 implements Spells filtering through one shared visible spell-id list used by both selection and rendering, so acted-on spells always match the rendered filtered rows.
 - Phase 6 keeps Spells matching scoped to resolved spell names only; rendered spell power remains presentation-only and does not participate in filtering.
+- Phase 7 extracts the shared ancestor-retention rule into a reusable helper so Nearby and Inventory regression tests exercise the same production filtering path instead of a duplicated test-only implementation.
+- Phase 7 covers active-filter footer behavior at the verb-visibility seam, which is the smallest practical test surface for proving that the rendered `Filter` verb disappears only while the active-filter header is present.
 - Default fuzzy behavior is case-insensitive subsequence matching, not substring-only matching.
 - Multiple space-separated tokens combine by union.
 - Filtering is inclusion-only and must never reorder a tab's canonical sequence.
@@ -440,6 +442,8 @@ The dry run says the work should execute in small slices, but the phase structur
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs` or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/render.rs`.
 - 2026-03-10: `cargo check -p holtburger-cli` passed after Phase 6 Spells filtering changes.
 - 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/tab.rs` or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/spells/render.rs`.
+- 2026-03-10: `cargo test -p holtburger-cli` passed after Phase 7 regression coverage changes.
+- 2026-03-10: VS Code diagnostics reported no errors in `apps/holtburger-cli/src/utils.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/render.rs`, `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/nearby/tab.rs`, or `apps/holtburger-cli/src/pages/game/panels/dashboard/tabs/inventory/tab.rs`.
 
 ### Open Questions
 - Do we want filter matching to stay limited to visible names/labels, or should Nearby/Inventory also match secondary metadata such as container status or item class names later?

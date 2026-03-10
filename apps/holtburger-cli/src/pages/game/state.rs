@@ -11,6 +11,7 @@ use std::time::Instant;
 use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
+use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane,
@@ -380,52 +381,26 @@ impl GameState {
                 }
             }
             AppAction::QueryDebugInfo { target } => match target {
-                crate::types::CommandTarget::Entity(guid)
-                | crate::types::CommandTarget::EntityWithSlot(guid, _) => {
+                InspectTarget::Entity(guid) => {
                     result
                         .commands
                         .push(ClientCommand::QueryEntityDebugInfo(guid));
                     result.merge(
-                        self.handle_action(AppAction::RequestDebugContext {
-                            target: InspectTarget::Entity(guid),
+                        self.handle_action(AppAction::ChangeContextView {
+                            view: ContextView::Debug(InspectTarget::Entity(guid)),
                         })
                             .unwrap_or_default(),
                     );
                 }
-                crate::types::CommandTarget::VendorItem(guid) => {
+                InspectTarget::VendorItem(guid) => {
                     result.commands.push(ClientCommand::Identify(guid));
                     result.merge(
-                        self.handle_action(AppAction::RequestDebugContext {
-                            target: InspectTarget::VendorItem(guid),
-                        })
-                        .unwrap_or_default(),
-                    );
-                }
-                crate::types::CommandTarget::Spell(spell_id) => {
-                    if matches!(
-                        self.view.context_view,
-                        ContextView::Assess(InspectTarget::VendorItem(_))
-                            | ContextView::Debug(InspectTarget::VendorItem(_))
-                    ) {
-                        result.needs_redraw = true;
-                        self.refresh_context_buffer();
-                    }
-                    result.merge(
                         self.handle_action(AppAction::ChangeContextView {
-                            view: crate::types::ContextView::DebugSpell(spell_id),
+                            view: ContextView::Debug(InspectTarget::VendorItem(guid)),
                         })
                         .unwrap_or_default(),
                     );
                 }
-                crate::types::CommandTarget::Enchantment(enchant) => {
-                    result.merge(
-                        self.handle_action(AppAction::ChangeContextView {
-                            view: crate::types::ContextView::DebugEnchantment(enchant),
-                        })
-                        .unwrap_or_default(),
-                    );
-                }
-                _ => {}
             },
             AppAction::CastSpell { spell_id, target } => {
                 match self.try_enter_combat_mode(CombatMode::Magic) {
@@ -525,12 +500,6 @@ impl GameState {
                 result.needs_redraw = true;
                 self.refresh_context_buffer();
             }
-            AppAction::RequestDebugContext { target } => {
-                self.view.context_view = crate::types::ContextView::Debug(target);
-                self.view.context_scroll_offset = 0;
-                result.needs_redraw = true;
-                self.refresh_context_buffer();
-            }
             AppAction::BeginInteraction { interaction } => {
                 if interaction == Interaction::Salvaging {
                     if !self.reset_salvaging_state(&mut result) {
@@ -605,13 +574,7 @@ impl GameState {
             self.view.context_buffer.clear();
             return;
         }
-        let content = {
-            let data = &self.data;
-            let view = &self.view;
-            self.dashboard
-                .active_tab_mut()
-                .get_context_panel_content(data, view)
-        };
+        let content = build_context_panel_content(&self.data, &self.view);
         self.view.context_buffer = content;
     }
 

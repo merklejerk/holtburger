@@ -12,7 +12,7 @@ use super::super::classification::{EntityClass, classify_entity};
 use super::render::render_inventory_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, ChatMessageKind, CommandTarget, InspectTarget, Interaction,
+    AppAction, AppUiAction, ChatMessageKind, InspectTarget, Interaction,
     TabController, UpdateResult, Verb, VerbInputEvent, VerbInputState,
 };
 use crate::utils::format_item_name;
@@ -177,7 +177,7 @@ impl TabController for InventoryTab {
                 ),
                 Verb::new(
                     vec![AppAction::QueryDebugInfo {
-                        target: CommandTarget::Entity(cur_entity.guid),
+                        target: InspectTarget::Entity(cur_entity.guid),
                     }],
                     'g',
                     "Debug",

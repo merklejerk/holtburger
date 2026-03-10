@@ -13,7 +13,7 @@ use super::super::classification::{self, EntityClass};
 use super::render::render_nearby_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, CommandTarget, InspectTarget, Interaction, TabController, UpdateResult, Verb,
+    AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb,
 };
 
 #[derive(Default, Debug, Clone)]
@@ -121,13 +121,9 @@ pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
 }
 
 impl NearbyTab {
-    fn get_target(&self, data: &GameData) -> CommandTarget {
+    fn get_selected_guid(&self, data: &GameData) -> Option<Guid> {
         let entities = get_entities(data);
-        if let Some((e, _, _)) = entities.get(self.selected_index) {
-            CommandTarget::Entity(e.guid)
-        } else {
-            CommandTarget::None
-        }
+        entities.get(self.selected_index).map(|(e, _, _)| e.guid)
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
@@ -147,11 +143,11 @@ impl TabController for NearbyTab {
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let mut verbs = Vec::new();
-        let target = self.get_target(data);
+        let target_guid = self.get_selected_guid(data);
         let player_guid = data.player_guid;
 
-        if let (Some(interaction), CommandTarget::Entity(guid)) = (interaction, &target) {
-            let e = data.entities.get(guid).unwrap();
+        if let (Some(interaction), Some(guid)) = (interaction, target_guid) {
+            let e = data.entities.get(&guid).unwrap();
             let class = classification::classify_entity(e);
             let is_self = Some(e.guid) == player_guid;
 
@@ -231,7 +227,7 @@ impl TabController for NearbyTab {
             }
         }
 
-        if let CommandTarget::Entity(guid) = target {
+        if let Some(guid) = target_guid {
             let e = data.entities.get(&guid).unwrap();
             let class = classification::classify_entity(e);
             let is_open_container = data.open_containers.contains(&e.guid);
@@ -288,7 +284,7 @@ impl TabController for NearbyTab {
                 ),
                 Verb::new(
                     vec![AppAction::QueryDebugInfo {
-                        target: CommandTarget::Entity(e.guid),
+                        target: InspectTarget::Entity(e.guid),
                     }],
                     'g',
                     "Debug",

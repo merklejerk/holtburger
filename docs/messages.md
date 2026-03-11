@@ -424,6 +424,61 @@ Primary way clients send commands and interactions to the server.
 - **`0x0015` Talk:** Send chat or commands.
 - **`0x0036` Use:** Interact with world objects or items.
 
+### Combat Game Actions
+
+The combat stance toggle and targeted attack packets are sent as `0xF7B1` game actions with a 4-byte sequence, a 4-byte action opcode, then the action payload.
+
+#### `0xF7B1:0x0008` TargetedMeleeAttack (C2S)
+Starts or continues a melee attack against a specific target.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `TargetGUID` | GUID of the creature or attackable world object being attacked. |
+| `uint32` | `AttackHeight` | Vertical attack selection. ACE values: `High = 1`, `Medium = 2`, `Low = 3`. |
+| `float32` | `PowerLevel` | Melee power slider value, clamped by ACE to `[0.0, 1.0]`. |
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `0`
+- Target: `0x80000001`
+- Height: `Medium`
+- Power: `0.5`
+- Full bytes: `000000000800000001000080020000000000003F`
+
+#### `0xF7B1:0x000A` TargetedMissileAttack (C2S)
+Starts or continues a missile attack against a specific target.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `TargetGUID` | GUID of the creature or attackable world object being attacked. |
+| `uint32` | `AttackHeight` | Vertical attack selection. ACE values: `High = 1`, `Medium = 2`, `Low = 3`. |
+| `float32` | `AccuracyLevel` | Missile accuracy slider value, clamped by ACE to `[0.0, 1.0]`. |
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `0`
+- Target: `0x80000002`
+- Height: `High`
+- Accuracy: `1.0`
+- Full bytes: `000000000A00000002000080010000000000803F`
+
+#### `0xF7B1:0x0053` ChangeCombatMode (C2S)
+Changes the player combat stance. holtburger uses this before targeted melee or missile attacks when the current stance does not already match.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `CombatMode` | ACE bitmask values. Common stances are `NonCombat = 1`, `Melee = 2`, `Missile = 4`, `Magic = 8`. |
+
+#### Holtburger TUI Combat Controls
+
+The current holtburger TUI exposes melee and missile controls in the dynamic pane.
+
+- Melee shows `Pow` for the outgoing `PowerLevel` float.
+- Missile shows `Acc` for the outgoing `AccuracyLevel` float.
+- Both modes show `Hgt` for the `AttackHeight` enum.
+- The fixed preset mapping is `Low = 0.0`, `Medium = 0.5`, `High = 1.0`.
+- The default local control state is `Medium` preset and `Medium` height.
+- `v` cycles power or accuracy and `h` cycles attack height, but only while the dynamic pane has focus.
+- There is no dedicated attack key. Entering melee or missile mode with a valid target sends `ChangeCombatMode` followed by the targeted attack action in the same command batch. Selecting a valid target while already in melee or missile mode sends only the targeted attack action.
+
 ---
 
 ## 6. Trade and Vendors

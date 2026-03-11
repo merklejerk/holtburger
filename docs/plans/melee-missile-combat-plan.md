@@ -316,7 +316,7 @@ Mitigation:
 - [x] Add auto-attack triggers on combat-mode entry and target acquisition.
 - [x] Clear stale targeting interactions on despawn.
 - [x] Update dynamic panel rendering.
-- [ ] Document protocol and UI behavior.
+- [x] Document protocol and UI behavior.
 - [x] Run focused tests.
 
 ### Decisions Log
@@ -338,6 +338,8 @@ Mitigation:
 - Phase 4 decision: show `Pow` for melee and `Acc` for missile, and only show `[V] [H]` shortcut hints while the dynamic pane itself has focus.
 - Phase 4 decision: intercept `v` and `h` only from `FocusedPane::Dynamic`; all other panes keep their existing key behavior unchanged.
 - Phase 4 decision: clear `Interaction::Targeting` immediately when the targeted entity despawns so auto-attack cannot reuse stale targets.
+- Phase 5 decision: document the wire layout and current client control model together in `docs/messages.md` so the protocol reference and operator-facing behavior stay in one maintained place.
+- Phase 5 decision: keep Phase 5 verification focused on the affected Rust crates plus the targeted ACE synthetic combat fixture test; no bespoke runtime harness was needed to prove the implemented packet layouts and TUI wiring.
 
 ### Verification Log
 - Investigated required opcodes in ACE and confirmed missing client actions: `0x0008`, `0x000A`.
@@ -365,5 +367,8 @@ Mitigation:
 - Implemented stale targeting cleanup on entity despawn in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
 - Added focused Phase 4 tests for dynamic control text, dynamic-pane key routing, and target-despawn cleanup in [apps/holtburger-cli/src/pages/game/panels/dynamic.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dynamic.rs), [apps/holtburger-cli/src/pages/game/input.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/input.rs), and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
 - Verified `cargo test -p holtburger-cli` passes after the Phase 4 changes.
+- Documented targeted melee and missile attack layouts, ACE-backed fixture bytes, and the current holtburger TUI combat control model in [docs/messages.md](/home/cluracan/code/holtburger/docs/messages.md).
+- Verified `cargo test -p holtburger-protocol -p holtburger-core -p holtburger-cli` passes after the Phase 5 documentation update.
+- Verified `dotnet test ACE.Server.Tests/ACE.Server.Tests.csproj --filter GenerateCombatActionFixtures` passes from [ACE/Source](/home/cluracan/code/holtburger/ACE/Source).
 
 ### Open Questions

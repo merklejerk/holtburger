@@ -310,7 +310,7 @@ Mitigation:
 - [x] Add `TargetedMeleeAttack` and `TargetedMissileAttack` opcodes to holtburger protocol.
 - [x] Add Rust `AttackHeight` enum and targeted attack action structs.
 - [x] Add parity tests for both actions.
-- [ ] Add core client commands and encoder branches.
+- [x] Add core client commands and encoder branches.
 - [ ] Add CLI combat-control state and app actions.
 - [ ] Add dynamic-pane input handlers for preset and height shortcuts.
 - [ ] Add auto-attack triggers on combat-mode entry and target acquisition.
@@ -328,6 +328,8 @@ Mitigation:
 - Updated decision: reuse the existing targeting interaction rather than introducing a combat-specific targeting variant.
 - Phase 1 decision: define `AttackHeight` in `holtburger-protocol::messages::combat::types` so both action payloads share the same wire enum.
 - Phase 1 decision: use ACE synthetic fixtures with raw `GameActionMessage` layout and `sequence = 0` for parity coverage.
+- Phase 2 decision: expose targeted melee and missile attacks as first-class `ClientCommand` variants in `holtburger-core`, carrying protocol `AttackHeight` directly and leaving preset-to-float translation to the CLI layer.
+- Phase 2 decision: route targeted melee and missile attacks through `handle_interaction_command`, alongside spells and other target-driven actions.
 
 ### Verification Log
 - Investigated required opcodes in ACE and confirmed missing client actions: `0x0008`, `0x000A`.
@@ -343,5 +345,7 @@ Mitigation:
 - Captured authoritative ACE fixture hex for targeted missile attack: `000000000A00000002000080010000000000803F`.
 - Implemented protocol opcode registration, `AttackHeight`, targeted combat action structs, and `GameAction` routing in [crates/holtburger-protocol/src/opcodes.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/opcodes.rs), [crates/holtburger-protocol/src/messages/combat/types.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/messages/combat/types.rs), [crates/holtburger-protocol/src/messages/combat/actions.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/messages/combat/actions.rs), and [crates/holtburger-protocol/src/messages/game_action.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/messages/game_action.rs).
 - Verified `cargo test -p holtburger-protocol` passes after the Phase 1 changes.
+- Implemented targeted melee and missile `ClientCommand` variants and protocol bridging in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs) and [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs).
+- Verified `cargo test -p holtburger-core` passes after the Phase 2 changes.
 
 ### Open Questions

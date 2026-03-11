@@ -28,6 +28,8 @@ impl Client {
             | ClientCommand::SalvageItemsWith { .. }
             | ClientCommand::CastTargetedSpell { .. }
             | ClientCommand::CastUntargetedSpell { .. }
+            | ClientCommand::TargetedMeleeAttack { .. }
+            | ClientCommand::TargetedMissileAttack { .. }
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
             | ClientCommand::OpenTrade(_)
@@ -192,6 +194,46 @@ impl Client {
                 log::info!(">>> Casting spell {}", spell_id);
                 self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
                     CastUntargetedSpellActionData { spell_id },
+                )))
+                .await
+            }
+            ClientCommand::TargetedMeleeAttack {
+                target,
+                attack_height,
+                power_level,
+            } => {
+                log::info!(
+                    ">>> Targeted melee attack on 0x{:08X} ({:?}, power {:.2})",
+                    target.0,
+                    attack_height,
+                    power_level
+                );
+                self.send_game_action(GameAction::TargetedMeleeAttack(Box::new(
+                    TargetedMeleeAttackActionData {
+                        target_guid: target,
+                        attack_height,
+                        power_level,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::TargetedMissileAttack {
+                target,
+                attack_height,
+                accuracy_level,
+            } => {
+                log::info!(
+                    ">>> Targeted missile attack on 0x{:08X} ({:?}, accuracy {:.2})",
+                    target.0,
+                    attack_height,
+                    accuracy_level
+                );
+                self.send_game_action(GameAction::TargetedMissileAttack(Box::new(
+                    TargetedMissileAttackActionData {
+                        target_guid: target,
+                        attack_height,
+                        accuracy_level,
+                    },
                 )))
                 .await
             }

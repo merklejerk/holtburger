@@ -1,6 +1,6 @@
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
-use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -313,6 +313,16 @@ pub enum ClientCommand {
     },
     CastUntargetedSpell {
         spell_id: u32,
+    },
+    TargetedMeleeAttack {
+        target: Guid,
+        attack_height: AttackHeight,
+        power_level: f32,
+    },
+    TargetedMissileAttack {
+        target: Guid,
+        attack_height: AttackHeight,
+        accuracy_level: f32,
     },
     SetCombatMode(CombatMode),
     SetNoClip(bool),

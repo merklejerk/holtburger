@@ -306,10 +306,10 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Add ACE synthetic protocol tests for targeted melee and missile attack actions.
-- [ ] Add `TargetedMeleeAttack` and `TargetedMissileAttack` opcodes to holtburger protocol.
-- [ ] Add Rust `AttackHeight` enum and targeted attack action structs.
-- [ ] Add parity tests for both actions.
+- [x] Add ACE synthetic protocol tests for targeted melee and missile attack actions.
+- [x] Add `TargetedMeleeAttack` and `TargetedMissileAttack` opcodes to holtburger protocol.
+- [x] Add Rust `AttackHeight` enum and targeted attack action structs.
+- [x] Add parity tests for both actions.
 - [ ] Add core client commands and encoder branches.
 - [ ] Add CLI combat-control state and app actions.
 - [ ] Add dynamic-pane input handlers for preset and height shortcuts.
@@ -326,6 +326,8 @@ Mitigation:
 - Updated decision: there is no separate attack key; melee and missile auto-attack based on combat mode plus valid target.
 - Updated decision: `v` and `h` should be handled only when the dynamic pane has focus, not as dashboard-global shortcuts.
 - Updated decision: reuse the existing targeting interaction rather than introducing a combat-specific targeting variant.
+- Phase 1 decision: define `AttackHeight` in `holtburger-protocol::messages::combat::types` so both action payloads share the same wire enum.
+- Phase 1 decision: use ACE synthetic fixtures with raw `GameActionMessage` layout and `sequence = 0` for parity coverage.
 
 ### Verification Log
 - Investigated required opcodes in ACE and confirmed missing client actions: `0x0008`, `0x000A`.
@@ -336,5 +338,10 @@ Mitigation:
 - Verified the TUI preserves command ordering when multiple commands are emitted in one update result.
 - Verified current dashboard-first input handling would swallow global `v` and `h` shortcuts.
 - Verified current entity-removal cleanup does not clear generic targeting interactions.
+- Implemented ACE synthetic fixture generator in [ACE/Source/ACE.Server.Tests/SyntheticProtocolTests.cs](/home/cluracan/code/holtburger/ACE/Source/ACE.Server.Tests/SyntheticProtocolTests.cs).
+- Captured authoritative ACE fixture hex for targeted melee attack: `000000000800000001000080020000000000003F`.
+- Captured authoritative ACE fixture hex for targeted missile attack: `000000000A00000002000080010000000000803F`.
+- Implemented protocol opcode registration, `AttackHeight`, targeted combat action structs, and `GameAction` routing in [crates/holtburger-protocol/src/opcodes.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/opcodes.rs), [crates/holtburger-protocol/src/messages/combat/types.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/messages/combat/types.rs), [crates/holtburger-protocol/src/messages/combat/actions.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/messages/combat/actions.rs), and [crates/holtburger-protocol/src/messages/game_action.rs](/home/cluracan/code/holtburger/crates/holtburger-protocol/src/messages/game_action.rs).
+- Verified `cargo test -p holtburger-protocol` passes after the Phase 1 changes.
 
 ### Open Questions

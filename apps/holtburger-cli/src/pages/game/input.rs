@@ -166,7 +166,7 @@ impl GameState {
                             self.data.get_suggested_combat_mode()
                         };
 
-                        result.commands.push(ClientCommand::SetCombatMode(mode));
+                        result.actions.push(crate::types::AppAction::SetCombatMode { mode });
                         self.chat_input.input_history.push(command.clone());
                         self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;

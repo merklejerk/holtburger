@@ -311,13 +311,13 @@ Mitigation:
 - [x] Add Rust `AttackHeight` enum and targeted attack action structs.
 - [x] Add parity tests for both actions.
 - [x] Add core client commands and encoder branches.
-- [ ] Add CLI combat-control state and app actions.
+- [x] Add CLI combat-control state and app actions.
 - [ ] Add dynamic-pane input handlers for preset and height shortcuts.
-- [ ] Add auto-attack triggers on combat-mode entry and target acquisition.
+- [x] Add auto-attack triggers on combat-mode entry and target acquisition.
 - [ ] Clear stale targeting interactions on despawn.
 - [ ] Update dynamic panel rendering.
 - [ ] Document protocol and UI behavior.
-- [ ] Run focused tests.
+- [x] Run focused tests.
 
 ### Decisions Log
 - Initial decision: reuse existing `Interaction::Targeting` rather than adding a second combat-target state.
@@ -330,6 +330,10 @@ Mitigation:
 - Phase 1 decision: use ACE synthetic fixtures with raw `GameActionMessage` layout and `sequence = 0` for parity coverage.
 - Phase 2 decision: expose targeted melee and missile attacks as first-class `ClientCommand` variants in `holtburger-core`, carrying protocol `AttackHeight` directly and leaving preset-to-float translation to the CLI layer.
 - Phase 2 decision: route targeted melee and missile attacks through `handle_interaction_command`, alongside spells and other target-driven actions.
+- Phase 3 decision: store combat-control UI state in `GameData` as `CombatControlState`, with medium preset and medium height defaults preserved across in-world updates.
+- Phase 3 decision: route `/combat` through `AppAction::SetCombatMode` so stance changes and auto-attack behavior share one reducer path.
+- Phase 3 decision: trigger auto-attack immediately from reducer handling when entering melee or missile mode with an existing target, and when acquiring a target while already in melee or missile mode.
+- Phase 3 decision: treat a combat target as valid only if it is not the player, still exists in the entity cache, has a non-null world position, and is either explicitly `Attackable` or has a creature profile.
 
 ### Verification Log
 - Investigated required opcodes in ACE and confirmed missing client actions: `0x0008`, `0x000A`.
@@ -347,5 +351,10 @@ Mitigation:
 - Verified `cargo test -p holtburger-protocol` passes after the Phase 1 changes.
 - Implemented targeted melee and missile `ClientCommand` variants and protocol bridging in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs) and [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs).
 - Verified `cargo test -p holtburger-core` passes after the Phase 2 changes.
+- Implemented CLI-local combat profile and attack-height state in [apps/holtburger-cli/src/pages/game/data.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/data.rs) and cycling app actions in [apps/holtburger-cli/src/types.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/types.rs).
+- Implemented reducer-driven auto-attack and combat-target validation in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
+- Routed the `/combat` command through reducer actions in [apps/holtburger-cli/src/pages/game/input.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/input.rs) so stance-entry auto-attack applies to the existing command path.
+- Added focused CLI state tests covering mode-entry auto-attack, target-acquisition auto-attack, and control cycling in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
+- Verified `cargo test -p holtburger-cli` passes after the Phase 3 changes.
 
 ### Open Questions

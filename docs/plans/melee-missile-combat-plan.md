@@ -312,10 +312,10 @@ Mitigation:
 - [x] Add parity tests for both actions.
 - [x] Add core client commands and encoder branches.
 - [x] Add CLI combat-control state and app actions.
-- [ ] Add dynamic-pane input handlers for preset and height shortcuts.
+- [x] Add dynamic-pane input handlers for preset and height shortcuts.
 - [x] Add auto-attack triggers on combat-mode entry and target acquisition.
-- [ ] Clear stale targeting interactions on despawn.
-- [ ] Update dynamic panel rendering.
+- [x] Clear stale targeting interactions on despawn.
+- [x] Update dynamic panel rendering.
 - [ ] Document protocol and UI behavior.
 - [x] Run focused tests.
 
@@ -334,6 +334,10 @@ Mitigation:
 - Phase 3 decision: route `/combat` through `AppAction::SetCombatMode` so stance changes and auto-attack behavior share one reducer path.
 - Phase 3 decision: trigger auto-attack immediately from reducer handling when entering melee or missile mode with an existing target, and when acquiring a target while already in melee or missile mode.
 - Phase 3 decision: treat a combat target as valid only if it is not the player, still exists in the entity cache, has a non-null world position, and is either explicitly `Attackable` or has a creature profile.
+- Phase 4 decision: render combat controls as a right-aligned dynamic-pane segment so existing interaction or world summary text keeps the left side of the pane.
+- Phase 4 decision: show `Pow` for melee and `Acc` for missile, and only show `[V] [H]` shortcut hints while the dynamic pane itself has focus.
+- Phase 4 decision: intercept `v` and `h` only from `FocusedPane::Dynamic`; all other panes keep their existing key behavior unchanged.
+- Phase 4 decision: clear `Interaction::Targeting` immediately when the targeted entity despawns so auto-attack cannot reuse stale targets.
 
 ### Verification Log
 - Investigated required opcodes in ACE and confirmed missing client actions: `0x0008`, `0x000A`.
@@ -356,5 +360,10 @@ Mitigation:
 - Routed the `/combat` command through reducer actions in [apps/holtburger-cli/src/pages/game/input.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/input.rs) so stance-entry auto-attack applies to the existing command path.
 - Added focused CLI state tests covering mode-entry auto-attack, target-acquisition auto-attack, and control cycling in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
 - Verified `cargo test -p holtburger-cli` passes after the Phase 3 changes.
+- Implemented right-aligned melee and missile combat control rendering in [apps/holtburger-cli/src/pages/game/panels/dynamic.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dynamic.rs), preserving the left-side interaction summary.
+- Implemented dynamic-pane-only `v` and `h` shortcut routing in [apps/holtburger-cli/src/pages/game/input.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/input.rs).
+- Implemented stale targeting cleanup on entity despawn in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
+- Added focused Phase 4 tests for dynamic control text, dynamic-pane key routing, and target-despawn cleanup in [apps/holtburger-cli/src/pages/game/panels/dynamic.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/panels/dynamic.rs), [apps/holtburger-cli/src/pages/game/input.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/input.rs), and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
+- Verified `cargo test -p holtburger-cli` passes after the Phase 4 changes.
 
 ### Open Questions

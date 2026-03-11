@@ -179,9 +179,9 @@
 - [x] Display encumbrance (sticky line in inv tab?).
 - [x] Vendor list is janky: assess/debug do nothing and all have max u32 qty.
 - [x] Enter shortcut to use mana charge on self.
-- [ ] Melee combat.
+- [~] Melee combat.
     - [ ] Auto-attack on target.
-- [ ] Missile combat.
+- [~] Missile combat.
     - [ ] Auto-attack on target.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.

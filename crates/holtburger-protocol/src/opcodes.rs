@@ -232,6 +232,14 @@ pub enum GameOpcode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Hash)]
 #[repr(u32)]
 pub enum GameActionOpcode {
+    // --- Combat ---
+    /// C2S: Initiate or continue a targeted melee attack.
+    /// Carries the current attack height and power slider value.
+    TargetedMeleeAttack = 0x0008,
+    /// C2S: Initiate or continue a targeted missile attack.
+    /// Carries the current attack height and accuracy slider value.
+    TargetedMissileAttack = 0x000A,
+
     // --- Communication & Chat ---
     // /// C2S: Toggle Away From Keyboard (AFK) status.
     // SetAfkMode = 0x000F,

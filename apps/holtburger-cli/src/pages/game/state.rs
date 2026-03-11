@@ -808,6 +808,12 @@ impl GameState {
             self.view.context_view = ContextView::Default;
             self.refresh_context_buffer();
         }
+        if matches!(
+            self.view.active_interaction,
+            Some(Interaction::Targeting { target_guid }) if target_guid == guid
+        ) {
+            self.view.active_interaction = None;
+        }
         if let Some(session) = self.view.salvaging.as_mut() {
             session
                 .queued_items
@@ -1081,5 +1087,17 @@ mod tests {
 
         assert_eq!(state.data.combat_controls.profile_level.wire_value(), 1.0);
         assert_eq!(state.data.combat_controls.attack_height, AttackHeight::High);
+    }
+
+    #[test]
+    fn despawning_target_clears_targeting_interaction() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+        state.handle_entity_removed(target_guid);
+
+        assert_eq!(state.view.active_interaction, None);
     }
 }

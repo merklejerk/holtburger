@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_core::ClientCommand;
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_world::context::WorldContextExt;
 
 use crate::pages::game::GameState;
@@ -312,6 +313,18 @@ impl GameState {
                 if self.view.focused_pane == FocusedPane::Input {
                     self.chat_input.input.push(c);
                     result.needs_redraw = true;
+                } else if self.view.focused_pane == FocusedPane::Dynamic {
+                    match c.to_ascii_lowercase() {
+                        'v' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
+                            result.actions.push(crate::types::AppAction::CycleCombatProfileLevel);
+                            result.needs_redraw = true;
+                        }
+                        'h' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
+                            result.actions.push(crate::types::AppAction::CycleCombatAttackHeight);
+                            result.needs_redraw = true;
+                        }
+                        _ => {}
+                    }
                 }
             }
             KeyCode::Home => match self.view.focused_pane {
@@ -341,5 +354,45 @@ impl GameState {
             _ => {}
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{AppAction, Interaction};
+    use crossterm::event::KeyModifiers;
+    use holtburger_common::Guid;
+
+    #[test]
+    fn dynamic_focus_v_cycles_combat_profile() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Dynamic;
+        state.view.active_interaction = Some(Interaction::Targeting {
+            target_guid: Guid(0x60000001),
+        });
+        state.data.combat_mode = CombatMode::Melee;
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE), 120);
+
+        assert_eq!(result.actions.len(), 1);
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::CycleCombatProfileLevel)
+        ));
+    }
+
+    #[test]
+    fn dashboard_focus_v_does_not_cycle_combat_profile() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Dashboard;
+        state.view.active_interaction = Some(Interaction::Targeting {
+            target_guid: Guid(0x60000001),
+        });
+        state.data.combat_mode = CombatMode::Melee;
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE), 120);
+
+        assert!(!result.actions.iter().any(|action| matches!(action, AppAction::CycleCombatProfileLevel)));
     }
 }

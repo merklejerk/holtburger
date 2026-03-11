@@ -6,7 +6,7 @@ use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::EquipMask;
-use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
@@ -15,6 +15,61 @@ use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
 use std::sync::Arc;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CombatProfileLevel {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl CombatProfileLevel {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Low => Self::Medium,
+            Self::Medium => Self::High,
+            Self::High => Self::Low,
+        }
+    }
+
+    pub fn wire_value(self) -> f32 {
+        match self {
+            Self::Low => 0.0,
+            Self::Medium => 0.5,
+            Self::High => 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CombatControlState {
+    pub profile_level: CombatProfileLevel,
+    pub attack_height: AttackHeight,
+}
+
+impl Default for CombatControlState {
+    fn default() -> Self {
+        Self {
+            profile_level: CombatProfileLevel::Medium,
+            attack_height: AttackHeight::Medium,
+        }
+    }
+}
+
+impl CombatControlState {
+    pub fn cycle_attack_height(&mut self) {
+        self.attack_height = match self.attack_height {
+            AttackHeight::Low => AttackHeight::Medium,
+            AttackHeight::Medium => AttackHeight::High,
+            AttackHeight::High => AttackHeight::Low,
+        };
+    }
+
+    pub fn cycle_profile_level(&mut self) {
+        self.profile_level = self.profile_level.cycle();
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GameData {
@@ -50,6 +105,8 @@ pub struct GameData {
     pub world_name: String,
     /// Current combat stances.
     pub combat_mode: CombatMode,
+    /// Local CLI combat controls for melee power or missile accuracy and attack height.
+    pub combat_controls: CombatControlState,
     /// Whether we can walk through walls (debug feature).
     pub noclip: bool,
     /// Every entity currently in player's pack.
@@ -81,6 +138,7 @@ impl Default for GameData {
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
+            combat_controls: CombatControlState::default(),
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),

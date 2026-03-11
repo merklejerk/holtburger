@@ -1,7 +1,8 @@
 use holtburger_common::Guid;
+use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessors};
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
-use holtburger_protocol::messages::CombatMode;
+use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
@@ -421,8 +422,24 @@ impl GameState {
                     }
                 }
             }
+            AppAction::CycleCombatProfileLevel => {
+                self.data.combat_controls.cycle_profile_level();
+                result.needs_redraw = true;
+            }
+            AppAction::CycleCombatAttackHeight => {
+                self.data.combat_controls.cycle_attack_height();
+                result.needs_redraw = true;
+            }
             AppAction::SetCombatMode { mode } => {
-                result.commands.push(ClientCommand::SetCombatMode(mode));
+                match self.try_enter_combat_mode(mode) {
+                    EnterCombatModeResult::Failed(res) => {
+                        result.merge(res);
+                    }
+                    EnterCombatModeResult::Success(res) => {
+                        result.merge(res);
+                        self.queue_auto_attack_for_mode(mode, &mut result);
+                    }
+                }
             }
             AppAction::LevelUpStat {
                 stat,
@@ -506,6 +523,7 @@ impl GameState {
                     }
                 } else {
                     self.view.active_interaction = Some(interaction);
+                    self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
                 }
                 result.needs_redraw = true;
             }
@@ -640,6 +658,60 @@ impl GameState {
         }
         result.commands.push(ClientCommand::SetCombatMode(mode));
         EnterCombatModeResult::Success(result)
+    }
+
+    fn queue_auto_attack_for_mode(&self, mode: CombatMode, result: &mut UpdateResult) {
+        let Some(target_guid) = self.current_target_guid() else {
+            return;
+        };
+
+        if !self.is_valid_combat_target(target_guid) {
+            return;
+        }
+
+        let attack_height = self.data.combat_controls.attack_height;
+        let profile_value = self.data.combat_controls.profile_level.wire_value();
+
+        let command = match mode {
+            CombatMode::Melee => Some(ClientCommand::TargetedMeleeAttack {
+                target: target_guid,
+                attack_height,
+                power_level: profile_value,
+            }),
+            CombatMode::Missile => Some(ClientCommand::TargetedMissileAttack {
+                target: target_guid,
+                attack_height,
+                accuracy_level: profile_value,
+            }),
+            _ => None,
+        };
+
+        if let Some(command) = command {
+            result.commands.push(command);
+        }
+    }
+
+    fn current_target_guid(&self) -> Option<Guid> {
+        match self.view.active_interaction {
+            Some(Interaction::Targeting { target_guid }) => Some(target_guid),
+            _ => None,
+        }
+    }
+
+    fn is_valid_combat_target(&self, target_guid: Guid) -> bool {
+        if Some(target_guid) == self.data.player_guid {
+            return false;
+        }
+
+        let Some(entity) = self.data.entities.get(&target_guid) else {
+            return false;
+        };
+
+        if entity.position.landblock_id == Guid::NULL {
+            return false;
+        }
+
+        entity.get_bool_prop(PropertyBool::Attackable) || entity.creature_profile.is_some()
     }
 
     fn reset_salvaging_state(&mut self, result: &mut UpdateResult) -> bool {
@@ -826,7 +898,10 @@ impl ViewState {
 mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{PropertyString, WorldObjectProperties};
+    use holtburger_common::properties::{
+        PropertyBool, PropertyString, WorldObjectProperties, WorldObjectPropertyAccessorsMut,
+    };
+    use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
 
     #[test]
@@ -925,5 +1000,86 @@ mod tests {
 
     fn context_buffer_contains(buffer: &[Line<'static>], needle: &str) -> bool {
         buffer.iter().any(|line| line.to_string().contains(needle))
+    }
+
+    #[test]
+    fn set_combat_mode_with_valid_target_queues_melee_attack() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let result = state
+            .handle_action(AppAction::SetCombatMode {
+                mode: CombatMode::Melee,
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::SetCombatMode(CombatMode::Melee))
+        ));
+        assert!(matches!(
+            result.commands.get(1),
+            Some(ClientCommand::TargetedMeleeAttack {
+                target,
+                attack_height: AttackHeight::Medium,
+                power_level,
+            }) if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn begin_targeting_in_missile_mode_queues_missile_attack() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Missile;
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+
+        let mut target = Entity::new(target_guid, "Tusker".to_string(), target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let result = state
+            .handle_action(AppAction::BeginInteraction {
+                interaction: Interaction::Targeting { target_guid },
+            })
+            .unwrap();
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::TargetedMissileAttack {
+                target,
+                attack_height: AttackHeight::Medium,
+                accuracy_level,
+            }) if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
+        ));
+    }
+
+    #[test]
+    fn combat_control_actions_cycle_defaults() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        assert_eq!(state.data.combat_controls.profile_level.wire_value(), 0.5);
+        assert_eq!(state.data.combat_controls.attack_height, AttackHeight::Medium);
+
+        state.handle_action(AppAction::CycleCombatProfileLevel).unwrap();
+        state.handle_action(AppAction::CycleCombatAttackHeight).unwrap();
+
+        assert_eq!(state.data.combat_controls.profile_level.wire_value(), 1.0);
+        assert_eq!(state.data.combat_controls.attack_height, AttackHeight::High);
     }
 }

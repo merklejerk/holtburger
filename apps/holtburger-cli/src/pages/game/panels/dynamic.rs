@@ -150,7 +150,7 @@ pub fn render_dynamic_pane(
     }
 }
 
-fn combat_controls_line(data: &GameData, view: &ViewState) -> Option<Line<'static>> {
+fn combat_controls_line(data: &GameData, _view: &ViewState) -> Option<Line<'static>> {
     let profile_label = match data.combat_controls.profile_level {
         crate::pages::game::data::CombatProfileLevel::Low => "Low",
         crate::pages::game::data::CombatProfileLevel::Medium => "Medium",
@@ -163,24 +163,28 @@ fn combat_controls_line(data: &GameData, view: &ViewState) -> Option<Line<'stati
         AttackHeight::Low => "Low",
     };
 
-    let has_target = matches!(view.active_interaction, Some(Interaction::Targeting { .. }));
-    let attack_activity = data.combat_runtime.attack_activity(data.combat_mode, has_target);
+    let attack_activity = data.combat_runtime.attack_activity(data.combat_mode);
 
     match data.combat_mode {
         CombatMode::Melee | CombatMode::Missile => {
-            let mut spans = vec![
-                Span::styled(
-                    format!("[P]ower: {}  [H]eight: {}", profile_label, height_label),
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ];
+            let mut spans = Vec::new();
 
             if let Some(activity) = attack_activity {
-                spans.push(Span::raw("  "));
                 spans.push(attack_indicator_span(activity));
+                spans.push(Span::raw("  "));
             }
+
+            let profile_name = match data.combat_mode {
+                CombatMode::Melee => "Powe[r]",
+                _ => "Accu[r]acy",
+            };
+
+            spans.push(Span::styled(
+                format!("{}: {}  [H]eight: {} ", profile_name, profile_label, height_label),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ));
 
             Some(Line::from(spans))
         }
@@ -191,11 +195,11 @@ fn combat_controls_line(data: &GameData, view: &ViewState) -> Option<Line<'stati
 fn attack_indicator_span(activity: AttackActivity) -> Span<'static> {
     let (marker, style) = match activity {
         AttackActivity::Ready => (
-            "||",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            " 😠 ",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
         ),
         AttackActivity::Active => (
-            "||||",
+            " 😡 ",
             Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD | Modifier::RAPID_BLINK),
         ),
     };
@@ -249,7 +253,7 @@ mod tests {
 
         let text = combat_controls_line(&data, &view).unwrap().to_string();
 
-        assert!(text.contains("[P]ower: Medium"));
+        assert!(text.contains("Powe[r]: Medium"));
         assert!(text.contains("[H]eight: Medium"));
         assert!(!text.ends_with("||"));
         assert!(!text.ends_with("||||"));
@@ -259,6 +263,7 @@ mod tests {
     fn missile_controls_show_ready_indicator_with_target() {
         let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
         data.combat_mode = CombatMode::Missile;
+        data.combat_runtime.attack_queued = true;
         data.combat_controls.attack_height = AttackHeight::High;
         let view = ViewState {
             active_interaction: Some(Interaction::Targeting {
@@ -269,9 +274,9 @@ mod tests {
 
         let text = combat_controls_line(&data, &view).unwrap().to_string();
 
-        assert!(text.contains("[P]ower: Medium"));
+        assert!(text.contains("Accu[r]acy: Medium"));
         assert!(text.contains("[H]eight: High"));
-        assert!(text.ends_with("||"));
+        assert!(text.contains(" 😠 "));
     }
 
     #[test]
@@ -306,21 +311,38 @@ mod tests {
 
         let text = combat_controls_line(&data, &view).unwrap().to_string();
 
-        assert!(text.ends_with("||||"));
+        assert!(text.contains(" 😡 "));
     }
 
     #[test]
     fn ready_indicator_uses_short_bar() {
-        assert_eq!(attack_indicator_span(AttackActivity::Ready).content, "||");
+        assert_eq!(attack_indicator_span(AttackActivity::Ready).content, " 😠 ");
     }
 
     #[test]
     fn active_indicator_uses_shared_bar() {
-        assert_eq!(attack_indicator_span(AttackActivity::Active).content, "||||");
+        assert_eq!(attack_indicator_span(AttackActivity::Active).content, " 😡 ");
+    }
+
+    #[test]
+    fn targeting_without_queued_attack_shows_no_indicator() {
+        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        data.combat_mode = CombatMode::Missile;
+        let view = ViewState {
+            active_interaction: Some(Interaction::Targeting {
+                target_guid: Default::default(),
+            }),
+            ..ViewState::default()
+        };
+
+        let text = combat_controls_line(&data, &view).unwrap().to_string();
+
+        assert!(!text.contains(" 😠 "));
+        assert!(!text.contains(" 😡 "));
     }
 
     #[test]
     fn combat_mode_title_uses_peace_label() {
-        assert_eq!(combat_mode_label(CombatMode::NonCombat), "PEACE");
+        assert_eq!(combat_mode_label(CombatMode::NonCombat), "🕊️ PEACE");
     }
 }

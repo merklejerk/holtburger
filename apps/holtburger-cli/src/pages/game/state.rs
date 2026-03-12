@@ -2,6 +2,7 @@ use holtburger_common::Guid;
 use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessors};
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
+use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_world::context::WorldContextExt;
@@ -58,12 +59,16 @@ impl GameState {
             | ClientViewEvent::ServerMessage { .. }
             | ClientViewEvent::Chat { .. }
             | ClientViewEvent::Emote { .. }
-            | ClientViewEvent::CombatFeedback(_)
             | ClientViewEvent::PingResponse
             | ClientViewEvent::BootAccount(_)
             | ClientViewEvent::NetPulse { .. }
             | ClientViewEvent::Disconnected => {
                 self.chat.handle_event(event);
+            }
+            ClientViewEvent::CombatFeedback(feedback) => {
+                self.handle_combat_feedback(&feedback);
+                self.chat.handle_event(ClientViewEvent::CombatFeedback(feedback));
+                result.needs_redraw = true;
             }
             ClientViewEvent::PlayerEnchantmentsUpdated { .. }
             | ClientViewEvent::PlayerStatsSkillsUpdated { .. }
@@ -223,7 +228,7 @@ impl GameState {
                         .retain(|queued_guid| *queued_guid != guid);
 
                     if session.queued_items.is_empty() {
-                        self.view.active_interaction = None;
+                        self.set_active_interaction(None, &mut result);
                         self.view.salvaging = None;
                     }
                     result.needs_redraw = true;
@@ -239,7 +244,7 @@ impl GameState {
                         items: item_guids,
                     });
                 }
-                self.view.active_interaction = None;
+                self.set_active_interaction(None, &mut result);
                 self.view.salvaging = None;
                 result.needs_redraw = true;
             }
@@ -345,7 +350,7 @@ impl GameState {
                     container,
                     placement: 0,
                 });
-                self.view.active_interaction = None;
+                self.set_active_interaction(None, &mut result);
             }
             AppAction::StackItems {
                 source,
@@ -426,10 +431,12 @@ impl GameState {
             }
             AppAction::CycleCombatProfileLevel => {
                 self.data.combat_controls.cycle_profile_level();
+                self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
                 result.needs_redraw = true;
             }
             AppAction::CycleCombatAttackHeight => {
                 self.data.combat_controls.cycle_attack_height();
+                self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
                 result.needs_redraw = true;
             }
             AppAction::SetCombatMode { mode } => {
@@ -524,13 +531,12 @@ impl GameState {
                         return Some(result);
                     }
                 } else {
-                    self.view.active_interaction = Some(interaction);
-                    self.queue_auto_attack_for_mode(self.data.combat_mode, &mut result);
+                    self.set_active_interaction(Some(interaction), &mut result);
                 }
                 result.needs_redraw = true;
             }
             AppAction::CancelInteraction => {
-                self.view.active_interaction = None;
+                self.set_active_interaction(None, &mut result);
                 self.view.salvaging = None;
                 result.needs_redraw = true;
             }
@@ -634,8 +640,21 @@ impl GameState {
                     self.data.trade = None;
                 }
                 self.data.combat_mode = mode;
+                self.data.combat_runtime.handle_mode_updated(mode);
             }
             _ => {}
+        }
+    }
+
+    fn handle_combat_feedback(&mut self, feedback: &CombatFeedback) {
+        self.data.combat_runtime.handle_feedback(feedback);
+    }
+
+    pub(crate) fn toggled_combat_mode(&self) -> CombatMode {
+        if self.data.combat_mode != CombatMode::NonCombat {
+            CombatMode::NonCombat
+        } else {
+            self.data.get_suggested_combat_mode()
         }
     }
 
@@ -660,6 +679,66 @@ impl GameState {
         }
         result.commands.push(ClientCommand::SetCombatMode(mode));
         EnterCombatModeResult::Success(result)
+    }
+
+    pub(crate) fn clear_active_interaction(&mut self, result: &mut UpdateResult) {
+        self.set_active_interaction(None, result);
+    }
+
+    fn set_active_interaction(
+        &mut self,
+        next_interaction: Option<Interaction>,
+        result: &mut UpdateResult,
+    ) {
+        let previous_interaction = self.view.active_interaction;
+        self.view.active_interaction = next_interaction;
+
+        if self.should_cancel_attack(previous_interaction, next_interaction) {
+            result.commands.push(ClientCommand::CancelAttack);
+            self.data.combat_runtime.cancel_attack();
+        }
+
+        if self.should_resume_attack(previous_interaction, next_interaction) {
+            self.queue_auto_attack_for_mode(self.data.combat_mode, result);
+        }
+    }
+
+    fn should_cancel_attack(
+        &self,
+        previous_interaction: Option<Interaction>,
+        next_interaction: Option<Interaction>,
+    ) -> bool {
+        matches!(
+            (previous_interaction, next_interaction, self.data.combat_mode),
+            (
+                Some(Interaction::Targeting { .. }),
+                None | Some(Interaction::Moving { .. })
+                    | Some(Interaction::Healing { .. })
+                    | Some(Interaction::Combining { .. })
+                    | Some(Interaction::Salvaging),
+                CombatMode::Melee | CombatMode::Missile
+            )
+        )
+    }
+
+    fn should_resume_attack(
+        &self,
+        previous_interaction: Option<Interaction>,
+        next_interaction: Option<Interaction>,
+    ) -> bool {
+        matches!(
+            (previous_interaction, next_interaction, self.data.combat_mode),
+            (
+                None
+                    | Some(Interaction::Moving { .. })
+                    | Some(Interaction::Healing { .. })
+                    | Some(Interaction::Combining { .. })
+                    | Some(Interaction::Salvaging)
+                    | Some(Interaction::Targeting { .. }),
+                Some(Interaction::Targeting { .. }),
+                CombatMode::Melee | CombatMode::Missile
+            )
+        )
     }
 
     fn queue_auto_attack_for_mode(&self, mode: CombatMode, result: &mut UpdateResult) {
@@ -814,7 +893,8 @@ impl GameState {
             self.view.active_interaction,
             Some(Interaction::Targeting { target_guid }) if target_guid == guid
         ) {
-            self.view.active_interaction = None;
+            let mut result = UpdateResult::new();
+            self.set_active_interaction(None, &mut result);
         }
         if let Some(session) = self.view.salvaging.as_mut() {
             session
@@ -823,7 +903,8 @@ impl GameState {
             if session.ust_guid == guid {
                 self.view.salvaging = None;
                 if self.view.active_interaction == Some(Interaction::Salvaging) {
-                    self.view.active_interaction = None;
+                    let mut result = UpdateResult::new();
+                    self.set_active_interaction(None, &mut result);
                 }
             }
         }
@@ -1059,6 +1140,28 @@ mod tests {
     }
 
     #[test]
+    fn combat_feedback_updates_auto_attack_runtime_state() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let commenced = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackCommenced,
+        ));
+
+        assert!(commenced.needs_redraw);
+        assert!(state.data.combat_runtime.attack_sequence_active);
+
+        let done = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::None,
+            },
+        ));
+
+        assert!(done.needs_redraw);
+        assert!(!state.data.combat_runtime.attack_sequence_active);
+    }
+
+    #[test]
     fn begin_targeting_in_missile_mode_queues_missile_attack() {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
@@ -1105,6 +1208,66 @@ mod tests {
     }
 
     #[test]
+    fn cycling_profile_while_targeting_resends_melee_attack_with_new_power() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let result = state.handle_action(AppAction::CycleCombatProfileLevel).unwrap();
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::TargetedMeleeAttack {
+                    target,
+                    attack_height: AttackHeight::Medium,
+                    power_level,
+                } if *target == target_guid && (*power_level - 1.0).abs() < f32::EPSILON
+            )
+        }));
+    }
+
+    #[test]
+    fn cycling_height_while_targeting_resends_missile_attack_with_new_height() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Missile;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Tusker".to_string(), target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let result = state.handle_action(AppAction::CycleCombatAttackHeight).unwrap();
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::TargetedMissileAttack {
+                    target,
+                    attack_height: AttackHeight::High,
+                    accuracy_level,
+                } if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
+            )
+        }));
+    }
+
+    #[test]
     fn despawning_target_clears_targeting_interaction() {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
@@ -1114,5 +1277,80 @@ mod tests {
         state.handle_entity_removed(target_guid);
 
         assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn cancel_interaction_sends_cancel_attack_when_leaving_targeting() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let result = state.handle_action(AppAction::CancelInteraction).unwrap();
+
+        assert!(matches!(result.commands.first(), Some(ClientCommand::CancelAttack)));
+        assert_eq!(state.view.active_interaction, None);
+        assert!(!state.data.combat_runtime.attack_sequence_active);
+    }
+
+    #[test]
+    fn switching_from_targeting_to_non_targeting_cancels_attack() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Missile;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let result = state
+            .handle_action(AppAction::BeginInteraction {
+                interaction: Interaction::Combining {
+                    item_guid: Guid(0x70000001),
+                },
+            })
+            .unwrap();
+
+        assert!(result
+            .commands
+            .iter()
+            .any(|command| matches!(command, ClientCommand::CancelAttack)));
+        assert!(matches!(
+            state.view.active_interaction,
+            Some(Interaction::Combining { item_guid }) if item_guid == Guid(0x70000001)
+        ));
+    }
+
+    #[test]
+    fn switching_to_targeting_in_combat_mode_resumes_attack() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let result = state
+            .handle_action(AppAction::BeginInteraction {
+                interaction: Interaction::Targeting { target_guid },
+            })
+            .unwrap();
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::TargetedMeleeAttack {
+                    target,
+                    attack_height: AttackHeight::Medium,
+                    power_level,
+                } if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
+            )
+        }));
     }
 }

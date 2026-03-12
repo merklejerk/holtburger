@@ -1,7 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_core::ClientCommand;
 use holtburger_protocol::messages::combat::CombatMode;
-use holtburger_world::context::WorldContextExt;
 
 use crate::pages::game::GameState;
 use crate::types::{FocusedPane, SCROLL_STEP, UpdateResult};
@@ -137,7 +136,7 @@ impl GameState {
                 if self.view.focused_pane == FocusedPane::Input {
                     self.view.focused_pane = self.view.previous_focused_pane;
                 } else if self.view.active_interaction.is_some() {
-                    self.view.active_interaction = None;
+                    self.clear_active_interaction(&mut result);
                     self.view.salvaging = None;
                 }
                 result.needs_redraw = true;
@@ -160,11 +159,7 @@ impl GameState {
                         return result.with_redraw(true);
                     }
                     if command == "/combat" {
-                        let mode = if self.data.combat_mode != CombatMode::NonCombat {
-                            CombatMode::NonCombat
-                        } else {
-                            self.data.get_suggested_combat_mode()
-                        };
+                        let mode = self.toggled_combat_mode();
 
                         result.actions.push(crate::types::AppAction::SetCombatMode { mode });
                         self.chat_input.input_history.push(command.clone());
@@ -312,9 +307,14 @@ impl GameState {
                 if self.view.focused_pane == FocusedPane::Input {
                     self.chat_input.input.push(c);
                     result.needs_redraw = true;
+                } else if c == '`' {
+                    result.actions.push(crate::types::AppAction::SetCombatMode {
+                        mode: self.toggled_combat_mode(),
+                    });
+                    result.needs_redraw = true;
                 } else if self.view.focused_pane == FocusedPane::Dynamic {
                     match c.to_ascii_lowercase() {
-                        'v' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
+                        'p' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
                             result.actions.push(crate::types::AppAction::CycleCombatProfileLevel);
                             result.needs_redraw = true;
                         }
@@ -410,7 +410,7 @@ mod tests {
         });
         state.data.combat_mode = CombatMode::Melee;
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE), 120);
 
         assert_eq!(result.actions.len(), 1);
         assert!(matches!(
@@ -420,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn dashboard_focus_v_does_not_cycle_combat_profile() {
+    fn dashboard_focus_p_does_not_cycle_combat_profile() {
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Dashboard;
         state.view.active_interaction = Some(Interaction::Targeting {
@@ -428,8 +428,43 @@ mod tests {
         });
         state.data.combat_mode = CombatMode::Melee;
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE), 120);
 
         assert!(!result.actions.iter().any(|action| matches!(action, AppAction::CycleCombatProfileLevel)));
+    }
+
+    #[test]
+    fn backtick_toggles_combat_mode_globally() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Dashboard;
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE), 120);
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::SetCombatMode {
+                mode: CombatMode::Melee
+            })
+        ));
+    }
+
+    #[test]
+    fn escape_cancels_attack_when_leaving_targeting() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Dashboard;
+        state.view.active_interaction = Some(Interaction::Targeting {
+            target_guid: Guid(0x60000001),
+        });
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 120);
+
+        assert!(result
+            .commands
+            .iter()
+            .any(|command| matches!(command, ClientCommand::CancelAttack)));
+        assert_eq!(state.view.active_interaction, None);
+        assert!(!state.data.combat_runtime.attack_sequence_active);
     }
 }

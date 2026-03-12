@@ -1,4 +1,5 @@
 use crate::pages::game::{GameData, ViewState};
+use crate::pages::game::combat::{AttackActivity, combat_mode_label};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
 use holtburger_common::properties::WorldObjectExt as _;
@@ -17,11 +18,11 @@ pub fn render_dynamic_pane(
     account_name: &str,
     area: Rect,
 ) {
-    let (combat_color, combat_title) = match data.combat_mode {
-        CombatMode::Melee => (Some(Color::LightRed), Some("MELEE")),
-        CombatMode::Missile => (Some(Color::LightRed), Some("MISSILE")),
-        CombatMode::Magic => (Some(Color::Cyan), Some("MAGIC")),
-        _ => (None, None),
+    let combat_color = match data.combat_mode {
+        CombatMode::Melee => Some(Color::LightRed),
+        CombatMode::Missile => Some(Color::LightRed),
+        CombatMode::Magic => Some(Color::Cyan),
+        _ => None,
     };
 
     let is_focused = view.focused_pane == FocusedPane::Dynamic;
@@ -54,23 +55,21 @@ pub fn render_dynamic_pane(
     }
 
     // Right title: Combat Mode
-    if let Some(title_text) = combat_title {
-        block = block.title(
-            ratatui::widgets::block::Title::from(Span::styled(
-                format!(" Combat mode: {} ", title_text),
-                Style::default().add_modifier(Modifier::BOLD),
-            ))
-            .alignment(ratatui::layout::Alignment::Right),
-        );
-    }
+    block = block.title(
+        ratatui::widgets::block::Title::from(Span::styled(
+            format!(" [`] Combat mode: {} ", combat_mode_label(data.combat_mode)),
+            Style::default().add_modifier(Modifier::BOLD),
+        ))
+        .alignment(ratatui::layout::Alignment::Right),
+    );
 
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    let control_text = combat_controls_text(data, is_focused);
-    let control_width = control_text
+    let control_line = combat_controls_line(data, view);
+    let control_width = control_line
         .as_ref()
-        .map(|text| text.chars().count() as u16 + 1)
+        .map(|line| line.to_string().chars().count() as u16 + 1)
         .unwrap_or(0)
         .min(inner.width);
 
@@ -144,44 +143,64 @@ pub fn render_dynamic_pane(
         f.render_widget(Paragraph::new(info), chunks[0]);
     }
 
-    if let Some(control_text) = control_text
+    if let Some(control_line) = control_line
         && control_width > 0
     {
-        let line = Line::from(vec![
-            Span::styled(
-                control_text,
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-        ]);
-        f.render_widget(Paragraph::new(line).right_aligned(), chunks[1]);
+        f.render_widget(Paragraph::new(control_line).right_aligned(), chunks[1]);
     }
 }
 
-fn combat_controls_text(data: &GameData, is_focused: bool) -> Option<String> {
+fn combat_controls_line(data: &GameData, view: &ViewState) -> Option<Line<'static>> {
     let profile_label = match data.combat_controls.profile_level {
         crate::pages::game::data::CombatProfileLevel::Low => "Low",
-        crate::pages::game::data::CombatProfileLevel::Medium => "Med",
+        crate::pages::game::data::CombatProfileLevel::Medium => "Medium",
         crate::pages::game::data::CombatProfileLevel::High => "High",
     };
 
     let height_label = match data.combat_controls.attack_height {
         AttackHeight::High => "High",
-        AttackHeight::Medium => "Mid",
+        AttackHeight::Medium => "Medium",
         AttackHeight::Low => "Low",
     };
 
-    let hints = if is_focused { " [V] [H]" } else { "" };
+    let has_target = matches!(view.active_interaction, Some(Interaction::Targeting { .. }));
+    let attack_activity = data.combat_runtime.attack_activity(data.combat_mode, has_target);
 
     match data.combat_mode {
-        CombatMode::Melee => Some(format!("Pow: {}  Hgt: {}{}", profile_label, height_label, hints)),
-        CombatMode::Missile => {
-            Some(format!("Acc: {}  Hgt: {}{}", profile_label, height_label, hints))
+        CombatMode::Melee | CombatMode::Missile => {
+            let mut spans = vec![
+                Span::styled(
+                    format!("[P]ower: {}  [H]eight: {}", profile_label, height_label),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ];
+
+            if let Some(activity) = attack_activity {
+                spans.push(Span::raw("  "));
+                spans.push(attack_indicator_span(activity));
+            }
+
+            Some(Line::from(spans))
         }
-        _ => None,
+        CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic => None,
     }
+}
+
+fn attack_indicator_span(activity: AttackActivity) -> Span<'static> {
+    let (marker, style) = match activity {
+        AttackActivity::Ready => (
+            "||",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ),
+        AttackActivity::Active => (
+            "||||",
+            Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD | Modifier::RAPID_BLINK),
+        ),
+    };
+
+    Span::styled(marker.to_string(), style)
 }
 
 fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
@@ -216,40 +235,92 @@ fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
 
 #[cfg(test)]
 mod tests {
-    use super::combat_controls_text;
-    use crate::pages::game::GameData;
+    use super::{attack_indicator_span, combat_controls_line};
+    use crate::pages::game::{GameData, ViewState};
+    use crate::pages::game::combat::{AttackActivity, combat_mode_label};
+    use crate::types::Interaction;
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 
     #[test]
-    fn melee_controls_use_power_label_and_focus_hints() {
+    fn melee_controls_use_full_labels_and_tiny_indicator() {
         let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
         data.combat_mode = CombatMode::Melee;
+        let view = ViewState::default();
 
-        let text = combat_controls_text(&data, true).unwrap();
+        let text = combat_controls_line(&data, &view).unwrap().to_string();
 
-        assert!(text.contains("Pow: Med"));
-        assert!(text.contains("Hgt: Mid"));
-        assert!(text.contains("[V] [H]"));
+        assert!(text.contains("[P]ower: Medium"));
+        assert!(text.contains("[H]eight: Medium"));
+        assert!(!text.ends_with("||"));
+        assert!(!text.ends_with("||||"));
     }
 
     #[test]
-    fn missile_controls_use_accuracy_label_without_hints_when_unfocused() {
+    fn missile_controls_show_ready_indicator_with_target() {
         let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
         data.combat_mode = CombatMode::Missile;
         data.combat_controls.attack_height = AttackHeight::High;
+        let view = ViewState {
+            active_interaction: Some(Interaction::Targeting {
+                target_guid: Default::default(),
+            }),
+            ..ViewState::default()
+        };
 
-        let text = combat_controls_text(&data, false).unwrap();
+        let text = combat_controls_line(&data, &view).unwrap().to_string();
 
-        assert!(text.contains("Acc: Med"));
-        assert!(text.contains("Hgt: High"));
-        assert!(!text.contains("[V]"));
+        assert!(text.contains("[P]ower: Medium"));
+        assert!(text.contains("[H]eight: High"));
+        assert!(text.ends_with("||"));
     }
 
     #[test]
-    fn magic_mode_has_no_combat_controls_text() {
+    fn peace_mode_has_no_attack_indicator_line() {
+        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        data.combat_mode = CombatMode::NonCombat;
+        let view = ViewState::default();
+
+        assert!(combat_controls_line(&data, &view).is_none());
+    }
+
+    #[test]
+    fn magic_mode_has_no_attack_indicator_line() {
         let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
         data.combat_mode = CombatMode::Magic;
+        let view = ViewState::default();
 
-        assert!(combat_controls_text(&data, true).is_none());
+        assert!(combat_controls_line(&data, &view).is_none());
+    }
+
+    #[test]
+    fn combat_controls_show_active_indicator_while_attack_sequence_is_active() {
+        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        data.combat_mode = CombatMode::Melee;
+        data.combat_runtime.attack_sequence_active = true;
+        let view = ViewState {
+            active_interaction: Some(Interaction::Targeting {
+                target_guid: Default::default(),
+            }),
+            ..ViewState::default()
+        };
+
+        let text = combat_controls_line(&data, &view).unwrap().to_string();
+
+        assert!(text.ends_with("||||"));
+    }
+
+    #[test]
+    fn ready_indicator_uses_short_bar() {
+        assert_eq!(attack_indicator_span(AttackActivity::Ready).content, "||");
+    }
+
+    #[test]
+    fn active_indicator_uses_shared_bar() {
+        assert_eq!(attack_indicator_span(AttackActivity::Active).content, "||||");
+    }
+
+    #[test]
+    fn combat_mode_title_uses_peace_label() {
+        assert_eq!(combat_mode_label(CombatMode::NonCombat), "PEACE");
     }
 }

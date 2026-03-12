@@ -126,6 +126,11 @@ impl Client {
                         message,
                     });
             }
+            WireEvent::CombatFeedback(feedback) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CombatFeedback(feedback.clone()));
+            }
             WireEvent::ServerMessage { message, chat_type } => {
                 let _ = self
                     .client_view_event_tx

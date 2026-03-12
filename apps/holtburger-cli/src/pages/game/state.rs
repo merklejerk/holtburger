@@ -58,6 +58,7 @@ impl GameState {
             | ClientViewEvent::ServerMessage { .. }
             | ClientViewEvent::Chat { .. }
             | ClientViewEvent::Emote { .. }
+            | ClientViewEvent::CombatFeedback(_)
             | ClientViewEvent::PingResponse
             | ClientViewEvent::BootAccount(_)
             | ClientViewEvent::NetPulse { .. }
@@ -70,6 +71,7 @@ impl GameState {
             | ClientViewEvent::PlayerSpellsUpdated { .. }
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
+                result.needs_redraw = true;
             }
             ClientViewEvent::SpellCatalogLoaded { .. } => {
                 self.handle_reference_data_event(event);
@@ -1041,6 +1043,19 @@ mod tests {
                 power_level,
             }) if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
         ));
+    }
+
+    #[test]
+    fn combat_mode_update_requests_redraw() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let result = state.handle_view_event(ClientViewEvent::CombatModeUpdated {
+            mode: CombatMode::Melee,
+        });
+
+        assert!(result.needs_redraw);
+        assert_eq!(state.data.combat_mode, CombatMode::Melee);
     }
 
     #[test]

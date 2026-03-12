@@ -1,7 +1,7 @@
 use crate::entity::Entity;
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
-use holtburger_common::properties::{ItemType, Usable, WorldObjectExt};
+use holtburger_common::properties::{EquipMask, ItemType, Usable, WorldObjectExt};
 use holtburger_protocol::messages::combat::CombatMode;
 
 /// Provides access to the world state for common logic.
@@ -245,13 +245,12 @@ pub trait WorldContextExt: WorldContext {
     fn get_suggested_combat_mode(&self) -> CombatMode {
         let mut best = CombatMode::Melee;
         for guid in self.iter_equipment() {
-            if let Some(entity) = self.get_entity(guid)
-                && let Some(it) = entity.item_type()
-            {
-                if it.intersects(ItemType::CASTER) {
+            if let Some(entity) = self.get_entity(guid) {
+                let wield_location = entity.wield_location();
+                if wield_location.intersects(EquipMask::CASTER) {
                     return CombatMode::Magic;
                 }
-                if it.intersects(ItemType::MISSILE_WEAPON) {
+                if wield_location.intersects(EquipMask::MISSILE_WEAPON) {
                     best = CombatMode::Missile;
                 }
             }
@@ -398,6 +397,8 @@ mod tests {
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyInt, Usable};
+    use holtburger_common::properties::EquipMask;
+    use holtburger_protocol::messages::combat::CombatMode;
 
     #[derive(Default)]
     struct TestWorld {
@@ -436,6 +437,61 @@ mod tests {
 
     fn entity(guid: Guid, name: &str) -> Entity {
         Entity::new(guid, name.to_string(), WorldPosition::default())
+    }
+
+    #[test]
+    fn suggested_combat_mode_uses_wield_location_over_item_type_noise() {
+        let player_guid = Guid(0x5000_0001);
+        let sword_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            equipment: HashSet::from([sword_guid]),
+            ..Default::default()
+        };
+
+        let mut sword = entity(sword_guid, "Noisy Sword");
+        sword
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, (ItemType::MELEE_WEAPON | ItemType::MISSILE_WEAPON).bits() as i32);
+        sword
+            .properties
+            .ints
+            .insert(PropertyInt::CurrentWieldedLocation, EquipMask::MELEE_WEAPON.bits() as i32);
+        world.entities.insert(sword_guid, sword);
+
+        assert_eq!(world.get_suggested_combat_mode(), CombatMode::Melee);
+    }
+
+    #[test]
+    fn suggested_combat_mode_detects_missile_and_caster_by_wield_slot() {
+        let player_guid = Guid(0x5000_0001);
+        let bow_guid = Guid(0x8000_0001);
+        let wand_guid = Guid(0x8000_0002);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            equipment: HashSet::from([bow_guid]),
+            ..Default::default()
+        };
+
+        let mut bow = entity(bow_guid, "Bow");
+        bow.properties
+            .ints
+            .insert(PropertyInt::CurrentWieldedLocation, EquipMask::MISSILE_WEAPON.bits() as i32);
+        world.entities.insert(bow_guid, bow);
+
+        assert_eq!(world.get_suggested_combat_mode(), CombatMode::Missile);
+
+        let mut wand = entity(wand_guid, "Wand");
+        wand.properties
+            .ints
+            .insert(PropertyInt::CurrentWieldedLocation, EquipMask::CASTER.bits() as i32);
+        world.entities.insert(wand_guid, wand);
+        world.equipment.insert(wand_guid);
+
+        assert_eq!(world.get_suggested_combat_mode(), CombatMode::Magic);
     }
 
     #[test]

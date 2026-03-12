@@ -1,6 +1,9 @@
 use holtburger_common::{Guid, Vector3};
+use holtburger_common::properties::DamageType;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
-use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+use holtburger_protocol::messages::combat::{
+    AttackConditions, AttackHeight, CombatMode, DamageLocation,
+};
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -101,6 +104,44 @@ pub enum WireEvent {
     UseDone {
         error: WeenieError,
     },
+    CombatFeedback(CombatFeedback),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CombatFeedback {
+    AttackDone {
+        error: WeenieError,
+    },
+    AttackCommenced,
+    AttackerNotification {
+        defender_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    DefenderNotification {
+        attacker_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        damage_location: DamageLocation,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    EvasionAttackerNotification {
+        defender_name: String,
+    },
+    EvasionDefenderNotification {
+        attacker_name: String,
+    },
+    VictimNotification {
+        death_message: String,
+    },
+    KillerNotification {
+        death_message: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +241,7 @@ pub enum ClientViewEvent {
     },
     PingResponse,
     LogMessage(String),
+    CombatFeedback(CombatFeedback),
     BootAccount(String),
     EntityDebugInfoSnapshot {
         entity: Box<Entity>,

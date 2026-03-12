@@ -160,7 +160,6 @@ impl GameState {
                         return result.with_redraw(true);
                     }
                     if command == "/combat" {
-                        use holtburger_protocol::messages::combat::CombatMode;
                         let mode = if self.data.combat_mode != CombatMode::NonCombat {
                             CombatMode::NonCombat
                         } else {
@@ -360,9 +359,47 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AppAction, Interaction};
+    use crate::pages::game::GameState;
+    use crate::types::{AppAction, FocusedPane, Interaction};
     use crossterm::event::KeyModifiers;
     use holtburger_common::Guid;
+
+    #[test]
+    fn combat_command_dispatches_set_combat_mode_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input = "/combat".to_string();
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 120);
+
+        assert!(result.commands.is_empty());
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::SetCombatMode {
+                mode: CombatMode::Melee
+            })
+        ));
+        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+    }
+
+    #[test]
+    fn combat_command_toggles_back_to_noncombat_action() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.data.combat_mode = CombatMode::Missile;
+        state.chat_input.input = "/combat".to_string();
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 120);
+
+        assert!(matches!(
+            result.actions.first(),
+            Some(AppAction::SetCombatMode {
+                mode: CombatMode::NonCombat
+            })
+        ));
+    }
 
     #[test]
     fn dynamic_focus_v_cycles_combat_profile() {

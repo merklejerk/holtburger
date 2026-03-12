@@ -1,3 +1,4 @@
+use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet};
 
 use holtburger_common::Guid;
@@ -105,6 +106,8 @@ pub struct GameData {
     pub world_name: String,
     /// Current combat stances.
     pub combat_mode: CombatMode,
+    /// Runtime-only combat state derived from feedback events and stance updates.
+    pub combat_runtime: CombatRuntimeState,
     /// Local CLI combat controls for melee power or missile accuracy and attack height.
     pub combat_controls: CombatControlState,
     /// Whether we can walk through walls (debug feature).
@@ -138,6 +141,7 @@ impl Default for GameData {
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
+            combat_runtime: CombatRuntimeState::default(),
             combat_controls: CombatControlState::default(),
             noclip: false,
             inventory: HashSet::new(),

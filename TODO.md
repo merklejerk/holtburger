@@ -179,10 +179,12 @@
 - [x] Display encumbrance (sticky line in inv tab?).
 - [x] Vendor list is janky: assess/debug do nothing and all have max u32 qty.
 - [x] Enter shortcut to use mana charge on self.
-- [~] Melee combat.
-    - [ ] Auto-attack on target.
-- [~] Missile combat.
-    - [ ] Auto-attack on target.
+- [x] Melee combat.
+    - [x] Auto-attack on target.
+- [x] Missile combat.
+    - [x] Auto-attack on target.
+- [ ] Cancel melee/missile attack sequence if target changes to non-creature.
+- [ ] Make melee attacks "sticky".
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.

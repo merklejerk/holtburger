@@ -741,7 +741,7 @@ impl GameState {
         )
     }
 
-    fn queue_auto_attack_for_mode(&self, mode: CombatMode, result: &mut UpdateResult) {
+    fn queue_auto_attack_for_mode(&mut self, mode: CombatMode, result: &mut UpdateResult) {
         let Some(target_guid) = self.current_target_guid() else {
             return;
         };
@@ -768,6 +768,7 @@ impl GameState {
         };
 
         if let Some(command) = command {
+            self.data.combat_runtime.queue_attack();
             result.commands.push(command);
         }
     }
@@ -1149,6 +1150,7 @@ mod tests {
         ));
 
         assert!(commenced.needs_redraw);
+        assert!(!state.data.combat_runtime.attack_queued);
         assert!(state.data.combat_runtime.attack_sequence_active);
 
         let done = state.handle_view_event(ClientViewEvent::CombatFeedback(
@@ -1158,6 +1160,17 @@ mod tests {
         ));
 
         assert!(done.needs_redraw);
+        assert!(state.data.combat_runtime.attack_queued);
+        assert!(!state.data.combat_runtime.attack_sequence_active);
+
+        let cancelled = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(cancelled.needs_redraw);
+        assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);
     }
 
@@ -1181,6 +1194,8 @@ mod tests {
                 interaction: Interaction::Targeting { target_guid },
             })
             .unwrap();
+
+        assert!(state.data.combat_runtime.attack_queued);
 
         assert!(matches!(
             result.commands.first(),
@@ -1225,6 +1240,8 @@ mod tests {
 
         let result = state.handle_action(AppAction::CycleCombatProfileLevel).unwrap();
 
+        assert!(state.data.combat_runtime.attack_queued);
+
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
@@ -1254,6 +1271,8 @@ mod tests {
         state.data.entities.insert(target_guid, target);
 
         let result = state.handle_action(AppAction::CycleCombatAttackHeight).unwrap();
+
+        assert!(state.data.combat_runtime.attack_queued);
 
         assert!(result.commands.iter().any(|command| {
             matches!(
@@ -1285,6 +1304,7 @@ mod tests {
         let target_guid = Guid(0x60000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_queued = true;
         state.data.combat_runtime.attack_sequence_active = true;
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
@@ -1292,6 +1312,7 @@ mod tests {
 
         assert!(matches!(result.commands.first(), Some(ClientCommand::CancelAttack)));
         assert_eq!(state.view.active_interaction, None);
+        assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);
     }
 

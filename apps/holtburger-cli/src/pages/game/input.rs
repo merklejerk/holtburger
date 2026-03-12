@@ -314,7 +314,7 @@ impl GameState {
                     result.needs_redraw = true;
                 } else if self.view.focused_pane == FocusedPane::Dynamic {
                     match c.to_ascii_lowercase() {
-                        'p' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
+                        'r' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
                             result.actions.push(crate::types::AppAction::CycleCombatProfileLevel);
                             result.needs_redraw = true;
                         }
@@ -402,7 +402,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_focus_v_cycles_combat_profile() {
+    fn dynamic_focus_r_cycles_combat_profile() {
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Dynamic;
         state.view.active_interaction = Some(Interaction::Targeting {
@@ -410,7 +410,7 @@ mod tests {
         });
         state.data.combat_mode = CombatMode::Melee;
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 120);
 
         assert_eq!(result.actions.len(), 1);
         assert!(matches!(

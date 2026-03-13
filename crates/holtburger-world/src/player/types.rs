@@ -63,6 +63,8 @@ pub struct PlayerState {
     pub instance_sequence: u16,
     /// Sequence for server-controlled movement/actions.
     pub server_control_sequence: u16,
+    /// Last non-zero server-reported motion stance/style for local movement packet preservation.
+    pub current_motion_style: Option<u32>,
     /// Sequence for teleportation events to ignore stale position updates.
     pub teleport_sequence: u16,
     /// Sequence for server-forced repositions (e.g. rubberbanding or physics corrections).
@@ -110,6 +112,7 @@ impl PlayerState {
             position: WorldPosition::default(),
             instance_sequence: 0,
             server_control_sequence: 0,
+            current_motion_style: None,
             teleport_sequence: 0,
             force_position_sequence: 0,
             position_sequence: 0,

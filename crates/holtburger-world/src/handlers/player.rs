@@ -49,6 +49,7 @@ pub(crate) fn handle_message(
                     data.server_control_sequence,
                     data.movement_sequence,
                 );
+                state.player.update_current_motion_style(data.current_style);
                 return false;
             }
             false

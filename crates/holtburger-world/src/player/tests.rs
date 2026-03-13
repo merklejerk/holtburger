@@ -1,6 +1,10 @@
 use super::*;
+use crate::WorldState;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
+};
+use holtburger_protocol::messages::{
+    GameMessage, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
 };
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
@@ -494,6 +498,50 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
         _ => None,
     });
     assert_eq!(derived_vitae, Some(0.95));
+}
+
+#[test]
+fn test_update_motion_caches_last_non_zero_player_style() {
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
+
+    let first = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid: state.player.guid,
+        object_instance_sequence: 7,
+        movement_sequence: 8,
+        server_control_sequence: 9,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 62,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    state.handle_message(&first);
+
+    assert_eq!(state.player.instance_sequence, 7);
+    assert_eq!(state.player.movement_sequence, 8);
+    assert_eq!(state.player.server_control_sequence, 9);
+    assert_eq!(state.player.current_motion_style, Some(62));
+
+    let second = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid: state.player.guid,
+        object_instance_sequence: 10,
+        movement_sequence: 11,
+        server_control_sequence: 12,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 0,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    state.handle_message(&second);
+
+    assert_eq!(state.player.instance_sequence, 10);
+    assert_eq!(state.player.movement_sequence, 11);
+    assert_eq!(state.player.server_control_sequence, 12);
+    assert_eq!(state.player.current_motion_style, Some(62));
 }
 
 #[test]

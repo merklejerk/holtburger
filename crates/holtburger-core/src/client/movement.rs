@@ -3,7 +3,7 @@ use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
-use holtburger_protocol::messages::game_message::RawMotionFlags;
+use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{StateEvent, WorldState};
@@ -37,8 +37,24 @@ fn is_stuck(
     (*current_pos - *last_pos).length() < threshold
 }
 
+fn has_reached_target(distance_to_target: f32, arrival_distance: f32) -> bool {
+    distance_to_target <= arrival_distance
+}
+
+pub(super) fn raw_motion_state_with_player_style(
+    world: &WorldState,
+    mut raw_motion_state: RawMotionState,
+) -> RawMotionState {
+    if let Some(current_style) = world.player.current_motion_style {
+        raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
+        raw_motion_state.current_style = Some(current_style);
+    }
+
+    raw_motion_state
+}
+
 pub(super) struct MovementSystem {
-    pub(super) move_target: Option<Guid>,
+    pub(super) move_target: Option<(Guid, f32)>,
     pub(super) last_move_sync: Instant,
     pub(super) last_move_pos: WorldPosition,
     pub(super) last_move_pos_time: Instant,
@@ -59,6 +75,7 @@ impl MovementSystem {
     pub(super) async fn handle_approach_task(
         &mut self,
         target_guid: Guid,
+        arrival_distance: f32,
         _dt: f32,
         world: &mut WorldState,
         session: &mut Session,
@@ -75,8 +92,12 @@ impl MovementSystem {
         let diff = target_pos - player_pos;
         let dist = diff.length();
 
-        if dist < 1.0 {
-            log::info!("Arrived at target 0x{:08X}", target_guid);
+        if has_reached_target(dist, arrival_distance) {
+            log::info!(
+                "Arrived at target 0x{:08X} within {:.2}m",
+                target_guid,
+                arrival_distance
+            );
             self.move_target = None;
             world.set_player_velocity(holtburger_common::Vector3::zero());
             return Ok((Vec::new(), Vec::new()));
@@ -110,12 +131,12 @@ impl MovementSystem {
             self.last_move_sync = now;
 
             let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-                raw_motion_state: holtburger_protocol::messages::game_message::RawMotionState {
+                raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState {
                     flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
                     current_hold_key: Some(HoldKey::Run as u32),
                     forward_speed: Some(7.0),
                     ..Default::default()
-                },
+                }),
                 position: world.player.position,
                 instance_sequence: world.player.instance_sequence,
                 server_control_sequence: world.player.server_control_sequence,
@@ -271,6 +292,7 @@ impl MovementSystem {
 mod tests {
     use super::*;
     use holtburger_common::Vector3;
+    use holtburger_world::WorldState;
 
     #[test]
     fn test_calculate_heading_to() {
@@ -317,5 +339,34 @@ mod tests {
 
         assert!(is_stuck(&current_stuck, &last, 0.1));
         assert!(!is_stuck(&current_moving, &last, 0.1));
+    }
+
+    #[test]
+    fn test_has_reached_target_uses_supplied_arrival_distance() {
+        assert!(has_reached_target(0.6, 0.6));
+        assert!(has_reached_target(0.59, 0.6));
+        assert!(!has_reached_target(0.99, 0.6));
+        assert!(has_reached_target(0.99, 1.0));
+    }
+
+    #[test]
+    fn test_raw_motion_state_preserves_cached_player_style() {
+        let mut world = WorldState::new(None, None);
+        world.player.current_motion_style = Some(0x8000_003e);
+
+        let raw_motion_state = raw_motion_state_with_player_style(
+            &world,
+            RawMotionState {
+                flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                current_hold_key: Some(HoldKey::Run as u32),
+                forward_speed: Some(7.0),
+                ..Default::default()
+            },
+        );
+
+        assert!(raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
+        assert_eq!(raw_motion_state.current_style, Some(0x8000_003e));
+        assert_eq!(raw_motion_state.current_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(raw_motion_state.forward_speed, Some(7.0));
     }
 }

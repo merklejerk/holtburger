@@ -494,9 +494,9 @@ impl Client {
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
 
-                    if let Some(target_guid) = self.movement.move_target {
+                    if let Some((target_guid, arrival_distance)) = self.movement.move_target {
                         let Client { movement, world, session, .. } = self;
-                        let (wire_events, state_events) = movement.handle_approach_task(target_guid, dt, world, session).await?;
+                        let (wire_events, state_events) = movement.handle_approach_task(target_guid, arrival_distance, dt, world, session).await?;
                         for event in wire_events {
                             self.emit_wire_event(event);
                         }

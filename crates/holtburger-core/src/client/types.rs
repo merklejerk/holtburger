@@ -300,7 +300,7 @@ pub enum ClientCommand {
     TurnTo {
         heading: f32,
     },
-    MoveTo {
+    ApproachTarget {
         target: Guid,
         arrival_distance: f32,
     },

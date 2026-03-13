@@ -23,7 +23,7 @@ We use a 3-layer event model to separate protocol fidelity from UI ergonomics, s
    - Consumers (like `holtburger-cli`) **ONLY** subscribe to `WorldViewEvent` because it is lightweight. It broadcasts granular semantic delta-events (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
 
 #### Interaction
-- **ClientCommand**: Commands sent from the UI to the engine (e.g., `TurnTo`, `MoveTo`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
+- **ClientCommand**: Commands sent from the UI to the engine (e.g., `TurnTo`, `ApproachTarget`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
 - **Producer-Only Pattern**: The Core Engine is strictly *producer-only* for the event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from Wire -> State -> View.
 
 ### Command and Controller Boundary
@@ -53,7 +53,7 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 #### Movement ([src/client/movement.rs](src/client/movement.rs))
 The `MovementSystem` runs on a fixed 30ms async interval, calculating physics ticks, client-side prediction, and pushing reliable synchronization with the server's authoritative position.
 
-Today, this module also contains an approach-target loop driven by `ClientCommand::MoveTo`. That behavior is useful, but it is better understood as a reusable controller layered over movement primitives than as the only movement API.
+Today, this module hosts an explicit `ApproachTargetController` that is ticked by the movement system and currently seeded through `ClientCommand::ApproachTarget`. That trigger command is a temporary bridge for the existing app-to-core command channel, not the final reusable-controller API.
 
 ## Movement Model
 
@@ -78,9 +78,9 @@ This structure keeps the core crate powerful without baking one frontend's contr
 
 ## Current State and Intended Direction
 
-The current `ClientCommand::MoveTo` flow is effectively a built-in controller:
+The current `ClientCommand::ApproachTarget` flow is effectively a built-in controller:
 
-1. A client issues `MoveTo`.
+1. A client issues `ApproachTarget`.
 2. Core stores controller state in the movement subsystem.
 3. The fixed physics tick advances that controller until it reaches the target or aborts.
 
@@ -131,7 +131,7 @@ sequenceDiagram
 We do not need a flag day refactor. The current movement behavior can evolve incrementally:
 
 1. **Document current controllers explicitly**
-    - Treat `MoveTo` as a controller-oriented API, not just a raw movement primitive.
+    - Treat `ApproachTarget` as a temporary controller-triggering API rather than a raw movement primitive.
 2. **Separate primitive helpers from controller logic**
     - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
 3. **Isolate controller state**

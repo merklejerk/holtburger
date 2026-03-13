@@ -9,8 +9,6 @@ use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, R
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::StateEvent;
-use std::time::Instant;
-
 impl Client {
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
@@ -52,7 +50,7 @@ impl Client {
             ClientCommand::Jump { .. }
             | ClientCommand::SetState(_)
             | ClientCommand::TurnTo { .. }
-            | ClientCommand::MoveTo { .. }
+            | ClientCommand::ApproachTarget { .. }
             | ClientCommand::StopMoving
             | ClientCommand::SyncPosition => self.handle_movement_command(cmd).await,
 
@@ -575,7 +573,7 @@ impl Client {
                 })))
                 .await
             }
-            ClientCommand::MoveTo {
+            ClientCommand::ApproachTarget {
                 target,
                 arrival_distance,
             } => {
@@ -584,15 +582,13 @@ impl Client {
                     target,
                     arrival_distance
                 );
-                self.movement.move_target = Some((target, arrival_distance));
-                self.movement.last_move_pos = self.world.player.position;
-                self.movement.last_move_pos_time = Instant::now();
+                self.movement
+                    .start_approach(target, arrival_distance, self.world.player.position);
                 Ok(())
             }
             ClientCommand::StopMoving => {
                 log::info!(">>> Stopping local approach movement");
-                self.movement.move_target = None;
-                let world_events = self.world.set_player_velocity(holtburger_common::Vector3::zero());
+                let world_events = self.movement.stop_approach(&mut self.world);
                 for event in world_events {
                     self.emit_state_event(event);
                 }

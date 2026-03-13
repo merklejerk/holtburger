@@ -441,10 +441,7 @@ impl Client {
 
                                         for event in world_events {
                                             if let StateEvent::ForcedReposition { .. } = event
-                                                && self.movement.move_target.is_some() {
-                                                    log::warn!("Approach aborted: Forced reposition by server");
-                                                    self.movement.move_target = None;
-                                                    let events = self.world.set_player_velocity(holtburger_common::Vector3::zero());
+                                                && let Some(events) = self.movement.cancel_approach_due_to_forced_reposition(&mut self.world).await? {
                                                     for ev in events {
                                                         self.emit_state_event(ev);
                                                     }
@@ -495,9 +492,9 @@ impl Client {
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
 
-                    if let Some((target_guid, arrival_distance)) = self.movement.move_target {
+                    if self.movement.has_active_approach() {
                         let Client { movement, world, session, .. } = self;
-                        let (wire_events, state_events) = movement.handle_approach_task(target_guid, arrival_distance, dt, world, session).await?;
+                        let (wire_events, state_events) = movement.tick_approach(world, session).await?;
                         for event in wire_events {
                             self.emit_wire_event(event);
                         }

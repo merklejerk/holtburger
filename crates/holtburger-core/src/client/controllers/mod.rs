@@ -1,3 +1,10 @@
+mod approach_target;
+
+pub(crate) use approach_target::{
+    ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
+    ApproachTargetInput,
+};
+
 /// Provisional shared controller kernel for reusable client-side behaviors.
 ///
 /// This module intentionally standardizes only the broad lifecycle shape.

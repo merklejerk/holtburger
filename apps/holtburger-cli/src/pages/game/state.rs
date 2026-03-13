@@ -283,7 +283,7 @@ impl GameState {
                 result.needs_redraw = true;
             }
             AppAction::Approach { guid } => {
-                result.commands.push(ClientCommand::MoveTo {
+                result.commands.push(ClientCommand::ApproachTarget {
                     target: guid,
                     arrival_distance: GENERIC_APPROACH_DISTANCE,
                 });
@@ -950,7 +950,7 @@ impl GameState {
                 distance,
                 max_follow_distance
             );
-            result.commands.push(ClientCommand::MoveTo {
+            result.commands.push(ClientCommand::ApproachTarget {
                 target: target_guid,
                 arrival_distance: MELEE_ATTACK_DISTANCE,
             });
@@ -1885,7 +1885,7 @@ mod tests {
             .any(|command| {
                 matches!(
                     command,
-                    ClientCommand::MoveTo {
+                    ClientCommand::ApproachTarget {
                         target,
                         arrival_distance,
                     } if *target == target_guid
@@ -1936,7 +1936,7 @@ mod tests {
             .any(|command| {
                 matches!(
                     command,
-                    ClientCommand::MoveTo {
+                    ClientCommand::ApproachTarget {
                         target,
                         arrival_distance,
                     } if *target == target_guid
@@ -1976,7 +1976,7 @@ mod tests {
         assert!(!result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::TargetedMeleeAttack { .. } | ClientCommand::MoveTo { .. }
+                ClientCommand::TargetedMeleeAttack { .. } | ClientCommand::ApproachTarget { .. }
             )
         }));
         assert_eq!(state.view.active_interaction, None);
@@ -2025,7 +2025,7 @@ mod tests {
             .any(|command| {
                 matches!(
                     command,
-                    ClientCommand::MoveTo {
+                    ClientCommand::ApproachTarget {
                         target,
                         arrival_distance,
                     } if *target == target_guid

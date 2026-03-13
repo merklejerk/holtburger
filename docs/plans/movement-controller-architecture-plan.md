@@ -446,6 +446,8 @@ This should be treated as a spike-quality contract that will be deliberately rev
 
 Complexity: Medium-High
 
+Status: Completed on March 13, 2026
+
 #### Deliverables
 - Carve the current `MoveTo` behavior out of the generic `MovementSystem` fields in [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs).
 - Replace raw tuple state like `move_target: Option<(Guid, f32)>` with an explicit `ApproachTargetController` state type.
@@ -457,6 +459,24 @@ Complexity: Medium-High
 - This is more than a local `movement.rs` refactor because forced-reposition cancellation currently lives in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs).
 - Expect edits in at least `movement.rs`, `mod.rs`, and `commands.rs`.
 - This phase should stay internal to core ownership. Do not try to make the controller frontend-owned yet.
+
+#### Phase 2 Outcome
+- Added [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) with an explicit `ApproachTargetController` plus controller-level tests for arrival, stuck abort, and forced reposition cancellation.
+- Replaced `MovementSystem` tuple state with `approach_target: Option<ApproachTargetController>` in [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs).
+- Moved forced-reposition cancellation behind `MovementSystem`, so approach lifecycle ownership no longer leaks through the main client loop in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs).
+- Removed `ClientCommand::MoveTo` and migrated callers onto `ClientCommand::ApproachTarget` in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs), [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs), and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
+
+#### Decisions Confirmed During Phase 2
+- The extracted controller should use the Phase 1 kernel directly, with controller-specific effect vocabulary for movement pulses, velocity changes, and termination reasons.
+- Forced-reposition cancellation belongs to `MovementSystem`, not the outer client event loop.
+- Because the CLI still communicates with core through `ClientCommand`, Phase 2 keeps a temporary controller-triggering command (`ApproachTarget`) instead of exposing frontend-owned controller instances yet.
+
+#### Pivot Watch
+No critical pivot is required yet, but Phase 2 surfaced one real fork:
+
+- temporary bridge chosen: keep a controller-oriented command trigger at the app-to-core boundary until Phase 4 exposes reusable controller APIs directly to frontends
+
+If that bridge starts accumulating more controller-specific commands before Phase 4, that is a sign we should pull the primitive/controller exposure work forward instead of letting the command surface become a second controller API.
 
 #### Files And Symbols
 - [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs)
@@ -692,9 +712,9 @@ Mitigation:
 
 ### Task Checklist
 - [x] Phase 1: define the controller contract and module home
-- [ ] Phase 2: extract `ApproachTargetController` with no behavior change
-- [ ] Phase 2: remove `ClientCommand::MoveTo` and migrate existing callers
-- [ ] Phase 2: add controller-level tests for approach, arrival, and forced reposition
+- [x] Phase 2: extract `ApproachTargetController` with no behavior change
+- [x] Phase 2: remove `ClientCommand::MoveTo` and migrate existing callers
+- [x] Phase 2: add controller-level tests for approach, arrival, and forced reposition
 - [ ] Phase 3: add a primitive locomotion layer suitable for reusable controllers
 - [ ] Phase 4: expose reusable controller APIs for frontend adoption
 - [ ] Phase 4: choose and document the default ownership model
@@ -719,12 +739,16 @@ Mitigation:
 - Resolved: the kernel should be treated as provisional until it is refined from real controller implementations.
 - March 13, 2026: the provisional kernel will avoid defining a shared lifecycle or reason ontology until real controller implementations prove one is needed.
 - March 13, 2026: orchestrator-facing semantics such as claims or scheduling remain explicitly out of scope for Phase 1.
+- March 13, 2026: Phase 2 keeps a temporary `ClientCommand::ApproachTarget` bridge because the frontend-to-core boundary is still command-based; direct frontend-owned controller APIs remain Phase 4 work.
+- March 13, 2026: forced-reposition cancellation is now owned by `MovementSystem`, alongside controller ticking and stop semantics.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
 - March 13, 2026: current workspace baseline previously had `cargo test --all` passing before this planning pass.
 - March 13, 2026: dry-run against [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs), [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs), and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) found that the original draft understated the need for a dedicated primitive locomotion phase and over-bundled the combat migration work.
 - March 13, 2026: Phase 1 landed a dedicated kernel module at [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs) and updated the architecture docs to describe it as provisional.
+- March 13, 2026: `cargo test -p holtburger-core` passed after extracting [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) and replacing `MoveTo` with `ApproachTarget`.
+- March 13, 2026: CLI regression coverage passed for `targeting_creature_item_type_without_profile_still_starts_attack`, `switching_targets_retargets_attack_sequence`, `switching_to_non_creature_target_cancels_attack_sequence`, `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range`, and `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range` after the Phase 2 migration.
 
 ### Open Questions
 - Exact shape of the structured controller update remains intentionally open.

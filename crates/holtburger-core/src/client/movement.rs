@@ -1,3 +1,7 @@
+use crate::client::controllers::{
+    ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
+    ApproachTargetInput, Controller, ControllerStatus, ControllerUpdate,
+};
 use crate::client::WireEvent;
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
@@ -7,7 +11,7 @@ use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{StateEvent, WorldState};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
@@ -28,19 +32,6 @@ fn calculate_arrival_position(
     }
 }
 
-/// Heuristic to detect if a player is "stuck".
-fn is_stuck(
-    current_pos: &holtburger_common::Vector3,
-    last_pos: &holtburger_common::Vector3,
-    threshold: f32,
-) -> bool {
-    (*current_pos - *last_pos).length() < threshold
-}
-
-fn has_reached_target(distance_to_target: f32, arrival_distance: f32) -> bool {
-    distance_to_target <= arrival_distance
-}
-
 pub(super) fn raw_motion_state_with_player_style(
     world: &WorldState,
     mut raw_motion_state: RawMotionState,
@@ -54,103 +45,157 @@ pub(super) fn raw_motion_state_with_player_style(
 }
 
 pub(super) struct MovementSystem {
-    pub(super) move_target: Option<(Guid, f32)>,
-    pub(super) last_move_sync: Instant,
-    pub(super) last_move_pos: WorldPosition,
-    pub(super) last_move_pos_time: Instant,
+    pub(super) approach_target: Option<ApproachTargetController>,
     pub(super) last_sent_pos_seq: Option<u16>,
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
-            move_target: None,
-            last_move_sync: Instant::now(),
-            last_move_pos: WorldPosition::default(),
-            last_move_pos_time: Instant::now(),
+            approach_target: None,
             last_sent_pos_seq: None,
         }
     }
 
-    pub(super) async fn handle_approach_task(
+    pub(super) fn start_approach(
         &mut self,
         target_guid: Guid,
         arrival_distance: f32,
-        _dt: f32,
+        player_position: WorldPosition,
+    ) {
+        self.approach_target = Some(ApproachTargetController::new(
+            target_guid,
+            arrival_distance,
+            player_position,
+            Instant::now(),
+        ));
+    }
+
+    pub(super) fn has_active_approach(&self) -> bool {
+        self.approach_target.is_some()
+    }
+
+    pub(super) fn stop_approach(&mut self, world: &mut WorldState) -> Vec<StateEvent> {
+        self.approach_target = None;
+        world.set_player_velocity(holtburger_common::Vector3::zero())
+    }
+
+    pub(super) async fn cancel_approach_due_to_forced_reposition(
+        &mut self,
+        world: &mut WorldState,
+    ) -> Result<Option<Vec<StateEvent>>> {
+        let Some(controller) = self.approach_target.as_mut() else {
+            return Ok(None);
+        };
+
+        let update = controller.handle(&ApproachTargetInput::ForcedReposition);
+        let status = update.status;
+        let state_events = self.apply_approach_update(update, world, None).await?;
+        if status == ControllerStatus::Completed {
+            self.approach_target = None;
+        }
+        Ok(Some(state_events))
+    }
+
+    pub(super) async fn tick_approach(
+        &mut self,
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
-        let player_pos = world.player.position.coords;
-        let target_pos = if let Some(target) = world.get_visible_entity(target_guid) {
-            target.position.coords
-        } else {
-            log::warn!("Approach aborted: Target 0x{:08X} not found", target_guid);
-            self.move_target = None;
+        let Some(controller) = self.approach_target.as_mut() else {
             return Ok((Vec::new(), Vec::new()));
         };
 
-        let diff = target_pos - player_pos;
-        let dist = diff.length();
-
-        if has_reached_target(dist, arrival_distance) {
-            log::info!(
-                "Arrived at target 0x{:08X} within {:.2}m",
-                target_guid,
-                arrival_distance
-            );
-            self.move_target = None;
-            world.set_player_velocity(holtburger_common::Vector3::zero());
-            return Ok((Vec::new(), Vec::new()));
+        let target_guid = controller.target_guid();
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now: Instant::now(),
+            player_position: world.player.position,
+            target_position: world.get_visible_entity(target_guid).map(|target| target.position),
+        });
+        let status = update.status;
+        let state_events = self.apply_approach_update(update, world, Some(session)).await?;
+        if status == ControllerStatus::Completed {
+            self.approach_target = None;
         }
+        Ok((Vec::new(), state_events))
+    }
 
-        // Stuck detection
-        let now = Instant::now();
-        if now.duration_since(self.last_move_pos_time) > Duration::from_millis(500) {
-            if is_stuck(
-                &world.player.position.coords,
-                &self.last_move_pos.coords,
-                0.1,
-            ) {
-                log::warn!("Approach aborted: Player seems stuck");
-                self.move_target = None;
-                world.set_player_velocity(holtburger_common::Vector3::zero());
-                return Ok((Vec::new(), Vec::new()));
+    async fn apply_approach_update(
+        &mut self,
+        update: ControllerUpdate<ApproachTargetEffect>,
+        world: &mut WorldState,
+        mut session: Option<&mut Session>,
+    ) -> Result<Vec<StateEvent>> {
+        let controller_details = self
+            .approach_target
+            .map(|controller| (controller.target_guid(), controller.arrival_distance()));
+        let mut state_events = Vec::new();
+
+        for effect in update.effects {
+            match effect {
+                ApproachTargetEffect::SetVelocity(velocity) => {
+                    state_events.extend(world.set_player_velocity(velocity));
+                }
+                ApproachTargetEffect::SendRunPulse => {
+                    if let Some(session) = session.as_deref_mut() {
+                        Self::send_run_pulse(world, session).await?;
+                    }
+                }
+                ApproachTargetEffect::StopMovement => {
+                    state_events.extend(
+                        world.set_player_velocity(holtburger_common::Vector3::zero()),
+                    );
+                }
+                ApproachTargetEffect::Finished(reason) => match reason {
+                    ApproachTargetFinishReason::Arrived => {
+                        if let Some((target_guid, arrival_distance)) = controller_details {
+                            log::info!(
+                                "Arrived at target 0x{:08X} within {:.2}m",
+                                target_guid,
+                                arrival_distance
+                            );
+                        }
+                    }
+                    ApproachTargetFinishReason::TargetUnavailable => {
+                        if let Some((target_guid, _)) = controller_details {
+                            log::warn!(
+                                "Approach aborted: Target 0x{:08X} not found",
+                                target_guid
+                            );
+                        }
+                    }
+                    ApproachTargetFinishReason::Stuck => {
+                        log::warn!("Approach aborted: Player seems stuck");
+                    }
+                    ApproachTargetFinishReason::ForcedReposition => {
+                        log::warn!("Approach aborted: Forced reposition by server");
+                    }
+                },
             }
-            self.last_move_pos = world.player.position;
-            self.last_move_pos_time = now;
         }
 
-        // Set velocity toward target (Running speed ~ 7.0m/s)
-        let dir = diff / dist;
-        let velocity = dir * 7.0;
+        Ok(state_events)
+    }
 
-        world.set_player_velocity(velocity);
+    async fn send_run_pulse(world: &WorldState, session: &mut Session) -> Result<()> {
+        let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
+            raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState {
+                flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                current_hold_key: Some(HoldKey::Run as u32),
+                forward_speed: Some(7.0),
+                ..Default::default()
+            }),
+            position: world.player.position,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+            contact_long_jump: 1,
+        };
 
-        // Send MoveToState to server periodically (~100ms)
-        if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
-            self.last_move_sync = now;
-
-            let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-                raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState {
-                    flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
-                    current_hold_key: Some(HoldKey::Run as u32),
-                    forward_speed: Some(7.0),
-                    ..Default::default()
-                }),
-                position: world.player.position,
-                instance_sequence: world.player.instance_sequence,
-                server_control_sequence: world.player.server_control_sequence,
-                teleport_sequence: world.player.teleport_sequence,
-                force_position_sequence: world.player.force_position_sequence,
-                contact_long_jump: 1, // On Ground
-            };
-
-            session
-                .send_action(GameAction::MoveToState(Box::new(data)))
-                .await?;
-        }
-
-        Ok((Vec::new(), Vec::new()))
+        session
+            .send_action(GameAction::MoveToState(Box::new(data)))
+            .await
     }
 
     pub(super) async fn handle_server_controlled_movement(
@@ -329,24 +374,6 @@ mod tests {
         let pos = calculate_arrival_position(&source, &target_pos, arrival_dist);
         assert!((pos.x - 8.0).abs() < 1e-4);
         assert!(pos.y.abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_is_stuck() {
-        let last = Vector3::new(0.0, 0.0, 0.0);
-        let current_stuck = Vector3::new(0.05, 0.0, 0.0);
-        let current_moving = Vector3::new(0.2, 0.0, 0.0);
-
-        assert!(is_stuck(&current_stuck, &last, 0.1));
-        assert!(!is_stuck(&current_moving, &last, 0.1));
-    }
-
-    #[test]
-    fn test_has_reached_target_uses_supplied_arrival_distance() {
-        assert!(has_reached_target(0.6, 0.6));
-        assert!(has_reached_target(0.59, 0.6));
-        assert!(!has_reached_target(0.99, 0.6));
-        assert!(has_reached_target(0.99, 1.0));
     }
 
     #[test]

@@ -1,8 +1,10 @@
 # Core Engine Architecture ⚙️
 
-This crate is the "Brain" and Orchestrator of the client. It binds together the pure networking from [`holtburger-session`](../holtburger-session) and the data tracking from [`holtburger-world`](../holtburger-world) into a single, cohesive engine.
+This crate is the "Brain" and behavior host of the client. It binds together the pure networking from [`holtburger-session`](../holtburger-session) and the data tracking from [`holtburger-world`](../holtburger-world) into a single, cohesive engine.
 
-This crate orchestrates translating complex network packets into meaningful gameplay events without suffocating the application in massive struct clones or lock contention.
+In addition to orchestration, this crate is allowed to provide reusable client-side behaviors when they are broadly useful across multiple frontends. The key boundary is not "high-level vs low-level" in the abstract, but whether a behavior is a reusable engine capability or a frontend-specific policy.
+
+This crate translates complex network packets into meaningful gameplay events without suffocating the application in massive struct clones or lock contention, and it may also host optional controllers that sit on top of the core movement and interaction primitives.
 
 ## Key Components
 
@@ -21,8 +23,19 @@ We use a 3-layer event model to separate protocol fidelity from UI ergonomics, s
    - Consumers (like `holtburger-cli`) **ONLY** subscribe to `WorldViewEvent` because it is lightweight. It broadcasts granular semantic delta-events (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
 
 #### Interaction
-- **ClientCommand**: Commands sent from the UI to the engine (e.g., `MoveTo`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
+- **ClientCommand**: Commands sent from the UI to the engine (e.g., `TurnTo`, `MoveTo`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
 - **Producer-Only Pattern**: The Core Engine is strictly *producer-only* for the event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from Wire -> State -> View.
+
+### Command and Controller Boundary
+
+The core crate exposes two layers of client-facing behavior:
+
+1. **Primitives**: low-level commands and systems that directly map to protocol or authoritative local-state responsibilities.
+    - Examples: `TurnTo`, `SetState`, `StopMoving`, movement prediction, position sync, and handling server-controlled movement.
+2. **Controllers**: optional, reusable higher-level behaviors built on top of those primitives.
+    - Examples: approach a target until an arrival distance, follow a target, combat-facing assistance, or sticky-melee steering.
+
+Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
 
 ### 2. Specialized Systems
 
@@ -31,6 +44,39 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 
 #### Movement ([src/client/movement.rs](src/client/movement.rs))
 The `MovementSystem` runs on a fixed 30ms async interval, calculating physics ticks, client-side prediction, and pushing reliable synchronization with the server's authoritative position.
+
+Today, this module also contains an approach-target loop driven by `ClientCommand::MoveTo`. That behavior is useful, but it is better understood as a reusable controller layered over movement primitives than as the only movement API.
+
+## Movement Model
+
+Movement in `holtburger-core` should converge on three distinct layers:
+
+1. **Protocol and authority plumbing**
+    - Format and send movement-related game actions.
+    - Handle server-driven movement and forced reposition.
+    - Maintain prediction and synchronization with the authoritative server state.
+2. **Primitive client actions**
+    - Set heading.
+    - Set movement state.
+    - Start or stop locally driven locomotion.
+    - Emit sync pulses and other direct control inputs.
+3. **Optional reusable controllers**
+    - Approach target until arrival distance.
+    - Follow or maintain range.
+    - Combat-facing assist.
+    - Shared stuck detection, retry cadence, and cancellation rules.
+
+This structure keeps the core crate powerful without baking one frontend's control policy directly into the engine loop.
+
+## Current State and Intended Direction
+
+The current `ClientCommand::MoveTo` flow is effectively a built-in controller:
+
+1. A client issues `MoveTo`.
+2. Core stores controller state in the movement subsystem.
+3. The fixed physics tick advances that controller until it reaches the target or aborts.
+
+That behavior is not wrong. The issue is that it is currently modeled as an ad hoc special case instead of as part of a clearer "optional controller" layer. The intended direction is to preserve useful shared behavior while making the abstraction boundaries more explicit.
 
 ## Internal Data Flow
 
@@ -63,6 +109,30 @@ sequenceDiagram
 3. **Handle in Core**: Add a case to the core loop in [src/client/messages.rs](src/client/messages.rs).
 4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `StateEvent`.
 5. **Map to View**: Update the `WorldViewEvent` stream in `emit_wire_event` or `emit_world_view_projection` inside [src/client/mod.rs](src/client/mod.rs) to share the new delta with the UI.
+
+### Adding or Refactoring a Reusable Controller
+1. **Prove the behavior is shared**: Confirm that the behavior is likely useful across multiple clients or modes of control.
+2. **Identify the primitive surface**: Separate the controller's decision-making from the low-level commands it needs to emit.
+3. **Make state explicit**: Keep controller state isolated from the transport and world-plumbing responsibilities.
+4. **Define interruption rules**: Be explicit about what cancels, supersedes, or pauses the controller.
+5. **Keep adoption optional**: Frontends should opt into controllers rather than being forced through them.
+
+## Migration Path Toward Reusable Controllers
+
+We do not need a flag day refactor. The current movement behavior can evolve incrementally:
+
+1. **Document current controllers explicitly**
+    - Treat `MoveTo` as a controller-oriented API, not just a raw movement primitive.
+2. **Separate primitive helpers from controller logic**
+    - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
+3. **Isolate controller state**
+    - Keep approach-specific state and heuristics grouped together behind a clearer controller boundary.
+4. **Introduce additional reusable controllers**
+    - Examples include combat-facing assistance or maintain-range behavior.
+5. **Let applications arbitrate controller usage**
+    - Frontends decide when to invoke or suspend a controller based on local UX needs.
+
+The end state is a core library that owns robust movement and interaction primitives, plus a catalog of optional higher-level controllers that clients can compose as needed.
 
 ## Dependencies
 - **`holtburger-session`**: Network tracking, transport, and packet parsing.

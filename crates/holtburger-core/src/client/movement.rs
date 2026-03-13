@@ -1,7 +1,3 @@
-use crate::client::controllers::{
-    ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
-    ApproachTargetInput, Controller, ControllerUpdate,
-};
 use crate::client::locomotion::LocomotionPrimitive;
 use crate::client::WireEvent;
 use anyhow::Result;
@@ -12,8 +8,6 @@ use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{StateEvent, WorldState};
-use std::time::Instant;
-
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 
@@ -46,78 +40,12 @@ pub(super) fn raw_motion_state_with_player_style(
 }
 
 pub(super) struct MovementSystem {
-    pub(super) approach_target: Option<ApproachTargetController>,
     pub(super) last_sent_pos_seq: Option<u16>,
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
-        Self {
-            approach_target: None,
-            last_sent_pos_seq: None,
-        }
-    }
-
-    pub(super) fn start_approach(
-        &mut self,
-        target_guid: Guid,
-        arrival_distance: f32,
-        player_position: WorldPosition,
-    ) {
-        self.approach_target = Some(ApproachTargetController::new(
-            target_guid,
-            arrival_distance,
-            player_position,
-            Instant::now(),
-        ));
-    }
-
-    pub(super) fn has_active_approach(&self) -> bool {
-        self.approach_target.is_some()
-    }
-
-    pub(super) fn stop_approach(&mut self) {
-        self.approach_target = None;
-    }
-
-    pub(super) async fn cancel_approach_due_to_forced_reposition(
-        &mut self,
-        world: &mut WorldState,
-    ) -> Result<Option<Vec<StateEvent>>> {
-        let Some(controller) = self.approach_target.as_mut() else {
-            return Ok(None);
-        };
-
-        let update = controller.handle(&ApproachTargetInput::ForcedReposition);
-        let completed = update.is_terminal();
-        let state_events = self.apply_approach_update(update, world, None).await?;
-        if completed {
-            self.approach_target = None;
-        }
-        Ok(Some(state_events))
-    }
-
-    pub(super) async fn tick_approach(
-        &mut self,
-        world: &mut WorldState,
-        session: &mut Session,
-    ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
-        let Some(controller) = self.approach_target.as_mut() else {
-            return Ok((Vec::new(), Vec::new()));
-        };
-
-        let target_guid = controller.target_guid();
-        let update = controller.handle(&ApproachTargetInput::Tick {
-            now: Instant::now(),
-            player_position: world.player.position,
-            target_position: world.get_visible_entity(target_guid).map(|target| target.position),
-        });
-        let completed = update.is_terminal();
-        let state_events = self.apply_approach_update(update, world, Some(session)).await?;
-        if completed {
-            self.approach_target = None;
-        }
-        Ok((Vec::new(), state_events))
+        Self { last_sent_pos_seq: None }
     }
 
     pub(super) async fn execute_locomotion_primitive(
@@ -136,60 +64,6 @@ impl MovementSystem {
                 LocomotionPrimitive::Stop { .. } => {
                     Self::send_stop_pulse(world, session).await?;
                 }
-            }
-        }
-
-        Ok(state_events)
-    }
-
-    async fn apply_approach_update(
-        &mut self,
-        update: ControllerUpdate<ApproachTargetEffect>,
-        world: &mut WorldState,
-        mut session: Option<&mut Session>,
-    ) -> Result<Vec<StateEvent>> {
-        let controller_details = self
-            .approach_target
-            .map(|controller| (controller.target_guid(), controller.arrival_distance()));
-        let mut state_events = Vec::new();
-
-        for effect in update.effects {
-            match effect {
-                ApproachTargetEffect::Locomotion(primitive) => {
-                    if let Some(session) = session.as_deref_mut() {
-                        state_events.extend(
-                            self.execute_locomotion_primitive(primitive, world, session)
-                                .await?,
-                        );
-                    } else {
-                        state_events.extend(self.apply_locomotion_primitive(primitive, world));
-                    }
-                }
-                ApproachTargetEffect::Finished(reason) => match reason {
-                    ApproachTargetFinishReason::Arrived => {
-                        if let Some((target_guid, arrival_distance)) = controller_details {
-                            log::info!(
-                                "Arrived at target 0x{:08X} within {:.2}m",
-                                target_guid,
-                                arrival_distance
-                            );
-                        }
-                    }
-                    ApproachTargetFinishReason::TargetUnavailable => {
-                        if let Some((target_guid, _)) = controller_details {
-                            log::warn!(
-                                "Approach aborted: Target 0x{:08X} not found",
-                                target_guid
-                            );
-                        }
-                    }
-                    ApproachTargetFinishReason::Stuck => {
-                        log::warn!("Approach aborted: Player seems stuck");
-                    }
-                    ApproachTargetFinishReason::ForcedReposition => {
-                        log::warn!("Approach aborted: Forced reposition by server");
-                    }
-                },
             }
         }
 

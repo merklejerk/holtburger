@@ -1,3 +1,4 @@
+use crate::client::locomotion::LocomotionPrimitive;
 use holtburger_common::{Guid, Vector3};
 use holtburger_common::properties::DamageType;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
@@ -192,6 +193,11 @@ pub enum ClientViewEvent {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
     },
+    ForcedReposition {
+        guid: Guid,
+        pos: holtburger_common::position::WorldPosition,
+        sequence: u16,
+    },
     EntityDespawned {
         guid: Guid,
     },
@@ -300,10 +306,7 @@ pub enum ClientCommand {
     TurnTo {
         heading: f32,
     },
-    ApproachTarget {
-        target: Guid,
-        arrival_distance: f32,
-    },
+    ExecuteLocomotion(LocomotionPrimitive),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,

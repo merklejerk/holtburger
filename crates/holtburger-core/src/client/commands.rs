@@ -51,7 +51,7 @@ impl Client {
             ClientCommand::Jump { .. }
             | ClientCommand::SetState(_)
             | ClientCommand::TurnTo { .. }
-            | ClientCommand::ApproachTarget { .. }
+            | ClientCommand::ExecuteLocomotion(_) 
             | ClientCommand::StopMoving
             | ClientCommand::SyncPosition => self.handle_movement_command(cmd).await,
 
@@ -574,22 +574,19 @@ impl Client {
                 })))
                 .await
             }
-            ClientCommand::ApproachTarget {
-                target,
-                arrival_distance,
-            } => {
-                log::info!(
-                    ">>> Starting approach to target: 0x{:08X} (arrival {:.2}m)",
-                    target,
-                    arrival_distance
-                );
-                self.movement
-                    .start_approach(target, arrival_distance, self.world.player.position);
+            ClientCommand::ExecuteLocomotion(primitive) => {
+                log::info!(">>> Executing locomotion primitive: {:?}", primitive);
+                let world_events = self
+                    .movement
+                    .execute_locomotion_primitive(primitive, &mut self.world, &mut self.session)
+                    .await?;
+                for event in world_events {
+                    self.emit_state_event(event);
+                }
                 Ok(())
             }
             ClientCommand::StopMoving => {
                 log::info!(">>> Stopping local approach movement");
-                self.movement.stop_approach();
                 let world_events = self
                     .movement
                     .execute_locomotion_primitive(

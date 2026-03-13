@@ -23,7 +23,7 @@ We use a 3-layer event model to separate protocol fidelity from UI ergonomics, s
    - Consumers (like `holtburger-cli`) **ONLY** subscribe to `WorldViewEvent` because it is lightweight. It broadcasts granular semantic delta-events (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
 
 #### Interaction
-- **ClientCommand**: Commands sent from the UI to the engine (e.g., `TurnTo`, `ApproachTarget`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
+- **ClientCommand**: Commands sent from the UI to the engine (e.g., `TurnTo`, `ExecuteLocomotion`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
 - **Producer-Only Pattern**: The Core Engine is strictly *producer-only* for the event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from Wire -> State -> View.
 
 ### Command and Controller Boundary
@@ -44,7 +44,7 @@ Frontend adoption pattern today:
 1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
 2. Feed it world-derived inputs on ticks or relevant events.
 3. Interpret its emitted primitive effects, such as `LocomotionPrimitive`, in the frontend's own orchestration layer.
-4. Either execute those primitives directly if the frontend owns a `Client`, or continue using compatibility bridges such as `ClientCommand::ApproachTarget` until they are removed.
+4. Execute those primitives through the frontend's preferred runtime path. Command-channel frontends can submit `LocomotionPrimitive` values through `ClientCommand::ExecuteLocomotion`, while direct embedders can call into a `Client` more directly.
 
 The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). After extracting real movement and combat controllers, it has been refined down to the proven shared surface and currently standardizes only:
 
@@ -62,7 +62,7 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 #### Movement ([src/client/movement.rs](src/client/movement.rs))
 The `MovementSystem` runs on a fixed 30ms async interval, calculating physics ticks, client-side prediction, and pushing reliable synchronization with the server's authoritative position.
 
-Today, this module hosts an explicit `ApproachTargetController` that emits `LocomotionPrimitive` values and is ticked by the movement system. It is currently seeded through `ClientCommand::ApproachTarget`, but that trigger command is still only a temporary bridge for the existing app-to-core command channel, not the final reusable-controller API.
+Today, this module owns primitive execution and server-controlled movement reconciliation. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and frontends feed that controller themselves before submitting emitted `LocomotionPrimitive` values for execution.
 
 Combat automation now follows the same pattern from [src/client/controllers/combat.rs](src/client/controllers/combat.rs): frontends own a controller, feed it world-derived snapshots, and translate emitted `TurnTo` or targeted-attack intents into their preferred execution path. Sticky melee range maintenance now does the same through [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), which owns the repeat latch and pursuit reissue cadence while leaving activation policy in the frontend.
 
@@ -89,14 +89,14 @@ This structure keeps the core crate powerful without baking one frontend's contr
 
 ## Current State and Intended Direction
 
-The current `ClientCommand::ApproachTarget` flow is effectively a built-in controller bridge:
+The current ownership model is explicit:
 
-1. A client issues `ApproachTarget`.
-2. Core stores controller state in the movement subsystem.
-3. The fixed physics tick advances that controller until it reaches the target or aborts.
-4. The controller emits `LocomotionPrimitive` values that the movement subsystem executes.
+1. A frontend owns reusable controllers such as `ApproachTargetController` or `MaintainRangeController`.
+2. The frontend feeds those controllers with world-derived inputs on ticks and relevant events, including forced reposition.
+3. The frontend translates emitted `LocomotionPrimitive` values into its runtime submission path.
+4. `MovementSystem` executes those primitives and continues to own local prediction plus server-authoritative movement handling.
 
-That behavior is not wrong. The issue is that it is currently modeled as an ad hoc special case instead of as part of a clearer "optional controller" layer. The intended direction is to preserve useful shared behavior while making the abstraction boundaries more explicit.
+This keeps controller state out of hidden engine-owned special cases while preserving a single movement executor for protocol traffic and prediction.
 
 ## Internal Data Flow
 
@@ -143,7 +143,7 @@ sequenceDiagram
 We do not need a flag day refactor. The current movement behavior can evolve incrementally:
 
 1. **Document current controllers explicitly**
-    - Treat `ApproachTarget` as a temporary controller-triggering API rather than a raw movement primitive or final reusable-controller surface.
+    - Document how frontends own reusable controllers and submit emitted primitives for execution.
 2. **Separate primitive helpers from controller logic**
     - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
 3. **Isolate controller state**

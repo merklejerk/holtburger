@@ -344,6 +344,19 @@ impl Client {
                         pos: *pos,
                     });
             }
+            StateEvent::ForcedReposition {
+                guid,
+                pos,
+                sequence,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ForcedReposition {
+                        guid: *guid,
+                        pos: *pos,
+                        sequence: *sequence,
+                    });
+            }
             StateEvent::EntityStateUpdated { .. } | StateEvent::EntityVectorUpdated { .. } => {}
             StateEvent::ServerTimeUpdate(time) => {
                 let _ = self
@@ -438,16 +451,7 @@ impl Client {
                             for event in events {
                                 match event {
                                     SessionEvent::Message(msg_data) => {
-                                        let world_events = self.handle_message(&msg_data).await?;
-
-                                        for event in world_events {
-                                            if let StateEvent::ForcedReposition { .. } = event
-                                                && let Some(events) = self.movement.cancel_approach_due_to_forced_reposition(&mut self.world).await? {
-                                                    for ev in events {
-                                                        self.emit_state_event(ev);
-                                                    }
-                                                }
-                                        }
+                                        self.handle_message(&msg_data).await?;
 
                                         if matches!(self.state, ClientState::Disconnected) {
                                             return Ok(());
@@ -492,17 +496,6 @@ impl Client {
                     let now = Instant::now();
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
-
-                    if self.movement.has_active_approach() {
-                        let Client { movement, world, session, .. } = self;
-                        let (wire_events, state_events) = movement.tick_approach(world, session).await?;
-                        for event in wire_events {
-                            self.emit_wire_event(event);
-                        }
-                        for event in state_events {
-                            self.emit_state_event(event);
-                        }
-                    }
 
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);

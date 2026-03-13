@@ -33,7 +33,7 @@ pub enum MaintainRangeFinishReason {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MaintainRangeEffect {
-    ApproachTarget {
+    StartApproach {
         target: Guid,
         arrival_distance: f32,
     },
@@ -154,7 +154,7 @@ impl Controller for MaintainRangeController {
                     self.pursuing = true;
                     self.last_reissue_at = Some(now);
                     return ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                        MaintainRangeEffect::ApproachTarget {
+                        MaintainRangeEffect::StartApproach {
                             target: target_guid,
                             arrival_distance: self.config.arrival_distance,
                         },
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![MaintainRangeEffect::ApproachTarget {
+            vec![MaintainRangeEffect::StartApproach {
                 target: Guid(0x1234),
                 arrival_distance: 0.6,
             }]
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![MaintainRangeEffect::ApproachTarget {
+            vec![MaintainRangeEffect::StartApproach {
                 target: Guid(0x1234),
                 arrival_distance: 0.6,
             }]

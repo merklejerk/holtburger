@@ -43,8 +43,8 @@ This section validates the plan against the code as it exists today.
 
 ### What The Current Code Already Supports Cleanly
 - `ClientCommand` is already the shared command surface consumed by clients and the core engine in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs).
-- The core engine already has a fixed tick host in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), so internal controller ticking has an obvious execution point.
-- The current approach behavior is already represented as an explicit controller: `ClientCommand::ApproachTarget` seeds state in [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs), the physics tick advances it in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), and the controller emits locomotion primitives through [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs).
+- Command-channel frontends can now submit primitive locomotion intents through `ClientCommand::ExecuteLocomotion` in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs), while [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) remains the single executor for prediction and protocol traffic.
+- The current approach behavior is already represented as an explicit frontend-owned controller: the CLI owns `ApproachTargetController` in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs), feeds it on ticks plus movement-related view events, and translates emitted locomotion primitives into executable commands.
 - Combat-side automation already exists as explicit decision logic in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs), which gives us real behavior to preserve and test during migration.
 
 ### Gaps The Original Draft Underestimated
@@ -694,6 +694,38 @@ Complexity: Medium-High
 
 Complexity: Medium
 
+Status: Completed on March 13, 2026
+
+#### Shim Audit Before Execution
+- `ClientCommand::ApproachTarget` was still acting as a legacy controller bridge at the app-to-core boundary.
+- `MovementSystem` still owned hidden `ApproachTargetController` state, leaving approach automation split between engine-owned and frontend-owned models.
+- `MaintainRangeController` still emitted bridge-era pursuit effects named around `ApproachTarget`, even though the intended long-term model was controller-to-controller composition.
+- Forced reposition was still only actionable inside core, so a frontend-owned approach controller could not preserve the same cancellation semantics without a new event surface.
+- [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) and this plan still described the temporary bridge as part of the current architecture.
+
+#### Phase 8 Outcome
+- Removed `ClientCommand::ApproachTarget` and replaced the runtime submission seam with `ClientCommand::ExecuteLocomotion(LocomotionPrimitive)` in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs) and [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs).
+- Removed hidden approach-controller ownership from [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) and the physics-loop special case in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), leaving core as the primitive executor rather than an approach orchestrator.
+- Moved reusable approach ownership into [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs), where the CLI now owns `ApproachTargetController`, translates its effects into primitive submission commands, and cancels it on `ClientViewEvent::ForcedReposition`.
+- Renamed the sticky-melee pursuit effect in [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs) from `ApproachTarget` to `StartApproach`, so it now describes controller composition instead of a removed command shim.
+- Updated [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) so the docs now describe the implemented ownership model rather than the old bridge.
+
+#### Decisions Confirmed During Phase 8
+- The command-channel runtime stays, but the stable movement submission surface is primitive execution, not a controller-specific high-level command.
+- `MovementSystem` remains the sole executor for locomotion primitives and server-authoritative movement handling; it no longer owns reusable approach policy.
+- Forced reposition is now part of the frontend-visible event surface so frontend-owned controllers can preserve cancellation semantics without hidden core hooks.
+- `MaintainRangeController` should emit controller-composition intents (`StartApproach`) instead of bridge-era command-shaped effects.
+
+#### Pivot Watch
+No critical pivot was required.
+
+What changed:
+- we kept the command channel for runtime submission, but removed the controller-specific bridge from it
+- we surfaced forced reposition to frontends rather than reintroducing hidden engine-owned controller cancellation
+
+What to watch:
+- if future frontends need a richer primitive-submission handle than `ClientCommand::ExecuteLocomotion`, that should emerge as a runtime-execution API rather than as a return to controller-specific commands
+
 #### Deliverables
 - Reassess whether `ClientCommand::ApproachTarget` remains valuable as:
   - a stable compatibility command
@@ -714,9 +746,9 @@ Complexity: Medium
 Do not break existing CLI flows while extracting the controller seam.
 
 Recommended compatibility rules:
-- keep `ClientCommand::ApproachTarget` working while the primitive layer and reusable controller APIs are being established
-- keep the current physics-tick-driven advancement until the extracted controller is stable
-- avoid moving sticky melee and attack-heartbeat logic at the same time as the first controller extraction
+- command-channel frontends submit `LocomotionPrimitive` values through `ClientCommand::ExecuteLocomotion` while owning reusable controllers locally
+- keep `MovementSystem` as the single primitive executor for prediction and protocol traffic
+- surface forced reposition through `ClientViewEvent::ForcedReposition` so frontend-owned movement controllers can preserve cancellation behavior
 
 ### Medium-Term Convergence
 Once `ApproachTargetController` exists as an explicit unit:
@@ -804,8 +836,8 @@ Mitigation:
 - [x] Phase 6: migrate sticky melee pursuit toward a reusable maintain-range controller
 - [x] Phase 7: revisit the kernel using the controllers built so far
 - [x] Phase 7: remove speculative abstractions that did not hold up
-- [ ] Phase 8: clean up legacy ownership and command shims
-- [ ] Phase 8: refresh docs to match the implemented design
+- [x] Phase 8: clean up legacy ownership and command shims
+- [x] Phase 8: refresh docs to match the implemented design
 
 ### Decisions Log
 - Initial decision: high-level reusable behavior is in scope for `holtburger-core` when broadly useful across clients.
@@ -829,6 +861,9 @@ Mitigation:
 - March 13, 2026: Phase 6 moves sticky melee latch and reissue cadence into `MaintainRangeController`, leaving only activation and effect execution in the TUI.
 - March 13, 2026: Phase 7 refines the shared kernel around the proven common surface of `Controller`, `ControllerStatus`, and `ControllerUpdate`, with shared helpers for terminal-state checks and child-effect remapping.
 - March 13, 2026: Phase 7 explicitly keeps scheduler, claim, and universal reason concepts out of the kernel because the current controllers still do not justify them.
+- March 13, 2026: Phase 8 removes the temporary `ClientCommand::ApproachTarget` bridge in favor of `ClientCommand::ExecuteLocomotion(LocomotionPrimitive)` as the stable command-channel submission path for frontend-owned controllers.
+- March 13, 2026: Phase 8 keeps `MovementSystem` as the primitive executor but moves all reusable approach ownership into frontend state.
+- March 13, 2026: Phase 8 promotes forced reposition to the frontend-visible `ClientViewEvent` surface so frontend-owned approach controllers can preserve cancellation semantics.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
@@ -847,6 +882,8 @@ Mitigation:
 - March 13, 2026: CLI regression coverage passed for `handle_tick_refreshes_stale_queued_attack_sequence`, `handle_tick_retries_cancelled_attack_after_combat_mode_reentry`, `cancelled_attack_stops_sticky_melee_follow`, `missile_targeting_turns_before_reissuing_attack_when_not_facing`, and `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range` after the Phase 5 combat automation migration.
 - March 13, 2026: `cargo test -p holtburger-core` passed after adding [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs) and exporting the reusable maintain-range controller surface.
 - March 13, 2026: CLI regression coverage passed for `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range`, `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range`, `cancelled_attack_stops_sticky_melee_follow`, `cancelled_attack_does_not_rearm_after_explicit_cancel`, and `handle_tick_refreshes_stale_queued_attack_sequence` after the Phase 6 maintain-range migration.
+- March 13, 2026: `cargo test -p holtburger-core` passed after removing the engine-owned approach bridge, adding `ClientCommand::ExecuteLocomotion`, and surfacing forced reposition to frontends.
+- March 13, 2026: `cargo test -p holtburger-cli` passed after moving approach ownership into CLI state, replacing bridge-era sticky-melee pursuit with primitive submission, and adding `forced_reposition_cancels_frontend_owned_approach_controller` coverage.
 
 ### Open Questions
 - Exact shape of the structured controller update remains intentionally open.

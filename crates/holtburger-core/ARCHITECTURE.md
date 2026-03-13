@@ -37,6 +37,8 @@ The core crate exposes two layers of client-facing behavior:
 
 Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
 
+The current primitive locomotion surface lives in [src/client/locomotion.rs](src/client/locomotion.rs). It defines controller-facing locomotion primitives such as drive and stop, while [src/client/movement.rs](src/client/movement.rs) remains the executor that applies those primitives to local prediction and protocol traffic.
+
 The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). It is intentionally provisional and currently standardizes only:
 
 - a broad controller trait shape
@@ -53,7 +55,7 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 #### Movement ([src/client/movement.rs](src/client/movement.rs))
 The `MovementSystem` runs on a fixed 30ms async interval, calculating physics ticks, client-side prediction, and pushing reliable synchronization with the server's authoritative position.
 
-Today, this module hosts an explicit `ApproachTargetController` that is ticked by the movement system and currently seeded through `ClientCommand::ApproachTarget`. That trigger command is a temporary bridge for the existing app-to-core command channel, not the final reusable-controller API.
+Today, this module hosts an explicit `ApproachTargetController` that emits `LocomotionPrimitive` values and is ticked by the movement system. It is currently seeded through `ClientCommand::ApproachTarget`, but that trigger command is still only a temporary bridge for the existing app-to-core command channel, not the final reusable-controller API.
 
 ## Movement Model
 
@@ -66,7 +68,7 @@ Movement in `holtburger-core` should converge on three distinct layers:
 2. **Primitive client actions**
     - Set heading.
     - Set movement state.
-    - Start or stop locally driven locomotion.
+    - Start, refresh, or stop locally driven locomotion through `LocomotionPrimitive`.
     - Emit sync pulses and other direct control inputs.
 3. **Optional reusable controllers**
     - Approach target until arrival distance.
@@ -78,11 +80,12 @@ This structure keeps the core crate powerful without baking one frontend's contr
 
 ## Current State and Intended Direction
 
-The current `ClientCommand::ApproachTarget` flow is effectively a built-in controller:
+The current `ClientCommand::ApproachTarget` flow is effectively a built-in controller bridge:
 
 1. A client issues `ApproachTarget`.
 2. Core stores controller state in the movement subsystem.
 3. The fixed physics tick advances that controller until it reaches the target or aborts.
+4. The controller emits `LocomotionPrimitive` values that the movement subsystem executes.
 
 That behavior is not wrong. The issue is that it is currently modeled as an ad hoc special case instead of as part of a clearer "optional controller" layer. The intended direction is to preserve useful shared behavior while making the abstraction boundaries more explicit.
 
@@ -131,7 +134,7 @@ sequenceDiagram
 We do not need a flag day refactor. The current movement behavior can evolve incrementally:
 
 1. **Document current controllers explicitly**
-    - Treat `ApproachTarget` as a temporary controller-triggering API rather than a raw movement primitive.
+    - Treat `ApproachTarget` as a temporary controller-triggering API rather than a raw movement primitive or final reusable-controller surface.
 2. **Separate primitive helpers from controller logic**
     - Extract helpers for heading changes, locomotion state, stop/cancel, and sync from the current approach loop.
 3. **Isolate controller state**

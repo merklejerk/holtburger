@@ -1,8 +1,14 @@
 pub mod approach_target;
+pub mod combat;
 
 pub use approach_target::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
     ApproachTargetInput,
+};
+pub use combat::{
+    CombatAutomationController, CombatAutomationEffect, CombatAutomationInput,
+    CombatFacingController, CombatFacingEffect, CombatFacingInput, DesiredAttackController,
+    DesiredAttackEffect, DesiredAttackInput, DesiredAttackProfile, TargetedAttackRequest,
 };
 
 /// Provisional shared controller kernel for reusable client-side behaviors.

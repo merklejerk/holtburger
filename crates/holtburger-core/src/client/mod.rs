@@ -10,6 +10,7 @@ mod auth;
 mod builder;
 mod commands;
 pub mod controllers;
+pub mod locomotion;
 mod messages;
 mod movement;
 pub mod types;

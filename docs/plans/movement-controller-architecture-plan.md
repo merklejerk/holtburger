@@ -44,7 +44,7 @@ This section validates the plan against the code as it exists today.
 ### What The Current Code Already Supports Cleanly
 - `ClientCommand` is already the shared command surface consumed by clients and the core engine in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs).
 - The core engine already has a fixed tick host in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), so internal controller ticking has an obvious execution point.
-- The current `MoveTo` behavior is already effectively a controller: `ClientCommand::MoveTo` seeds state in [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs), and the physics tick advances it in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs).
+- The current approach behavior is already represented as an explicit controller: `ClientCommand::ApproachTarget` seeds state in [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs), the physics tick advances it in [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), and the controller emits locomotion primitives through [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs).
 - Combat-side automation already exists as explicit decision logic in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs), which gives us real behavior to preserve and test during migration.
 
 ### Gaps The Original Draft Underestimated
@@ -493,6 +493,8 @@ If that bridge starts accumulating more controller-specific commands before Phas
 
 Complexity: High
 
+Status: Completed on March 13, 2026
+
 #### Deliverables
 - Define the low-level movement primitives needed so reusable controllers are not forced to hide inside core.
 - Add an explicit primitive surface for client-side locomotion intent, likely covering some form of:
@@ -506,6 +508,26 @@ Complexity: High
 - This phase did not exist in the original draft and is required by the current codebase.
 - Without it, frontend-owned reusable controllers are mostly aspirational because the public command surface cannot actually express approach locomotion.
 - This is the first phase where API design risk is substantial.
+
+#### Phase 3 Outcome
+- Added the public primitive locomotion surface in [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs) as `LocomotionPrimitive`.
+- Refactored [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) so the controller now emits locomotion primitives instead of mutating velocity or relying on hidden movement internals.
+- Refactored [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) to execute locomotion primitives for both controller-driven approach updates and direct stop commands.
+- Kept [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs) unchanged in this phase apart from the Phase 2 `ApproachTarget` bridge, so the primitive layer exists as a controller-output surface rather than a new `ClientCommand` family.
+
+#### Decisions Confirmed During Phase 3
+- The primitive locomotion layer should be a public controller-output type, not a new public `ClientCommand` surface.
+- `LocomotionPrimitive` should express drive and stop semantics, each with explicit `refresh_server` control so controllers can request local-only vs protocol-emitting updates.
+- `MovementSystem` remains the executor for locomotion primitives because it owns prediction and movement packet emission.
+
+#### Pivot Watch
+No critical pivot is required yet. Phase 3 did resolve the main fork in the road:
+
+- chosen direction: public controller-output primitives in core
+- rejected direction: adding another public `ClientCommand` family for locomotion primitives
+
+What to watch:
+- if multiple future controllers need primitives beyond drive and stop before Phase 4 begins, we should widen `LocomotionPrimitive` deliberately rather than smuggling those needs back through controller-specific effects or new command variants
 
 #### Acceptance Criteria
 - A controller no longer needs hidden access to `MovementSystem` internals to express locomotion.
@@ -527,7 +549,7 @@ Complexity: Medium-High
 
 #### Dry-Run Notes
 - This phase is tractable only after Phase 3 lands.
-- The biggest design choice is whether the stable reusable API is expressed in public `ClientCommand`s or in a thinner controller-output type that apps translate into `ClientCommand`s.
+- Phase 3 already resolved the primitive-shape fork in favor of a thinner controller-output type; Phase 4 now needs to expose adoption patterns around that choice.
 
 #### Design Fork To Resolve
 - Option A: controllers remain engine-owned and frontends opt in via high-level commands.
@@ -615,7 +637,7 @@ Complexity: Medium-High
 Complexity: Medium
 
 #### Deliverables
-- Reassess whether `ClientCommand::MoveTo` remains valuable as:
+- Reassess whether `ClientCommand::ApproachTarget` remains valuable as:
   - a stable compatibility command
   - a thin shorthand over a reusable controller
   - or a deprecated legacy API
@@ -634,7 +656,7 @@ Complexity: Medium
 Do not break existing CLI flows while extracting the controller seam.
 
 Recommended compatibility rules:
-- keep `ClientCommand::MoveTo` working during extraction
+- keep `ClientCommand::ApproachTarget` working while the primitive layer and reusable controller APIs are being established
 - keep the current physics-tick-driven advancement until the extracted controller is stable
 - avoid moving sticky melee and attack-heartbeat logic at the same time as the first controller extraction
 
@@ -695,13 +717,13 @@ Mitigation:
 
 ### Risk: Removing `MoveTo` too early causes churn across the app layer
 Mitigation:
-- remove it only after the first controller path exists end-to-end
+- remove the temporary `ApproachTarget` bridge only after the reusable controller path exists end-to-end
 - migrate all known callers in the same phase so the repo has one clear way to approach a target
 
 ## Definition Of Done
 
 - Core docs describe primitives, controllers, and client policy boundaries accurately.
-- The current `MoveTo` behavior is represented as an explicit controller rather than an ad hoc movement-system special case.
+- The current approach behavior is represented as an explicit controller rather than an ad hoc movement-system special case.
 - The primitive movement surface is sufficient for reusable locomotion controllers.
 - At least one controller can be consumed in a reusable way outside the hidden engine loop.
 - Sticky melee and attack-heartbeat follow-on work has a clear migration target.
@@ -715,7 +737,7 @@ Mitigation:
 - [x] Phase 2: extract `ApproachTargetController` with no behavior change
 - [x] Phase 2: remove `ClientCommand::MoveTo` and migrate existing callers
 - [x] Phase 2: add controller-level tests for approach, arrival, and forced reposition
-- [ ] Phase 3: add a primitive locomotion layer suitable for reusable controllers
+- [x] Phase 3: add a primitive locomotion layer suitable for reusable controllers
 - [ ] Phase 4: expose reusable controller APIs for frontend adoption
 - [ ] Phase 4: choose and document the default ownership model
 - [ ] Phase 5: migrate desired-attack heartbeat toward a reusable controller or helper
@@ -741,6 +763,8 @@ Mitigation:
 - March 13, 2026: orchestrator-facing semantics such as claims or scheduling remain explicitly out of scope for Phase 1.
 - March 13, 2026: Phase 2 keeps a temporary `ClientCommand::ApproachTarget` bridge because the frontend-to-core boundary is still command-based; direct frontend-owned controller APIs remain Phase 4 work.
 - March 13, 2026: forced-reposition cancellation is now owned by `MovementSystem`, alongside controller ticking and stop semantics.
+- March 13, 2026: Phase 3 chooses a public controller-output primitive layer in [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs) instead of adding new locomotion-specific `ClientCommand` variants.
+- March 13, 2026: `MovementSystem` remains the primitive executor because it owns prediction and movement packet emission.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
@@ -749,6 +773,8 @@ Mitigation:
 - March 13, 2026: Phase 1 landed a dedicated kernel module at [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs) and updated the architecture docs to describe it as provisional.
 - March 13, 2026: `cargo test -p holtburger-core` passed after extracting [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) and replacing `MoveTo` with `ApproachTarget`.
 - March 13, 2026: CLI regression coverage passed for `targeting_creature_item_type_without_profile_still_starts_attack`, `switching_targets_retargets_attack_sequence`, `switching_to_non_creature_target_cancels_attack_sequence`, `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range`, and `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range` after the Phase 2 migration.
+- March 13, 2026: `cargo test -p holtburger-core` passed after introducing [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs) and refactoring [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) plus [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) onto it.
+- March 13, 2026: CLI sticky melee regression coverage still passed for `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range` and `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range` after the Phase 3 primitive-layer migration.
 
 ### Open Questions
 - Exact shape of the structured controller update remains intentionally open.

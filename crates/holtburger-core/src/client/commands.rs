@@ -1,5 +1,6 @@
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
+use crate::client::locomotion::LocomotionPrimitive;
 use crate::client::movement::raw_motion_state_with_player_style;
 use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
@@ -588,29 +589,21 @@ impl Client {
             }
             ClientCommand::StopMoving => {
                 log::info!(">>> Stopping local approach movement");
-                let world_events = self.movement.stop_approach(&mut self.world);
+                self.movement.stop_approach();
+                let world_events = self
+                    .movement
+                    .execute_locomotion_primitive(
+                        LocomotionPrimitive::Stop {
+                            refresh_server: true,
+                        },
+                        &mut self.world,
+                        &mut self.session,
+                    )
+                    .await?;
                 for event in world_events {
                     self.emit_state_event(event);
                 }
-
-                let obj_inst = self.world.player.instance_sequence;
-                let srv_seq = self.world.player.server_control_sequence;
-                let tele_seq = self.world.player.teleport_sequence;
-                let force_seq = self.world.player.force_position_sequence;
-
-                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: raw_motion_state_with_player_style(
-                        &self.world,
-                        RawMotionState::default(),
-                    ),
-                    position: self.world.player.position,
-                    instance_sequence: obj_inst,
-                    server_control_sequence: srv_seq,
-                    teleport_sequence: tele_seq,
-                    force_position_sequence: force_seq,
-                    contact_long_jump: 1,
-                })))
-                .await
+                Ok(())
             }
             ClientCommand::SyncPosition => {
                 log::debug!(">>> Syncing Position (Heartbeat)");

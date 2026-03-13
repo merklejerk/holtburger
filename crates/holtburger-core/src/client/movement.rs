@@ -2,6 +2,7 @@ use crate::client::controllers::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
     ApproachTargetInput, Controller, ControllerStatus, ControllerUpdate,
 };
+use crate::client::locomotion::LocomotionPrimitive;
 use crate::client::WireEvent;
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
@@ -75,9 +76,8 @@ impl MovementSystem {
         self.approach_target.is_some()
     }
 
-    pub(super) fn stop_approach(&mut self, world: &mut WorldState) -> Vec<StateEvent> {
+    pub(super) fn stop_approach(&mut self) {
         self.approach_target = None;
-        world.set_player_velocity(holtburger_common::Vector3::zero())
     }
 
     pub(super) async fn cancel_approach_due_to_forced_reposition(
@@ -120,6 +120,28 @@ impl MovementSystem {
         Ok((Vec::new(), state_events))
     }
 
+    pub(super) async fn execute_locomotion_primitive(
+        &mut self,
+        primitive: LocomotionPrimitive,
+        world: &mut WorldState,
+        session: &mut Session,
+    ) -> Result<Vec<StateEvent>> {
+        let state_events = self.apply_locomotion_primitive(primitive, world);
+
+        if primitive.refresh_server() {
+            match primitive {
+                LocomotionPrimitive::Drive { speed, .. } => {
+                    Self::send_drive_pulse(world, session, speed).await?;
+                }
+                LocomotionPrimitive::Stop { .. } => {
+                    Self::send_stop_pulse(world, session).await?;
+                }
+            }
+        }
+
+        Ok(state_events)
+    }
+
     async fn apply_approach_update(
         &mut self,
         update: ControllerUpdate<ApproachTargetEffect>,
@@ -133,18 +155,15 @@ impl MovementSystem {
 
         for effect in update.effects {
             match effect {
-                ApproachTargetEffect::SetVelocity(velocity) => {
-                    state_events.extend(world.set_player_velocity(velocity));
-                }
-                ApproachTargetEffect::SendRunPulse => {
+                ApproachTargetEffect::Locomotion(primitive) => {
                     if let Some(session) = session.as_deref_mut() {
-                        Self::send_run_pulse(world, session).await?;
+                        state_events.extend(
+                            self.execute_locomotion_primitive(primitive, world, session)
+                                .await?,
+                        );
+                    } else {
+                        state_events.extend(self.apply_locomotion_primitive(primitive, world));
                     }
-                }
-                ApproachTargetEffect::StopMovement => {
-                    state_events.extend(
-                        world.set_player_velocity(holtburger_common::Vector3::zero()),
-                    );
                 }
                 ApproachTargetEffect::Finished(reason) => match reason {
                     ApproachTargetFinishReason::Arrived => {
@@ -177,14 +196,41 @@ impl MovementSystem {
         Ok(state_events)
     }
 
-    async fn send_run_pulse(world: &WorldState, session: &mut Session) -> Result<()> {
+    pub(super) fn apply_locomotion_primitive(
+        &mut self,
+        primitive: LocomotionPrimitive,
+        world: &mut WorldState,
+    ) -> Vec<StateEvent> {
+        primitive
+            .desired_velocity()
+            .map(|velocity| world.set_player_velocity(velocity))
+            .unwrap_or_default()
+    }
+
+    async fn send_drive_pulse(world: &WorldState, session: &mut Session, speed: f32) -> Result<()> {
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
             raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState {
                 flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
                 current_hold_key: Some(HoldKey::Run as u32),
-                forward_speed: Some(7.0),
+                forward_speed: Some(speed),
                 ..Default::default()
             }),
+            position: world.player.position,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+            contact_long_jump: 1,
+        };
+
+        session
+            .send_action(GameAction::MoveToState(Box::new(data)))
+            .await
+    }
+
+    async fn send_stop_pulse(world: &WorldState, session: &mut Session) -> Result<()> {
+        let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
+            raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState::default()),
             position: world.player.position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,

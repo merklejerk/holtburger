@@ -9,6 +9,7 @@ use tokio::sync::{broadcast, mpsc};
 mod auth;
 mod builder;
 mod commands;
+pub mod controllers;
 mod messages;
 mod movement;
 pub mod types;

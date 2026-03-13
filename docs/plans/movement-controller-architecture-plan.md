@@ -109,10 +109,9 @@ The controller pattern should not be movement-specific.
 
 `holtburger-core::client::controllers` should provide a small generic kernel made of concepts like:
 - controller state machine trait or contract
-- tick context
-- tick result
+- controller input
+- controller update result
 - lifecycle status
-- lightweight coordination claims
 
 Core-provided movement and combat controllers are then implementations of that kernel rather than special architecture unto themselves.
 
@@ -122,6 +121,8 @@ This leaves room for:
 - domain-specific effect vocabularies rather than one giant closed effect enum in core
 
 The key goal is to standardize the orchestration shape, not to force every controller into one fixed domain model.
+
+For now, clients should be assumed to own their own orchestrator. The core kernel should help controllers interoperate, but it should not hard-code one orchestration model up front.
 
 ### Primitive Layer
 Core owns the low-level movement and interaction primitives that directly affect protocol traffic or authoritative local simulation.
@@ -134,7 +135,7 @@ Examples:
 - server-controlled movement reconciliation
 
 ### Controller Layer
-Reusable controllers are explicit state machines that consume context plus time, then emit structured results.
+Reusable controllers are explicit state machines that consume inputs and emit structured updates.
 
 Examples:
 - approach target until arrival distance
@@ -278,7 +279,7 @@ Instead, the early extraction should prefer:
 
 - a shared controller contract that can serve both movement and combat helpers
 - explicit controller state and status
-- world-and-time-based inputs
+- generic inputs that can represent ticks, time, or events
 - composition-friendly outputs and interruption handling
 
 ### Recommended Minimal Result Shape
@@ -290,8 +291,6 @@ Recommended minimum fields:
   - examples: `Idle`, `Active`, `Blocked`, `Paused`, `CoolingDown`, `Completed`
 - `effects`
   - emitted intents and notifications for this tick
-- `claims`
-  - lightweight coordination hints such as whether the controller believes it currently owns movement, facing, or attack maintenance
 
 Recommended early effect categories:
 - command emission
@@ -304,7 +303,11 @@ Recommended early effect categories:
 Why this is the right starting point:
 - `status` lets callers distinguish "nothing to do" from "temporarily blocked" or "finished"
 - `effects` preserves the simple command-emission model while leaving room for observable milestones and interruptions
-- `claims` gives us a narrow on-ramp for future priority, exclusivity, and fallthrough behavior without forcing us to solve orchestration up front
+
+Why omit claims from the kernel for now:
+- claims presume details about orchestrator shape that we do not know yet
+- different clients may want different priority, exclusivity, or arbitration models
+- if claims become necessary later, they can emerge either as domain-specific effects or as a separate orchestrator-facing layer
 
 Why notifications matter:
 - a future 3D client may want to react to controller milestones without re-deriving them from raw world state every frame
@@ -326,29 +329,26 @@ This is intentionally not a final Rust API. It is a shape sketch to guide Phase 
 #### Minimal Kernel Concepts
 
 1. `Controller`
-  - a stateful behavior unit that advances from a tick context and produces a structured tick result
-2. `ControllerTickContext`
-  - the read-only information a controller needs for one decision step
-  - likely includes time, relevant world snapshot access, and controller-specific inputs or goals
-3. `ControllerTickResult`
-  - the structured output for one tick
-  - includes lifecycle status, effects, and lightweight coordination claims
+  - a stateful behavior unit that consumes a controller-specific input and produces a structured update
+2. `ControllerInput`
+  - controller-specific stimuli such as a tick, a time pulse, or a relevant view-event-derived update
+3. `ControllerUpdate`
+  - the structured output for one step
+  - includes lifecycle status and effects
 4. `ControllerStatus`
   - the coarse lifecycle state the orchestrator or client can reason about
-5. `ControllerClaim`
-  - a narrow coordination hint for arbitration across domains like movement, facing, or attack maintenance
 
 #### Conceptual Shape
 
 At a high level, the kernel should support something conceptually like:
 
 ```text
-controller.tick(context) -> result
+controller.handle(input) -> update
 ```
 
 Where:
-- `context` is read-only input for this tick
-- `result` is declarative output for this tick
+- `input` is one controller-specific stimulus
+- `update` is declarative output for that step
 - the caller decides how to route, merge, suppress, or observe that output
 
 #### What The Kernel Should Not Assume
@@ -357,6 +357,7 @@ Where:
 - It should not assume every controller owns movement.
 - It should not assume the orchestrator lives inside `holtburger-core`.
 - It should not assume only one controller can be active at a time.
+- It should not assume every controller is driven only by ticks.
 - It should not assume callbacks or a visitor-style execution model.
 
 #### What The Kernel Should Make Easy
@@ -364,6 +365,7 @@ Where:
 - core shipping reusable controllers
 - clients defining their own controllers
 - clients observing lifecycle and milestone notifications
+- clients feeding controllers with either time-based or event-driven inputs
 - simple orchestration first, with room for stricter priority or exclusivity later
 
 #### Suggested Phase 1 Output
@@ -386,31 +388,34 @@ Complexity: Medium
 - Add a controller-oriented design note to core docs and keep it aligned with code reality.
 - Introduce explicit internal concepts for:
   - controller state
-  - controller tick context
-  - controller output effects
+  - controller input
+  - controller output effects or updates
   - interruption and cancellation reasons
   - controller status and blocked or paused reasons
 - Choose an initial home for the API, likely under a new module such as `crates/holtburger-core/src/client/controllers/`.
-- Define whether controllers are:
-  - pure state machines that return `Vec<ClientCommand>`, or
-  - engine-owned subsystems that directly mutate `Client`
-- Ensure the contract is broad enough for both movement controllers and future combat controllers.
+- Establish a provisional kernel only.
+- Ensure the provisional kernel is broad enough for both movement controllers and future combat controllers, without pretending it is final.
 
 #### Dry-Run Notes
 - This is mostly architectural and type-design work.
 - No major code churn is required yet, but the contract must account for the missing primitive locomotion layer discovered in the dry-run.
+- The goal here is to create a useful starting vocabulary, not to freeze the final controller interface before real controllers exist.
 
 #### Preferred Direction
-Use pure or near-pure controller state machines that return a small structured tick result rather than a bare command list. However, do not hard-code the output to the current `ClientCommand` surface until the locomotion primitive gap is addressed.
+Use pure or near-pure controller state machines that accept controller-specific inputs and return a small structured update rather than a bare command list. However, do not hard-code the output to the current `ClientCommand` surface until the locomotion primitive gap is addressed.
 
-That result should be broad enough to include both command intents and client-observable notifications.
+That update should be broad enough to include both command intents and client-observable notifications.
+
+This should be treated as a spike-quality contract that will be deliberately revisited after multiple real controllers exist.
 
 #### Acceptance Criteria
 - The codebase has a single documented controller contract.
 - There is no ambiguity about whether controller logic belongs in `commands.rs`, `movement.rs`, or app state.
 - The contract can clearly represent at least approach movement, desired-attack maintenance, and combat-facing assistance.
 - The contract does not rely on bare command lists alone to express controller state.
+- The contract is generic enough to support time-driven and event-driven controllers.
 - No gameplay behavior changes yet.
+- The plan explicitly expects kernel refinement later rather than treating this phase as final API design.
 
 ### Phase 2: Extract An Internal `ApproachTargetController`
 
@@ -543,7 +548,24 @@ Complexity: High
 - Range-maintenance rules are individually testable without booting the TUI.
 - Composition with desired-attack and facing controllers remains covered.
 
-### Phase 7: Clean Up Legacy Surfaces And Finish The Migration
+### Phase 7: Refine The Controller Kernel From Real Usage
+
+Complexity: Medium-High
+
+#### Deliverables
+- Review the kernel after `ApproachTargetController`, `DesiredAttackController`, `CombatFacingController`, and `MaintainRangeController` all exist.
+- Identify what the implementations actually have in common versus what was prematurely generalized.
+- Tighten, rename, split, or remove kernel concepts based on real controller usage.
+- Decide whether any currently provisional terms should become stable API.
+- Confirm whether any orchestrator-facing concepts belong in the kernel at all, or should stay outside it.
+
+#### Acceptance Criteria
+- The kernel reflects proven commonality from real controllers rather than speculation.
+- Unused or awkward abstractions introduced during the spike are removed or simplified.
+- The refined kernel still supports client-defined controllers.
+- The refined kernel remains compatible with both time-driven and event-driven controllers.
+
+### Phase 8: Clean Up Legacy Surfaces And Finish The Migration
 
 Complexity: Medium
 
@@ -579,6 +601,8 @@ Once `ApproachTargetController` exists as an explicit unit:
 - use that migration to validate controller composition, not just controller reuse in isolation
 
 Before that convergence can happen cleanly, Phase 3 must establish the primitive locomotion layer that the dry-run showed is currently missing.
+
+Before the design is considered settled, Phase 7 must revisit the kernel using the real controllers built in Phases 2 through 6.
 
 ### Long-Term End State
 The long-term model should look like this:
@@ -653,8 +677,10 @@ Mitigation:
 - [ ] Phase 5: prototype combat-facing assist with ACE-informed rules
 - [ ] Phase 5: validate composition between combat controllers
 - [ ] Phase 6: migrate sticky melee pursuit toward a reusable maintain-range controller
-- [ ] Phase 7: clean up legacy ownership and command shims
-- [ ] Phase 7: refresh docs to match the implemented design
+- [ ] Phase 7: revisit the kernel using the controllers built so far
+- [ ] Phase 7: remove speculative abstractions that did not hold up
+- [ ] Phase 8: clean up legacy ownership and command shims
+- [ ] Phase 8: refresh docs to match the implemented design
 
 ### Decisions Log
 - Initial decision: high-level reusable behavior is in scope for `holtburger-core` when broadly useful across clients.
@@ -664,7 +690,8 @@ Mitigation:
 - Resolved: the target model is frontend-owned reusable controllers, not engine-owned controllers or a hybrid long-term model.
 - Resolved: migration should replace legacy surfaces rather than preserve shims.
 - Resolved: the harder combat migration should come before sticky melee range maintenance to pressure-test the design.
-- Resolved: controllers should return a small structured tick result rather than a bare command list.
+- Resolved: controllers should accept generic inputs and return a small structured update rather than a bare command list.
+- Resolved: the kernel should be treated as provisional until it is refined from real controller implementations.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
@@ -672,9 +699,10 @@ Mitigation:
 - March 13, 2026: dry-run against [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs), [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs), and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) found that the original draft understated the need for a dedicated primitive locomotion phase and over-bundled the combat migration work.
 
 ### Open Questions
-- Exact shape of the structured tick result remains intentionally open.
+- Exact shape of the structured controller update remains intentionally open.
 
 Working direction:
-- start with a minimal result containing `status`, `effects`, and lightweight coordination `claims`
+- start with a minimal update containing `status` and `effects`
 - do not lock in a heavyweight scheduler or arbitration framework until real controller composition demands it
 - keep the kernel generic enough that core does not need to predict every future controller-specific effect up front
+- let orchestrator-specific coordination semantics emerge separately rather than baking `claims` into the kernel too early

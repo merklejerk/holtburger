@@ -942,7 +942,7 @@ impl GameState {
             })
             .handle(&input);
 
-        let completed = matches!(update.status, holtburger_core::client::controllers::ControllerStatus::Completed);
+        let completed = update.is_terminal();
         for effect in update.effects {
             self.apply_sticky_melee_effect(effect, result);
         }

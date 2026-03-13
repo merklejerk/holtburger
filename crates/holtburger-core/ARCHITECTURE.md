@@ -46,13 +46,13 @@ Frontend adoption pattern today:
 3. Interpret its emitted primitive effects, such as `LocomotionPrimitive`, in the frontend's own orchestration layer.
 4. Either execute those primitives directly if the frontend owns a `Client`, or continue using compatibility bridges such as `ClientCommand::ApproachTarget` until they are removed.
 
-The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). It is intentionally provisional and currently standardizes only:
+The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). After extracting real movement and combat controllers, it has been refined down to the proven shared surface and currently standardizes only:
 
 - a broad controller trait shape
 - coarse lifecycle status
 - a small structured update containing `status` and controller-defined `effects`
 
-It intentionally does not standardize a scheduler, claim system, universal reason ontology, or one closed effect enum. Those decisions stay outside the kernel until real controller implementations force a clearer common model.
+It intentionally does not standardize a scheduler, claim system, universal reason ontology, or one closed effect enum. Those decisions stay outside the kernel because the current controller set still does not justify them.
 
 ### 2. Specialized Systems
 
@@ -136,7 +136,7 @@ sequenceDiagram
 3. **Make state explicit**: Keep controller state isolated from the transport and world-plumbing responsibilities.
 4. **Define lifecycle and interruption rules**: Be explicit about what blocks, pauses, interrupts, cancels, or completes the controller.
 5. **Keep adoption optional**: Frontends should opt into controllers rather than being forced through them.
-6. **Treat the kernel as provisional**: Prefer small reusable controller-local vocabularies and refine the shared kernel only after multiple real controllers exist.
+6. **Keep the kernel small and evidence-driven**: Prefer controller-local vocabularies and only promote helpers or shared terminology that multiple real controllers demonstrably need.
 
 ## Migration Path Toward Reusable Controllers
 

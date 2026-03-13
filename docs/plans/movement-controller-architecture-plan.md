@@ -802,8 +802,8 @@ Mitigation:
 - [x] Phase 5: prototype combat-facing assist with ACE-informed rules
 - [x] Phase 5: validate composition between combat controllers
 - [x] Phase 6: migrate sticky melee pursuit toward a reusable maintain-range controller
-- [ ] Phase 7: revisit the kernel using the controllers built so far
-- [ ] Phase 7: remove speculative abstractions that did not hold up
+- [x] Phase 7: revisit the kernel using the controllers built so far
+- [x] Phase 7: remove speculative abstractions that did not hold up
 - [ ] Phase 8: clean up legacy ownership and command shims
 - [ ] Phase 8: refresh docs to match the implemented design
 
@@ -827,6 +827,8 @@ Mitigation:
 - March 13, 2026: Option B is now the documented default ownership model; the command bridge remains only for compatibility.
 - March 13, 2026: Phase 5 introduces a thin `CombatAutomationController` that composes reusable desired-attack and combat-facing helpers while preserving frontend ownership of activation policy.
 - March 13, 2026: Phase 6 moves sticky melee latch and reissue cadence into `MaintainRangeController`, leaving only activation and effect execution in the TUI.
+- March 13, 2026: Phase 7 refines the shared kernel around the proven common surface of `Controller`, `ControllerStatus`, and `ControllerUpdate`, with shared helpers for terminal-state checks and child-effect remapping.
+- March 13, 2026: Phase 7 explicitly keeps scheduler, claim, and universal reason concepts out of the kernel because the current controllers still do not justify them.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
@@ -838,6 +840,9 @@ Mitigation:
 - March 13, 2026: `cargo test -p holtburger-core` passed after introducing [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs) and refactoring [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) plus [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) onto it.
 - March 13, 2026: CLI sticky melee regression coverage still passed for `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range` and `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range` after the Phase 3 primitive-layer migration.
 - March 13, 2026: external integration coverage in [crates/holtburger-core/tests/approach_target_controller_api.rs](/home/cluracan/code/holtburger/crates/holtburger-core/tests/approach_target_controller_api.rs) proved that an outside consumer can instantiate and drive `ApproachTargetController` directly.
+- March 13, 2026: Phase 7 audited `ApproachTargetController`, `DesiredAttackController`, `CombatFacingController`, `CombatAutomationController`, and `MaintainRangeController` and found that terminal-state interpretation plus child-effect remapping are the only new kernel concepts clearly shared across them.
+- March 13, 2026: `cargo test -p holtburger-core` passed after refining the kernel helpers and updating movement orchestration to use terminal-state helpers.
+- March 13, 2026: `cargo test -p holtburger-cli` passed after updating sticky-melee orchestration to use the refined controller helper surface.
 - March 13, 2026: `cargo test -p holtburger-core` passed after adding [crates/holtburger-core/src/client/controllers/combat.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/combat.rs) and exporting the reusable combat controller surface.
 - March 13, 2026: CLI regression coverage passed for `handle_tick_refreshes_stale_queued_attack_sequence`, `handle_tick_retries_cancelled_attack_after_combat_mode_reentry`, `cancelled_attack_stops_sticky_melee_follow`, `missile_targeting_turns_before_reissuing_attack_when_not_facing`, and `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range` after the Phase 5 combat automation migration.
 - March 13, 2026: `cargo test -p holtburger-core` passed after adding [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs) and exporting the reusable maintain-range controller surface.

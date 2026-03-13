@@ -83,7 +83,7 @@ impl Controller for ApproachTargetController {
                 ControllerStatus::Completed,
             )
             .with_effect(ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                refresh_server: false,
+                refresh_server: true,
             }))
             .with_effect(ApproachTargetEffect::Finished(
                 ApproachTargetFinishReason::ForcedReposition,
@@ -94,11 +94,15 @@ impl Controller for ApproachTargetController {
                 target_position,
             } => {
                 let Some(target_position) = target_position else {
-                    return ControllerUpdate::new(ControllerStatus::Completed).with_effect(
-                        ApproachTargetEffect::Finished(
+                    return ControllerUpdate::new(ControllerStatus::Completed)
+                        .with_effect(ApproachTargetEffect::Locomotion(
+                            LocomotionPrimitive::Stop {
+                                refresh_server: true,
+                            },
+                        ))
+                        .with_effect(ApproachTargetEffect::Finished(
                             ApproachTargetFinishReason::TargetUnavailable,
-                        ),
-                    );
+                        ));
                 };
 
                 let diff = target_position.coords - player_position.coords;
@@ -108,7 +112,7 @@ impl Controller for ApproachTargetController {
                     return ControllerUpdate::new(ControllerStatus::Completed)
                         .with_effect(ApproachTargetEffect::Locomotion(
                             LocomotionPrimitive::Stop {
-                                refresh_server: false,
+                                refresh_server: true,
                             },
                         ))
                         .with_effect(ApproachTargetEffect::Finished(
@@ -123,7 +127,7 @@ impl Controller for ApproachTargetController {
                         return ControllerUpdate::new(ControllerStatus::Completed)
                             .with_effect(ApproachTargetEffect::Locomotion(
                                 LocomotionPrimitive::Stop {
-                                    refresh_server: false,
+                                    refresh_server: true,
                                 },
                             ))
                             .with_effect(ApproachTargetEffect::Finished(
@@ -183,7 +187,7 @@ mod tests {
             update.effects,
             vec![
                 ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: false,
+                    refresh_server: true,
                 }),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
@@ -206,7 +210,7 @@ mod tests {
             update.effects,
             vec![
                 ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: false,
+                    refresh_server: true,
                 }),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Stuck),
             ]
@@ -225,9 +229,32 @@ mod tests {
             update.effects,
             vec![
                 ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: false,
+                    refresh_server: true,
                 }),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::ForcedReposition),
+            ]
+        );
+    }
+
+    #[test]
+    fn target_unavailable_finishes_and_stops_movement() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position: position(0.0),
+            target_position: None,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Completed);
+        assert_eq!(
+            update.effects,
+            vec![
+                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
+                    refresh_server: true,
+                }),
+                ApproachTargetEffect::Finished(ApproachTargetFinishReason::TargetUnavailable),
             ]
         );
     }

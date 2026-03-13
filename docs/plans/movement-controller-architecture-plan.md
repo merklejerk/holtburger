@@ -637,6 +637,8 @@ What to watch:
 
 Complexity: High
 
+Status: Completed on March 13, 2026
+
 #### Deliverables
 - Extract sticky melee pursuit from [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) into a reusable maintain-range controller plus TUI policy glue.
 - Preserve the current semantics around:
@@ -653,6 +655,23 @@ Complexity: High
 - CLI `GameState` becomes thinner and more declarative around combat movement.
 - Range-maintenance rules are individually testable without booting the TUI.
 - Composition with desired-attack and facing controllers remains covered.
+
+#### Phase 6 Outcome
+- Added [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs) with reusable `MaintainRangeController`, config-driven sticky and repeat distance thresholds, and controller-level tests for pursuit start, pause, repeat latch retention, clear-on-distance, and suspension.
+- Replaced the ad hoc sticky melee bookkeeping in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) with a frontend-owned maintain-range controller, so the CLI now applies `ApproachTarget` and `StopMoving` effects declaratively instead of storing `sticky_combat_target` and `last_sticky_move_at` itself.
+- Kept sticky melee activation policy in the TUI while preserving combat-controller composition with the Phase 5 desired-attack and facing helpers.
+
+#### Decisions Confirmed During Phase 6
+- `MaintainRangeController` should own the repeat latch and reissue cadence internally rather than leaking those as frontend timestamps or target markers.
+- The reusable maintain-range controller can emit compatibility-level pursuit intents for now; frontends may still route those through `ClientCommand::ApproachTarget` until the bridge is retired.
+- Returning to range should pause pursuit without clearing the latch, while loss of target or exit beyond repeat distance should complete and clear controller state.
+
+#### Pivot Watch
+No critical pivot is required yet.
+
+What to watch:
+- `MaintainRangeController` currently emits approach-trigger effects rather than directly composing `ApproachTargetController`, because the command-bridge compatibility path is still in play
+- if Phase 8 removes the bridge before we add a first-class composition handle for frontends, we may want maintain-range to emit `LocomotionPrimitive` or nested-controller intents instead of `ApproachTarget`-style effects
 
 ### Phase 7: Refine The Controller Kernel From Real Usage
 
@@ -782,7 +801,7 @@ Mitigation:
 - [x] Phase 5: migrate desired-attack heartbeat toward a reusable controller or helper
 - [x] Phase 5: prototype combat-facing assist with ACE-informed rules
 - [x] Phase 5: validate composition between combat controllers
-- [ ] Phase 6: migrate sticky melee pursuit toward a reusable maintain-range controller
+- [x] Phase 6: migrate sticky melee pursuit toward a reusable maintain-range controller
 - [ ] Phase 7: revisit the kernel using the controllers built so far
 - [ ] Phase 7: remove speculative abstractions that did not hold up
 - [ ] Phase 8: clean up legacy ownership and command shims
@@ -807,6 +826,7 @@ Mitigation:
 - March 13, 2026: Phase 4 promotes `ApproachTargetController` and its input or effect types to the public reusable API surface under [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs).
 - March 13, 2026: Option B is now the documented default ownership model; the command bridge remains only for compatibility.
 - March 13, 2026: Phase 5 introduces a thin `CombatAutomationController` that composes reusable desired-attack and combat-facing helpers while preserving frontend ownership of activation policy.
+- March 13, 2026: Phase 6 moves sticky melee latch and reissue cadence into `MaintainRangeController`, leaving only activation and effect execution in the TUI.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
@@ -820,6 +840,8 @@ Mitigation:
 - March 13, 2026: external integration coverage in [crates/holtburger-core/tests/approach_target_controller_api.rs](/home/cluracan/code/holtburger/crates/holtburger-core/tests/approach_target_controller_api.rs) proved that an outside consumer can instantiate and drive `ApproachTargetController` directly.
 - March 13, 2026: `cargo test -p holtburger-core` passed after adding [crates/holtburger-core/src/client/controllers/combat.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/combat.rs) and exporting the reusable combat controller surface.
 - March 13, 2026: CLI regression coverage passed for `handle_tick_refreshes_stale_queued_attack_sequence`, `handle_tick_retries_cancelled_attack_after_combat_mode_reentry`, `cancelled_attack_stops_sticky_melee_follow`, `missile_targeting_turns_before_reissuing_attack_when_not_facing`, and `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range` after the Phase 5 combat automation migration.
+- March 13, 2026: `cargo test -p holtburger-core` passed after adding [crates/holtburger-core/src/client/controllers/maintain_range.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/maintain_range.rs) and exporting the reusable maintain-range controller surface.
+- March 13, 2026: CLI regression coverage passed for `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range`, `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range`, `cancelled_attack_stops_sticky_melee_follow`, `cancelled_attack_does_not_rearm_after_explicit_cancel`, and `handle_tick_refreshes_stale_queued_attack_sequence` after the Phase 6 maintain-range migration.
 
 ### Open Questions
 - Exact shape of the structured controller update remains intentionally open.

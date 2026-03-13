@@ -1,5 +1,6 @@
 pub mod approach_target;
 pub mod combat;
+pub mod maintain_range;
 
 pub use approach_target::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
@@ -9,6 +10,10 @@ pub use combat::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput,
     CombatFacingController, CombatFacingEffect, CombatFacingInput, DesiredAttackController,
     DesiredAttackEffect, DesiredAttackInput, DesiredAttackProfile, TargetedAttackRequest,
+};
+pub use maintain_range::{
+    MaintainRangeConfig, MaintainRangeController, MaintainRangeEffect,
+    MaintainRangeFinishReason, MaintainRangeInput,
 };
 
 /// Provisional shared controller kernel for reusable client-side behaviors.

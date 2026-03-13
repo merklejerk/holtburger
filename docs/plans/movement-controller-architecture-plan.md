@@ -384,6 +384,8 @@ It should produce:
 
 Complexity: Medium
 
+Status: Completed on March 13, 2026
+
 #### Deliverables
 - Add a controller-oriented design note to core docs and keep it aligned with code reality.
 - Introduce explicit internal concepts for:
@@ -395,6 +397,29 @@ Complexity: Medium
 - Choose an initial home for the API, likely under a new module such as `crates/holtburger-core/src/client/controllers/`.
 - Establish a provisional kernel only.
 - Ensure the provisional kernel is broad enough for both movement controllers and future combat controllers, without pretending it is final.
+
+#### Phase 1 Outcome
+- Added the provisional kernel under [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs).
+- Kept the result shape small: `ControllerUpdate` still carries `status` plus controller-defined `effects`.
+- Updated [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) so the docs now describe the provisional kernel and explicitly defer scheduler and claims design.
+
+#### Decisions Confirmed During Phase 1
+- Keep the kernel module generic and controller-agnostic.
+- Do not bake orchestrator semantics into the kernel yet.
+- Do not hard-code a closed effect enum in core.
+- Do not hard-code a shared lifecycle or reason ontology in core yet.
+- Preserve a small structured update shape rather than introducing a scheduler or claims model early.
+- Keep `MoveTo` in place for now; removing it belongs to Phase 2.
+
+#### Pivot Watch
+Minor pivot applied within Phase 1.
+
+What changed:
+- we dropped the shared lifecycle and reason enums from the kernel after recognizing that they reintroduced a universal ontology too early
+- the kernel now standardizes only trait shape, coarse status, and structured updates
+
+What to watch:
+- if Phase 5 later shows that multiple controllers genuinely share interruption or completion semantics, Phase 7 can reintroduce a proven shared vocabulary at that point instead of guessing now
 
 #### Dry-Run Notes
 - This is mostly architectural and type-design work.
@@ -666,7 +691,7 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: define the controller contract and module home
+- [x] Phase 1: define the controller contract and module home
 - [ ] Phase 2: extract `ApproachTargetController` with no behavior change
 - [ ] Phase 2: remove `ClientCommand::MoveTo` and migrate existing callers
 - [ ] Phase 2: add controller-level tests for approach, arrival, and forced reposition
@@ -692,11 +717,14 @@ Mitigation:
 - Resolved: the harder combat migration should come before sticky melee range maintenance to pressure-test the design.
 - Resolved: controllers should accept generic inputs and return a small structured update rather than a bare command list.
 - Resolved: the kernel should be treated as provisional until it is refined from real controller implementations.
+- March 13, 2026: the provisional kernel will avoid defining a shared lifecycle or reason ontology until real controller implementations prove one is needed.
+- March 13, 2026: orchestrator-facing semantics such as claims or scheduling remain explicitly out of scope for Phase 1.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
 - March 13, 2026: current workspace baseline previously had `cargo test --all` passing before this planning pass.
 - March 13, 2026: dry-run against [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs), [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs), [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs), and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) found that the original draft understated the need for a dedicated primitive locomotion phase and over-bundled the combat migration work.
+- March 13, 2026: Phase 1 landed a dedicated kernel module at [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs) and updated the architecture docs to describe it as provisional.
 
 ### Open Questions
 - Exact shape of the structured controller update remains intentionally open.

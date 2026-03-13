@@ -33,7 +33,7 @@ The core crate exposes two layers of client-facing behavior:
 1. **Primitives**: low-level commands and systems that directly map to protocol or authoritative local-state responsibilities.
     - Examples: `TurnTo`, `SetState`, `StopMoving`, movement prediction, position sync, and handling server-controlled movement.
 2. **Controllers**: optional, reusable higher-level behaviors built on top of those primitives.
-    - Examples: approach a target until an arrival distance, follow a target, combat-facing assistance, or sticky-melee steering.
+    - Examples: approach a target until an arrival distance, desired-attack maintenance, combat-facing assistance, or sticky-melee steering.
 
 Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
 
@@ -41,7 +41,7 @@ The current primitive locomotion surface lives in [src/client/locomotion.rs](src
 
 Frontend adoption pattern today:
 
-1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs) in frontend state.
+1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs) or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
 2. Feed it world-derived inputs on ticks or relevant events.
 3. Interpret its emitted primitive effects, such as `LocomotionPrimitive`, in the frontend's own orchestration layer.
 4. Either execute those primitives directly if the frontend owns a `Client`, or continue using the temporary `ClientCommand::ApproachTarget` bridge until it is removed.
@@ -63,6 +63,8 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 The `MovementSystem` runs on a fixed 30ms async interval, calculating physics ticks, client-side prediction, and pushing reliable synchronization with the server's authoritative position.
 
 Today, this module hosts an explicit `ApproachTargetController` that emits `LocomotionPrimitive` values and is ticked by the movement system. It is currently seeded through `ClientCommand::ApproachTarget`, but that trigger command is still only a temporary bridge for the existing app-to-core command channel, not the final reusable-controller API.
+
+Combat automation now follows the same pattern from [src/client/controllers/combat.rs](src/client/controllers/combat.rs): frontends own a controller, feed it world-derived snapshots, and translate emitted `TurnTo` or targeted-attack intents into their preferred execution path.
 
 ## Movement Model
 

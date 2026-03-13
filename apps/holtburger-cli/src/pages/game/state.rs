@@ -1,5 +1,9 @@
 use holtburger_common::Guid;
 use holtburger_core::ClientViewEvent;
+use holtburger_core::client::controllers::{
+    CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
+    DesiredAttackProfile, TargetedAttackRequest,
+};
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
 use holtburger_protocol::errors::WeenieError;
@@ -36,7 +40,6 @@ const MELEE_ATTACK_DISTANCE: f32 = 0.6;
 const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_REPEAT_DISTANCE: f32 = 16.0;
 const STICKY_MOVE_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
-const ATTACK_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
 
 enum StickyMeleeDecision {
@@ -630,7 +633,7 @@ impl GameState {
             }
         }
 
-        self.refresh_stale_attack_sequence(&mut result);
+        self.refresh_stale_attack_sequence(Instant::now(), &mut result);
 
         self.sync_sticky_melee_pursuit(&mut result);
 
@@ -685,7 +688,7 @@ impl GameState {
                 self.data.combat_mode = mode;
                 self.data.combat_runtime.handle_mode_updated(mode);
                 if matches!(mode, CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic) {
-                    self.view.last_attack_heartbeat_at = None;
+                    self.view.combat_automation = None;
                 }
             }
             _ => {}
@@ -774,7 +777,7 @@ impl GameState {
         if self.should_cancel_attack(previous_interaction, next_interaction) {
             result.commands.push(ClientCommand::CancelAttack);
             self.data.combat_runtime.cancel_attack();
-            self.view.last_attack_heartbeat_at = None;
+            self.view.combat_automation = None;
         }
 
         if self.should_resume_attack(previous_interaction, next_interaction) {
@@ -830,71 +833,103 @@ impl GameState {
     }
 
     fn queue_auto_attack_for_mode(&mut self, mode: CombatMode, result: &mut UpdateResult) {
-        let Some(target_guid) = self.current_target_guid() else {
+        self.sync_combat_automation(Instant::now(), mode, true, result);
+    }
+
+    fn refresh_stale_attack_sequence(&mut self, now: Instant, result: &mut UpdateResult) {
+        self.sync_combat_automation(now, self.data.combat_mode, false, result);
+    }
+
+    fn sync_combat_automation(
+        &mut self,
+        now: Instant,
+        mode: CombatMode,
+        force_attack: bool,
+        result: &mut UpdateResult,
+    ) {
+        let Some(input) = self.combat_automation_input(now, mode, force_attack) else {
+            self.view.combat_automation = None;
             return;
         };
 
-        if !self.is_valid_combat_target(target_guid) {
-            return;
-        }
+        let update = self
+            .view
+            .combat_automation
+            .get_or_insert_with(CombatAutomationController::default)
+            .handle(&input);
 
-        let attack_height = self.data.combat_controls.attack_height;
-        let profile_value = self.data.combat_controls.profile_level.wire_value();
-
-        let command = match mode {
-            CombatMode::Melee => Some(ClientCommand::TargetedMeleeAttack {
-                target: target_guid,
-                attack_height,
-                power_level: profile_value,
-            }),
-            CombatMode::Missile => Some(ClientCommand::TargetedMissileAttack {
-                target: target_guid,
-                attack_height,
-                accuracy_level: profile_value,
-            }),
-            _ => None,
-        };
-
-        if let Some(command) = command {
-            self.data.combat_runtime.queue_attack();
-            self.view.last_attack_heartbeat_at = Some(Instant::now());
-            result.commands.push(command);
+        for effect in update.effects {
+            self.apply_combat_automation_effect(effect, result);
         }
     }
 
-    fn refresh_stale_attack_sequence(&mut self, result: &mut UpdateResult) {
-        if !matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) {
-            return;
+    fn combat_automation_input(
+        &self,
+        now: Instant,
+        mode: CombatMode,
+        force_attack: bool,
+    ) -> Option<CombatAutomationInput> {
+        let target_guid = self.current_target_guid()?;
+        let attack_profile = self.desired_attack_profile(mode)?;
+
+        Some(CombatAutomationInput::Tick {
+            now,
+            target_guid,
+            target_available: self.is_valid_combat_target(target_guid),
+            player_position: self.data.player_pos,
+            target_position: self.data.entities.get(&target_guid).map(|entity| entity.position),
+            attack_profile,
+            attack_sequence_active: self.data.combat_runtime.attack_sequence_active,
+            force_attack,
+        })
+    }
+
+    fn desired_attack_profile(&self, mode: CombatMode) -> Option<DesiredAttackProfile> {
+        match mode {
+            CombatMode::Melee | CombatMode::Missile => Some(DesiredAttackProfile {
+                mode,
+                attack_height: self.data.combat_controls.attack_height,
+                charge_level: self.data.combat_controls.profile_level.wire_value(),
+            }),
+            CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic => None,
         }
+    }
 
-        if !matches!(self.view.active_interaction, Some(Interaction::Targeting { .. })) {
-            return;
-        }
-
-        let Some(target_guid) = self.current_target_guid() else {
-            return;
-        };
-
-        if !self.is_valid_combat_target(target_guid) {
-            return;
-        }
-
-        if self.data.combat_runtime.attack_sequence_active {
-            return;
-        }
-
-        let now = Instant::now();
-        let should_refresh = self
-            .view
-            .last_attack_heartbeat_at
-            .is_none_or(|last_attempt| now.duration_since(last_attempt) >= ATTACK_HEARTBEAT_INTERVAL);
-
-        if should_refresh {
-            log::info!(
-                "combat heartbeat: refreshing desired attack for target 0x{:08X}",
-                target_guid.0
-            );
-            self.queue_auto_attack_for_mode(self.data.combat_mode, result);
+    fn apply_combat_automation_effect(
+        &mut self,
+        effect: CombatAutomationEffect,
+        result: &mut UpdateResult,
+    ) {
+        match effect {
+            CombatAutomationEffect::TurnTo { heading } => {
+                self.data.combat_runtime.queue_attack();
+                result.needs_redraw = true;
+                result.commands.push(ClientCommand::TurnTo { heading });
+            }
+            CombatAutomationEffect::Attack(request) => {
+                self.data.combat_runtime.queue_attack();
+                result.needs_redraw = true;
+                match request {
+                    TargetedAttackRequest::Melee {
+                        target,
+                        attack_height,
+                        power_level,
+                    } => result.commands.push(ClientCommand::TargetedMeleeAttack {
+                        target,
+                        attack_height,
+                        power_level,
+                    }),
+                    TargetedAttackRequest::Missile {
+                        target,
+                        attack_height,
+                        accuracy_level,
+                    } => result.commands.push(ClientCommand::TargetedMissileAttack {
+                        target,
+                        attack_height,
+                        accuracy_level,
+                    }),
+                }
+            }
         }
     }
 
@@ -1207,8 +1242,8 @@ pub struct ViewState {
     pub sticky_combat_target: Option<Guid>,
     /// Last time we refreshed sticky combat movement.
     pub last_sticky_move_at: Option<Instant>,
-    /// Last time we sent an attack request for the current desired combat interaction.
-    pub last_attack_heartbeat_at: Option<Instant>,
+    /// Current reusable combat automation controller for desired attack maintenance.
+    pub combat_automation: Option<CombatAutomationController>,
     /// Cache of the exact bounding boxes computed during update_layout.
     pub layout_cache: LayoutCache,
 }
@@ -1235,7 +1270,7 @@ impl Default for ViewState {
             last_trade_initiation: None,
             sticky_combat_target: None,
             last_sticky_move_at: None,
-            last_attack_heartbeat_at: None,
+            combat_automation: None,
             layout_cache: LayoutCache::default(),
         }
     }
@@ -1751,12 +1786,17 @@ mod tests {
         target.set_bool_prop(PropertyBool::Attackable, true);
         state.data.entities.insert(target_guid, target);
 
+        let now = Instant::now();
+        let mut seeded = UpdateResult::new();
+        state.sync_combat_automation(now, CombatMode::Melee, true, &mut seeded);
         state.data.combat_runtime.attack_queued = true;
         state.data.combat_runtime.attack_sequence_active = false;
-        state.view.last_attack_heartbeat_at =
-            Some(Instant::now() - ATTACK_HEARTBEAT_INTERVAL);
 
-        let result = state.handle_tick(0.016);
+        let mut result = UpdateResult::new();
+        state.refresh_stale_attack_sequence(
+            now + Duration::from_secs(1) + Duration::from_millis(1),
+            &mut result,
+        );
 
         assert!(result.commands.iter().any(|command| {
             matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
@@ -1795,10 +1835,9 @@ mod tests {
         assert!(!state.data.combat_runtime.attack_queued);
 
         state.data.combat_mode = CombatMode::Melee;
-        state.view.last_attack_heartbeat_at =
-            Some(Instant::now() - ATTACK_HEARTBEAT_INTERVAL);
 
-        let retry = state.handle_tick(0.016);
+        let mut retry = UpdateResult::new();
+        state.refresh_stale_attack_sequence(Instant::now(), &mut retry);
 
         assert!(retry.commands.iter().any(|command| {
             matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
@@ -1903,6 +1942,7 @@ mod tests {
         state.data.combat_mode = CombatMode::Melee;
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
+            rotation: holtburger_common::Quaternion::from_heading(0.0),
             ..WorldPosition::default()
         });
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
@@ -1929,7 +1969,7 @@ mod tests {
         assert!(result
             .commands
             .iter()
-            .any(|command| matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)));
+            .any(|command| matches!(command, ClientCommand::TurnTo { .. })));
         assert!(result
             .commands
             .iter()
@@ -1944,6 +1984,19 @@ mod tests {
                 )
             }));
         assert_eq!(state.view.sticky_combat_target, Some(target_guid));
+
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            rotation: holtburger_common::Quaternion::from_heading(180.0_f32.to_radians()),
+            ..WorldPosition::default()
+        });
+
+        let mut retry = UpdateResult::new();
+        state.refresh_stale_attack_sequence(Instant::now() + Duration::from_millis(200), &mut retry);
+
+        assert!(retry.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
     }
 
     #[test]
@@ -1980,6 +2033,55 @@ mod tests {
             )
         }));
         assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn missile_targeting_turns_before_reissuing_attack_when_not_facing() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Missile;
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            rotation: holtburger_common::Quaternion::from_heading(0.0),
+            ..WorldPosition::default()
+        });
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(0.0, 10.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Tusker", target_position));
+
+        let now = Instant::now();
+        let mut turn = UpdateResult::new();
+        state.sync_combat_automation(now, CombatMode::Missile, true, &mut turn);
+
+        assert!(turn
+            .commands
+            .iter()
+            .any(|command| matches!(command, ClientCommand::TurnTo { .. })));
+        assert!(!turn.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMissileAttack { .. })
+        }));
+
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            rotation: holtburger_common::Quaternion::from_heading(90.0_f32.to_radians()),
+            ..WorldPosition::default()
+        });
+
+        let mut attack = UpdateResult::new();
+        state.refresh_stale_attack_sequence(now + Duration::from_millis(200), &mut attack);
+
+        assert!(attack.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMissileAttack { target, .. } if *target == target_guid)
+        }));
     }
 
     #[test]

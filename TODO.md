@@ -197,6 +197,8 @@
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] Movement should (approach, sticky melee) probably should probably be handled by the client?
+- [ ] There's a stray `[X] Close` verb showing up on in-world containers.
+- [ ] Make target of current interaction bold in dashboard lists?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -219,3 +221,4 @@
 - [x] Is `WorldObjectPropertyAccessors` a pointless abstraction?
 - [x] Do tabs need to expose `item_count()`?
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
+- [ ] Track "dead" creatures to avoid targeting them?

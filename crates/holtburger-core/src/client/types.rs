@@ -302,6 +302,7 @@ pub enum ClientCommand {
     },
     MoveTo {
         target: Guid,
+        arrival_distance: f32,
     },
     RaiseAttribute {
         attribute: AttributeType,
@@ -369,6 +370,7 @@ pub enum ClientCommand {
     SetCombatMode(CombatMode),
     SetNoClip(bool),
     CancelAttack,
+    StopMoving,
     SyncPosition,
     QueryEntityDebugInfo(Guid),
     Quit,

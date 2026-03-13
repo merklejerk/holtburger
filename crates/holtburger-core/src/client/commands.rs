@@ -1,5 +1,6 @@
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
+use crate::client::movement::raw_motion_state_with_player_style;
 use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_common::{Guid, Quaternion};
@@ -52,6 +53,7 @@ impl Client {
             | ClientCommand::SetState(_)
             | ClientCommand::TurnTo { .. }
             | ClientCommand::MoveTo { .. }
+            | ClientCommand::StopMoving
             | ClientCommand::SyncPosition => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
@@ -560,7 +562,10 @@ impl Client {
                 let force_seq = self.world.player.force_position_sequence;
 
                 self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: RawMotionState::default(),
+                    raw_motion_state: raw_motion_state_with_player_style(
+                        &self.world,
+                        RawMotionState::default(),
+                    ),
                     position: self.world.player.position,
                     instance_sequence: obj_inst,
                     server_control_sequence: srv_seq,
@@ -570,12 +575,46 @@ impl Client {
                 })))
                 .await
             }
-            ClientCommand::MoveTo { target } => {
-                log::info!(">>> Starting approach to target: 0x{:08X}", target);
-                self.movement.move_target = Some(target);
+            ClientCommand::MoveTo {
+                target,
+                arrival_distance,
+            } => {
+                log::info!(
+                    ">>> Starting approach to target: 0x{:08X} (arrival {:.2}m)",
+                    target,
+                    arrival_distance
+                );
+                self.movement.move_target = Some((target, arrival_distance));
                 self.movement.last_move_pos = self.world.player.position;
                 self.movement.last_move_pos_time = Instant::now();
                 Ok(())
+            }
+            ClientCommand::StopMoving => {
+                log::info!(">>> Stopping local approach movement");
+                self.movement.move_target = None;
+                let world_events = self.world.set_player_velocity(holtburger_common::Vector3::zero());
+                for event in world_events {
+                    self.emit_state_event(event);
+                }
+
+                let obj_inst = self.world.player.instance_sequence;
+                let srv_seq = self.world.player.server_control_sequence;
+                let tele_seq = self.world.player.teleport_sequence;
+                let force_seq = self.world.player.force_position_sequence;
+
+                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
+                    raw_motion_state: raw_motion_state_with_player_style(
+                        &self.world,
+                        RawMotionState::default(),
+                    ),
+                    position: self.world.player.position,
+                    instance_sequence: obj_inst,
+                    server_control_sequence: srv_seq,
+                    teleport_sequence: tele_seq,
+                    force_position_sequence: force_seq,
+                    contact_long_jump: 1,
+                })))
+                .await
             }
             ClientCommand::SyncPosition => {
                 log::debug!(">>> Syncing Position (Heartbeat)");

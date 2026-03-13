@@ -200,6 +200,12 @@ impl PlayerState {
         self.movement_sequence = movement_sequence;
     }
 
+    pub fn update_current_motion_style(&mut self, current_style: u16) {
+        if current_style != 0 {
+            self.current_motion_style = Some(u32::from(current_style));
+        }
+    }
+
     pub fn update_vector_sequence(&mut self, instance_sequence: u16) {
         self.instance_sequence = instance_sequence;
     }

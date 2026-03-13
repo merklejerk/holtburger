@@ -27,27 +27,68 @@ struct CapturedLog {
 struct TuiLogger {
     tx: mpsc::UnboundedSender<CapturedLog>,
     file: Option<Mutex<File>>,
+    file_level: log::LevelFilter,
     verbosity: u8,
+}
+
+fn tui_level_filter(verbosity: u8) -> log::LevelFilter {
+    match verbosity {
+        0 => log::LevelFilter::Error,
+        1 => log::LevelFilter::Warn,
+        2 => log::LevelFilter::Info,
+        3 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    }
+}
+
+fn debug_file_level_filter(verbosity: u8) -> log::LevelFilter {
+    tui_level_filter(verbosity)
+}
+
+fn level_enabled(filter: log::LevelFilter, level: log::Level) -> bool {
+    match filter {
+        log::LevelFilter::Off => false,
+        log::LevelFilter::Error => matches!(level, log::Level::Error),
+        log::LevelFilter::Warn => matches!(level, log::Level::Error | log::Level::Warn),
+        log::LevelFilter::Info => {
+            matches!(level, log::Level::Error | log::Level::Warn | log::Level::Info)
+        }
+        log::LevelFilter::Debug => !matches!(level, log::Level::Trace),
+        log::LevelFilter::Trace => true,
+    }
+}
+
+fn max_level_filter(a: log::LevelFilter, b: log::LevelFilter) -> log::LevelFilter {
+    use log::LevelFilter;
+
+    fn rank(level: LevelFilter) -> u8 {
+        match level {
+            LevelFilter::Off => 0,
+            LevelFilter::Error => 1,
+            LevelFilter::Warn => 2,
+            LevelFilter::Info => 3,
+            LevelFilter::Debug => 4,
+            LevelFilter::Trace => 5,
+        }
+    }
+
+    if rank(a) >= rank(b) { a } else { b }
 }
 
 impl log::Log for TuiLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
         let level = metadata.level();
-        let should_send_to_tui = match level {
-            log::Level::Error => true,
-            log::Level::Warn => self.verbosity >= 1,
-            log::Level::Info => self.verbosity >= 2,
-            log::Level::Debug => self.verbosity >= 3,
-            log::Level::Trace => self.verbosity >= 4,
-        };
-        should_send_to_tui || self.file.is_some()
+        let should_send_to_tui = level_enabled(tui_level_filter(self.verbosity), level);
+        let should_write_to_file = self.file.is_some() && level_enabled(self.file_level, level);
+        should_send_to_tui || should_write_to_file
     }
 
     fn log(&self, record: &log::Record) {
         if self.enabled(record.metadata()) {
             let log_msg = format!("[{}] {}", record.level(), record.args());
 
-            if let Some(file_mutex) = &self.file
+            if self.file.is_some() && level_enabled(self.file_level, record.level())
+                && let Some(file_mutex) = &self.file
                 && let Ok(mut file) = file_mutex.lock()
             {
                 let _ = writeln!(file, "{}", log_msg);
@@ -55,13 +96,7 @@ impl log::Log for TuiLogger {
             }
 
             // Only send to TUI if verbose is high enough or it's a high level message
-            let should_send = match record.level() {
-                log::Level::Error => true,
-                log::Level::Warn => self.verbosity >= 1,
-                log::Level::Info => self.verbosity >= 2,
-                log::Level::Debug => self.verbosity >= 3,
-                log::Level::Trace => self.verbosity >= 4,
-            };
+            let should_send = level_enabled(tui_level_filter(self.verbosity), record.level());
 
             if should_send {
                 let _ = self.tx.send(CapturedLog {
@@ -82,7 +117,14 @@ impl log::Log for TuiLogger {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None, disable_help_flag = true)]
+#[command(
+    author,
+    version,
+    about,
+    long_about = None,
+    disable_help_flag = true,
+    disable_version_flag = true
+)]
 struct Args {
     #[arg(short, long)]
     server: Option<String>,
@@ -98,16 +140,20 @@ struct Args {
     character: Option<String>,
     #[arg(long)]
     capture: Option<String>,
-    #[arg(short, long)]
+    #[arg(short, long, help = "Write chat and in-game system messages to a file")]
     log: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Write Rust log output to a debug log file")]
     debug_log: Option<String>,
-    #[arg(short, long, action = clap::ArgAction::Count)]
+    #[arg(short, long, action = clap::ArgAction::Count, help = "Increase log messages shown inside the TUI (-v warn, -vv info, -vvv debug, -vvvv trace)")]
     verbose: u8,
+    #[arg(short = 'V', long = "debug-verbose", action = clap::ArgAction::Count, requires = "debug_log", help = "Increase log messages written to --debug-log (-V warn, -VV info, -VVV debug, -VVVV trace)")]
+    debug_verbosity: u8,
     #[arg(short, long)]
     dats: Option<String>,
     #[arg(long, action = clap::ArgAction::Help)]
     help: Option<bool>,
+    #[arg(long, action = clap::ArgAction::Version)]
+    version: Option<bool>,
 }
 
 #[tokio::main]
@@ -155,7 +201,7 @@ async fn main() -> Result<()> {
     let (local_log_tx, mut local_log_rx) = mpsc::unbounded_channel::<CapturedLog>();
     let (server_cmd_tx, server_cmd_rx) = mpsc::unbounded_channel();
 
-    let _chat_log = if let Some(path) = &args.log {
+    let chat_log = if let Some(path) = &args.log {
         match File::create(path) {
             Ok(f) => Some(Mutex::new(f)),
             Err(e) => {
@@ -168,6 +214,11 @@ async fn main() -> Result<()> {
     };
 
     if args.verbose > 0 || args.debug_log.is_some() {
+        let file_level = if args.debug_log.is_some() {
+            debug_file_level_filter(args.debug_verbosity)
+        } else {
+            log::LevelFilter::Off
+        };
         let log_file = if let Some(path) = &args.debug_log {
             match File::create(path) {
                 Ok(f) => Some(Mutex::new(f)),
@@ -183,10 +234,11 @@ async fn main() -> Result<()> {
         let logger = TuiLogger {
             tx: local_log_tx.clone(),
             file: log_file,
+            file_level,
             verbosity: args.verbose,
         };
         log::set_boxed_logger(Box::new(logger)).ok();
-        log::set_max_level(log::LevelFilter::Trace);
+        log::set_max_level(max_level_filter(tui_level_filter(args.verbose), file_level));
     }
 
     println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
@@ -223,6 +275,7 @@ async fn main() -> Result<()> {
         account_name: args.account.clone(),
         account_password: args.password.clone(),
         character_preference: args.character.clone(),
+        chat_log,
         page: Page::Selection(SelectionState::default()),
         modal: None,
         logon_retry: RetryState::new(5),
@@ -346,4 +399,57 @@ async fn main() -> Result<()> {
 
     let _ = client_task_handle.await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn debug_verbosity_requires_debug_log() {
+        let result = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "-V",
+        ]);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn debug_verbosity_parses_and_maps() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "acct",
+            "--debug-log",
+            "debug.log",
+            "-VV",
+        ])
+        .expect("debug log args should parse");
+
+        assert_eq!(args.debug_verbosity, 2);
+        assert_eq!(debug_file_level_filter(args.debug_verbosity), log::LevelFilter::Info);
+    }
+
+    #[test]
+    fn global_max_level_keeps_file_and_tui_thresholds() {
+        assert_eq!(
+            max_level_filter(log::LevelFilter::Warn, log::LevelFilter::Debug),
+            log::LevelFilter::Debug
+        );
+        assert_eq!(
+            max_level_filter(log::LevelFilter::Trace, log::LevelFilter::Info),
+            log::LevelFilter::Trace
+        );
+    }
+
+    #[test]
+    fn zero_verbosity_still_includes_errors() {
+        assert_eq!(tui_level_filter(0), log::LevelFilter::Error);
+        assert!(level_enabled(log::LevelFilter::Error, log::Level::Error));
+        assert!(!level_enabled(log::LevelFilter::Error, log::Level::Warn));
+    }
 }

@@ -1,5 +1,4 @@
 use holtburger_common::Guid;
-use holtburger_common::properties::{PropertyBool, WorldObjectPropertyAccessors};
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
@@ -37,6 +36,7 @@ const MELEE_ATTACK_DISTANCE: f32 = 0.6;
 const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_REPEAT_DISTANCE: f32 = 16.0;
 const STICKY_MOVE_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
+const ATTACK_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
 
 enum StickyMeleeDecision {
@@ -630,6 +630,8 @@ impl GameState {
             }
         }
 
+        self.refresh_stale_attack_sequence(&mut result);
+
         self.sync_sticky_melee_pursuit(&mut result);
 
         result
@@ -682,6 +684,9 @@ impl GameState {
                 }
                 self.data.combat_mode = mode;
                 self.data.combat_runtime.handle_mode_updated(mode);
+                if matches!(mode, CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic) {
+                    self.view.last_attack_heartbeat_at = None;
+                }
             }
             _ => {}
         }
@@ -769,6 +774,7 @@ impl GameState {
         if self.should_cancel_attack(previous_interaction, next_interaction) {
             result.commands.push(ClientCommand::CancelAttack);
             self.data.combat_runtime.cancel_attack();
+            self.view.last_attack_heartbeat_at = None;
         }
 
         if self.should_resume_attack(previous_interaction, next_interaction) {
@@ -781,17 +787,26 @@ impl GameState {
         previous_interaction: Option<Interaction>,
         next_interaction: Option<Interaction>,
     ) -> bool {
-        matches!(
-            (previous_interaction, next_interaction, self.data.combat_mode),
-            (
-                Some(Interaction::Targeting { .. }),
-                None | Some(Interaction::Moving { .. })
+        matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile)
+            && match (previous_interaction, next_interaction) {
+                (
+                    Some(Interaction::Targeting {
+                        target_guid: previous_target,
+                    }),
+                    Some(Interaction::Targeting {
+                        target_guid: next_target,
+                    }),
+                ) => previous_target != next_target,
+                (
+                    Some(Interaction::Targeting { .. }),
+                    None
+                    | Some(Interaction::Moving { .. })
                     | Some(Interaction::Healing { .. })
                     | Some(Interaction::Combining { .. })
                     | Some(Interaction::Salvaging),
-                CombatMode::Melee | CombatMode::Missile
-            )
-        )
+                ) => true,
+                _ => false,
+            }
     }
 
     fn should_resume_attack(
@@ -842,7 +857,44 @@ impl GameState {
 
         if let Some(command) = command {
             self.data.combat_runtime.queue_attack();
+            self.view.last_attack_heartbeat_at = Some(Instant::now());
             result.commands.push(command);
+        }
+    }
+
+    fn refresh_stale_attack_sequence(&mut self, result: &mut UpdateResult) {
+        if !matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) {
+            return;
+        }
+
+        if !matches!(self.view.active_interaction, Some(Interaction::Targeting { .. })) {
+            return;
+        }
+
+        let Some(target_guid) = self.current_target_guid() else {
+            return;
+        };
+
+        if !self.is_valid_combat_target(target_guid) {
+            return;
+        }
+
+        if self.data.combat_runtime.attack_sequence_active {
+            return;
+        }
+
+        let now = Instant::now();
+        let should_refresh = self
+            .view
+            .last_attack_heartbeat_at
+            .is_none_or(|last_attempt| now.duration_since(last_attempt) >= ATTACK_HEARTBEAT_INTERVAL);
+
+        if should_refresh {
+            log::info!(
+                "combat heartbeat: refreshing desired attack for target 0x{:08X}",
+                target_guid.0
+            );
+            self.queue_auto_attack_for_mode(self.data.combat_mode, result);
         }
     }
 
@@ -995,7 +1047,7 @@ impl GameState {
             return false;
         }
 
-        entity.get_bool_prop(PropertyBool::Attackable) || entity.creature_profile.is_some()
+        entity.is_creature()
     }
 
     fn reset_salvaging_state(&mut self, result: &mut UpdateResult) -> bool {
@@ -1155,6 +1207,8 @@ pub struct ViewState {
     pub sticky_combat_target: Option<Guid>,
     /// Last time we refreshed sticky combat movement.
     pub last_sticky_move_at: Option<Instant>,
+    /// Last time we sent an attack request for the current desired combat interaction.
+    pub last_attack_heartbeat_at: Option<Instant>,
     /// Cache of the exact bounding boxes computed during update_layout.
     pub layout_cache: LayoutCache,
 }
@@ -1181,6 +1235,7 @@ impl Default for ViewState {
             last_trade_initiation: None,
             sticky_combat_target: None,
             last_sticky_move_at: None,
+            last_attack_heartbeat_at: None,
             layout_cache: LayoutCache::default(),
         }
     }
@@ -1197,9 +1252,11 @@ mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        PropertyBool, PropertyString, WorldObjectProperties, WorldObjectPropertyAccessorsMut,
+        ItemType, PropertyBool, PropertyInt, PropertyString, WorldObjectProperties,
+        WorldObjectPropertyAccessorsMut,
     };
     use holtburger_protocol::messages::combat::AttackHeight;
+    use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
 
     #[test]
@@ -1300,6 +1357,19 @@ mod tests {
         buffer.iter().any(|line| line.to_string().contains(needle))
     }
 
+    fn creature_entity(guid: Guid, name: &str, position: WorldPosition) -> Entity {
+        let mut entity = Entity::new(guid, name.to_string(), position);
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        entity.creature_profile = Some(CreatureProfile {
+            flags: CreatureProfileFlags::empty(),
+            health: 1,
+            health_max: 1,
+            attributes: None,
+            buffs: None,
+        });
+        entity
+    }
+
     #[test]
     fn set_combat_mode_with_valid_target_queues_melee_attack() {
         let player_guid = Guid(0x50000001);
@@ -1310,9 +1380,10 @@ mod tests {
             ..WorldPosition::default()
         };
 
-        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
         let result = state
@@ -1393,9 +1464,10 @@ mod tests {
             ..WorldPosition::default()
         };
 
-        let mut target = Entity::new(target_guid, "Tusker".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Tusker", target_position));
 
         let result = state
             .handle_action(AppAction::BeginInteraction {
@@ -1442,9 +1514,10 @@ mod tests {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
         };
-        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
 
         let result = state.handle_action(AppAction::CycleCombatProfileLevel).unwrap();
 
@@ -1474,9 +1547,10 @@ mod tests {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
         };
-        let mut target = Entity::new(target_guid, "Tusker".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Tusker", target_position));
 
         let result = state.handle_action(AppAction::CycleCombatAttackHeight).unwrap();
 
@@ -1561,9 +1635,10 @@ mod tests {
             landblock_id: Guid(0x01000000),
             ..WorldPosition::default()
         };
-        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
 
         let result = state
             .handle_action(AppAction::BeginInteraction {
@@ -1584,6 +1659,202 @@ mod tests {
     }
 
     #[test]
+    fn switching_targets_retargets_attack_sequence() {
+        let player_guid = Guid(0x50000001);
+        let first_target_guid = Guid(0x60000001);
+        let second_target_guid = Guid(0x60000002);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+        state.view.active_interaction = Some(Interaction::Targeting {
+            target_guid: first_target_guid,
+        });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+
+        state.data.entities.insert(
+            first_target_guid,
+            creature_entity(first_target_guid, "Drudge", target_position),
+        );
+        state.data.entities.insert(
+            second_target_guid,
+            creature_entity(second_target_guid, "Shreth", target_position),
+        );
+
+        let result = state
+            .handle_action(AppAction::BeginInteraction {
+                interaction: Interaction::Targeting {
+                    target_guid: second_target_guid,
+                },
+            })
+            .unwrap();
+
+        assert!(result
+            .commands
+            .iter()
+            .any(|command| matches!(command, ClientCommand::CancelAttack)));
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::TargetedMeleeAttack { target, .. } if *target == second_target_guid
+            )
+        }));
+        assert!(state.data.combat_runtime.attack_queued);
+        assert!(!state.data.combat_runtime.attack_sequence_active);
+    }
+
+    #[test]
+    fn targeting_creature_item_type_without_profile_still_starts_attack() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let result = state
+            .handle_action(AppAction::BeginInteraction {
+                interaction: Interaction::Targeting { target_guid },
+            })
+            .unwrap();
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
+    }
+
+    #[test]
+    fn handle_tick_refreshes_stale_queued_attack_sequence() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        state.data.combat_runtime.attack_queued = true;
+        state.data.combat_runtime.attack_sequence_active = false;
+        state.view.last_attack_heartbeat_at =
+            Some(Instant::now() - ATTACK_HEARTBEAT_INTERVAL);
+
+        let result = state.handle_tick(0.016);
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
+        assert!(state.data.combat_runtime.attack_queued);
+    }
+
+    #[test]
+    fn handle_tick_retries_cancelled_attack_after_combat_mode_reentry() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::NonCombat;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        state.data.combat_runtime.queue_attack();
+
+        let cancelled = state.handle_view_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackDone {
+                error: holtburger_protocol::errors::WeenieError::ActionCancelled,
+            },
+        ));
+
+        assert!(!cancelled.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+        }));
+        assert!(!state.data.combat_runtime.attack_queued);
+
+        state.data.combat_mode = CombatMode::Melee;
+        state.view.last_attack_heartbeat_at =
+            Some(Instant::now() - ATTACK_HEARTBEAT_INTERVAL);
+
+        let retry = state.handle_tick(0.016);
+
+        assert!(retry.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
+        assert!(state.data.combat_runtime.attack_queued);
+    }
+
+    #[test]
+    fn switching_to_non_creature_target_cancels_attack_sequence() {
+        let player_guid = Guid(0x50000001);
+        let creature_guid = Guid(0x60000001);
+        let non_creature_guid = Guid(0x70000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+        state.view.active_interaction = Some(Interaction::Targeting {
+            target_guid: creature_guid,
+        });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+
+        state.data.entities.insert(
+            creature_guid,
+            creature_entity(creature_guid, "Drudge", target_position),
+        );
+
+        let mut chest = Entity::new(non_creature_guid, "Chest".to_string(), target_position);
+        chest.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(non_creature_guid, chest);
+
+        let result = state
+            .handle_action(AppAction::BeginInteraction {
+                interaction: Interaction::Targeting {
+                    target_guid: non_creature_guid,
+                },
+            })
+            .unwrap();
+
+        assert!(result
+            .commands
+            .iter()
+            .any(|command| matches!(command, ClientCommand::CancelAttack)));
+        assert!(!result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::TargetedMeleeAttack { .. } | ClientCommand::TargetedMissileAttack { .. }
+            )
+        }));
+        assert!(!state.data.combat_runtime.attack_queued);
+        assert!(!state.data.combat_runtime.attack_sequence_active);
+    }
+
+    #[test]
     fn handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range() {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
@@ -1601,9 +1872,10 @@ mod tests {
             coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
             ..WorldPosition::default()
         };
-        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
 
         let result = state.handle_tick(0.016);
 
@@ -1643,9 +1915,10 @@ mod tests {
             coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
             ..WorldPosition::default()
         };
-        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
 
         let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
             CombatFeedback::AttackDone {
@@ -1687,9 +1960,10 @@ mod tests {
             coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
             ..WorldPosition::default()
         };
-        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
-        state.data.entities.insert(target_guid, target);
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
 
         let _ = state.handle_action(AppAction::CancelInteraction).unwrap();
 
@@ -1728,8 +2002,7 @@ mod tests {
             coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
             ..WorldPosition::default()
         };
-        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
-        target.set_bool_prop(PropertyBool::Attackable, true);
+        let mut target = creature_entity(target_guid, "Drudge", target_position);
         state.data.entities.insert(target_guid, target.clone());
 
         let in_range = state.handle_tick(0.016);

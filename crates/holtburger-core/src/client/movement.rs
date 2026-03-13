@@ -10,6 +10,7 @@ use holtburger_session::Session;
 use holtburger_world::{StateEvent, WorldState};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
+const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 
 /// Computes the position a player should stop at when moving toward a target at a specific distance.
 fn calculate_arrival_position(
@@ -58,8 +59,8 @@ impl MovementSystem {
 
         if primitive.refresh_server() {
             match primitive {
-                LocomotionPrimitive::Drive { speed, .. } => {
-                    Self::send_drive_pulse(world, session, speed).await?;
+                LocomotionPrimitive::Drive { heading, speed, .. } => {
+                    Self::send_drive_pulse(world, session, heading, speed).await?;
                 }
                 LocomotionPrimitive::Stop { .. } => {
                     Self::send_stop_pulse(world, session).await?;
@@ -75,21 +76,41 @@ impl MovementSystem {
         primitive: LocomotionPrimitive,
         world: &mut WorldState,
     ) -> Vec<StateEvent> {
-        primitive
-            .desired_velocity()
-            .map(|velocity| world.set_player_velocity(velocity))
-            .unwrap_or_default()
+        let mut events = Vec::new();
+
+        if let LocomotionPrimitive::Drive { heading, .. } = primitive {
+            let mut next_pos = world.player.position;
+            next_pos.rotation = Quaternion::from_heading(heading);
+            events.extend(world.set_player_position(next_pos));
+        }
+
+        if let Some(velocity) = primitive.desired_velocity() {
+            events.extend(world.set_player_velocity(velocity));
+        }
+
+        events
     }
 
-    async fn send_drive_pulse(world: &WorldState, session: &mut Session, speed: f32) -> Result<()> {
+    async fn send_drive_pulse(
+        world: &WorldState,
+        session: &mut Session,
+        heading: f32,
+        speed: f32,
+    ) -> Result<()> {
+        let mut position = world.player.position;
+        position.rotation = Quaternion::from_heading(heading);
+
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
             raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState {
-                flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                flags: RawMotionFlags::CURRENT_HOLD_KEY
+                    | RawMotionFlags::FORWARD_COMMAND
+                    | RawMotionFlags::FORWARD_SPEED,
                 current_hold_key: Some(HoldKey::Run as u32),
+                forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
                 forward_speed: Some(speed),
                 ..Default::default()
             }),
-            position: world.player.position,
+            position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
@@ -304,16 +325,21 @@ mod tests {
         let raw_motion_state = raw_motion_state_with_player_style(
             &world,
             RawMotionState {
-                flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+                flags: RawMotionFlags::CURRENT_HOLD_KEY
+                    | RawMotionFlags::FORWARD_COMMAND
+                    | RawMotionFlags::FORWARD_SPEED,
                 current_hold_key: Some(HoldKey::Run as u32),
+                forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
                 forward_speed: Some(7.0),
                 ..Default::default()
             },
         );
 
         assert!(raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
+        assert!(raw_motion_state.flags.contains(RawMotionFlags::FORWARD_COMMAND));
         assert_eq!(raw_motion_state.current_style, Some(0x8000_003e));
         assert_eq!(raw_motion_state.current_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(raw_motion_state.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
         assert_eq!(raw_motion_state.forward_speed, Some(7.0));
     }
 }

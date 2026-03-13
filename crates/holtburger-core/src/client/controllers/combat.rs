@@ -252,12 +252,11 @@ impl Controller for CombatAutomationController {
             facing_update.status,
             ControllerStatus::Active | ControllerStatus::CoolingDown
         ) {
-            let mut update = ControllerUpdate::new(facing_update.status);
-            for effect in facing_update.effects {
-                let CombatFacingEffect::TurnTo { heading } = effect;
-                update.push_effect(CombatAutomationEffect::TurnTo { heading });
-            }
-            return update;
+            return facing_update.map_effects(|effect| match effect {
+                CombatFacingEffect::TurnTo { heading } => CombatAutomationEffect::TurnTo {
+                    heading,
+                },
+            });
         }
 
         let desired_attack_update = self.desired_attack.handle(&DesiredAttackInput::Tick {
@@ -269,12 +268,9 @@ impl Controller for CombatAutomationController {
             force_attack,
         });
 
-        let mut update = ControllerUpdate::new(desired_attack_update.status);
-        for effect in desired_attack_update.effects {
-            let DesiredAttackEffect::Attack(request) = effect;
-            update.push_effect(CombatAutomationEffect::Attack(request));
-        }
-        update
+        desired_attack_update.map_effects(|effect| match effect {
+            DesiredAttackEffect::Attack(request) => CombatAutomationEffect::Attack(request),
+        })
     }
 }
 

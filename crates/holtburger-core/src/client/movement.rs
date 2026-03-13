@@ -1,6 +1,6 @@
 use crate::client::controllers::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
-    ApproachTargetInput, Controller, ControllerStatus, ControllerUpdate,
+    ApproachTargetInput, Controller, ControllerUpdate,
 };
 use crate::client::locomotion::LocomotionPrimitive;
 use crate::client::WireEvent;
@@ -89,9 +89,9 @@ impl MovementSystem {
         };
 
         let update = controller.handle(&ApproachTargetInput::ForcedReposition);
-        let status = update.status;
+        let completed = update.is_terminal();
         let state_events = self.apply_approach_update(update, world, None).await?;
-        if status == ControllerStatus::Completed {
+        if completed {
             self.approach_target = None;
         }
         Ok(Some(state_events))
@@ -112,9 +112,9 @@ impl MovementSystem {
             player_position: world.player.position,
             target_position: world.get_visible_entity(target_guid).map(|target| target.position),
         });
-        let status = update.status;
+        let completed = update.is_terminal();
         let state_events = self.apply_approach_update(update, world, Some(session)).await?;
-        if status == ControllerStatus::Completed {
+        if completed {
             self.approach_target = None;
         }
         Ok((Vec::new(), state_events))

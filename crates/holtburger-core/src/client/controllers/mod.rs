@@ -16,12 +16,17 @@ pub use maintain_range::{
     MaintainRangeFinishReason, MaintainRangeInput,
 };
 
-/// Provisional shared controller kernel for reusable client-side behaviors.
+/// Shared controller kernel for reusable client-side behaviors.
 ///
-/// This module intentionally standardizes only the broad lifecycle shape.
-/// Concrete controllers are expected to define their own input and effect
-/// vocabularies, and this kernel will be refined after more real controllers
-/// exist in the codebase.
+/// After landing real movement and combat controllers, the proven common kernel
+/// is intentionally small:
+/// - a controller trait shape
+/// - coarse lifecycle status
+/// - a structured update carrying status plus controller-defined effects
+///
+/// Concrete controllers still define their own input and effect vocabularies.
+/// Scheduler, claims, and other orchestrator-facing concepts remain outside the
+/// kernel until real composition needs justify them.
 pub trait Controller {
     type Input;
     type Effect;
@@ -31,12 +36,24 @@ pub trait Controller {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControllerStatus {
+    /// The controller has no work to do for this input and is not blocked.
     Idle,
+    /// The controller is actively driving behavior or wants to keep ownership.
     Active,
+    /// The controller cannot proceed because prerequisites are currently unmet.
     Blocked,
+    /// The controller is intentionally quiescent but may resume later.
     Paused,
+    /// The controller is waiting for a bounded retry or refresh interval.
     CoolingDown,
+    /// The controller reached a terminal state for its current goal.
     Completed,
+}
+
+impl ControllerStatus {
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -58,8 +75,30 @@ impl<E> ControllerUpdate<E> {
         self
     }
 
+    pub fn with_effects<I>(mut self, effects: I) -> Self
+    where
+        I: IntoIterator<Item = E>,
+    {
+        self.effects.extend(effects);
+        self
+    }
+
     pub fn push_effect(&mut self, effect: E) {
         self.effects.push(effect);
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        self.status.is_terminal()
+    }
+
+    pub fn map_effects<U, F>(self, mut map: F) -> ControllerUpdate<U>
+    where
+        F: FnMut(E) -> U,
+    {
+        ControllerUpdate {
+            status: self.status,
+            effects: self.effects.into_iter().map(&mut map).collect(),
+        }
     }
 }
 
@@ -118,6 +157,30 @@ mod tests {
 
         assert_eq!(result.status, ControllerStatus::Active);
         assert_eq!(result.effects, vec![ThresholdEffect::EnteredThreshold]);
+    }
+
+    #[test]
+    fn controller_status_reports_terminal_state() {
+        assert!(ControllerStatus::Completed.is_terminal());
+        assert!(!ControllerStatus::Paused.is_terminal());
+    }
+
+    #[test]
+    fn controller_update_can_map_effect_vocabulary() {
+        let result = ControllerUpdate::new(ControllerStatus::Active)
+            .with_effects([
+                ThresholdEffect::Started,
+                ThresholdEffect::EnteredThreshold,
+            ])
+            .map_effects(|effect| match effect {
+                ThresholdEffect::Started => "started",
+                ThresholdEffect::EnteredThreshold => "entered",
+                ThresholdEffect::ExitedThreshold => "exited",
+                ThresholdEffect::LostThreshold => "lost",
+            });
+
+        assert_eq!(result.status, ControllerStatus::Active);
+        assert_eq!(result.effects, vec!["started", "entered"]);
     }
 
     #[test]

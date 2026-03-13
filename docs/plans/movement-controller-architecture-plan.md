@@ -538,6 +538,8 @@ What to watch:
 
 Complexity: Medium-High
 
+Status: Completed on March 13, 2026
+
 #### Deliverables
 - Decide how applications consume controllers.
 - Preferred model:
@@ -550,6 +552,24 @@ Complexity: Medium-High
 #### Dry-Run Notes
 - This phase is tractable only after Phase 3 lands.
 - Phase 3 already resolved the primitive-shape fork in favor of a thinner controller-output type; Phase 4 now needs to expose adoption patterns around that choice.
+
+#### Phase 4 Outcome
+- Made [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs) export `ApproachTargetController`, `ApproachTargetInput`, `ApproachTargetEffect`, and `ApproachTargetFinishReason` as public reusable API.
+- Made [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) publicly constructible and documented as a frontend-owned controller.
+- Added external integration coverage in [crates/holtburger-core/tests/approach_target_controller_api.rs](/home/cluracan/code/holtburger/crates/holtburger-core/tests/approach_target_controller_api.rs) to prove that an outside consumer can instantiate the controller, feed inputs, and consume locomotion primitive outputs.
+- Documented the current frontend adoption pattern in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
+
+#### Decisions Confirmed During Phase 4
+- `ApproachTargetController` is now the first officially reusable controller surface in core.
+- The stable reusable API is the controller plus primitive outputs, not the temporary `ClientCommand::ApproachTarget` bridge.
+- The command-driven path remains available for existing frontends, but it is now explicitly secondary to the reusable library API.
+
+#### Pivot Watch
+No critical pivot is required yet.
+
+What to watch:
+- the bridge is still present because the TUI runtime is command-channel-based
+- if multiple frontends need to execute primitives against a running client before Phase 8, we may want a first-class non-command primitive submission handle rather than relying on each frontend to own the full `Client` directly
 
 #### Design Fork To Resolve
 - Option A: controllers remain engine-owned and frontends opt in via high-level commands.
@@ -738,8 +758,8 @@ Mitigation:
 - [x] Phase 2: remove `ClientCommand::MoveTo` and migrate existing callers
 - [x] Phase 2: add controller-level tests for approach, arrival, and forced reposition
 - [x] Phase 3: add a primitive locomotion layer suitable for reusable controllers
-- [ ] Phase 4: expose reusable controller APIs for frontend adoption
-- [ ] Phase 4: choose and document the default ownership model
+- [x] Phase 4: expose reusable controller APIs for frontend adoption
+- [x] Phase 4: choose and document the default ownership model
 - [ ] Phase 5: migrate desired-attack heartbeat toward a reusable controller or helper
 - [ ] Phase 5: prototype combat-facing assist with ACE-informed rules
 - [ ] Phase 5: validate composition between combat controllers
@@ -765,6 +785,8 @@ Mitigation:
 - March 13, 2026: forced-reposition cancellation is now owned by `MovementSystem`, alongside controller ticking and stop semantics.
 - March 13, 2026: Phase 3 chooses a public controller-output primitive layer in [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs) instead of adding new locomotion-specific `ClientCommand` variants.
 - March 13, 2026: `MovementSystem` remains the primitive executor because it owns prediction and movement packet emission.
+- March 13, 2026: Phase 4 promotes `ApproachTargetController` and its input or effect types to the public reusable API surface under [crates/holtburger-core/src/client/controllers/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/mod.rs).
+- March 13, 2026: Option B is now the documented default ownership model; the command bridge remains only for compatibility.
 
 ### Verification Log
 - March 13, 2026: architecture direction aligned and documented in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
@@ -775,6 +797,7 @@ Mitigation:
 - March 13, 2026: CLI regression coverage passed for `targeting_creature_item_type_without_profile_still_starts_attack`, `switching_targets_retargets_attack_sequence`, `switching_to_non_creature_target_cancels_attack_sequence`, `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range`, and `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range` after the Phase 2 migration.
 - March 13, 2026: `cargo test -p holtburger-core` passed after introducing [crates/holtburger-core/src/client/locomotion.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/locomotion.rs) and refactoring [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs) plus [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) onto it.
 - March 13, 2026: CLI sticky melee regression coverage still passed for `handle_tick_starts_sticky_melee_follow_when_target_slips_out_of_range` and `sticky_melee_keeps_repeat_latch_after_temporarily_returning_to_range` after the Phase 3 primitive-layer migration.
+- March 13, 2026: external integration coverage in [crates/holtburger-core/tests/approach_target_controller_api.rs](/home/cluracan/code/holtburger/crates/holtburger-core/tests/approach_target_controller_api.rs) proved that an outside consumer can instantiate and drive `ApproachTargetController` directly.
 
 ### Open Questions
 - Exact shape of the structured controller update remains intentionally open.

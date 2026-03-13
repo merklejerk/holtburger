@@ -1,6 +1,6 @@
-mod approach_target;
+pub mod approach_target;
 
-pub(crate) use approach_target::{
+pub use approach_target::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
     ApproachTargetInput,
 };

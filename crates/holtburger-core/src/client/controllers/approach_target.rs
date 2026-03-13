@@ -1,3 +1,9 @@
+//! Reusable controller for approaching a target until an arrival distance is met.
+//!
+//! Frontends can own this controller directly, feed it world-derived inputs, and
+//! apply the resulting [`LocomotionPrimitive`] values using their preferred
+//! orchestration model.
+
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
 use crate::client::locomotion::LocomotionPrimitive;
 use holtburger_common::position::WorldPosition;
@@ -10,7 +16,7 @@ const STUCK_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 const STUCK_DISTANCE_THRESHOLD: f32 = 0.1;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ApproachTargetInput {
+pub enum ApproachTargetInput {
     Tick {
         now: Instant,
         player_position: WorldPosition,
@@ -20,7 +26,7 @@ pub(crate) enum ApproachTargetInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ApproachTargetFinishReason {
+pub enum ApproachTargetFinishReason {
     Arrived,
     TargetUnavailable,
     Stuck,
@@ -28,13 +34,13 @@ pub(crate) enum ApproachTargetFinishReason {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ApproachTargetEffect {
+pub enum ApproachTargetEffect {
     Locomotion(LocomotionPrimitive),
     Finished(ApproachTargetFinishReason),
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ApproachTargetController {
+pub struct ApproachTargetController {
     target_guid: Guid,
     arrival_distance: f32,
     last_move_sync: Instant,
@@ -43,7 +49,7 @@ pub(crate) struct ApproachTargetController {
 }
 
 impl ApproachTargetController {
-    pub(crate) fn new(
+    pub fn new(
         target_guid: Guid,
         arrival_distance: f32,
         player_position: WorldPosition,
@@ -58,11 +64,11 @@ impl ApproachTargetController {
         }
     }
 
-    pub(crate) fn target_guid(&self) -> Guid {
+    pub fn target_guid(&self) -> Guid {
         self.target_guid
     }
 
-    pub(crate) fn arrival_distance(&self) -> f32 {
+    pub fn arrival_distance(&self) -> f32 {
         self.arrival_distance
     }
 }

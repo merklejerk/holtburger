@@ -39,6 +39,13 @@ Applications are free to use these controllers, ignore them, or layer their own 
 
 The current primitive locomotion surface lives in [src/client/locomotion.rs](src/client/locomotion.rs). It defines controller-facing locomotion primitives such as drive and stop, while [src/client/movement.rs](src/client/movement.rs) remains the executor that applies those primitives to local prediction and protocol traffic.
 
+Frontend adoption pattern today:
+
+1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs) in frontend state.
+2. Feed it world-derived inputs on ticks or relevant events.
+3. Interpret its emitted primitive effects, such as `LocomotionPrimitive`, in the frontend's own orchestration layer.
+4. Either execute those primitives directly if the frontend owns a `Client`, or continue using the temporary `ClientCommand::ApproachTarget` bridge until it is removed.
+
 The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). It is intentionally provisional and currently standardizes only:
 
 - a broad controller trait shape

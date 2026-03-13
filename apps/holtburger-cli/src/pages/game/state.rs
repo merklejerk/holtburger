@@ -2,7 +2,8 @@ use holtburger_common::Guid;
 use holtburger_core::ClientViewEvent;
 use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
-    DesiredAttackProfile, TargetedAttackRequest,
+    DesiredAttackProfile, MaintainRangeConfig, MaintainRangeController,
+    MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput, TargetedAttackRequest,
 };
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::CombatFeedback;
@@ -41,18 +42,6 @@ const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_REPEAT_DISTANCE: f32 = 16.0;
 const STICKY_MOVE_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
 const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
-
-enum StickyMeleeDecision {
-    Follow {
-        target_guid: Guid,
-        distance: f32,
-        max_follow_distance: f32,
-    },
-    Stop {
-        reason: &'static str,
-        clear_target: bool,
-    },
-}
 
 enum EnterCombatModeResult {
     Success(UpdateResult),
@@ -934,131 +923,104 @@ impl GameState {
     }
 
     fn sync_sticky_melee_pursuit(&mut self, result: &mut UpdateResult) {
-        let decision = self.sticky_melee_decision();
-        let (target_guid, distance, max_follow_distance) = match decision {
-            StickyMeleeDecision::Follow {
-                target_guid,
-                distance,
-                max_follow_distance,
-            } => (target_guid, distance, max_follow_distance),
-            StickyMeleeDecision::Stop {
-                reason,
-                clear_target,
-            } => {
-                if self.view.sticky_combat_target.is_some() {
-                    let was_moving = self.view.last_sticky_move_at.take().is_some();
-                    if clear_target || was_moving {
-                        let action = if clear_target { "stopping" } else { "pausing" };
-                        log::info!("sticky melee: {} pursuit ({})", action, reason);
-                    }
-
-                    if clear_target {
-                        self.view.sticky_combat_target = None;
-                    }
-
-                    if was_moving {
-                        result.commands.push(ClientCommand::StopMoving);
-                    }
-                }
-                return;
-            }
+        let now = Instant::now();
+        let Some(input) = self.sticky_melee_input(now) else {
+            self.suspend_sticky_melee(result);
+            return;
         };
 
-        let now = Instant::now();
-        let should_issue_move = self.view.sticky_combat_target != Some(target_guid)
-            || self
-                .view
-                .last_sticky_move_at
-                .map(|last_move| now.duration_since(last_move) >= STICKY_MOVE_REISSUE_INTERVAL)
-                .unwrap_or(true);
+        let update = self
+            .view
+            .sticky_melee
+            .get_or_insert_with(|| {
+                MaintainRangeController::new(MaintainRangeConfig {
+                    arrival_distance: MELEE_ATTACK_DISTANCE,
+                    acquire_distance: MELEE_STICKY_DISTANCE,
+                    repeat_distance: MELEE_REPEAT_DISTANCE,
+                    reissue_interval: STICKY_MOVE_REISSUE_INTERVAL,
+                })
+            })
+            .handle(&input);
 
-        if should_issue_move {
-            let action = if self.view.sticky_combat_target == Some(target_guid) {
-                "refreshing"
-            } else {
-                "starting"
-            };
-            log::info!(
-                "sticky melee: {} pursuit for target 0x{:08X} at {:.2}m (limit {:.2}m)",
-                action,
-                target_guid.0,
-                distance,
-                max_follow_distance
-            );
-            result.commands.push(ClientCommand::ApproachTarget {
-                target: target_guid,
-                arrival_distance: MELEE_ATTACK_DISTANCE,
-            });
-            self.view.sticky_combat_target = Some(target_guid);
-            self.view.last_sticky_move_at = Some(now);
+        let completed = matches!(update.status, holtburger_core::client::controllers::ControllerStatus::Completed);
+        for effect in update.effects {
+            self.apply_sticky_melee_effect(effect, result);
+        }
+
+        if completed {
+            self.view.sticky_melee = None;
         }
     }
 
-    fn sticky_melee_decision(&self) -> StickyMeleeDecision {
+    fn sticky_melee_input(&self, now: Instant) -> Option<MaintainRangeInput> {
         if self.data.combat_mode != CombatMode::Melee {
-            return StickyMeleeDecision::Stop {
-                reason: "not in melee mode",
-                clear_target: true,
-            };
+            return None;
         }
 
         if self.data.combat_runtime.attack_activity(self.data.combat_mode).is_none() {
-            return StickyMeleeDecision::Stop {
-                reason: "no active or queued melee attack",
-                clear_target: true,
-            };
+            return None;
         }
 
-        let Some(target_guid) = self.current_target_guid() else {
-            return StickyMeleeDecision::Stop {
-                reason: "no combat target selected",
-                clear_target: true,
-            };
-        };
-
+        let target_guid = self.current_target_guid()?;
         if !self.is_valid_combat_target(target_guid) {
-            return StickyMeleeDecision::Stop {
-                reason: "target is no longer a valid combat target",
-                clear_target: true,
-            };
+            return None;
         }
 
-        let Some(player_pos) = self.data.player_pos else {
-            return StickyMeleeDecision::Stop {
-                reason: "player position is unavailable",
-                clear_target: true,
-            };
-        };
+        let player_position = self.data.player_pos?;
+        let target_position = self.data.entities.get(&target_guid).map(|entity| entity.position);
 
-        let Some(target) = self.data.entities.get(&target_guid) else {
-            return StickyMeleeDecision::Stop {
-                reason: "target entity is unavailable",
-                clear_target: true,
-            };
-        };
-
-        let max_follow_distance = if self.view.sticky_combat_target == Some(target_guid) {
-            MELEE_REPEAT_DISTANCE
-        } else {
-            MELEE_STICKY_DISTANCE
-        };
-        let distance = player_pos.distance_to(&target.position);
-
-        if distance <= MELEE_ATTACK_DISTANCE || distance > max_follow_distance {
-            return StickyMeleeDecision::Stop {
-                reason: if distance <= MELEE_ATTACK_DISTANCE {
-                    "already back in melee range"
-                } else {
-                    "target moved beyond sticky follow range"
-                },
-                clear_target: distance > max_follow_distance,
-            };
-        }
-
-        StickyMeleeDecision::Follow {
+        Some(MaintainRangeInput::Tick {
+            now,
             target_guid,
-            distance,
-            max_follow_distance,
+            player_position,
+            target_position,
+        })
+    }
+
+    fn suspend_sticky_melee(&mut self, result: &mut UpdateResult) {
+        let Some(controller) = self.view.sticky_melee.as_mut() else {
+            return;
+        };
+
+        let update = controller.handle(&MaintainRangeInput::Suspend { clear_latch: true });
+        for effect in update.effects {
+            self.apply_sticky_melee_effect(effect, result);
+        }
+        self.view.sticky_melee = None;
+    }
+
+    fn apply_sticky_melee_effect(
+        &mut self,
+        effect: MaintainRangeEffect,
+        result: &mut UpdateResult,
+    ) {
+        match effect {
+            MaintainRangeEffect::ApproachTarget {
+                target,
+                arrival_distance,
+            } => {
+                log::info!(
+                    "sticky melee: issuing pursuit for target 0x{:08X}",
+                    target.0
+                );
+                result.commands.push(ClientCommand::ApproachTarget {
+                    target,
+                    arrival_distance,
+                });
+            }
+            MaintainRangeEffect::Stop => {
+                log::info!("sticky melee: pausing pursuit");
+                result.commands.push(ClientCommand::StopMoving);
+            }
+            MaintainRangeEffect::Finished(reason) => match reason {
+                MaintainRangeFinishReason::OutsideFollowDistance => {
+                    log::info!("sticky melee: stopping pursuit (target moved beyond sticky follow range)");
+                }
+                MaintainRangeFinishReason::TargetUnavailable => {
+                    log::info!("sticky melee: stopping pursuit (target entity is unavailable)");
+                }
+                MaintainRangeFinishReason::Suspended => {}
+            },
         }
     }
 
@@ -1238,10 +1200,8 @@ pub struct ViewState {
     pub salvaging: Option<SalvagingState>,
     /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.
     pub last_trade_initiation: Option<(Instant, Guid)>,
-    /// Current combat target we are locally sticking to with MoveTo.
-    pub sticky_combat_target: Option<Guid>,
-    /// Last time we refreshed sticky combat movement.
-    pub last_sticky_move_at: Option<Instant>,
+    /// Current reusable maintain-range controller for sticky melee pursuit.
+    pub sticky_melee: Option<MaintainRangeController>,
     /// Current reusable combat automation controller for desired attack maintenance.
     pub combat_automation: Option<CombatAutomationController>,
     /// Cache of the exact bounding boxes computed during update_layout.
@@ -1268,8 +1228,7 @@ impl Default for ViewState {
             active_interaction: None,
             salvaging: None,
             last_trade_initiation: None,
-            sticky_combat_target: None,
-            last_sticky_move_at: None,
+            sticky_melee: None,
             combat_automation: None,
             layout_cache: LayoutCache::default(),
         }
@@ -1931,7 +1890,14 @@ mod tests {
                         && (*arrival_distance - MELEE_ATTACK_DISTANCE).abs() < f32::EPSILON
                 )
             }));
-        assert_eq!(state.view.sticky_combat_target, Some(target_guid));
+        assert_eq!(
+            state
+                .view
+                .sticky_melee
+                .as_ref()
+                .and_then(MaintainRangeController::latched_target_guid),
+            Some(target_guid)
+        );
     }
 
     #[test]
@@ -1946,8 +1912,6 @@ mod tests {
             ..WorldPosition::default()
         });
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-        state.view.sticky_combat_target = Some(target_guid);
-        state.view.last_sticky_move_at = Some(Instant::now() - STICKY_MOVE_REISSUE_INTERVAL);
         state.data.combat_runtime.attack_sequence_active = true;
 
         let target_position = WorldPosition {
@@ -1959,6 +1923,20 @@ mod tests {
             .data
             .entities
             .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
+
+        let mut sticky_melee = MaintainRangeController::new(MaintainRangeConfig {
+            arrival_distance: MELEE_ATTACK_DISTANCE,
+            acquire_distance: MELEE_STICKY_DISTANCE,
+            repeat_distance: MELEE_REPEAT_DISTANCE,
+            reissue_interval: STICKY_MOVE_REISSUE_INTERVAL,
+        });
+        let _ = sticky_melee.handle(&MaintainRangeInput::Tick {
+            now: Instant::now() - STICKY_MOVE_REISSUE_INTERVAL,
+            target_guid,
+            player_position: state.data.player_pos.unwrap(),
+            target_position: Some(target_position),
+        });
+        state.view.sticky_melee = Some(sticky_melee);
 
         let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
             CombatFeedback::AttackDone {
@@ -1983,7 +1961,14 @@ mod tests {
                         && (*arrival_distance - MELEE_ATTACK_DISTANCE).abs() < f32::EPSILON
                 )
             }));
-        assert_eq!(state.view.sticky_combat_target, Some(target_guid));
+        assert_eq!(
+            state
+                .view
+                .sticky_melee
+                .as_ref()
+                .and_then(MaintainRangeController::latched_target_guid),
+            Some(target_guid)
+        );
 
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
@@ -2096,8 +2081,6 @@ mod tests {
         });
         state.data.combat_runtime.attack_sequence_active = true;
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
-        state.view.sticky_combat_target = Some(target_guid);
-        state.view.last_sticky_move_at = Some(Instant::now() - STICKY_MOVE_REISSUE_INTERVAL);
 
         let target_position = WorldPosition {
             landblock_id: Guid(0x01000000),
@@ -2107,14 +2090,43 @@ mod tests {
         let mut target = creature_entity(target_guid, "Drudge", target_position);
         state.data.entities.insert(target_guid, target.clone());
 
+        let mut sticky_melee = MaintainRangeController::new(MaintainRangeConfig {
+            arrival_distance: MELEE_ATTACK_DISTANCE,
+            acquire_distance: MELEE_STICKY_DISTANCE,
+            repeat_distance: MELEE_REPEAT_DISTANCE,
+            reissue_interval: STICKY_MOVE_REISSUE_INTERVAL,
+        });
+        let _ = sticky_melee.handle(&MaintainRangeInput::Tick {
+            now: Instant::now() - STICKY_MOVE_REISSUE_INTERVAL,
+            target_guid,
+            player_position: state.data.player_pos.unwrap(),
+            target_position: Some(WorldPosition {
+                landblock_id: Guid(0x01000000),
+                coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+                ..WorldPosition::default()
+            }),
+        });
+        state.view.sticky_melee = Some(sticky_melee);
+
         let in_range = state.handle_tick(0.016);
 
         assert!(in_range
             .commands
             .iter()
             .any(|command| matches!(command, ClientCommand::StopMoving)));
-        assert_eq!(state.view.sticky_combat_target, Some(target_guid));
-        assert_eq!(state.view.last_sticky_move_at, None);
+        assert_eq!(
+            state
+                .view
+                .sticky_melee
+                .as_ref()
+                .and_then(MaintainRangeController::latched_target_guid),
+            Some(target_guid)
+        );
+        assert!(!state
+            .view
+            .sticky_melee
+            .as_ref()
+            .is_some_and(MaintainRangeController::is_pursuing));
 
         target.position.coords = holtburger_common::Vector3::new(6.0, 0.0, 0.0);
         state.data.entities.insert(target_guid, target);
@@ -2134,7 +2146,18 @@ mod tests {
                         && (*arrival_distance - MELEE_ATTACK_DISTANCE).abs() < f32::EPSILON
                 )
             }));
-        assert_eq!(state.view.sticky_combat_target, Some(target_guid));
-        assert!(state.view.last_sticky_move_at.is_some());
+        assert_eq!(
+            state
+                .view
+                .sticky_melee
+                .as_ref()
+                .and_then(MaintainRangeController::latched_target_guid),
+            Some(target_guid)
+        );
+        assert!(state
+            .view
+            .sticky_melee
+            .as_ref()
+            .is_some_and(MaintainRangeController::is_pursuing));
     }
 }

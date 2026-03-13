@@ -37,6 +37,14 @@ The core crate exposes two layers of client-facing behavior:
 
 Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
 
+The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). It is intentionally provisional and currently standardizes only:
+
+- a broad controller trait shape
+- coarse lifecycle status
+- a small structured update containing `status` and controller-defined `effects`
+
+It intentionally does not standardize a scheduler, claim system, universal reason ontology, or one closed effect enum. Those decisions stay outside the kernel until real controller implementations force a clearer common model.
+
 ### 2. Specialized Systems
 
 #### Auth & Connection ([src/client/auth.rs](src/client/auth.rs))
@@ -114,8 +122,9 @@ sequenceDiagram
 1. **Prove the behavior is shared**: Confirm that the behavior is likely useful across multiple clients or modes of control.
 2. **Identify the primitive surface**: Separate the controller's decision-making from the low-level commands it needs to emit.
 3. **Make state explicit**: Keep controller state isolated from the transport and world-plumbing responsibilities.
-4. **Define interruption rules**: Be explicit about what cancels, supersedes, or pauses the controller.
+4. **Define lifecycle and interruption rules**: Be explicit about what blocks, pauses, interrupts, cancels, or completes the controller.
 5. **Keep adoption optional**: Frontends should opt into controllers rather than being forced through them.
+6. **Treat the kernel as provisional**: Prefer small reusable controller-local vocabularies and refine the shared kernel only after multiple real controllers exist.
 
 ## Migration Path Toward Reusable Controllers
 

@@ -1,3 +1,9 @@
+/// Provisional shared controller kernel for reusable client-side behaviors.
+///
+/// This module intentionally standardizes only the broad lifecycle shape.
+/// Concrete controllers are expected to define their own input and effect
+/// vocabularies, and this kernel will be refined after more real controllers
+/// exist in the codebase.
 pub trait Controller {
     type Input;
     type Effect;
@@ -52,6 +58,8 @@ mod tests {
     enum ThresholdEffect {
         EnteredThreshold,
         ExitedThreshold,
+        Started,
+        LostThreshold,
     }
 
     #[derive(Debug, Default, Clone, Copy)]
@@ -73,8 +81,10 @@ mod tests {
             });
 
             if !self.was_within && is_within {
+                result.push_effect(ThresholdEffect::Started);
                 result.push_effect(ThresholdEffect::EnteredThreshold);
             } else if self.was_within && !is_within {
+                result.push_effect(ThresholdEffect::LostThreshold);
                 result.push_effect(ThresholdEffect::ExitedThreshold);
             }
 
@@ -93,7 +103,7 @@ mod tests {
     }
 
     #[test]
-    fn threshold_controller_emits_milestone_when_crossing_threshold() {
+    fn threshold_controller_can_emit_lifecycle_and_domain_effects() {
         let mut controller = ThresholdController::default();
 
         let idle = controller.handle(&ThresholdInput::Sample {
@@ -110,11 +120,17 @@ mod tests {
         });
 
         assert_eq!(entered.status, ControllerStatus::Active);
-        assert_eq!(entered.effects, vec![ThresholdEffect::EnteredThreshold]);
+        assert_eq!(
+            entered.effects,
+            vec![
+                ThresholdEffect::Started,
+                ThresholdEffect::EnteredThreshold,
+            ]
+        );
     }
 
     #[test]
-    fn threshold_controller_emits_exit_notification_when_leaving_threshold() {
+    fn threshold_controller_can_emit_custom_effect_vocabulary() {
         let mut controller = ThresholdController { was_within: true };
 
         let exited = controller.handle(&ThresholdInput::Sample {
@@ -123,6 +139,12 @@ mod tests {
         });
 
         assert_eq!(exited.status, ControllerStatus::Idle);
-        assert_eq!(exited.effects, vec![ThresholdEffect::ExitedThreshold]);
+        assert_eq!(
+            exited.effects,
+            vec![
+                ThresholdEffect::LostThreshold,
+                ThresholdEffect::ExitedThreshold,
+            ]
+        );
     }
 }

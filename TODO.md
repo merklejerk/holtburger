@@ -184,7 +184,7 @@
 - [x] Missile combat.
     - [x] Auto-attack on target.
 - [ ] Cancel melee/missile attack sequence if target changes to non-creature.
-- [ ] Make melee attacks "sticky".
+- [x] Make melee attacks "sticky".
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.

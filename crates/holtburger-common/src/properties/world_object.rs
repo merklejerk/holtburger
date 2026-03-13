@@ -304,6 +304,11 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
         true
     }
 
+    fn is_creature(&self) -> bool {
+        self.item_type()
+            .is_some_and(|it| it.contains(ItemType::CREATURE))
+    }
+
     fn name(&self) -> &str {
         self.get_string_prop(PropertyString::Name)
             .unwrap_or("Unknown")

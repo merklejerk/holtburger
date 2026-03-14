@@ -169,16 +169,25 @@ impl PlayerState {
         pos_seq: u16,
         teleport_seq: u16,
         force_seq: u16,
+        server_grounded: bool,
         events: &mut Vec<StateEvent>,
     ) {
         use holtburger_common::sequence::is_newer_u16;
         let old_forced_seq = self.force_position_sequence;
+        let old_grounded = self.server_grounded;
 
         self.position = pos;
         self.instance_sequence = instance_seq;
         self.position_sequence = pos_seq;
         self.teleport_sequence = teleport_seq;
         self.force_position_sequence = force_seq;
+        self.server_grounded = Some(server_grounded);
+
+        if old_grounded != Some(server_grounded) {
+            events.push(StateEvent::PlayerGroundedUpdated {
+                grounded: server_grounded,
+            });
+        }
 
         if is_newer_u16(self.force_position_sequence, old_forced_seq) {
             events.push(StateEvent::ForcedReposition {

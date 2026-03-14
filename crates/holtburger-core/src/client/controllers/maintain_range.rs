@@ -1,6 +1,6 @@
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,10 +33,7 @@ pub enum MaintainRangeFinishReason {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MaintainRangeEffect {
-    StartApproach {
-        target: Guid,
-        arrival_distance: f32,
-    },
+    StartApproach { target: Guid, arrival_distance: f32 },
     Stop,
     Finished(MaintainRangeFinishReason),
 }
@@ -112,10 +109,8 @@ impl Controller for MaintainRangeController {
                 self.reset_for_target_change(target_guid);
 
                 let Some(target_position) = target_position else {
-                    return self.stop_and_finish(
-                        MaintainRangeFinishReason::TargetUnavailable,
-                        true,
-                    );
+                    return self
+                        .stop_and_finish(MaintainRangeFinishReason::TargetUnavailable, true);
                 };
 
                 let max_follow_distance = if self.latched_target == Some(target_guid) {
@@ -137,10 +132,8 @@ impl Controller for MaintainRangeController {
                 }
 
                 if distance > max_follow_distance {
-                    return self.stop_and_finish(
-                        MaintainRangeFinishReason::OutsideFollowDistance,
-                        true,
-                    );
+                    return self
+                        .stop_and_finish(MaintainRangeFinishReason::OutsideFollowDistance, true);
                 }
 
                 let should_issue = self.latched_target != Some(target_guid)

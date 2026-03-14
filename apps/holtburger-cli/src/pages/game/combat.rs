@@ -16,7 +16,10 @@ pub enum AttackActivity {
 
 impl CombatRuntimeState {
     pub fn handle_mode_updated(&mut self, mode: CombatMode) {
-        if matches!(mode, CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic) {
+        if matches!(
+            mode,
+            CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
+        ) {
             self.attack_queued = false;
             self.attack_sequence_active = false;
         }
@@ -43,7 +46,8 @@ impl CombatRuntimeState {
                 self.attack_queued = true;
                 self.attack_sequence_active = false;
             }
-            CombatFeedback::AttackDone { .. } | CombatFeedback::VictimNotification { .. }
+            CombatFeedback::AttackDone { .. }
+            | CombatFeedback::VictimNotification { .. }
             | CombatFeedback::KillerNotification { .. } => {
                 self.attack_queued = false;
                 self.attack_sequence_active = false;
@@ -91,15 +95,24 @@ mod tests {
 
         state.queue_attack();
 
-        assert_eq!(state.attack_activity(CombatMode::Melee), Some(AttackActivity::Ready));
+        assert_eq!(
+            state.attack_activity(CombatMode::Melee),
+            Some(AttackActivity::Ready)
+        );
 
         state.handle_feedback(&CombatFeedback::AttackCommenced);
-        assert_eq!(state.attack_activity(CombatMode::Melee), Some(AttackActivity::Active));
+        assert_eq!(
+            state.attack_activity(CombatMode::Melee),
+            Some(AttackActivity::Active)
+        );
 
         state.handle_feedback(&CombatFeedback::AttackDone {
             error: holtburger_protocol::errors::WeenieError::None,
         });
-        assert_eq!(state.attack_activity(CombatMode::Melee), Some(AttackActivity::Ready));
+        assert_eq!(
+            state.attack_activity(CombatMode::Melee),
+            Some(AttackActivity::Ready)
+        );
     }
 
     #[test]
@@ -147,7 +160,10 @@ mod tests {
 
         state.queue_attack();
 
-        assert_eq!(state.attack_activity(CombatMode::Missile), Some(AttackActivity::Ready));
+        assert_eq!(
+            state.attack_activity(CombatMode::Missile),
+            Some(AttackActivity::Ready)
+        );
     }
 
     #[test]

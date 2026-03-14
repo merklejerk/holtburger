@@ -25,7 +25,8 @@ impl ProtocolUnpack for TargetedMeleeAttackActionData {
 
         Some(Self {
             target_guid,
-            attack_height: AttackHeight::from_repr(attack_height_raw).unwrap_or(AttackHeight::Medium),
+            attack_height: AttackHeight::from_repr(attack_height_raw)
+                .unwrap_or(AttackHeight::Medium),
             power_level,
         })
     }
@@ -62,7 +63,8 @@ impl ProtocolUnpack for TargetedMissileAttackActionData {
 
         Some(Self {
             target_guid,
-            attack_height: AttackHeight::from_repr(attack_height_raw).unwrap_or(AttackHeight::Medium),
+            attack_height: AttackHeight::from_repr(attack_height_raw)
+                .unwrap_or(AttackHeight::Medium),
             accuracy_level,
         })
     }

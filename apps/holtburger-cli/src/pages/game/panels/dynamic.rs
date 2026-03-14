@@ -1,5 +1,5 @@
-use crate::pages::game::{GameData, ViewState};
 use crate::pages::game::combat::{AttackActivity, combat_mode_label};
+use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
 use holtburger_common::properties::WorldObjectExt as _;
@@ -75,10 +75,7 @@ pub fn render_dynamic_pane(
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Fill(1),
-            Constraint::Length(control_width),
-        ])
+        .constraints([Constraint::Fill(1), Constraint::Length(control_width)])
         .split(inner);
 
     // --- 1. Interaction Info / World Name ---
@@ -180,7 +177,10 @@ fn combat_controls_line(data: &GameData, _view: &ViewState) -> Option<Line<'stat
             };
 
             spans.push(Span::styled(
-                format!("{}: {}  [H]eight: {} ", profile_name, profile_label, height_label),
+                format!(
+                    "{}: {}  [H]eight: {} ",
+                    profile_name, profile_label, height_label
+                ),
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
@@ -196,11 +196,15 @@ fn attack_indicator_span(activity: AttackActivity) -> Span<'static> {
     let (marker, style) = match activity {
         AttackActivity::Ready => (
             " 😠 ",
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
         ),
         AttackActivity::Active => (
             " 😡 ",
-            Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD | Modifier::RAPID_BLINK),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD | Modifier::RAPID_BLINK),
         ),
     };
 
@@ -240,14 +244,18 @@ fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::{attack_indicator_span, combat_controls_line};
-    use crate::pages::game::{GameData, ViewState};
     use crate::pages::game::combat::{AttackActivity, combat_mode_label};
+    use crate::pages::game::{GameData, ViewState};
     use crate::types::Interaction;
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 
     #[test]
     fn melee_controls_use_full_labels_and_tiny_indicator() {
-        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
         data.combat_mode = CombatMode::Melee;
         let view = ViewState::default();
 
@@ -261,7 +269,11 @@ mod tests {
 
     #[test]
     fn missile_controls_show_ready_indicator_with_target() {
-        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
         data.combat_mode = CombatMode::Missile;
         data.combat_runtime.attack_queued = true;
         data.combat_controls.attack_height = AttackHeight::High;
@@ -281,7 +293,11 @@ mod tests {
 
     #[test]
     fn peace_mode_has_no_attack_indicator_line() {
-        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
         data.combat_mode = CombatMode::NonCombat;
         let view = ViewState::default();
 
@@ -290,7 +306,11 @@ mod tests {
 
     #[test]
     fn magic_mode_has_no_attack_indicator_line() {
-        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
         data.combat_mode = CombatMode::Magic;
         let view = ViewState::default();
 
@@ -299,7 +319,11 @@ mod tests {
 
     #[test]
     fn combat_controls_show_active_indicator_while_attack_sequence_is_active() {
-        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
         data.combat_mode = CombatMode::Melee;
         data.combat_runtime.attack_sequence_active = true;
         let view = ViewState {
@@ -321,12 +345,19 @@ mod tests {
 
     #[test]
     fn active_indicator_uses_shared_bar() {
-        assert_eq!(attack_indicator_span(AttackActivity::Active).content, " 😡 ");
+        assert_eq!(
+            attack_indicator_span(AttackActivity::Active).content,
+            " 😡 "
+        );
     }
 
     #[test]
     fn targeting_without_queued_attack_shows_no_indicator() {
-        let mut data = GameData::new(Default::default(), "Player".to_string(), "World".to_string());
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
         data.combat_mode = CombatMode::Missile;
         let view = ViewState {
             active_interaction: Some(Interaction::Targeting {

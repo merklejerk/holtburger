@@ -227,7 +227,10 @@ fn format_combat_feedback(feedback: &CombatFeedback) -> (ChatMessageKind, String
     match feedback {
         CombatFeedback::AttackDone { error } => {
             if *error == WeenieError::None {
-                (ChatMessageKind::Debug, "Attack sequence finished.".to_string())
+                (
+                    ChatMessageKind::Debug,
+                    "Attack sequence finished.".to_string(),
+                )
             } else {
                 (
                     ChatMessageKind::Warning,

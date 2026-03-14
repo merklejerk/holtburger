@@ -232,6 +232,14 @@ pub enum GameOpcode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Hash)]
 #[repr(u32)]
 pub enum GameActionOpcode {
+    // --- Combat ---
+    /// C2S: Initiate or continue a targeted melee attack.
+    /// Carries the current attack height and power slider value.
+    TargetedMeleeAttack = 0x0008,
+    /// C2S: Initiate or continue a targeted missile attack.
+    /// Carries the current attack height and accuracy slider value.
+    TargetedMissileAttack = 0x000A,
+
     // --- Communication & Chat ---
     // /// C2S: Toggle Away From Keyboard (AFK) status.
     // SetAfkMode = 0x000F,
@@ -715,22 +723,22 @@ pub enum GameEventOpcode {
     // SalvageOperationsResult = 0x02B4,
 
     // --- Combat & Stats ---
-    // /// S2C: Notification that the current attack sequence is finished.
-    // AttackDone = 0x01A7,
-    // /// S2C: Notifies the attacker about the result of their attack.
-    // AttackerNotification = 0x01B1,
-    // /// S2C: Notifies the defender that they were attacked.
-    // DefenderNotification = 0x01B2,
-    // /// S2C: Notifies the attacker that the target evaded.
-    // EvasionAttackerNotification = 0x01B3,
-    // /// S2C: Notifies the defender that they successfully evaded an attack.
-    // EvasionDefenderNotification = 0x01B4,
-    // /// S2C: Signals the start of an attack sequence.
-    // CombatCommenceAttack = 0x01B8,
-    // /// S2C: Sent to the victim when they die.
-    // VictimNotification = 0x01AC,
-    // /// S2C: Sent to the killer when they defeat a target.
-    // KillerNotification = 0x01AD,
+    /// S2C: Notification that the current attack sequence is finished.
+    AttackDone = 0x01A7,
+    /// S2C: Sent to the victim when they die.
+    VictimNotification = 0x01AC,
+    /// S2C: Sent to the killer when they defeat a target.
+    KillerNotification = 0x01AD,
+    /// S2C: Notifies the attacker about the result of their attack.
+    AttackerNotification = 0x01B1,
+    /// S2C: Notifies the defender that they were attacked.
+    DefenderNotification = 0x01B2,
+    /// S2C: Notifies the attacker that the target evaded.
+    EvasionAttackerNotification = 0x01B3,
+    /// S2C: Notifies the defender that they successfully evaded an attack.
+    EvasionDefenderNotification = 0x01B4,
+    /// S2C: Signals the start of an attack sequence.
+    CombatCommenceAttack = 0x01B8,
 
     // --- Magic & Enchantments (Extra) ---
     /// S2C: Removes a spell from the player's spellbook.

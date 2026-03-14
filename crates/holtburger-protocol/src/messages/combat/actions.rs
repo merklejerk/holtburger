@@ -1,7 +1,86 @@
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::Guid;
 
 use super::types::*;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetedMeleeAttackActionData {
+    pub target_guid: Guid,
+    pub attack_height: AttackHeight,
+    pub power_level: f32,
+}
+
+impl ProtocolUnpack for TargetedMeleeAttackActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 12 > data.len() {
+            return None;
+        }
+
+        let target_guid = Guid::unpack(data, offset)?;
+        let attack_height_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let power_level = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        *offset += 4;
+
+        Some(Self {
+            target_guid,
+            attack_height: AttackHeight::from_repr(attack_height_raw)
+                .unwrap_or(AttackHeight::Medium),
+            power_level,
+        })
+    }
+}
+
+impl ProtocolPack for TargetedMeleeAttackActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.target_guid.pack(writer);
+        writer
+            .write_u32::<LittleEndian>(self.attack_height as u32)
+            .unwrap();
+        writer.write_f32::<LittleEndian>(self.power_level).unwrap();
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TargetedMissileAttackActionData {
+    pub target_guid: Guid,
+    pub attack_height: AttackHeight,
+    pub accuracy_level: f32,
+}
+
+impl ProtocolUnpack for TargetedMissileAttackActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 12 > data.len() {
+            return None;
+        }
+
+        let target_guid = Guid::unpack(data, offset)?;
+        let attack_height_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let accuracy_level = LittleEndian::read_f32(&data[*offset..*offset + 4]);
+        *offset += 4;
+
+        Some(Self {
+            target_guid,
+            attack_height: AttackHeight::from_repr(attack_height_raw)
+                .unwrap_or(AttackHeight::Medium),
+            accuracy_level,
+        })
+    }
+}
+
+impl ProtocolPack for TargetedMissileAttackActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.target_guid.pack(writer);
+        writer
+            .write_u32::<LittleEndian>(self.attack_height as u32)
+            .unwrap();
+        writer
+            .write_f32::<LittleEndian>(self.accuracy_level)
+            .unwrap();
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChangeCombatModeActionData {
@@ -42,6 +121,36 @@ mod tests {
     use super::*;
     use crate::messages::game_action::{GameAction, GameActionMessage};
     use crate::test_helpers::assert_pack_unpack_parity;
+
+    #[test]
+    fn test_targeted_melee_attack_parity() {
+        let action = GameActionMessage {
+            sequence: 0,
+            action: GameAction::TargetedMeleeAttack(Box::new(TargetedMeleeAttackActionData {
+                target_guid: Guid(0x80000001),
+                attack_height: AttackHeight::Medium,
+                power_level: 0.5,
+            })),
+        };
+
+        let fixture = hex::decode("000000000800000001000080020000000000003F").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_targeted_missile_attack_parity() {
+        let action = GameActionMessage {
+            sequence: 0,
+            action: GameAction::TargetedMissileAttack(Box::new(TargetedMissileAttackActionData {
+                target_guid: Guid(0x80000002),
+                attack_height: AttackHeight::High,
+                accuracy_level: 1.0,
+            })),
+        };
+
+        let fixture = hex::decode("000000000A00000002000080010000000000803F").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
 
     #[test]
     fn test_change_combat_mode_parity() {

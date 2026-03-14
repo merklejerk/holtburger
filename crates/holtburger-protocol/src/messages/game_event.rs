@@ -1,4 +1,5 @@
 pub use crate::messages::chat::events::*;
+pub use crate::messages::combat::events::*;
 pub use crate::messages::inventory::events::*;
 pub use crate::messages::magic::events::*;
 pub use crate::messages::misc::events::*;
@@ -32,6 +33,14 @@ pub enum GameEvent {
     PopupString(Box<PopupStringEventData>),
     CommunicationTransientString(Box<CommunicationTransientStringEventData>),
     StartGame,
+    AttackDone(Box<AttackDoneEventData>),
+    AttackerNotification(Box<AttackerNotificationEventData>),
+    DefenderNotification(Box<DefenderNotificationEventData>),
+    EvasionAttackerNotification(Box<EvasionAttackerNotificationEventData>),
+    EvasionDefenderNotification(Box<EvasionDefenderNotificationEventData>),
+    CombatCommenceAttack,
+    VictimNotification(Box<VictimNotificationEventData>),
+    KillerNotification(Box<KillerNotificationEventData>),
     MagicUpdateEnchantment(Box<MagicUpdateEnchantmentEventData>),
     MagicUpdateMultipleEnchantments(Box<MagicUpdateMultipleEnchantmentsEventData>),
     MagicRemoveEnchantment(Box<MagicRemoveEnchantmentEventData>),
@@ -111,6 +120,32 @@ impl ProtocolUnpack for GameEventMessage {
                     ))
                 }
                 GameEventOpcode::StartGame => GameEvent::StartGame,
+                GameEventOpcode::AttackDone => {
+                    GameEvent::AttackDone(Box::new(AttackDoneEventData::unpack(data, offset)?))
+                }
+                GameEventOpcode::AttackerNotification => GameEvent::AttackerNotification(Box::new(
+                    AttackerNotificationEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::DefenderNotification => GameEvent::DefenderNotification(Box::new(
+                    DefenderNotificationEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::EvasionAttackerNotification => {
+                    GameEvent::EvasionAttackerNotification(Box::new(
+                        EvasionAttackerNotificationEventData::unpack(data, offset)?,
+                    ))
+                }
+                GameEventOpcode::EvasionDefenderNotification => {
+                    GameEvent::EvasionDefenderNotification(Box::new(
+                        EvasionDefenderNotificationEventData::unpack(data, offset)?,
+                    ))
+                }
+                GameEventOpcode::CombatCommenceAttack => GameEvent::CombatCommenceAttack,
+                GameEventOpcode::VictimNotification => GameEvent::VictimNotification(Box::new(
+                    VictimNotificationEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::KillerNotification => GameEvent::KillerNotification(Box::new(
+                    KillerNotificationEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::MagicUpdateEnchantment => {
                     let mut d = MagicUpdateEnchantmentEventData::unpack(data, offset)?;
                     d.target = target;
@@ -295,6 +330,45 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::StartGame => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::StartGame as u32)
                     .unwrap();
+            }
+            GameEvent::AttackDone(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::AttackDone as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::AttackerNotification(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::AttackerNotification as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::DefenderNotification(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::DefenderNotification as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::EvasionAttackerNotification(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::EvasionAttackerNotification as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::EvasionDefenderNotification(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::EvasionDefenderNotification as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::CombatCommenceAttack => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CombatCommenceAttack as u32)
+                    .unwrap();
+            }
+            GameEvent::VictimNotification(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::VictimNotification as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::KillerNotification(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::KillerNotification as u32)
+                    .unwrap();
+                data.pack(buf);
             }
             GameEvent::MagicUpdateEnchantment(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::MagicUpdateEnchantment as u32)

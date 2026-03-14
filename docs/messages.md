@@ -424,6 +424,161 @@ Primary way clients send commands and interactions to the server.
 - **`0x0015` Talk:** Send chat or commands.
 - **`0x0036` Use:** Interact with world objects or items.
 
+### Combat Game Actions
+
+The combat stance toggle and targeted attack packets are sent as `0xF7B1` game actions with a 4-byte sequence, a 4-byte action opcode, then the action payload.
+
+#### `0xF7B1:0x0008` TargetedMeleeAttack (C2S)
+Starts or continues a melee attack against a specific target.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `TargetGUID` | GUID of the creature or attackable world object being attacked. |
+| `uint32` | `AttackHeight` | Vertical attack selection. ACE values: `High = 1`, `Medium = 2`, `Low = 3`. |
+| `float32` | `PowerLevel` | Melee power slider value, clamped by ACE to `[0.0, 1.0]`. |
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `0`
+- Target: `0x80000001`
+- Height: `Medium`
+- Power: `0.5`
+- Full bytes: `000000000800000001000080020000000000003F`
+
+#### `0xF7B1:0x000A` TargetedMissileAttack (C2S)
+Starts or continues a missile attack against a specific target.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `TargetGUID` | GUID of the creature or attackable world object being attacked. |
+| `uint32` | `AttackHeight` | Vertical attack selection. ACE values: `High = 1`, `Medium = 2`, `Low = 3`. |
+| `float32` | `AccuracyLevel` | Missile accuracy slider value, clamped by ACE to `[0.0, 1.0]`. |
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `0`
+- Target: `0x80000002`
+- Height: `High`
+- Accuracy: `1.0`
+- Full bytes: `000000000A00000002000080010000000000803F`
+
+#### `0xF7B1:0x0053` ChangeCombatMode (C2S)
+Changes the player combat stance. holtburger uses this before targeted melee or missile attacks when the current stance does not already match.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `CombatMode` | ACE bitmask values. Common stances are `NonCombat = 1`, `Melee = 2`, `Missile = 4`, `Magic = 8`. |
+
+### Combat Game Events
+
+These `0xF7B0` events provide the retail combat feedback stream that ACE sends while an attack starts, lands, misses, or ends. holtburger now unpacks them as typed protocol messages and surfaces them to the CLI chat panel.
+
+#### `0xF7B0:0x01B8` CombatCommenceAttack (S2C)
+Sent when the server has accepted the attack and combat animation timing begins.
+
+Payload: none.
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `5`
+- Full bytes: `B0F700000000000005000000B8010000`
+
+#### `0xF7B0:0x01A7` AttackDone (S2C)
+Sent when an attack sequence finishes. The payload is a `WeenieError` result code.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `uint32` | `WeenieError` | ACE completion code. `0x36` is `ActionCancelled` in the parity fixture. |
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `0`
+- Full bytes: `B0F700000000000000000000A701000036000000`
+
+#### `0xF7B0:0x01B1` AttackerNotification (S2C)
+Sent to the attacker when a hit lands.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `String16L` | `DefenderName` | Target display name. |
+| `uint32` | `DamageType` | ACE damage-type bitmask. |
+| `float64` | `HealthPercent` | Remaining target health fraction after the hit. |
+| `uint32` | `Damage` | Damage dealt. |
+| `uint32` | `CriticalHit` | `0` or `1`. |
+| `uint64` | `AttackConditions` | ACE bitflags such as `Recklessness`, `SneakAttack`, or `Overpower`. |
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `1`
+- Defender: `Drudge Ravener`
+- Damage type: `Slash`
+- Health percent: `0.25`
+- Damage: `37`
+- Critical hit: `true`
+- Attack conditions: `Recklessness | SneakAttack`
+
+#### `0xF7B0:0x01B2` DefenderNotification (S2C)
+Sent to the defender when an incoming hit lands.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `String16L` | `AttackerName` | Attacker display name. |
+| `uint32` | `DamageType` | ACE damage-type bitmask. |
+| `float64` | `HealthPercent` | Remaining player health fraction after the hit. |
+| `uint32` | `Damage` | Damage taken. |
+| `uint32` | `DamageLocation` | Hit location enum. ACE values cover `Head` through `Foot`. |
+| `uint32` | `CriticalHit` | `0` or `1`. |
+| `uint64` | `AttackConditions` | ACE bitflags such as `Overpower`. |
+
+ACE-backed fixture used by holtburger parity tests:
+- Sequence: `2`
+- Attacker: `Banderling`
+- Damage type: `Fire`
+- Health percent: `0.125`
+- Damage: `18`
+- Damage location: `Chest`
+- Critical hit: `false`
+- Attack conditions: `Overpower`
+
+#### `0xF7B0:0x01B3` EvasionAttackerNotification (S2C)
+Sent to the attacker when the defender evades.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `String16L` | `DefenderName` | Defender display name. |
+
+#### `0xF7B0:0x01B4` EvasionDefenderNotification (S2C)
+Sent to the defender when they evade an attack.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `String16L` | `AttackerName` | Attacker display name. |
+
+#### `0xF7B0:0x01AC` VictimNotification (S2C)
+Sent to the victim with the death string displayed by the retail client.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `String16L` | `DeathMessage` | Death text. |
+
+Parity fixture message: `You have died!`
+
+#### `0xF7B0:0x01AD` KillerNotification (S2C)
+Sent to the killer with the kill confirmation string displayed by the retail client.
+
+| Type | Name | Description |
+| :--- | :--- | :--- |
+| `String16L` | `DeathMessage` | Kill text. |
+
+Parity fixture message: `You killed the drudge!`
+
+#### Holtburger TUI Combat Controls
+
+The current holtburger TUI exposes melee and missile controls in the dynamic pane.
+
+- Melee shows `Pow` for the outgoing `PowerLevel` float.
+- Missile shows `Acc` for the outgoing `AccuracyLevel` float.
+- Both modes show `Hgt` for the `AttackHeight` enum.
+- The fixed preset mapping is `Low = 0.0`, `Medium = 0.5`, `High = 1.0`.
+- The default local control state is `Medium` preset and `Medium` height.
+- `v` cycles power or accuracy and `h` cycles attack height, but only while the dynamic pane has focus.
+- There is no dedicated attack key. Entering melee or missile mode with a valid target sends `ChangeCombatMode` followed by the targeted attack action in the same command batch. Selecting a valid target while already in melee or missile mode sends only the targeted attack action.
+
 ---
 
 ## 6. Trade and Vendors

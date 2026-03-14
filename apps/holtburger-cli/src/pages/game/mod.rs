@@ -1,3 +1,4 @@
+pub mod combat;
 pub mod input;
 pub mod panels;
 mod salvaging;

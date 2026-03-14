@@ -53,23 +53,12 @@ pub(super) fn raw_motion_state_with_player_style(
     raw_motion_state
 }
 
-pub(super) fn resolve_movement_contact(
-    _world: &WorldState,
-    metadata: MovementPacketMetadata,
-) -> bool {
-    metadata.contact.unwrap_or(true)
+pub(super) fn encode_contact_long_jump(metadata: MovementPacketMetadata) -> u8 {
+    u8::from(metadata.contact.unwrap_or(true))
 }
 
-pub(super) fn default_movement_metadata(_world: &WorldState) -> MovementPacketMetadata {
-    MovementPacketMetadata::default()
-}
-
-pub(super) fn encode_contact_long_jump(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
-    u8::from(resolve_movement_contact(world, metadata))
-}
-
-pub(super) fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
-    u8::from(resolve_movement_contact(world, metadata))
+pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
+    u8::from(metadata.contact.unwrap_or(true))
 }
 
 pub(super) struct MovementSystem {
@@ -166,7 +155,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(world, metadata),
+            contact_long_jump: encode_contact_long_jump(metadata),
         };
 
         session
@@ -186,7 +175,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(world, metadata),
+            contact_long_jump: encode_contact_long_jump(metadata),
         };
 
         session
@@ -308,7 +297,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            last_contact: encode_last_contact(world, MovementPacketMetadata::default()),
+            last_contact: encode_last_contact(MovementPacketMetadata::default()),
         };
 
         log::debug!(
@@ -408,27 +397,5 @@ mod tests {
             Some(WALK_FORWARD_MOTION_COMMAND)
         );
         assert_eq!(raw_motion_state.forward_speed, Some(7.0));
-    }
-
-    #[test]
-    fn movement_contact_defaults_to_grounded_even_if_server_flag_is_false() {
-        let mut world = WorldState::new(None, None);
-        world.player.server_grounded = Some(false);
-
-        assert!(resolve_movement_contact(
-            &world,
-            MovementPacketMetadata::default(),
-        ));
-    }
-
-    #[test]
-    fn movement_contact_still_honors_explicit_metadata() {
-        let mut world = WorldState::new(None, None);
-        world.player.server_grounded = Some(true);
-
-        assert!(!resolve_movement_contact(
-            &world,
-            MovementPacketMetadata::with_contact(false),
-        ));
     }
 }

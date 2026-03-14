@@ -1,7 +1,6 @@
-use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest};
+use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
 use crate::client::movement::{
-    default_movement_metadata, encode_contact_long_jump, encode_last_contact,
-    raw_motion_state_with_player_style,
+    encode_contact_long_jump, encode_last_contact, raw_motion_state_with_player_style,
 };
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
@@ -573,7 +572,7 @@ impl Client {
                     server_control_sequence: srv_seq,
                     teleport_sequence: tele_seq,
                     force_position_sequence: force_seq,
-                    contact_long_jump: encode_contact_long_jump(&self.world, metadata),
+                    contact_long_jump: encode_contact_long_jump(metadata),
                 })))
                 .await
             }
@@ -619,10 +618,7 @@ impl Client {
                     server_control_sequence: self.world.player.server_control_sequence,
                     teleport_sequence: self.world.player.teleport_sequence,
                     force_position_sequence: self.world.player.force_position_sequence,
-                    last_contact: encode_last_contact(
-                        &self.world,
-                        default_movement_metadata(&self.world),
-                    ),
+                    last_contact: encode_last_contact(MovementPacketMetadata::default()),
                 };
 
                 self.send_game_action(GameAction::AutonomousPosition(Box::new(pulse)))

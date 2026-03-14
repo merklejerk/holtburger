@@ -335,48 +335,6 @@ fn format_attack_conditions_suffix(attack_conditions: AttackConditions) -> Strin
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn attacker_feedback_formats_damage_summary() {
-        let (kind, text) = format_combat_feedback(&CombatFeedback::AttackerNotification {
-            defender_name: "Drudge".to_string(),
-            damage_type: DamageType::SLASH,
-            health_percent: 0.25,
-            damage: 37,
-            critical_hit: true,
-            attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
-        });
-
-        assert_eq!(kind, ChatMessageKind::Info);
-        assert!(text.contains("You hit Drudge for 37 slashing damage"));
-        assert!(text.contains("25.0%"));
-        assert!(text.contains("Critical hit."));
-        assert!(text.contains("Recklessness"));
-        assert!(text.contains("Sneak Attack"));
-    }
-
-    #[test]
-    fn defender_feedback_formats_location_summary() {
-        let (kind, text) = format_combat_feedback(&CombatFeedback::DefenderNotification {
-            attacker_name: "Banderling".to_string(),
-            damage_type: DamageType::FIRE,
-            health_percent: 0.125,
-            damage: 18,
-            damage_location: DamageLocation::Chest,
-            critical_hit: false,
-            attack_conditions: AttackConditions::OVERPOWER,
-        });
-
-        assert_eq!(kind, ChatMessageKind::Warning);
-        assert!(text.contains("Banderling hit you for 18 fire damage to your chest"));
-        assert!(text.contains("12.5%"));
-        assert!(text.contains("Overpower"));
-    }
-}
-
 pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area: Rect) {
     let height = area.height.saturating_sub(2) as usize;
 
@@ -440,4 +398,46 @@ pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area:
         total_lines,
         start,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attacker_feedback_formats_damage_summary() {
+        let (kind, text) = format_combat_feedback(&CombatFeedback::AttackerNotification {
+            defender_name: "Drudge".to_string(),
+            damage_type: DamageType::SLASH,
+            health_percent: 0.25,
+            damage: 37,
+            critical_hit: true,
+            attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
+        });
+
+        assert_eq!(kind, ChatMessageKind::Info);
+        assert!(text.contains("You hit Drudge for 37 slashing damage"));
+        assert!(text.contains("25.0%"));
+        assert!(text.contains("Critical hit."));
+        assert!(text.contains("Recklessness"));
+        assert!(text.contains("Sneak Attack"));
+    }
+
+    #[test]
+    fn defender_feedback_formats_location_summary() {
+        let (kind, text) = format_combat_feedback(&CombatFeedback::DefenderNotification {
+            attacker_name: "Banderling".to_string(),
+            damage_type: DamageType::FIRE,
+            health_percent: 0.125,
+            damage: 18,
+            damage_location: DamageLocation::Chest,
+            critical_hit: false,
+            attack_conditions: AttackConditions::OVERPOWER,
+        });
+
+        assert_eq!(kind, ChatMessageKind::Warning);
+        assert!(text.contains("Banderling hit you for 18 fire damage to your chest"));
+        assert!(text.contains("12.5%"));
+        assert!(text.contains("Overpower"));
+    }
 }

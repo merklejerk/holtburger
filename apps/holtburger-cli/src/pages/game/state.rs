@@ -991,14 +991,9 @@ impl GameState {
             return None;
         }
 
-        if self
-            .data
+        self.data
             .combat_runtime
-            .attack_activity(self.data.combat_mode)
-            .is_none()
-        {
-            return None;
-        }
+            .attack_activity(self.data.combat_mode)?;
 
         let target_guid = self.current_target_guid()?;
         if !self.is_valid_combat_target(target_guid) {
@@ -1347,9 +1342,7 @@ impl GameState {
     }
 
     pub(crate) fn current_movement_metadata(&self) -> MovementPacketMetadata {
-        MovementPacketMetadata {
-            contact: self.data.player_grounded,
-        }
+        MovementPacketMetadata::default()
     }
 
     fn locomotion_request(
@@ -1669,6 +1662,7 @@ mod tests {
         assert!(state.view.approach_target.is_some());
     }
 
+    #[test]
     fn combat_feedback_updates_auto_attack_runtime_state() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -2557,5 +2551,14 @@ mod tests {
 
         assert!(second.commands.is_empty());
         assert!(state.view.approach_target.is_some());
+    }
+
+    #[test]
+    fn movement_metadata_does_not_echo_server_grounded_state() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_grounded = Some(false);
+
+        assert_eq!(state.current_movement_metadata().contact, None);
     }
 }

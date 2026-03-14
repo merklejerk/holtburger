@@ -54,18 +54,14 @@ pub(super) fn raw_motion_state_with_player_style(
 }
 
 pub(super) fn resolve_movement_contact(
-    world: &WorldState,
+    _world: &WorldState,
     metadata: MovementPacketMetadata,
 ) -> bool {
-    metadata
-        .contact
-        .unwrap_or(world.player.server_grounded.unwrap_or(true))
+    metadata.contact.unwrap_or(true)
 }
 
-pub(super) fn default_movement_metadata(world: &WorldState) -> MovementPacketMetadata {
-    MovementPacketMetadata {
-        contact: world.player.server_grounded,
-    }
+pub(super) fn default_movement_metadata(_world: &WorldState) -> MovementPacketMetadata {
+    MovementPacketMetadata::default()
 }
 
 pub(super) fn encode_contact_long_jump(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
@@ -412,5 +408,27 @@ mod tests {
             Some(WALK_FORWARD_MOTION_COMMAND)
         );
         assert_eq!(raw_motion_state.forward_speed, Some(7.0));
+    }
+
+    #[test]
+    fn movement_contact_defaults_to_grounded_even_if_server_flag_is_false() {
+        let mut world = WorldState::new(None, None);
+        world.player.server_grounded = Some(false);
+
+        assert!(resolve_movement_contact(
+            &world,
+            MovementPacketMetadata::default(),
+        ));
+    }
+
+    #[test]
+    fn movement_contact_still_honors_explicit_metadata() {
+        let mut world = WorldState::new(None, None);
+        world.player.server_grounded = Some(true);
+
+        assert!(!resolve_movement_contact(
+            &world,
+            MovementPacketMetadata::with_contact(false),
+        ));
     }
 }

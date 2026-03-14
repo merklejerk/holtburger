@@ -201,8 +201,10 @@
 - [ ] Make target of current interaction bold in dashboard lists?
 - [ ] Don't auto-attack targets too far away or marked for deletion.
 - [ ] Too much attack error spam! `Attack sequence finished with ActionCancelled.` 50x.
+    - I think related to dead/dying targets.
 - [ ] Label containers that you have recently opened.
 - [ ] Approach can overshoot target and oscillate. Ease out?
+- [ ] Use o[n] Self verb for mana charges, healing kits.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

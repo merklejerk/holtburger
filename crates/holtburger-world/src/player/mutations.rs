@@ -207,9 +207,9 @@ impl PlayerState {
         self.movement_sequence = movement_sequence;
     }
 
-    pub fn update_current_motion_style(&mut self, current_style: u16) {
+    pub fn update_last_server_motion_style(&mut self, current_style: u16) {
         if current_style != 0 {
-            self.current_motion_style = Some(u32::from(current_style));
+            self.last_server_motion_style = Some(u32::from(current_style));
         }
     }
 

@@ -1,5 +1,7 @@
 use crate::client::WireEvent;
-use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
+use crate::client::locomotion::{
+    LocomotionPrimitive, LocomotionRequest, MotionStyle, MovementPacketMetadata,
+};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
@@ -27,13 +29,26 @@ fn calculate_arrival_position(
     }
 }
 
-pub(super) fn raw_motion_state_with_player_style(
+pub(super) fn raw_motion_state_with_motion_style(
     world: &WorldState,
     mut raw_motion_state: RawMotionState,
+    motion_style: MotionStyle,
 ) -> RawMotionState {
-    if let Some(current_style) = world.player.current_motion_style {
-        raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
-        raw_motion_state.current_style = Some(current_style);
+    match motion_style {
+        MotionStyle::PreserveServer => {
+            if let Some(current_style) = world.player.last_server_motion_style {
+                raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
+                raw_motion_state.current_style = Some(current_style);
+            }
+        }
+        MotionStyle::Explicit(current_style) => {
+            raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
+            raw_motion_state.current_style = Some(current_style);
+        }
+        MotionStyle::Omit => {
+            raw_motion_state.flags.remove(RawMotionFlags::CURRENT_STYLE);
+            raw_motion_state.current_style = None;
+        }
     }
 
     raw_motion_state
@@ -116,7 +131,7 @@ impl MovementSystem {
         position.rotation = Quaternion::from_heading(heading);
 
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_player_style(
+            raw_motion_state: raw_motion_state_with_motion_style(
                 world,
                 RawMotionState {
                     flags: RawMotionFlags::CURRENT_HOLD_KEY
@@ -127,6 +142,7 @@ impl MovementSystem {
                     forward_speed: Some(speed),
                     ..Default::default()
                 },
+                metadata.motion_style,
             ),
             position,
             instance_sequence: world.player.instance_sequence,
@@ -147,7 +163,11 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState::default()),
+            raw_motion_state: raw_motion_state_with_motion_style(
+                world,
+                RawMotionState::default(),
+                metadata.motion_style,
+            ),
             position: world.player.position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
@@ -340,11 +360,11 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_motion_state_preserves_cached_player_style() {
+    fn test_raw_motion_state_preserves_cached_server_style_by_default() {
         let mut world = WorldState::new(None, None);
-        world.player.current_motion_style = Some(0x8000_003e);
+        world.player.last_server_motion_style = Some(0x8000_003e);
 
-        let raw_motion_state = raw_motion_state_with_player_style(
+        let raw_motion_state = raw_motion_state_with_motion_style(
             &world,
             RawMotionState {
                 flags: RawMotionFlags::CURRENT_HOLD_KEY
@@ -355,6 +375,7 @@ mod tests {
                 forward_speed: Some(7.0),
                 ..Default::default()
             },
+            MotionStyle::PreserveServer,
         );
 
         assert!(
@@ -374,5 +395,39 @@ mod tests {
             Some(WALK_FORWARD_MOTION_COMMAND)
         );
         assert_eq!(raw_motion_state.forward_speed, Some(7.0));
+    }
+
+    #[test]
+    fn test_raw_motion_state_can_override_cached_server_style() {
+        let mut world = WorldState::new(None, None);
+        world.player.last_server_motion_style = Some(0x8000_003e);
+
+        let raw_motion_state = raw_motion_state_with_motion_style(
+            &world,
+            RawMotionState::default(),
+            MotionStyle::Explicit(0x1111_2222),
+        );
+
+        assert!(raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
+        assert_eq!(raw_motion_state.current_style, Some(0x1111_2222));
+    }
+
+    #[test]
+    fn test_raw_motion_state_can_omit_cached_server_style() {
+        let mut world = WorldState::new(None, None);
+        world.player.last_server_motion_style = Some(0x8000_003e);
+
+        let raw_motion_state = raw_motion_state_with_motion_style(
+            &world,
+            RawMotionState {
+                flags: RawMotionFlags::CURRENT_STYLE,
+                current_style: Some(0x9999_0000),
+                ..Default::default()
+            },
+            MotionStyle::Omit,
+        );
+
+        assert!(!raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
+        assert_eq!(raw_motion_state.current_style, None);
     }
 }

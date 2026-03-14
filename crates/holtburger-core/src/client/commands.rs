@@ -1,5 +1,5 @@
 use crate::client::movement::{
-    encode_contact_long_jump, raw_motion_state_with_player_style,
+    encode_contact_long_jump, raw_motion_state_with_motion_style,
 };
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
@@ -513,9 +513,10 @@ impl Client {
                 let force_seq = self.world.player.force_position_sequence;
 
                 self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: raw_motion_state_with_player_style(
+                    raw_motion_state: raw_motion_state_with_motion_style(
                         &self.world,
                         RawMotionState::default(),
+                        metadata.motion_style,
                     ),
                     position: self.world.player.position,
                     instance_sequence: obj_inst,

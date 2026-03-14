@@ -63,12 +63,16 @@ pub struct PlayerState {
     pub instance_sequence: u16,
     /// Sequence for server-controlled movement/actions.
     pub server_control_sequence: u16,
+    /// Last non-zero server-reported motion stance/style for local movement packet preservation.
+    pub current_motion_style: Option<u32>,
     /// Sequence for teleportation events to ignore stale position updates.
     pub teleport_sequence: u16,
     /// Sequence for server-forced repositions (e.g. rubberbanding or physics corrections).
     pub force_position_sequence: u16,
     /// Sequence for client-initiated position updates.
     pub position_sequence: u16,
+    /// Last grounded state reported by authoritative server movement updates.
+    pub server_grounded: Option<bool>,
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
@@ -110,9 +114,11 @@ impl PlayerState {
             position: WorldPosition::default(),
             instance_sequence: 0,
             server_control_sequence: 0,
+            current_motion_style: None,
             teleport_sequence: 0,
             force_position_sequence: 0,
             position_sequence: 0,
+            server_grounded: None,
             movement_sequence: 0,
             enchantments: Vec::new(),
             spells: BTreeMap::new(),

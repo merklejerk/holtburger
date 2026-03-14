@@ -1,3 +1,4 @@
+use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet};
 
 use holtburger_common::Guid;
@@ -6,7 +7,7 @@ use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
 use holtburger_protocol::messages::EquipMask;
-use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
@@ -15,6 +16,61 @@ use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
 use std::sync::Arc;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CombatProfileLevel {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl CombatProfileLevel {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Low => Self::Medium,
+            Self::Medium => Self::High,
+            Self::High => Self::Low,
+        }
+    }
+
+    pub fn wire_value(self) -> f32 {
+        match self {
+            Self::Low => 0.0,
+            Self::Medium => 0.5,
+            Self::High => 1.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CombatControlState {
+    pub profile_level: CombatProfileLevel,
+    pub attack_height: AttackHeight,
+}
+
+impl Default for CombatControlState {
+    fn default() -> Self {
+        Self {
+            profile_level: CombatProfileLevel::Medium,
+            attack_height: AttackHeight::Medium,
+        }
+    }
+}
+
+impl CombatControlState {
+    pub fn cycle_attack_height(&mut self) {
+        self.attack_height = match self.attack_height {
+            AttackHeight::Low => AttackHeight::Medium,
+            AttackHeight::Medium => AttackHeight::High,
+            AttackHeight::High => AttackHeight::Low,
+        };
+    }
+
+    pub fn cycle_profile_level(&mut self) {
+        self.profile_level = self.profile_level.cycle();
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GameData {
@@ -38,6 +94,8 @@ pub struct GameData {
     pub vitae: f32,
     /// Current position in the world.
     pub player_pos: Option<WorldPosition>,
+    /// Last grounded state reported by the server for the player.
+    pub player_grounded: Option<bool>,
     /// Active enchantments on the player.
     pub player_enchantments: Vec<Enchantment>,
     /// List of learned spell IDs.
@@ -50,6 +108,10 @@ pub struct GameData {
     pub world_name: String,
     /// Current combat stances.
     pub combat_mode: CombatMode,
+    /// Runtime-only combat state derived from feedback events and stance updates.
+    pub combat_runtime: CombatRuntimeState,
+    /// Local CLI combat controls for melee power or missile accuracy and attack height.
+    pub combat_controls: CombatControlState,
     /// Whether we can walk through walls (debug feature).
     pub noclip: bool,
     /// Every entity currently in player's pack.
@@ -75,12 +137,15 @@ impl Default for GameData {
             armor: 0,
             vitae: 1.0,
             player_pos: None,
+            player_grounded: None,
             player_enchantments: Vec::new(),
             player_spells: Vec::new(),
             spell_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
+            combat_runtime: CombatRuntimeState::default(),
+            combat_controls: CombatControlState::default(),
             noclip: false,
             inventory: HashSet::new(),
             equipment: HashMap::new(),
@@ -170,6 +235,24 @@ impl GameData {
         }
 
         Some(encumbrance / capacity)
+    }
+
+    pub fn get_run_rate(&self) -> Option<f32> {
+        let run_skill = self.skills.get(&SkillType::Run)?.current as f32;
+        let burden = self.get_burden().unwrap_or(3.0);
+        let load_mod = if burden < 1.0 {
+            1.0
+        } else if burden < 2.0 {
+            2.0 - burden
+        } else {
+            0.0
+        };
+
+        if run_skill >= 800.0 {
+            Some(18.0 / 4.0)
+        } else {
+            Some((load_mod * (run_skill / (run_skill + 200.0) * 11.0) + 4.0) / 4.0)
+        }
     }
 
     pub fn spell_name(&self, spell_id: u32) -> Option<&str> {

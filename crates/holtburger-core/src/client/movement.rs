@@ -1,18 +1,17 @@
 use crate::client::WireEvent;
+use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
-use holtburger_protocol::messages::game_message::RawMotionFlags;
+use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{StateEvent, WorldState};
-use std::time::{Duration, Instant};
-
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
+const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 
-/// Computes the position a player should stop at when moving toward a target at a specific distance.
 fn calculate_arrival_position(
     source: &WorldPosition,
     target_pos: &holtburger_common::Vector3,
@@ -28,108 +27,138 @@ fn calculate_arrival_position(
     }
 }
 
-/// Heuristic to detect if a player is "stuck".
-fn is_stuck(
-    current_pos: &holtburger_common::Vector3,
-    last_pos: &holtburger_common::Vector3,
-    threshold: f32,
-) -> bool {
-    (*current_pos - *last_pos).length() < threshold
+pub(super) fn raw_motion_state_with_player_style(
+    world: &WorldState,
+    mut raw_motion_state: RawMotionState,
+) -> RawMotionState {
+    if let Some(current_style) = world.player.current_motion_style {
+        raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
+        raw_motion_state.current_style = Some(current_style);
+    }
+
+    raw_motion_state
+}
+
+pub(super) fn encode_contact_long_jump(metadata: MovementPacketMetadata) -> u8 {
+    u8::from(metadata.contact.unwrap_or(true))
+}
+
+pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
+    u8::from(metadata.contact.unwrap_or(true))
 }
 
 pub(super) struct MovementSystem {
-    pub(super) move_target: Option<Guid>,
-    pub(super) last_move_sync: Instant,
-    pub(super) last_move_pos: WorldPosition,
-    pub(super) last_move_pos_time: Instant,
     pub(super) last_sent_pos_seq: Option<u16>,
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
-            move_target: None,
-            last_move_sync: Instant::now(),
-            last_move_pos: WorldPosition::default(),
-            last_move_pos_time: Instant::now(),
             last_sent_pos_seq: None,
         }
     }
 
-    pub(super) async fn handle_approach_task(
+    pub(super) async fn execute_locomotion_request(
         &mut self,
-        target_guid: Guid,
-        _dt: f32,
+        request: LocomotionRequest,
         world: &mut WorldState,
         session: &mut Session,
-    ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
-        let player_pos = world.player.position.coords;
-        let target_pos = if let Some(target) = world.get_visible_entity(target_guid) {
-            target.position.coords
-        } else {
-            log::warn!("Approach aborted: Target 0x{:08X} not found", target_guid);
-            self.move_target = None;
-            return Ok((Vec::new(), Vec::new()));
-        };
+    ) -> Result<Vec<StateEvent>> {
+        let primitive = request.primitive;
+        let state_events = self.apply_locomotion_primitive(primitive, world);
 
-        let diff = target_pos - player_pos;
-        let dist = diff.length();
-
-        if dist < 1.0 {
-            log::info!("Arrived at target 0x{:08X}", target_guid);
-            self.move_target = None;
-            world.set_player_velocity(holtburger_common::Vector3::zero());
-            return Ok((Vec::new(), Vec::new()));
-        }
-
-        // Stuck detection
-        let now = Instant::now();
-        if now.duration_since(self.last_move_pos_time) > Duration::from_millis(500) {
-            if is_stuck(
-                &world.player.position.coords,
-                &self.last_move_pos.coords,
-                0.1,
-            ) {
-                log::warn!("Approach aborted: Player seems stuck");
-                self.move_target = None;
-                world.set_player_velocity(holtburger_common::Vector3::zero());
-                return Ok((Vec::new(), Vec::new()));
+        if primitive.refresh_server() {
+            match primitive {
+                LocomotionPrimitive::Drive { heading, speed, .. } => {
+                    // When refresh_server() is true, honor the explicit request by always
+                    // sending a drive pulse, rather than suppressing it based on
+                    // heading/speed thresholds.
+                    Self::send_drive_pulse(world, session, heading, speed, request.metadata)
+                        .await?;
+                }
+                LocomotionPrimitive::Stop { .. } => {
+                    Self::send_stop_pulse(world, session, request.metadata).await?;
+                }
             }
-            self.last_move_pos = world.player.position;
-            self.last_move_pos_time = now;
         }
 
-        // Set velocity toward target (Running speed ~ 7.0m/s)
-        let dir = diff / dist;
-        let velocity = dir * 7.0;
+        Ok(state_events)
+    }
 
-        world.set_player_velocity(velocity);
+    pub(super) fn apply_locomotion_primitive(
+        &mut self,
+        primitive: LocomotionPrimitive,
+        world: &mut WorldState,
+    ) -> Vec<StateEvent> {
+        let mut events = Vec::new();
 
-        // Send MoveToState to server periodically (~100ms)
-        if now.duration_since(self.last_move_sync) > Duration::from_millis(100) {
-            self.last_move_sync = now;
+        if let LocomotionPrimitive::Drive { heading, .. } = primitive {
+            let mut next_pos = world.player.position;
+            next_pos.rotation = Quaternion::from_heading(heading);
+            events.extend(world.set_player_position(next_pos));
+        }
 
-            let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-                raw_motion_state: holtburger_protocol::messages::game_message::RawMotionState {
-                    flags: RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::FORWARD_SPEED,
+        if let Some(velocity) = primitive.desired_velocity() {
+            events.extend(world.set_player_velocity(velocity));
+        }
+
+        events
+    }
+
+    async fn send_drive_pulse(
+        world: &WorldState,
+        session: &mut Session,
+        heading: f32,
+        speed: f32,
+        metadata: MovementPacketMetadata,
+    ) -> Result<()> {
+        let mut position = world.player.position;
+        position.rotation = Quaternion::from_heading(heading);
+
+        let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
+            raw_motion_state: raw_motion_state_with_player_style(
+                world,
+                RawMotionState {
+                    flags: RawMotionFlags::CURRENT_HOLD_KEY
+                        | RawMotionFlags::FORWARD_COMMAND
+                        | RawMotionFlags::FORWARD_SPEED,
                     current_hold_key: Some(HoldKey::Run as u32),
-                    forward_speed: Some(7.0),
+                    forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
+                    forward_speed: Some(speed),
                     ..Default::default()
                 },
-                position: world.player.position,
-                instance_sequence: world.player.instance_sequence,
-                server_control_sequence: world.player.server_control_sequence,
-                teleport_sequence: world.player.teleport_sequence,
-                force_position_sequence: world.player.force_position_sequence,
-                contact_long_jump: 1, // On Ground
-            };
+            ),
+            position,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+            contact_long_jump: encode_contact_long_jump(metadata),
+        };
 
-            session
-                .send_action(GameAction::MoveToState(Box::new(data)))
-                .await?;
-        }
+        session
+            .send_action(GameAction::MoveToState(Box::new(data)))
+            .await
+    }
 
-        Ok((Vec::new(), Vec::new()))
+    async fn send_stop_pulse(
+        world: &WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<()> {
+        let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
+            raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState::default()),
+            position: world.player.position,
+            instance_sequence: world.player.instance_sequence,
+            server_control_sequence: world.player.server_control_sequence,
+            teleport_sequence: world.player.teleport_sequence,
+            force_position_sequence: world.player.force_position_sequence,
+            contact_long_jump: encode_contact_long_jump(metadata),
+        };
+
+        session
+            .send_action(GameAction::MoveToState(Box::new(data)))
+            .await
     }
 
     pub(super) async fn handle_server_controlled_movement(
@@ -245,7 +274,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            last_contact: 1, // Logged as 0x1 (Contact) in retail
+            last_contact: encode_last_contact(MovementPacketMetadata::default()),
         };
 
         log::debug!(
@@ -271,6 +300,7 @@ impl MovementSystem {
 mod tests {
     use super::*;
     use holtburger_common::Vector3;
+    use holtburger_world::WorldState;
 
     #[test]
     fn test_calculate_heading_to() {
@@ -310,12 +340,39 @@ mod tests {
     }
 
     #[test]
-    fn test_is_stuck() {
-        let last = Vector3::new(0.0, 0.0, 0.0);
-        let current_stuck = Vector3::new(0.05, 0.0, 0.0);
-        let current_moving = Vector3::new(0.2, 0.0, 0.0);
+    fn test_raw_motion_state_preserves_cached_player_style() {
+        let mut world = WorldState::new(None, None);
+        world.player.current_motion_style = Some(0x8000_003e);
 
-        assert!(is_stuck(&current_stuck, &last, 0.1));
-        assert!(!is_stuck(&current_moving, &last, 0.1));
+        let raw_motion_state = raw_motion_state_with_player_style(
+            &world,
+            RawMotionState {
+                flags: RawMotionFlags::CURRENT_HOLD_KEY
+                    | RawMotionFlags::FORWARD_COMMAND
+                    | RawMotionFlags::FORWARD_SPEED,
+                current_hold_key: Some(HoldKey::Run as u32),
+                forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
+                forward_speed: Some(7.0),
+                ..Default::default()
+            },
+        );
+
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::CURRENT_STYLE)
+        );
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::FORWARD_COMMAND)
+        );
+        assert_eq!(raw_motion_state.current_style, Some(0x8000_003e));
+        assert_eq!(raw_motion_state.current_hold_key, Some(HoldKey::Run as u32));
+        assert_eq!(
+            raw_motion_state.forward_command,
+            Some(WALK_FORWARD_MOTION_COMMAND)
+        );
+        assert_eq!(raw_motion_state.forward_speed, Some(7.0));
     }
 }

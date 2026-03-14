@@ -484,6 +484,8 @@ pub enum AppAction {
         spell_id: u32,
         target: Option<Guid>,
     },
+    CycleCombatProfileLevel,
+    CycleCombatAttackHeight,
     SetCombatMode {
         mode: CombatMode,
     },

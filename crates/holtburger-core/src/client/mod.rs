@@ -9,6 +9,8 @@ use tokio::sync::{broadcast, mpsc};
 mod auth;
 mod builder;
 mod commands;
+pub mod controllers;
+pub mod locomotion;
 mod messages;
 mod movement;
 pub mod types;
@@ -125,6 +127,11 @@ impl Client {
                         reason: ErrorReason::Weenie(*error, None),
                         message,
                     });
+            }
+            WireEvent::CombatFeedback(feedback) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CombatFeedback(feedback.clone()));
             }
             WireEvent::ServerMessage { message, chat_type } => {
                 let _ = self
@@ -337,6 +344,26 @@ impl Client {
                         pos: *pos,
                     });
             }
+            StateEvent::PlayerGroundedUpdated { grounded } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerGroundedUpdated {
+                        grounded: *grounded,
+                    });
+            }
+            StateEvent::ForcedReposition {
+                guid,
+                pos,
+                sequence,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ForcedReposition {
+                        guid: *guid,
+                        pos: *pos,
+                        sequence: *sequence,
+                    });
+            }
             StateEvent::EntityStateUpdated { .. } | StateEvent::EntityVectorUpdated { .. } => {}
             StateEvent::ServerTimeUpdate(time) => {
                 let _ = self
@@ -431,19 +458,7 @@ impl Client {
                             for event in events {
                                 match event {
                                     SessionEvent::Message(msg_data) => {
-                                        let world_events = self.handle_message(&msg_data).await?;
-
-                                        for event in world_events {
-                                            if let StateEvent::ForcedReposition { .. } = event
-                                                && self.movement.move_target.is_some() {
-                                                    log::warn!("Approach aborted: Forced reposition by server");
-                                                    self.movement.move_target = None;
-                                                    let events = self.world.set_player_velocity(holtburger_common::Vector3::zero());
-                                                    for ev in events {
-                                                        self.emit_state_event(ev);
-                                                    }
-                                                }
-                                        }
+                                        self.handle_message(&msg_data).await?;
 
                                         if matches!(self.state, ClientState::Disconnected) {
                                             return Ok(());
@@ -488,17 +503,6 @@ impl Client {
                     let now = Instant::now();
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
-
-                    if let Some(target_guid) = self.movement.move_target {
-                        let Client { movement, world, session, .. } = self;
-                        let (wire_events, state_events) = movement.handle_approach_task(target_guid, dt, world, session).await?;
-                        for event in wire_events {
-                            self.emit_wire_event(event);
-                        }
-                        for event in state_events {
-                            self.emit_state_event(event);
-                        }
-                    }
 
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);

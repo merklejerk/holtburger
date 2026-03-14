@@ -202,6 +202,7 @@
 - [ ] Don't auto-attack targets too far away or marked for deletion.
 - [ ] Too much attack error spam! `Attack sequence finished with ActionCancelled.` 50x.
 - [ ] Label containers that you have recently opened.
+- [ ] Approach can overshoot target and oscillate. Ease out?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

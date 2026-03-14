@@ -167,7 +167,6 @@ impl MovementSystem {
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
-        self.last_drive_sync = None;
         let mut wire_events = Vec::new();
         log::info!(
             ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",

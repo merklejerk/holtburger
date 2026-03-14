@@ -1,6 +1,10 @@
+use crate::client::locomotion::{LocomotionRequest, MovementPacketMetadata};
+use holtburger_common::properties::DamageType;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
-use holtburger_protocol::messages::combat::CombatMode;
+use holtburger_protocol::messages::combat::{
+    AttackConditions, AttackHeight, CombatMode, DamageLocation,
+};
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -101,6 +105,44 @@ pub enum WireEvent {
     UseDone {
         error: WeenieError,
     },
+    CombatFeedback(CombatFeedback),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CombatFeedback {
+    AttackDone {
+        error: WeenieError,
+    },
+    AttackCommenced,
+    AttackerNotification {
+        defender_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    DefenderNotification {
+        attacker_name: String,
+        damage_type: DamageType,
+        health_percent: f64,
+        damage: u32,
+        damage_location: DamageLocation,
+        critical_hit: bool,
+        attack_conditions: AttackConditions,
+    },
+    EvasionAttackerNotification {
+        defender_name: String,
+    },
+    EvasionDefenderNotification {
+        attacker_name: String,
+    },
+    VictimNotification {
+        death_message: String,
+    },
+    KillerNotification {
+        death_message: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -151,6 +193,14 @@ pub enum ClientViewEvent {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
     },
+    PlayerGroundedUpdated {
+        grounded: bool,
+    },
+    ForcedReposition {
+        guid: Guid,
+        pos: holtburger_common::position::WorldPosition,
+        sequence: u16,
+    },
     EntityDespawned {
         guid: Guid,
     },
@@ -200,6 +250,7 @@ pub enum ClientViewEvent {
     },
     PingResponse,
     LogMessage(String),
+    CombatFeedback(CombatFeedback),
     BootAccount(String),
     EntityDebugInfoSnapshot {
         entity: Box<Entity>,
@@ -257,10 +308,9 @@ pub enum ClientCommand {
     SetState(u32),
     TurnTo {
         heading: f32,
+        metadata: MovementPacketMetadata,
     },
-    MoveTo {
-        target: Guid,
-    },
+    ExecuteLocomotion(LocomotionRequest),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,
@@ -314,9 +364,22 @@ pub enum ClientCommand {
     CastUntargetedSpell {
         spell_id: u32,
     },
+    TargetedMeleeAttack {
+        target: Guid,
+        attack_height: AttackHeight,
+        power_level: f32,
+    },
+    TargetedMissileAttack {
+        target: Guid,
+        attack_height: AttackHeight,
+        accuracy_level: f32,
+    },
     SetCombatMode(CombatMode),
     SetNoClip(bool),
     CancelAttack,
+    StopMoving {
+        metadata: MovementPacketMetadata,
+    },
     SyncPosition,
     QueryEntityDebugInfo(Guid),
     Quit,

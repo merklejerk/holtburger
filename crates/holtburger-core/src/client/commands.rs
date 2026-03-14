@@ -1,3 +1,7 @@
+use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
+use crate::client::movement::{
+    encode_contact_long_jump, encode_last_contact, raw_motion_state_with_player_style,
+};
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
@@ -8,8 +12,6 @@ use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, R
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::StateEvent;
-use std::time::Instant;
-
 impl Client {
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
@@ -28,6 +30,8 @@ impl Client {
             | ClientCommand::SalvageItemsWith { .. }
             | ClientCommand::CastTargetedSpell { .. }
             | ClientCommand::CastUntargetedSpell { .. }
+            | ClientCommand::TargetedMeleeAttack { .. }
+            | ClientCommand::TargetedMissileAttack { .. }
             | ClientCommand::Buy { .. }
             | ClientCommand::Sell { .. }
             | ClientCommand::OpenTrade(_)
@@ -49,7 +53,8 @@ impl Client {
             ClientCommand::Jump { .. }
             | ClientCommand::SetState(_)
             | ClientCommand::TurnTo { .. }
-            | ClientCommand::MoveTo { .. }
+            | ClientCommand::ExecuteLocomotion(_)
+            | ClientCommand::StopMoving { .. }
             | ClientCommand::SyncPosition => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
@@ -192,6 +197,46 @@ impl Client {
                 log::info!(">>> Casting spell {}", spell_id);
                 self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
                     CastUntargetedSpellActionData { spell_id },
+                )))
+                .await
+            }
+            ClientCommand::TargetedMeleeAttack {
+                target,
+                attack_height,
+                power_level,
+            } => {
+                log::info!(
+                    ">>> Targeted melee attack on 0x{:08X} ({:?}, power {:.2})",
+                    target.0,
+                    attack_height,
+                    power_level
+                );
+                self.send_game_action(GameAction::TargetedMeleeAttack(Box::new(
+                    TargetedMeleeAttackActionData {
+                        target_guid: target,
+                        attack_height,
+                        power_level,
+                    },
+                )))
+                .await
+            }
+            ClientCommand::TargetedMissileAttack {
+                target,
+                attack_height,
+                accuracy_level,
+            } => {
+                log::info!(
+                    ">>> Targeted missile attack on 0x{:08X} ({:?}, accuracy {:.2})",
+                    target.0,
+                    attack_height,
+                    accuracy_level
+                );
+                self.send_game_action(GameAction::TargetedMissileAttack(Box::new(
+                    TargetedMissileAttackActionData {
+                        target_guid: target,
+                        attack_height,
+                        accuracy_level,
+                    },
                 )))
                 .await
             }
@@ -501,7 +546,7 @@ impl Client {
                 })))
                 .await
             }
-            ClientCommand::TurnTo { heading } => {
+            ClientCommand::TurnTo { heading, metadata } => {
                 log::info!(">>> Turning to heading: {}", heading);
 
                 // Prediction: update local state immediately so UI feels snappy
@@ -518,21 +563,51 @@ impl Client {
                 let force_seq = self.world.player.force_position_sequence;
 
                 self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: RawMotionState::default(),
+                    raw_motion_state: raw_motion_state_with_player_style(
+                        &self.world,
+                        RawMotionState::default(),
+                    ),
                     position: self.world.player.position,
                     instance_sequence: obj_inst,
                     server_control_sequence: srv_seq,
                     teleport_sequence: tele_seq,
                     force_position_sequence: force_seq,
-                    contact_long_jump: 1, // Assume contact
+                    contact_long_jump: encode_contact_long_jump(metadata),
                 })))
                 .await
             }
-            ClientCommand::MoveTo { target } => {
-                log::info!(">>> Starting approach to target: 0x{:08X}", target);
-                self.movement.move_target = Some(target);
-                self.movement.last_move_pos = self.world.player.position;
-                self.movement.last_move_pos_time = Instant::now();
+            ClientCommand::ExecuteLocomotion(request) => {
+                if request.primitive.refresh_server() {
+                    log::info!(
+                        ">>> Executing locomotion primitive: {:?}",
+                        request.primitive
+                    );
+                }
+                let world_events = self
+                    .movement
+                    .execute_locomotion_request(request, &mut self.world, &mut self.session)
+                    .await?;
+                for event in world_events {
+                    self.emit_state_event(event);
+                }
+                Ok(())
+            }
+            ClientCommand::StopMoving { metadata } => {
+                log::info!(">>> Stopping local approach movement");
+                let world_events = self
+                    .movement
+                    .execute_locomotion_request(
+                        LocomotionRequest::new(LocomotionPrimitive::Stop {
+                            refresh_server: true,
+                        })
+                        .with_metadata(metadata),
+                        &mut self.world,
+                        &mut self.session,
+                    )
+                    .await?;
+                for event in world_events {
+                    self.emit_state_event(event);
+                }
                 Ok(())
             }
             ClientCommand::SyncPosition => {
@@ -543,7 +618,7 @@ impl Client {
                     server_control_sequence: self.world.player.server_control_sequence,
                     teleport_sequence: self.world.player.teleport_sequence,
                     force_position_sequence: self.world.player.force_position_sequence,
-                    last_contact: 1,
+                    last_contact: encode_last_contact(MovementPacketMetadata::default()),
                 };
 
                 self.send_game_action(GameAction::AutonomousPosition(Box::new(pulse)))

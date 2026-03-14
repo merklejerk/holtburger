@@ -1,6 +1,12 @@
 use super::*;
+use crate::StateEvent;
+use crate::WorldState;
+use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
+};
+use holtburger_protocol::messages::{
+    GameMessage, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
 };
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
@@ -497,8 +503,51 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
 }
 
 #[test]
+fn test_update_motion_caches_last_non_zero_player_style() {
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
+
+    let first = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid: state.player.guid,
+        object_instance_sequence: 7,
+        movement_sequence: 8,
+        server_control_sequence: 9,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 62,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    state.handle_message(&first);
+
+    assert_eq!(state.player.instance_sequence, 7);
+    assert_eq!(state.player.movement_sequence, 8);
+    assert_eq!(state.player.server_control_sequence, 9);
+    assert_eq!(state.player.current_motion_style, Some(62));
+
+    let second = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid: state.player.guid,
+        object_instance_sequence: 10,
+        movement_sequence: 11,
+        server_control_sequence: 12,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 0,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    state.handle_message(&second);
+
+    assert_eq!(state.player.instance_sequence, 10);
+    assert_eq!(state.player.movement_sequence, 11);
+    assert_eq!(state.player.server_control_sequence, 12);
+    assert_eq!(state.player.current_motion_style, Some(62));
+}
+
+#[test]
 fn test_magic_purge_enchantments_preserves_vitae_only() {
-    use crate::StateEvent;
     use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsEventData,
@@ -564,6 +613,47 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
         _ => None,
     });
     assert_eq!(latest_derived_vitae, Some(0.88));
+}
+
+#[test]
+fn test_update_position_from_server_caches_grounded_state() {
+    let mut player = PlayerState::new();
+    player.guid = Guid(0x50000001);
+
+    let mut events = Vec::<StateEvent>::new();
+    let pos = WorldPosition::default();
+
+    use holtburger_protocol::messages::movement::messages::position::{
+        PositionPack, UpdatePositionFlag,
+    };
+
+    player.update_position_from_server(
+        &PositionPack {
+            pos,
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 3,
+            force_position_sequence: 4,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+        &mut events,
+    );
+    assert_eq!(player.server_grounded, Some(false));
+
+    player.update_position_from_server(
+        &PositionPack {
+            pos,
+            instance_sequence: 5,
+            position_sequence: 6,
+            teleport_sequence: 7,
+            force_position_sequence: 4,
+            flags: UpdatePositionFlag::IS_GROUNDED,
+            ..Default::default()
+        },
+        &mut events,
+    );
+    assert_eq!(player.server_grounded, Some(true));
 }
 
 #[test]

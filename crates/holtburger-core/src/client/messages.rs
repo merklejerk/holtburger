@@ -171,6 +171,77 @@ impl Client {
                     });
                     Ok(())
                 }
+                GameEvent::AttackDone(data) => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::AttackDone { error: data.error },
+                    ));
+                    Ok(())
+                }
+                GameEvent::AttackerNotification(data) => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::AttackerNotification {
+                            defender_name: data.defender_name.clone(),
+                            damage_type: data.damage_type,
+                            health_percent: data.health_percent,
+                            damage: data.damage,
+                            critical_hit: data.critical_hit,
+                            attack_conditions: data.attack_conditions,
+                        },
+                    ));
+                    Ok(())
+                }
+                GameEvent::DefenderNotification(data) => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::DefenderNotification {
+                            attacker_name: data.attacker_name.clone(),
+                            damage_type: data.damage_type,
+                            health_percent: data.health_percent,
+                            damage: data.damage,
+                            damage_location: data.damage_location,
+                            critical_hit: data.critical_hit,
+                            attack_conditions: data.attack_conditions,
+                        },
+                    ));
+                    Ok(())
+                }
+                GameEvent::EvasionAttackerNotification(data) => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::EvasionAttackerNotification {
+                            defender_name: data.defender_name.clone(),
+                        },
+                    ));
+                    Ok(())
+                }
+                GameEvent::EvasionDefenderNotification(data) => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::EvasionDefenderNotification {
+                            attacker_name: data.attacker_name.clone(),
+                        },
+                    ));
+                    Ok(())
+                }
+                GameEvent::CombatCommenceAttack => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::AttackCommenced,
+                    ));
+                    Ok(())
+                }
+                GameEvent::VictimNotification(data) => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::VictimNotification {
+                            death_message: data.death_message.clone(),
+                        },
+                    ));
+                    Ok(())
+                }
+                GameEvent::KillerNotification(data) => {
+                    self.emit_wire_event(WireEvent::CombatFeedback(
+                        crate::client::types::CombatFeedback::KillerNotification {
+                            death_message: data.death_message.clone(),
+                        },
+                    ));
+                    Ok(())
+                }
                 GameEvent::WeenieError(data) => {
                     self.emit_wire_event(WireEvent::WeenieError {
                         error: data.error,

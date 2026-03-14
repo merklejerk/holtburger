@@ -11,8 +11,6 @@ pub(crate) use crate::stats;
 #[cfg(test)]
 pub(crate) use holtburger_common::Guid;
 #[cfg(test)]
-pub(crate) use holtburger_common::position::WorldPosition;
-#[cfg(test)]
 pub(crate) use holtburger_protocol::messages::magic::Enchantment;
 
 #[cfg(test)]

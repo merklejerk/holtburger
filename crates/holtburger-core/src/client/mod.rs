@@ -13,6 +13,7 @@ pub mod controllers;
 pub mod locomotion;
 mod messages;
 mod movement;
+pub mod navigation;
 pub mod types;
 use auth::AuthState;
 use movement::MovementSystem;

@@ -1,6 +1,5 @@
-use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
 use crate::client::movement::{
-    encode_contact_long_jump, encode_last_contact, raw_motion_state_with_player_style,
+    encode_contact_long_jump, raw_motion_state_with_player_style,
 };
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
@@ -8,10 +7,9 @@ use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
-use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, RawMotionState};
+use holtburger_protocol::messages::game_message::{GameMessage, RawMotionState};
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
-use holtburger_world::StateEvent;
 impl Client {
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
@@ -50,12 +48,9 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::Jump { .. }
-            | ClientCommand::SetState(_)
-            | ClientCommand::TurnTo { .. }
-            | ClientCommand::ExecuteLocomotion(_)
-            | ClientCommand::StopMoving { .. }
-            | ClientCommand::SyncPosition => self.handle_movement_command(cmd).await,
+            ClientCommand::TurnTo { .. } | ClientCommand::ExecuteLocomotion(_) => {
+                self.handle_movement_command(cmd).await
+            }
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -65,7 +60,6 @@ impl Client {
             ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
-            | ClientCommand::SetNoClip(_)
             | ClientCommand::QueryEntityDebugInfo(_)
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
@@ -502,50 +496,6 @@ impl Client {
 
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::Jump {
-                extent,
-                velocity: _,
-            } => {
-                log::info!(">>> Jumping: extent={}", extent);
-                let obj_inst = self.world.player.instance_sequence;
-                let srv_seq = self.world.player.server_control_sequence;
-                let tele_seq = self.world.player.teleport_sequence;
-                let force_seq = self.world.player.force_position_sequence;
-
-                self.send_game_action(GameAction::Jump(Box::new(JumpActionData {
-                    extent,
-                    velocity: Default::default(),
-                    instance_sequence: obj_inst,
-                    server_control_sequence: srv_seq,
-                    teleport_sequence: tele_seq,
-                    force_position_sequence: force_seq,
-                    object_guid: self.world.player.guid,
-                    spell_id: 0,
-                })))
-                .await
-            }
-            ClientCommand::SetState(state_opcode) => {
-                log::info!(">>> Setting state: 0x{:08X}", state_opcode);
-                let obj_inst = self.world.player.instance_sequence;
-                let srv_seq = self.world.player.server_control_sequence;
-                let tele_seq = self.world.player.teleport_sequence;
-                let force_seq = self.world.player.force_position_sequence;
-
-                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: RawMotionState {
-                        flags: RawMotionFlags::CURRENT_STYLE,
-                        current_style: Some(state_opcode),
-                        ..Default::default()
-                    },
-                    position: self.world.player.position,
-                    instance_sequence: obj_inst,
-                    server_control_sequence: srv_seq,
-                    teleport_sequence: tele_seq,
-                    force_position_sequence: force_seq,
-                    contact_long_jump: 0,
-                })))
-                .await
-            }
             ClientCommand::TurnTo { heading, metadata } => {
                 log::info!(">>> Turning to heading: {}", heading);
 
@@ -592,38 +542,6 @@ impl Client {
                 }
                 Ok(())
             }
-            ClientCommand::StopMoving { metadata } => {
-                log::info!(">>> Stopping local approach movement");
-                let world_events = self
-                    .movement
-                    .execute_locomotion_request(
-                        LocomotionRequest::new(LocomotionPrimitive::Stop {
-                            refresh_server: true,
-                        })
-                        .with_metadata(metadata),
-                        &mut self.world,
-                        &mut self.session,
-                    )
-                    .await?;
-                for event in world_events {
-                    self.emit_state_event(event);
-                }
-                Ok(())
-            }
-            ClientCommand::SyncPosition => {
-                log::debug!(">>> Syncing Position (Heartbeat)");
-                let pulse = AutonomousPositionActionData {
-                    position: self.world.player.position,
-                    instance_sequence: self.world.player.instance_sequence,
-                    server_control_sequence: self.world.player.server_control_sequence,
-                    teleport_sequence: self.world.player.teleport_sequence,
-                    force_position_sequence: self.world.player.force_position_sequence,
-                    last_contact: encode_last_contact(MovementPacketMetadata::default()),
-                };
-
-                self.send_game_action(GameAction::AutonomousPosition(Box::new(pulse)))
-                    .await
-            }
             _ => unreachable!(),
         }
     }
@@ -641,12 +559,6 @@ impl Client {
                     ChangeCombatModeActionData { mode },
                 )))
                 .await
-            }
-            ClientCommand::SetNoClip(enabled) => {
-                log::info!(">>> NoClip set to: {}", enabled);
-                self.world.player.noclip = enabled;
-                self.emit_state_event(StateEvent::NoClipUpdated(enabled));
-                Ok(())
             }
             ClientCommand::CancelAttack => {
                 log::info!(">>> Canceling attack");

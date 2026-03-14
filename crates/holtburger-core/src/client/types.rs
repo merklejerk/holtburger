@@ -1,6 +1,6 @@
 use crate::client::locomotion::{LocomotionRequest, MovementPacketMetadata};
 use holtburger_common::properties::DamageType;
-use holtburger_common::{Guid, Vector3};
+use holtburger_common::Guid;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
@@ -301,11 +301,6 @@ pub enum ClientCommand {
         slot: Option<TargetSlot>,
         amount: u32,
     },
-    Jump {
-        extent: f32,
-        velocity: Vector3,
-    },
-    SetState(u32),
     TurnTo {
         heading: f32,
         metadata: MovementPacketMetadata,
@@ -375,12 +370,7 @@ pub enum ClientCommand {
         accuracy_level: f32,
     },
     SetCombatMode(CombatMode),
-    SetNoClip(bool),
     CancelAttack,
-    StopMoving {
-        metadata: MovementPacketMetadata,
-    },
-    SyncPosition,
     QueryEntityDebugInfo(Guid),
     Quit,
 }

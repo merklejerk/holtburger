@@ -27,6 +27,7 @@ fn external_consumers_can_drive_approach_target_controller() {
         now,
         player_position: position(0.0),
         target_position: Some(position(5.0)),
+        move_speed: 4.5,
     });
 
     assert_eq!(update.status, ControllerStatus::Active);
@@ -36,8 +37,24 @@ fn external_consumers_can_drive_approach_target_controller() {
         update.effects.as_slice(),
         [ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
             speed,
+            refresh_server: true,
+            ..
+        })] if (*speed - 4.5).abs() < f32::EPSILON
+    ));
+
+    let update = controller.handle(&ApproachTargetInput::Tick {
+        now: now + std::time::Duration::from_millis(100),
+        player_position: position(0.45),
+        target_position: Some(position(5.0)),
+        move_speed: 4.5,
+    });
+
+    assert!(matches!(
+        update.effects.as_slice(),
+        [ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
+            speed,
             refresh_server: false,
             ..
-        })] if (*speed - 7.0).abs() < f32::EPSILON
+        })] if (*speed - 4.5).abs() < f32::EPSILON
     ));
 }

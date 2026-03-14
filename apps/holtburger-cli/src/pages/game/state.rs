@@ -44,6 +44,7 @@ const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_REPEAT_DISTANCE: f32 = 16.0;
 const STICKY_MOVE_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
 const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
+const DEFAULT_APPROACH_RUN_RATE: f32 = 4.5;
 
 enum EnterCombatModeResult {
     Success(UpdateResult),
@@ -140,14 +141,18 @@ impl GameState {
                 }
             }
             ClientViewEvent::EntityMoved { guid, pos } => {
+                let is_player_move = Some(guid) == self.data.player_guid;
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.position = pos;
-                    if Some(guid) == self.data.player_guid {
+                    if is_player_move {
                         self.data.player_pos = Some(pos);
                     }
                 }
-                self.sync_approach_target(Instant::now(), &mut result);
-                self.sync_sticky_melee_pursuit(&mut result);
+                if !is_player_move {
+                    self.sync_approach_target(Instant::now(), &mut result);
+                    self.sync_sticky_melee_pursuit(&mut result);
+                }
+                result.needs_redraw = true;
             }
             ClientViewEvent::ForcedReposition { guid, .. } => {
                 if Some(guid) == self.data.player_guid {
@@ -1035,6 +1040,18 @@ impl GameState {
         arrival_distance: f32,
         result: &mut UpdateResult,
     ) {
+        if let Some(controller) = self.view.approach_target.as_ref()
+            && controller.target_guid() == target
+            && (controller.arrival_distance() - arrival_distance).abs() <= f32::EPSILON
+        {
+            log::debug!(
+                "approach: keeping existing controller for target 0x{:08X} at {:.2}m",
+                target.0,
+                arrival_distance
+            );
+            return;
+        }
+
         let Some(player_position) = self.data.player_pos else {
             log::warn!(
                 "approach: cannot start controller for target 0x{:08X} without player position",
@@ -1042,6 +1059,16 @@ impl GameState {
             );
             return;
         };
+
+        if let Some(controller) = self.view.approach_target.as_ref() {
+            log::info!(
+                "approach: replacing controller from target 0x{:08X} ({:.2}m) to 0x{:08X} ({:.2}m)",
+                controller.target_guid().0,
+                controller.arrival_distance(),
+                target.0,
+                arrival_distance
+            );
+        }
 
         self.view.approach_target = Some(ApproachTargetController::new(
             target,
@@ -1067,6 +1094,10 @@ impl GameState {
             now,
             player_position,
             target_position: self.data.entities.get(&target_guid).map(|entity| entity.position),
+            move_speed: self
+                .data
+                .get_run_rate()
+                .unwrap_or(DEFAULT_APPROACH_RUN_RATE),
         });
 
         let completed = update.is_terminal();
@@ -1113,8 +1144,8 @@ impl GameState {
                 ApproachTargetFinishReason::TargetUnavailable => {
                     log::warn!("approach: target became unavailable");
                 }
-                ApproachTargetFinishReason::Stuck => {
-                    log::warn!("approach: controller aborted because the player appears stuck");
+                ApproachTargetFinishReason::NoProgress => {
+                    log::warn!("approach: controller aborted because the player made no progress");
                 }
                 ApproachTargetFinishReason::ForcedReposition => {
                     log::warn!("approach: controller aborted after forced reposition");
@@ -1516,6 +1547,74 @@ mod tests {
     }
 
     #[test]
+    fn player_movement_event_requests_redraw() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), WorldPosition::default()),
+        );
+
+        let moved_pos = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let result = state.handle_view_event(ClientViewEvent::EntityMoved {
+            guid: player_guid,
+            pos: moved_pos,
+        });
+
+        assert!(result.needs_redraw);
+        assert_eq!(state.data.player_pos, Some(moved_pos));
+    }
+
+    #[test]
+    fn player_movement_event_does_not_immediately_redrive_approach() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let start_pos = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        state.data.player_pos = Some(start_pos);
+        state.data.entities.insert(
+            player_guid,
+            Entity::new(player_guid, "Player".to_string(), start_pos),
+        );
+
+        let target_pos = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(5.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_pos));
+        state.view.approach_target = Some(ApproachTargetController::new(
+            target_guid,
+            1.0,
+            start_pos,
+            Instant::now(),
+        ));
+
+        let moved_pos = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(0.2, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        let result = state.handle_view_event(ClientViewEvent::EntityMoved {
+            guid: player_guid,
+            pos: moved_pos,
+        });
+
+        assert!(result.commands.is_empty());
+        assert_eq!(state.data.player_pos, Some(moved_pos));
+        assert!(state.view.approach_target.is_some());
+    }
+
     fn combat_feedback_updates_auto_attack_runtime_state() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -2312,5 +2411,47 @@ mod tests {
             .sticky_melee
             .as_ref()
             .is_some_and(MaintainRangeController::is_pursuing));
+    }
+
+    #[test]
+    fn repeated_start_approach_reuses_existing_controller_for_same_target() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(5.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state
+            .data
+            .entities
+            .insert(target_guid, creature_entity(target_guid, "Drudge", target_position));
+
+        let mut first = UpdateResult::new();
+        state.start_approach_target(target_guid, 1.0, &mut first);
+
+        assert!(first.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(
+                    holtburger_core::client::locomotion::LocomotionPrimitive::Drive {
+                        refresh_server: true,
+                        ..
+                    }
+                )
+            )
+        }));
+
+        let mut second = UpdateResult::new();
+        state.start_approach_target(target_guid, 1.0, &mut second);
+
+        assert!(second.commands.is_empty());
+        assert!(state.view.approach_target.is_some());
     }
 }

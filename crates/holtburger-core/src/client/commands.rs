@@ -575,7 +575,9 @@ impl Client {
                 .await
             }
             ClientCommand::ExecuteLocomotion(primitive) => {
-                log::info!(">>> Executing locomotion primitive: {:?}", primitive);
+                if primitive.refresh_server() {
+                    log::info!(">>> Executing locomotion primitive: {:?}", primitive);
+                }
                 let world_events = self
                     .movement
                     .execute_locomotion_primitive(primitive, &mut self.world, &mut self.session)

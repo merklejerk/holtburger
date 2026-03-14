@@ -59,6 +59,16 @@ impl std::fmt::Display for WorldCoordinates {
 }
 
 impl WorldPosition {
+    pub fn global_coords(&self) -> Vector3 {
+        let (landblock_x, landblock_y) = self.landblock_coords();
+
+        Vector3::new(
+            (landblock_x as f32 * 192.0) + self.coords.x,
+            (landblock_y as f32 * 192.0) + self.coords.y,
+            self.coords.z,
+        )
+    }
+
     pub fn is_indoors(&self) -> bool {
         // In Asheron's Call, the low 16 bits of the landblock ID contain the cell.
         // Cell IDs 0x0000 - 0x003F are used for the 64 outdoor cells in a landblock.
@@ -127,20 +137,17 @@ impl WorldPosition {
         // Global-space distance in meters.
         // Mirrors ACE Position.DistanceTo semantics, which use landblock offsets for
         // both outdoor and indoor cells.
-        let (lb_x1, lb_y1) = self.landblock_coords();
-        let (lb_x2, lb_y2) = other.landblock_coords();
+        let delta = self.global_coords() - other.global_coords();
 
-        // Coordinates are local to their current cell/landblock frame.
-        let wx1 = (lb_x1 as f32 * 192.0) + self.coords.x;
-        let wy1 = (lb_y1 as f32 * 192.0) + self.coords.y;
-        let wx2 = (lb_x2 as f32 * 192.0) + other.coords.x;
-        let wy2 = (lb_y2 as f32 * 192.0) + other.coords.y;
+        delta.length()
+    }
 
-        let dx = wx1 - wx2;
-        let dy = wy1 - wy2;
-        let dz = self.coords.z - other.coords.z;
+    pub fn heading_to(&self, other: &Self) -> f32 {
+        if self.landblock_id == other.landblock_id {
+            return self.coords.heading_to(&other.coords);
+        }
 
-        (dx * dx + dy * dy + dz * dz).sqrt()
+        self.global_coords().heading_to(&other.global_coords())
     }
 }
 
@@ -252,5 +259,22 @@ mod tests {
         };
         let d = indoor.distance_to(&outdoor);
         assert!((d - 192.0).abs() < 1e-6, "Distance was {}", d);
+    }
+
+    #[test]
+    fn test_heading_uses_global_space_across_landblocks() {
+        let player = WorldPosition {
+            landblock_id: Guid(0u32),
+            coords: Vector3::new(10.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        let target = WorldPosition {
+            landblock_id: Guid(1u32 << 24),
+            coords: Vector3::new(10.0, 10.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+
+        let heading = player.heading_to(&target);
+        assert!((heading - std::f32::consts::PI).abs() < 1e-6, "Heading was {}", heading);
     }
 }

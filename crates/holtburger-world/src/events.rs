@@ -61,6 +61,9 @@ pub enum StateEvent {
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
     },
+    PlayerGroundedUpdated {
+        grounded: bool,
+    },
     SpellUpdated {
         spell_id: u32,
         name: Option<String>,
@@ -105,6 +108,7 @@ pub enum EventDedupeKey {
     Attribute(stats::AttributeType),
     Skill(stats::SkillType),
     CombatMode,
+    PlayerGrounded,
     LevelInfo,
     ServerTime,
     EntityPosition(Guid),
@@ -122,6 +126,7 @@ impl holtburger_common::traits::Deduplicable for StateEvent {
             StateEvent::AttributeUpdated(a) => Some(EventDedupeKey::Attribute(a.attr_type)),
             StateEvent::SkillUpdated(s) => Some(EventDedupeKey::Skill(s.skill_type)),
             StateEvent::CombatModeUpdated(_) => Some(EventDedupeKey::CombatMode),
+            StateEvent::PlayerGroundedUpdated { .. } => Some(EventDedupeKey::PlayerGrounded),
             StateEvent::LevelInfoUpdated(_) => Some(EventDedupeKey::LevelInfo),
             StateEvent::ServerTimeUpdate(_) => Some(EventDedupeKey::ServerTime),
             StateEvent::EntityMoved { guid, .. } => Some(EventDedupeKey::EntityPosition(*guid)),

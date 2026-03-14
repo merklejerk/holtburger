@@ -94,6 +94,8 @@ pub struct GameData {
     pub vitae: f32,
     /// Current position in the world.
     pub player_pos: Option<WorldPosition>,
+    /// Last grounded state reported by the server for the player.
+    pub player_grounded: Option<bool>,
     /// Active enchantments on the player.
     pub player_enchantments: Vec<Enchantment>,
     /// List of learned spell IDs.
@@ -135,6 +137,7 @@ impl Default for GameData {
             armor: 0,
             vitae: 1.0,
             player_pos: None,
+            player_grounded: None,
             player_enchantments: Vec::new(),
             player_spells: Vec::new(),
             spell_catalog: None,

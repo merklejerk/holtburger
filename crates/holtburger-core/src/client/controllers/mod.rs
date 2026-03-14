@@ -3,8 +3,7 @@ pub mod combat;
 pub mod maintain_range;
 
 pub use approach_target::{
-    ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
-    ApproachTargetInput,
+    ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason, ApproachTargetInput,
 };
 pub use combat::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput,
@@ -12,8 +11,8 @@ pub use combat::{
     DesiredAttackEffect, DesiredAttackInput, DesiredAttackProfile, TargetedAttackRequest,
 };
 pub use maintain_range::{
-    MaintainRangeConfig, MaintainRangeController, MaintainRangeEffect,
-    MaintainRangeFinishReason, MaintainRangeInput,
+    MaintainRangeConfig, MaintainRangeController, MaintainRangeEffect, MaintainRangeFinishReason,
+    MaintainRangeInput,
 };
 
 /// Shared controller kernel for reusable client-side behaviors.
@@ -168,10 +167,7 @@ mod tests {
     #[test]
     fn controller_update_can_map_effect_vocabulary() {
         let result = ControllerUpdate::new(ControllerStatus::Active)
-            .with_effects([
-                ThresholdEffect::Started,
-                ThresholdEffect::EnteredThreshold,
-            ])
+            .with_effects([ThresholdEffect::Started, ThresholdEffect::EnteredThreshold])
             .map_effects(|effect| match effect {
                 ThresholdEffect::Started => "started",
                 ThresholdEffect::EnteredThreshold => "entered",
@@ -203,10 +199,7 @@ mod tests {
         assert_eq!(entered.status, ControllerStatus::Active);
         assert_eq!(
             entered.effects,
-            vec![
-                ThresholdEffect::Started,
-                ThresholdEffect::EnteredThreshold,
-            ]
+            vec![ThresholdEffect::Started, ThresholdEffect::EnteredThreshold,]
         );
     }
 

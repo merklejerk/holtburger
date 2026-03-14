@@ -200,6 +200,7 @@
 - [ ] There's a stray `[X] Close` verb showing up on in-world containers.
 - [ ] Make target of current interaction bold in dashboard lists?
 - [ ] Don't auto-attack targets too far away or marked for deletion.
+- [ ] Too much attack error spam! `Attack sequence finished with ActionCancelled.` 50x.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

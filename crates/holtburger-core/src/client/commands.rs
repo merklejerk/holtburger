@@ -1,7 +1,9 @@
+use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
+use crate::client::movement::{
+    encode_contact_long_jump, encode_last_contact, raw_motion_state_with_player_style,
+};
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
-use crate::client::locomotion::LocomotionPrimitive;
-use crate::client::movement::raw_motion_state_with_player_style;
 use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_common::{Guid, Quaternion};
@@ -51,8 +53,8 @@ impl Client {
             ClientCommand::Jump { .. }
             | ClientCommand::SetState(_)
             | ClientCommand::TurnTo { .. }
-            | ClientCommand::ExecuteLocomotion(_) 
-            | ClientCommand::StopMoving
+            | ClientCommand::ExecuteLocomotion(_)
+            | ClientCommand::StopMoving { .. }
             | ClientCommand::SyncPosition => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
@@ -544,7 +546,7 @@ impl Client {
                 })))
                 .await
             }
-            ClientCommand::TurnTo { heading } => {
+            ClientCommand::TurnTo { heading, metadata } => {
                 log::info!(">>> Turning to heading: {}", heading);
 
                 // Prediction: update local state immediately so UI feels snappy
@@ -570,31 +572,35 @@ impl Client {
                     server_control_sequence: srv_seq,
                     teleport_sequence: tele_seq,
                     force_position_sequence: force_seq,
-                    contact_long_jump: 1, // Assume contact
+                    contact_long_jump: encode_contact_long_jump(metadata),
                 })))
                 .await
             }
-            ClientCommand::ExecuteLocomotion(primitive) => {
-                if primitive.refresh_server() {
-                    log::info!(">>> Executing locomotion primitive: {:?}", primitive);
+            ClientCommand::ExecuteLocomotion(request) => {
+                if request.primitive.refresh_server() {
+                    log::info!(
+                        ">>> Executing locomotion primitive: {:?}",
+                        request.primitive
+                    );
                 }
                 let world_events = self
                     .movement
-                    .execute_locomotion_primitive(primitive, &mut self.world, &mut self.session)
+                    .execute_locomotion_request(request, &mut self.world, &mut self.session)
                     .await?;
                 for event in world_events {
                     self.emit_state_event(event);
                 }
                 Ok(())
             }
-            ClientCommand::StopMoving => {
+            ClientCommand::StopMoving { metadata } => {
                 log::info!(">>> Stopping local approach movement");
                 let world_events = self
                     .movement
-                    .execute_locomotion_primitive(
-                        LocomotionPrimitive::Stop {
+                    .execute_locomotion_request(
+                        LocomotionRequest::new(LocomotionPrimitive::Stop {
                             refresh_server: true,
-                        },
+                        })
+                        .with_metadata(metadata),
                         &mut self.world,
                         &mut self.session,
                     )
@@ -612,7 +618,7 @@ impl Client {
                     server_control_sequence: self.world.player.server_control_sequence,
                     teleport_sequence: self.world.player.teleport_sequence,
                     force_position_sequence: self.world.player.force_position_sequence,
-                    last_contact: 1,
+                    last_contact: encode_last_contact(MovementPacketMetadata::default()),
                 };
 
                 self.send_game_action(GameAction::AutonomousPosition(Box::new(pulse)))

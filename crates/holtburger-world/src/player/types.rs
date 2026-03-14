@@ -71,6 +71,8 @@ pub struct PlayerState {
     pub force_position_sequence: u16,
     /// Sequence for client-initiated position updates.
     pub position_sequence: u16,
+    /// Last grounded state reported by authoritative server movement updates.
+    pub server_grounded: Option<bool>,
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
@@ -116,6 +118,7 @@ impl PlayerState {
             teleport_sequence: 0,
             force_position_sequence: 0,
             position_sequence: 0,
+            server_grounded: None,
             movement_sequence: 0,
             enchantments: Vec::new(),
             spells: BTreeMap::new(),

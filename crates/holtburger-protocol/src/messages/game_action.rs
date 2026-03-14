@@ -77,9 +77,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Jump => {
                     GameAction::Jump(Box::new(JumpActionData::unpack(data, offset)?))
                 }
-                GameActionOpcode::TargetedMeleeAttack => GameAction::TargetedMeleeAttack(
-                    Box::new(TargetedMeleeAttackActionData::unpack(data, offset)?),
-                ),
+                GameActionOpcode::TargetedMeleeAttack => GameAction::TargetedMeleeAttack(Box::new(
+                    TargetedMeleeAttackActionData::unpack(data, offset)?,
+                )),
                 GameActionOpcode::TargetedMissileAttack => GameAction::TargetedMissileAttack(
                     Box::new(TargetedMissileAttackActionData::unpack(data, offset)?),
                 ),

@@ -11,21 +11,10 @@ use holtburger_world::{StateEvent, WorldState};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
-const DRIVE_HEADING_CHANGE_THRESHOLD: f32 = 0.05;
-const DRIVE_SPEED_CHANGE_THRESHOLD: f32 = 0.05;
 
 #[derive(Debug, Clone, Copy)]
-struct DriveSyncState {
-    heading: f32,
-    speed: f32,
-}
+struct DriveSyncState;
 
-fn heading_delta(lhs: f32, rhs: f32) -> f32 {
-    let delta = (lhs - rhs).rem_euclid(std::f32::consts::TAU);
-    delta.min(std::f32::consts::TAU - delta)
-}
-
-/// Computes the position a player should stop at when moving toward a target at a specific distance.
 fn calculate_arrival_position(
     source: &WorldPosition,
     target_pos: &holtburger_common::Vector3,
@@ -91,7 +80,7 @@ impl MovementSystem {
                     // heading/speed thresholds.
                     Self::send_drive_pulse(world, session, heading, speed, request.metadata)
                         .await?;
-                    self.last_drive_sync = Some(DriveSyncState { heading, speed });
+                    self.last_drive_sync = Some(DriveSyncState);
                 }
                 LocomotionPrimitive::Stop { .. } => {
                     Self::send_stop_pulse(world, session, request.metadata).await?;

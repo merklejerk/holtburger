@@ -23,6 +23,8 @@ pub enum GameAction {
     Jump(Box<JumpActionData>),
     AutonomousPosition(Box<AutonomousPositionActionData>),
     MoveToState(Box<MoveToStateActionData>),
+    TargetedMeleeAttack(Box<TargetedMeleeAttackActionData>),
+    TargetedMissileAttack(Box<TargetedMissileAttackActionData>),
     GetAndWieldItem(Box<GetAndWieldItemActionData>),
     StackableMerge(Box<StackableMergeActionData>),
     StackableSplitToContainer(Box<StackableSplitToContainerActionData>),
@@ -75,6 +77,12 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Jump => {
                     GameAction::Jump(Box::new(JumpActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::TargetedMeleeAttack => GameAction::TargetedMeleeAttack(Box::new(
+                    TargetedMeleeAttackActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::TargetedMissileAttack => GameAction::TargetedMissileAttack(
+                    Box::new(TargetedMissileAttackActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::AutonomousPosition => GameAction::AutonomousPosition(Box::new(
                     AutonomousPositionActionData::unpack(data, offset)?,
                 )),
@@ -204,6 +212,16 @@ impl ProtocolPack for GameActionMessage {
         match &self.action {
             GameAction::Jump(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Jump as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TargetedMeleeAttack(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TargetedMeleeAttack as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::TargetedMissileAttack(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::TargetedMissileAttack as u32)
                     .unwrap();
                 data.pack(buf);
             }

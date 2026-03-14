@@ -1,4 +1,5 @@
 use std::time::Instant;
+use std::{fs::File, sync::Mutex};
 
 use holtburger_common::Guid;
 use holtburger_core::{ClientState, RetryState};
@@ -32,6 +33,7 @@ pub struct AppState {
     pub account_name: String,
     pub account_password: String,
     pub character_preference: Option<String>,
+    pub chat_log: Option<Mutex<File>>,
     pub page: Page,
     pub modal: Option<Modal>,
     pub logon_retry: RetryState,

@@ -164,21 +164,28 @@ impl PlayerState {
     /// Updates the player's world position and associated sequences.
     pub fn update_position_from_server(
         &mut self,
-        pos: holtburger_common::position::WorldPosition,
-        instance_seq: u16,
-        pos_seq: u16,
-        teleport_seq: u16,
-        force_seq: u16,
+        pos_pack: &holtburger_protocol::messages::movement::messages::position::PositionPack,
         events: &mut Vec<StateEvent>,
     ) {
         use holtburger_common::sequence::is_newer_u16;
         let old_forced_seq = self.force_position_sequence;
+        let old_grounded = self.server_grounded;
 
-        self.position = pos;
-        self.instance_sequence = instance_seq;
-        self.position_sequence = pos_seq;
-        self.teleport_sequence = teleport_seq;
-        self.force_position_sequence = force_seq;
+        self.position = pos_pack.pos;
+        self.instance_sequence = pos_pack.instance_sequence;
+        self.position_sequence = pos_pack.position_sequence;
+        self.teleport_sequence = pos_pack.teleport_sequence;
+        self.force_position_sequence = pos_pack.force_position_sequence;
+        let is_grounded = pos_pack
+            .flags
+            .contains(holtburger_protocol::messages::movement::messages::position::UpdatePositionFlag::IS_GROUNDED);
+        self.server_grounded = Some(is_grounded);
+
+        if old_grounded != Some(is_grounded) {
+            events.push(StateEvent::PlayerGroundedUpdated {
+                grounded: is_grounded,
+            });
+        }
 
         if is_newer_u16(self.force_position_sequence, old_forced_seq) {
             events.push(StateEvent::ForcedReposition {
@@ -198,6 +205,12 @@ impl PlayerState {
         self.instance_sequence = instance_sequence;
         self.server_control_sequence = server_control_sequence;
         self.movement_sequence = movement_sequence;
+    }
+
+    pub fn update_current_motion_style(&mut self, current_style: u16) {
+        if current_style != 0 {
+            self.current_motion_style = Some(u32::from(current_style));
+        }
     }
 
     pub fn update_vector_sequence(&mut self, instance_sequence: u16) {

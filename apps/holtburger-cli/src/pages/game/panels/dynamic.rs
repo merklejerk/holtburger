@@ -68,11 +68,12 @@ pub fn render_dynamic_pane(
     f.render_widget(block, area);
 
     let control_line = combat_controls_line(data, view);
+    let max_control_width = inner.width.saturating_sub(1);
     let control_width = control_line
         .as_ref()
         .map(|line| line.to_string().width() as u16 + 1)
         .unwrap_or(0)
-        .min(inner.width);
+        .min(max_control_width);
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)

@@ -12,9 +12,6 @@ use holtburger_world::{StateEvent, WorldState};
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 
-#[derive(Debug, Clone, Copy)]
-struct DriveSyncState;
-
 fn calculate_arrival_position(
     source: &WorldPosition,
     target_pos: &holtburger_common::Vector3,
@@ -52,14 +49,12 @@ pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
 
 pub(super) struct MovementSystem {
     pub(super) last_sent_pos_seq: Option<u16>,
-    last_drive_sync: Option<DriveSyncState>,
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
             last_sent_pos_seq: None,
-            last_drive_sync: None,
         }
     }
 
@@ -80,11 +75,9 @@ impl MovementSystem {
                     // heading/speed thresholds.
                     Self::send_drive_pulse(world, session, heading, speed, request.metadata)
                         .await?;
-                    self.last_drive_sync = Some(DriveSyncState);
                 }
                 LocomotionPrimitive::Stop { .. } => {
                     Self::send_stop_pulse(world, session, request.metadata).await?;
-                    self.last_drive_sync = None;
                 }
             }
         }

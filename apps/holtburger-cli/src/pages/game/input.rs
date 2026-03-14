@@ -443,7 +443,7 @@ mod tests {
         });
         state.data.combat_mode = CombatMode::Melee;
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 120);
 
         assert!(
             !result

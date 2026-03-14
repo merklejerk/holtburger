@@ -623,10 +623,36 @@ fn test_update_position_from_server_caches_grounded_state() {
     let mut events = Vec::<StateEvent>::new();
     let pos = WorldPosition::default();
 
-    player.update_position_from_server(pos, 1, 2, 3, 4, false, &mut events);
+    use holtburger_protocol::messages::movement::messages::position::{
+        PositionPack, UpdatePositionFlag,
+    };
+
+    player.update_position_from_server(
+        &PositionPack {
+            pos,
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 3,
+            force_position_sequence: 4,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+        &mut events,
+    );
     assert_eq!(player.server_grounded, Some(false));
 
-    player.update_position_from_server(pos, 5, 6, 7, 4, true, &mut events);
+    player.update_position_from_server(
+        &PositionPack {
+            pos,
+            instance_sequence: 5,
+            position_sequence: 6,
+            teleport_sequence: 7,
+            force_position_sequence: 4,
+            flags: UpdatePositionFlag::IS_GROUNDED,
+            ..Default::default()
+        },
+        &mut events,
+    );
     assert_eq!(player.server_grounded, Some(true));
 }
 

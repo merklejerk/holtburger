@@ -45,7 +45,7 @@ pub struct AttackerNotificationEventData {
 impl ProtocolUnpack for AttackerNotificationEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let defender_name = read_string16(data, offset)?;
-        if *offset + 24 > data.len() {
+        if *offset + 28 > data.len() {
             return None;
         }
 
@@ -95,7 +95,7 @@ pub struct DefenderNotificationEventData {
 impl ProtocolUnpack for DefenderNotificationEventData {
     fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
         let attacker_name = read_string16(data, offset)?;
-        if *offset + 28 > data.len() {
+        if *offset + 32 > data.len() {
             return None;
         }
 

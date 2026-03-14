@@ -86,16 +86,12 @@ impl MovementSystem {
         if primitive.refresh_server() {
             match primitive {
                 LocomotionPrimitive::Drive { heading, speed, .. } => {
-                    let should_send_drive_pulse = self.last_drive_sync.is_none_or(|last_sync| {
-                        heading_delta(heading, last_sync.heading) > DRIVE_HEADING_CHANGE_THRESHOLD
-                            || (speed - last_sync.speed).abs() > DRIVE_SPEED_CHANGE_THRESHOLD
-                    });
-
-                    if should_send_drive_pulse {
-                        Self::send_drive_pulse(world, session, heading, speed, request.metadata)
-                            .await?;
-                        self.last_drive_sync = Some(DriveSyncState { heading, speed });
-                    }
+                    // When refresh_server() is true, honor the explicit request by always
+                    // sending a drive pulse, rather than suppressing it based on
+                    // heading/speed thresholds.
+                    Self::send_drive_pulse(world, session, heading, speed, request.metadata)
+                        .await?;
+                    self.last_drive_sync = Some(DriveSyncState { heading, speed });
                 }
                 LocomotionPrimitive::Stop { .. } => {
                     Self::send_stop_pulse(world, session, request.metadata).await?;

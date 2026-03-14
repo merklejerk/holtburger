@@ -10,6 +10,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use unicode_width::UnicodeWidthStr;
 
 pub fn render_dynamic_pane(
     f: &mut Frame,
@@ -69,7 +70,7 @@ pub fn render_dynamic_pane(
     let control_line = combat_controls_line(data, view);
     let control_width = control_line
         .as_ref()
-        .map(|line| line.to_string().chars().count() as u16 + 1)
+        .map(|line| line.to_string().width() as u16 + 1)
         .unwrap_or(0)
         .min(inner.width);
 

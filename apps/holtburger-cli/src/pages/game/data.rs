@@ -234,6 +234,24 @@ impl GameData {
         Some(encumbrance / capacity)
     }
 
+    pub fn get_run_rate(&self) -> Option<f32> {
+        let run_skill = self.skills.get(&SkillType::Run)?.current as f32;
+        let burden = self.get_burden().unwrap_or(3.0);
+        let load_mod = if burden < 1.0 {
+            1.0
+        } else if burden < 2.0 {
+            2.0 - burden
+        } else {
+            0.0
+        };
+
+        if run_skill >= 800.0 {
+            Some(18.0 / 4.0)
+        } else {
+            Some((load_mod * (run_skill / (run_skill + 200.0) * 11.0) + 4.0) / 4.0)
+        }
+    }
+
     pub fn spell_name(&self, spell_id: u32) -> Option<&str> {
         self.spell_catalog
             .as_ref()

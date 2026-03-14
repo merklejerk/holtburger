@@ -1,5 +1,7 @@
 use holtburger_common::Vector3;
 
+const RUN_ANIM_SPEED: f32 = 4.0;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LocomotionPrimitive {
     Drive {
@@ -15,11 +17,14 @@ pub enum LocomotionPrimitive {
 impl LocomotionPrimitive {
     pub fn desired_velocity(&self) -> Option<Vector3> {
         match *self {
-            Self::Drive { heading, speed, .. } => Some(Vector3::new(
-                -heading.cos() * speed,
-                heading.sin() * speed,
+            Self::Drive { heading, speed, .. } => {
+                let world_speed = speed * RUN_ANIM_SPEED;
+
+                Some(Vector3::new(
+                -heading.cos() * world_speed,
+                heading.sin() * world_speed,
                 0.0,
-            )),
+            ))}
             Self::Stop { .. } => Some(Vector3::zero()),
         }
     }
@@ -48,11 +53,11 @@ mod tests {
             refresh_server: false,
         };
 
-        assert_eq!(west.desired_velocity(), Some(Vector3::new(-2.0, 0.0, 0.0)));
+        assert_eq!(west.desired_velocity(), Some(Vector3::new(-8.0, 0.0, 0.0)));
 
         let north_velocity = north.desired_velocity().unwrap();
         assert!(north_velocity.x.abs() < 1e-5);
-        assert!((north_velocity.y - 2.0).abs() < 1e-5);
+        assert!((north_velocity.y - 8.0).abs() < 1e-5);
     }
 
     #[test]

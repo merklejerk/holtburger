@@ -161,7 +161,9 @@ impl GameState {
                     if command == "/combat" {
                         let mode = self.toggled_combat_mode();
 
-                        result.actions.push(crate::types::AppAction::SetCombatMode { mode });
+                        result
+                            .actions
+                            .push(crate::types::AppAction::SetCombatMode { mode });
                         self.chat_input.input_history.push(command.clone());
                         self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
@@ -216,6 +218,7 @@ impl GameState {
                     self.data.player_pos = Some(pos);
                     result.commands.push(ClientCommand::TurnTo {
                         heading: new_heading,
+                        metadata: self.current_movement_metadata(),
                     });
                     result.needs_redraw = true;
                 }
@@ -314,12 +317,24 @@ impl GameState {
                     result.needs_redraw = true;
                 } else if self.view.focused_pane == FocusedPane::Dynamic {
                     match c.to_ascii_lowercase() {
-                        'r' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
-                            result.actions.push(crate::types::AppAction::CycleCombatProfileLevel);
+                        'r' if matches!(
+                            self.data.combat_mode,
+                            CombatMode::Melee | CombatMode::Missile
+                        ) =>
+                        {
+                            result
+                                .actions
+                                .push(crate::types::AppAction::CycleCombatProfileLevel);
                             result.needs_redraw = true;
                         }
-                        'h' if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) => {
-                            result.actions.push(crate::types::AppAction::CycleCombatAttackHeight);
+                        'h' if matches!(
+                            self.data.combat_mode,
+                            CombatMode::Melee | CombatMode::Missile
+                        ) =>
+                        {
+                            result
+                                .actions
+                                .push(crate::types::AppAction::CycleCombatAttackHeight);
                             result.needs_redraw = true;
                         }
                         _ => {}
@@ -430,7 +445,12 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::NONE), 120);
 
-        assert!(!result.actions.iter().any(|action| matches!(action, AppAction::CycleCombatProfileLevel)));
+        assert!(
+            !result
+                .actions
+                .iter()
+                .any(|action| matches!(action, AppAction::CycleCombatProfileLevel))
+        );
     }
 
     #[test]
@@ -460,10 +480,12 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 120);
 
-        assert!(result
-            .commands
-            .iter()
-            .any(|command| matches!(command, ClientCommand::CancelAttack)));
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| matches!(command, ClientCommand::CancelAttack))
+        );
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_sequence_active);
     }

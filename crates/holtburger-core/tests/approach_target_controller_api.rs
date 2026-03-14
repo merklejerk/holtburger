@@ -16,12 +16,8 @@ fn position(x: f32) -> WorldPosition {
 #[test]
 fn external_consumers_can_drive_approach_target_controller() {
     let now = std::time::Instant::now();
-    let mut controller = ApproachTargetController::new(
-        holtburger_common::Guid(0x1234),
-        1.0,
-        position(0.0),
-        now,
-    );
+    let mut controller =
+        ApproachTargetController::new(holtburger_common::Guid(0x1234), 1.0, position(0.0), now);
 
     let update = controller.handle(&ApproachTargetInput::Tick {
         now,

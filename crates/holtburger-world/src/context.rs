@@ -396,8 +396,8 @@ mod tests {
     use crate::entity::Entity;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
-    use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyInt, Usable};
     use holtburger_common::properties::EquipMask;
+    use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyInt, Usable};
     use holtburger_protocol::messages::combat::CombatMode;
 
     #[derive(Default)]
@@ -451,14 +451,14 @@ mod tests {
         };
 
         let mut sword = entity(sword_guid, "Noisy Sword");
-        sword
-            .properties
-            .ints
-            .insert(PropertyInt::ItemType, (ItemType::MELEE_WEAPON | ItemType::MISSILE_WEAPON).bits() as i32);
-        sword
-            .properties
-            .ints
-            .insert(PropertyInt::CurrentWieldedLocation, EquipMask::MELEE_WEAPON.bits() as i32);
+        sword.properties.ints.insert(
+            PropertyInt::ItemType,
+            (ItemType::MELEE_WEAPON | ItemType::MISSILE_WEAPON).bits() as i32,
+        );
+        sword.properties.ints.insert(
+            PropertyInt::CurrentWieldedLocation,
+            EquipMask::MELEE_WEAPON.bits() as i32,
+        );
         world.entities.insert(sword_guid, sword);
 
         assert_eq!(world.get_suggested_combat_mode(), CombatMode::Melee);
@@ -477,17 +477,19 @@ mod tests {
         };
 
         let mut bow = entity(bow_guid, "Bow");
-        bow.properties
-            .ints
-            .insert(PropertyInt::CurrentWieldedLocation, EquipMask::MISSILE_WEAPON.bits() as i32);
+        bow.properties.ints.insert(
+            PropertyInt::CurrentWieldedLocation,
+            EquipMask::MISSILE_WEAPON.bits() as i32,
+        );
         world.entities.insert(bow_guid, bow);
 
         assert_eq!(world.get_suggested_combat_mode(), CombatMode::Missile);
 
         let mut wand = entity(wand_guid, "Wand");
-        wand.properties
-            .ints
-            .insert(PropertyInt::CurrentWieldedLocation, EquipMask::CASTER.bits() as i32);
+        wand.properties.ints.insert(
+            PropertyInt::CurrentWieldedLocation,
+            EquipMask::CASTER.bits() as i32,
+        );
         world.entities.insert(wand_guid, wand);
         world.equipment.insert(wand_guid);
 

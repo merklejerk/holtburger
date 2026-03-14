@@ -344,6 +344,13 @@ impl Client {
                         pos: *pos,
                     });
             }
+            StateEvent::PlayerGroundedUpdated { grounded } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerGroundedUpdated {
+                        grounded: *grounded,
+                    });
+            }
             StateEvent::ForcedReposition {
                 guid,
                 pos,

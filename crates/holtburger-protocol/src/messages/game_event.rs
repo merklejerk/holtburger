@@ -123,12 +123,12 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::AttackDone => {
                     GameEvent::AttackDone(Box::new(AttackDoneEventData::unpack(data, offset)?))
                 }
-                GameEventOpcode::AttackerNotification => GameEvent::AttackerNotification(
-                    Box::new(AttackerNotificationEventData::unpack(data, offset)?),
-                ),
-                GameEventOpcode::DefenderNotification => GameEvent::DefenderNotification(
-                    Box::new(DefenderNotificationEventData::unpack(data, offset)?),
-                ),
+                GameEventOpcode::AttackerNotification => GameEvent::AttackerNotification(Box::new(
+                    AttackerNotificationEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::DefenderNotification => GameEvent::DefenderNotification(Box::new(
+                    DefenderNotificationEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::EvasionAttackerNotification => {
                     GameEvent::EvasionAttackerNotification(Box::new(
                         EvasionAttackerNotificationEventData::unpack(data, offset)?,

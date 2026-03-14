@@ -1,5 +1,5 @@
-use crate::client::locomotion::LocomotionPrimitive;
 use crate::client::WireEvent;
+use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Quaternion};
@@ -53,6 +53,14 @@ pub(super) fn raw_motion_state_with_player_style(
     raw_motion_state
 }
 
+pub(super) fn encode_contact_long_jump(metadata: MovementPacketMetadata) -> u8 {
+    u8::from(metadata.contact.unwrap_or(true))
+}
+
+pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
+    u8::from(metadata.contact.unwrap_or(true))
+}
+
 pub(super) struct MovementSystem {
     pub(super) last_sent_pos_seq: Option<u16>,
     last_drive_sync: Option<DriveSyncState>,
@@ -66,30 +74,31 @@ impl MovementSystem {
         }
     }
 
-    pub(super) async fn execute_locomotion_primitive(
+    pub(super) async fn execute_locomotion_request(
         &mut self,
-        primitive: LocomotionPrimitive,
+        request: LocomotionRequest,
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<Vec<StateEvent>> {
+        let primitive = request.primitive;
         let state_events = self.apply_locomotion_primitive(primitive, world);
 
         if primitive.refresh_server() {
             match primitive {
                 LocomotionPrimitive::Drive { heading, speed, .. } => {
                     let should_send_drive_pulse = self.last_drive_sync.is_none_or(|last_sync| {
-                        heading_delta(heading, last_sync.heading)
-                            > DRIVE_HEADING_CHANGE_THRESHOLD
+                        heading_delta(heading, last_sync.heading) > DRIVE_HEADING_CHANGE_THRESHOLD
                             || (speed - last_sync.speed).abs() > DRIVE_SPEED_CHANGE_THRESHOLD
                     });
 
                     if should_send_drive_pulse {
-                        Self::send_drive_pulse(world, session, heading, speed).await?;
+                        Self::send_drive_pulse(world, session, heading, speed, request.metadata)
+                            .await?;
                         self.last_drive_sync = Some(DriveSyncState { heading, speed });
                     }
                 }
                 LocomotionPrimitive::Stop { .. } => {
-                    Self::send_stop_pulse(world, session).await?;
+                    Self::send_stop_pulse(world, session, request.metadata).await?;
                     self.last_drive_sync = None;
                 }
             }
@@ -123,26 +132,30 @@ impl MovementSystem {
         session: &mut Session,
         heading: f32,
         speed: f32,
+        metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let mut position = world.player.position;
         position.rotation = Quaternion::from_heading(heading);
 
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState {
-                flags: RawMotionFlags::CURRENT_HOLD_KEY
-                    | RawMotionFlags::FORWARD_COMMAND
-                    | RawMotionFlags::FORWARD_SPEED,
-                current_hold_key: Some(HoldKey::Run as u32),
-                forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
-                forward_speed: Some(speed),
-                ..Default::default()
-            }),
+            raw_motion_state: raw_motion_state_with_player_style(
+                world,
+                RawMotionState {
+                    flags: RawMotionFlags::CURRENT_HOLD_KEY
+                        | RawMotionFlags::FORWARD_COMMAND
+                        | RawMotionFlags::FORWARD_SPEED,
+                    current_hold_key: Some(HoldKey::Run as u32),
+                    forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
+                    forward_speed: Some(speed),
+                    ..Default::default()
+                },
+            ),
             position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: 1,
+            contact_long_jump: encode_contact_long_jump(metadata),
         };
 
         session
@@ -150,7 +163,11 @@ impl MovementSystem {
             .await
     }
 
-    async fn send_stop_pulse(world: &WorldState, session: &mut Session) -> Result<()> {
+    async fn send_stop_pulse(
+        world: &WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<()> {
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
             raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState::default()),
             position: world.player.position,
@@ -158,7 +175,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: 1,
+            contact_long_jump: encode_contact_long_jump(metadata),
         };
 
         session
@@ -280,7 +297,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            last_contact: 1, // Logged as 0x1 (Contact) in retail
+            last_contact: encode_last_contact(MovementPacketMetadata::default()),
         };
 
         log::debug!(
@@ -363,11 +380,22 @@ mod tests {
             },
         );
 
-        assert!(raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
-        assert!(raw_motion_state.flags.contains(RawMotionFlags::FORWARD_COMMAND));
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::CURRENT_STYLE)
+        );
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::FORWARD_COMMAND)
+        );
         assert_eq!(raw_motion_state.current_style, Some(0x8000_003e));
         assert_eq!(raw_motion_state.current_hold_key, Some(HoldKey::Run as u32));
-        assert_eq!(raw_motion_state.forward_command, Some(WALK_FORWARD_MOTION_COMMAND));
+        assert_eq!(
+            raw_motion_state.forward_command,
+            Some(WALK_FORWARD_MOTION_COMMAND)
+        );
         assert_eq!(raw_motion_state.forward_speed, Some(7.0));
     }
 }

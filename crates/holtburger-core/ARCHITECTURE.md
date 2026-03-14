@@ -39,6 +39,8 @@ Applications are free to use these controllers, ignore them, or layer their own 
 
 The current primitive locomotion surface lives in [src/client/locomotion.rs](src/client/locomotion.rs). It defines controller-facing locomotion primitives such as drive and stop, while [src/client/movement.rs](src/client/movement.rs) remains the executor that applies those primitives to local prediction and protocol traffic.
 
+Movement packet metadata may optionally carry an explicit motion-style choice for frontends that need direct stance control. When a frontend does not provide one, the core falls back to the last non-zero server-reported motion style so outbound `MoveToState` packets stay protocol-correct.
+
 Frontend adoption pattern today:
 
 1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
@@ -74,6 +76,7 @@ Movement in `holtburger-core` should converge on three distinct layers:
     - Format and send movement-related game actions.
     - Handle server-driven movement and forced reposition.
     - Maintain prediction and synchronization with the authoritative server state.
+    - Cache server-authored motion-style state needed to build correct outbound movement packets.
 2. **Primitive client actions**
     - Set heading.
     - Set movement state.
@@ -97,6 +100,8 @@ The current ownership model is explicit:
 4. `MovementSystem` executes those primitives and continues to own local prediction plus server-authoritative movement handling.
 
 This keeps controller state out of hidden engine-owned special cases while preserving a single movement executor for protocol traffic and prediction.
+
+The important boundary is that the core preserves protocol fidelity for motion-style fields, but it does not own the frontend's movement policy. A 3D client may drive locomotion directly and supply explicit motion-style choices when needed.
 
 ## Internal Data Flow
 

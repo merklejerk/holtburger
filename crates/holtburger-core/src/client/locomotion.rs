@@ -3,14 +3,31 @@ use holtburger_common::Vector3;
 const RUN_ANIM_SPEED: f32 = 4.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MotionStyle {
+    #[default]
+    PreserveServer,
+    Explicit(u32),
+    Omit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MovementPacketMetadata {
     pub contact: Option<bool>,
+    pub motion_style: MotionStyle,
 }
 
 impl MovementPacketMetadata {
     pub const fn with_contact(contact: bool) -> Self {
         Self {
             contact: Some(contact),
+            motion_style: MotionStyle::PreserveServer,
+        }
+    }
+
+    pub const fn with_motion_style(motion_style: MotionStyle) -> Self {
+        Self {
+            contact: None,
+            motion_style,
         }
     }
 }
@@ -25,7 +42,10 @@ impl LocomotionRequest {
     pub const fn new(primitive: LocomotionPrimitive) -> Self {
         Self {
             primitive,
-            metadata: MovementPacketMetadata { contact: None },
+            metadata: MovementPacketMetadata {
+                contact: None,
+                motion_style: MotionStyle::PreserveServer,
+            },
         }
     }
 
@@ -116,5 +136,14 @@ mod tests {
         });
 
         assert_eq!(request.metadata.contact, None);
+        assert_eq!(request.metadata.motion_style, MotionStyle::PreserveServer);
+    }
+
+    #[test]
+    fn metadata_can_override_motion_style_without_contact() {
+        let metadata = MovementPacketMetadata::with_motion_style(MotionStyle::Explicit(0x1234_5678));
+
+        assert_eq!(metadata.contact, None);
+        assert_eq!(metadata.motion_style, MotionStyle::Explicit(0x1234_5678));
     }
 }

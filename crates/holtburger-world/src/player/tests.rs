@@ -503,7 +503,7 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
 }
 
 #[test]
-fn test_update_motion_caches_last_non_zero_player_style() {
+fn test_update_motion_caches_last_non_zero_server_style() {
     let mut state = WorldState::new(None, None);
     state.player.guid = Guid(0x50000001);
 
@@ -524,7 +524,7 @@ fn test_update_motion_caches_last_non_zero_player_style() {
     assert_eq!(state.player.instance_sequence, 7);
     assert_eq!(state.player.movement_sequence, 8);
     assert_eq!(state.player.server_control_sequence, 9);
-    assert_eq!(state.player.current_motion_style, Some(62));
+    assert_eq!(state.player.last_server_motion_style, Some(62));
 
     let second = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid: state.player.guid,
@@ -543,7 +543,7 @@ fn test_update_motion_caches_last_non_zero_player_style() {
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.movement_sequence, 11);
     assert_eq!(state.player.server_control_sequence, 12);
-    assert_eq!(state.player.current_motion_style, Some(62));
+    assert_eq!(state.player.last_server_motion_style, Some(62));
 }
 
 #[test]

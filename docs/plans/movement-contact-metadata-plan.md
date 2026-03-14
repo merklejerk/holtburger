@@ -288,15 +288,15 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Add `server_grounded` storage to `PlayerState`
-- [ ] Thread `IS_GROUNDED` from protocol handling into player state
-- [ ] Introduce a packet-focused movement metadata type in core
-- [ ] Replace `ExecuteLocomotion(LocomotionPrimitive)` with an explicit wrapper payload
-- [ ] Refactor `MovementSystem` send helpers to consume metadata
-- [ ] Refactor `TurnTo` and `SyncPosition` to consume metadata
-- [ ] Decide how server-controlled movement acknowledgements obtain contact metadata
-- [ ] Update app/frontend call sites
-- [ ] Add or update tests for world grounded capture and outbound metadata propagation
+- [x] Add `server_grounded` storage to `PlayerState`
+- [x] Thread `IS_GROUNDED` from protocol handling into player state
+- [x] Introduce a packet-focused movement metadata type in core
+- [x] Replace `ExecuteLocomotion(LocomotionPrimitive)` with an explicit wrapper payload
+- [x] Refactor `MovementSystem` send helpers to consume metadata
+- [x] Refactor `TurnTo` and `SyncPosition` to consume metadata
+- [x] Decide how server-controlled movement acknowledgements obtain contact metadata
+- [x] Update app/frontend call sites
+- [x] Add or update tests for world grounded capture and outbound metadata propagation
 
 ### Decisions Log
 - Prefer explicit per-call metadata over a long-lived provider object.
@@ -308,7 +308,69 @@ Mitigation:
 - Dry-run verified current hardcoded contact send sites in core movement and command handling.
 - Dry-run verified that `holtburger-world` currently drops `IS_GROUNDED` on the floor.
 - Dry-run verified that builder construction does not need dependency-injection changes if the design stays per-call.
+- Phase 1 complete: `PlayerState` now stores `server_grounded`, `UpdatePosition` handling preserves `IS_GROUNDED`, and a focused regression test covers the mutation path.
+- Verification: `cargo test -p holtburger-world` passed after Phase 1.
+- Phase 2 complete: `holtburger-core` now has `MovementPacketMetadata` and `LocomotionRequest`, and `ClientCommand::ExecuteLocomotion` carries the wrapper request instead of a bare primitive.
+- Phase 3 complete: outbound movement send sites now resolve contact through centralized helpers instead of hardcoded `1` values.
+- Phase 4 complete: the CLI stores player grounded state and supplies explicit metadata on the movement commands it emits directly.
+- Verification: `cargo test -p holtburger-core` passed after the metadata refactor.
+- Verification: `cargo test -p holtburger-cli` passed after the CLI integration changes.
+- Final validation: `cargo fmt`, `cargo test -p holtburger-world`, `cargo test -p holtburger-core`, and `cargo test -p holtburger-cli` all passed after the full implementation landed.
 
 ### Open Questions
-- Should server-controlled movement acknowledgements continue using an internal default contact rule for now, or should the caller supply metadata there too?
-- Do we want a single shared `MovementPacketMetadata` type for both locomotion and direct movement commands, or a slightly more specific wrapper per command family?
+- None at the moment.
+
+## Execution Progress
+
+### Phase 1 Status: Completed
+
+Completed work:
+
+- Added `server_grounded: Option<bool>` to `PlayerState`
+- Threaded `UpdatePositionFlag::IS_GROUNDED` through player message handling
+- Updated the player mutation path to cache authoritative grounded state
+- Added a focused test covering grounded-state updates
+
+Notes:
+
+- No pivot required.
+- The dry-run assumption was correct: Phase 1 stayed contained to `holtburger-world`.
+
+### Phase 2 Status: Completed
+
+Completed work:
+
+- Added `MovementPacketMetadata` and `LocomotionRequest` to `holtburger-core`
+- Updated `ClientCommand::ExecuteLocomotion` to carry a request wrapper instead of a bare primitive
+- Added centralized fallback resolution: explicit metadata, then last server-grounded, then bootstrap `true`
+
+Notes:
+
+- No pivot required.
+- The chosen shared type is a single `MovementPacketMetadata` used by both locomotion and direct movement commands.
+
+### Phase 3 Status: Completed
+
+Completed work:
+
+- Refactored `MovementSystem` send helpers to use centralized contact encoding
+- Removed hardcoded `1` values from `MoveToState` and `AutonomousPosition` send paths
+- Updated direct `TurnTo` handling and default `SyncPosition` heartbeat construction to use the centralized fallback
+
+Notes:
+
+- Server-controlled movement acknowledgements currently use the internal compatibility default rather than caller-supplied explicit metadata.
+- No pivot required.
+
+### Phase 4 Status: Completed
+
+Completed work:
+
+- Added a `PlayerGroundedUpdated` event from `holtburger-world` through `holtburger-core` into the CLI
+- Added `player_grounded` tracking to CLI `GameData`
+- Updated CLI movement command producers to attach explicit metadata for locomotion, `TurnTo`, and `StopMoving`
+
+Notes:
+
+- Small execution-time design choice: adding a dedicated grounded event was the cleanest way to let the CLI provide explicit metadata without teaching it to peek into core internals.
+- `SyncPosition` still relies on the core fallback because the CLI does not currently emit that command.

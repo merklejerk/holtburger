@@ -1,6 +1,6 @@
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use std::f32::consts::{PI, TAU};
 use std::time::{Duration, Instant};
@@ -233,7 +233,8 @@ impl Controller for CombatAutomationController {
             force_attack,
         } = *input;
 
-        if self.current_target != Some(target_guid) || self.current_mode != Some(attack_profile.mode)
+        if self.current_target != Some(target_guid)
+            || self.current_mode != Some(attack_profile.mode)
         {
             self.current_target = Some(target_guid);
             self.current_mode = Some(attack_profile.mode);
@@ -253,9 +254,9 @@ impl Controller for CombatAutomationController {
             ControllerStatus::Active | ControllerStatus::CoolingDown
         ) {
             return facing_update.map_effects(|effect| match effect {
-                CombatFacingEffect::TurnTo { heading } => CombatAutomationEffect::TurnTo {
-                    heading,
-                },
+                CombatFacingEffect::TurnTo { heading } => {
+                    CombatAutomationEffect::TurnTo { heading }
+                }
             });
         }
 
@@ -461,11 +462,13 @@ mod tests {
         assert_eq!(attack.status, ControllerStatus::Active);
         assert_eq!(
             attack.effects,
-            vec![CombatAutomationEffect::Attack(TargetedAttackRequest::Missile {
-                target: Guid(0x1234),
-                attack_height: AttackHeight::Medium,
-                accuracy_level: 0.5,
-            })]
+            vec![CombatAutomationEffect::Attack(
+                TargetedAttackRequest::Missile {
+                    target: Guid(0x1234),
+                    attack_height: AttackHeight::Medium,
+                    accuracy_level: 0.5,
+                }
+            )]
         );
     }
 }

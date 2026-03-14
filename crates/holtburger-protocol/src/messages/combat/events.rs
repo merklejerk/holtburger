@@ -49,9 +49,8 @@ impl ProtocolUnpack for AttackerNotificationEventData {
             return None;
         }
 
-        let damage_type = DamageType::from_bits_retain(LittleEndian::read_u32(
-            &data[*offset..*offset + 4],
-        ));
+        let damage_type =
+            DamageType::from_bits_retain(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         let health_percent = LittleEndian::read_f64(&data[*offset + 4..*offset + 12]);
         let damage = LittleEndian::read_u32(&data[*offset + 12..*offset + 16]);
         let critical_hit = LittleEndian::read_u32(&data[*offset + 16..*offset + 20]) != 0;
@@ -100,9 +99,8 @@ impl ProtocolUnpack for DefenderNotificationEventData {
             return None;
         }
 
-        let damage_type = DamageType::from_bits_retain(LittleEndian::read_u32(
-            &data[*offset..*offset + 4],
-        ));
+        let damage_type =
+            DamageType::from_bits_retain(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         let health_percent = LittleEndian::read_f64(&data[*offset + 4..*offset + 12]);
         let damage = LittleEndian::read_u32(&data[*offset + 12..*offset + 16]);
         let damage_location_raw = LittleEndian::read_u32(&data[*offset + 16..*offset + 20]);
@@ -218,9 +216,9 @@ impl ProtocolPack for KillerNotificationEventData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::errors::WeenieError;
     use crate::messages::game_event::{GameEvent, GameEventMessage};
     use crate::test_helpers::assert_pack_unpack_parity;
-    use crate::errors::WeenieError;
     use holtburger_common::Guid;
 
     #[test]
@@ -275,7 +273,8 @@ mod tests {
 
     #[test]
     fn test_evasion_attacker_notification_fixture() {
-        let fixture = hex::decode("B0F700000000000003000000B301000008004D6F7373776172740000").unwrap();
+        let fixture =
+            hex::decode("B0F700000000000003000000B301000008004D6F7373776172740000").unwrap();
         let expected = crate::messages::GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0),
             sequence: 3,
@@ -316,7 +315,9 @@ mod tests {
 
     #[test]
     fn test_victim_notification_fixture() {
-        let fixture = hex::decode("B0F700000000000006000000AC0100000E00596F752068617665206469656421").unwrap();
+        let fixture =
+            hex::decode("B0F700000000000006000000AC0100000E00596F752068617665206469656421")
+                .unwrap();
         let expected = crate::messages::GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0),
             sequence: 6,
@@ -329,7 +330,10 @@ mod tests {
 
     #[test]
     fn test_killer_notification_fixture() {
-        let fixture = hex::decode("B0F700000000000007000000AD0100001600596F75206B696C6C6564207468652064727564676521").unwrap();
+        let fixture = hex::decode(
+            "B0F700000000000007000000AD0100001600596F75206B696C6C6564207468652064727564676521",
+        )
+        .unwrap();
         let expected = crate::messages::GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid(0),
             sequence: 7,

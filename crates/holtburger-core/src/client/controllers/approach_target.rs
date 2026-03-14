@@ -6,8 +6,8 @@
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
 use crate::client::locomotion::LocomotionPrimitive;
-use holtburger_common::position::WorldPosition;
 use holtburger_common::Guid;
+use holtburger_common::position::WorldPosition;
 use std::time::{Duration, Instant};
 
 const MOVE_SYNC_INTERVAL: Duration = Duration::from_secs(1);
@@ -79,15 +79,17 @@ impl Controller for ApproachTargetController {
 
     fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
         match *input {
-            ApproachTargetInput::ForcedReposition => ControllerUpdate::new(
-                ControllerStatus::Completed,
-            )
-            .with_effect(ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                refresh_server: false,
-            }))
-            .with_effect(ApproachTargetEffect::Finished(
-                ApproachTargetFinishReason::ForcedReposition,
-            )),
+            ApproachTargetInput::ForcedReposition => {
+                ControllerUpdate::new(ControllerStatus::Completed)
+                    .with_effect(ApproachTargetEffect::Locomotion(
+                        LocomotionPrimitive::Stop {
+                            refresh_server: false,
+                        },
+                    ))
+                    .with_effect(ApproachTargetEffect::Finished(
+                        ApproachTargetFinishReason::ForcedReposition,
+                    ))
+            }
             ApproachTargetInput::Tick {
                 now,
                 player_position,
@@ -139,13 +141,13 @@ impl Controller for ApproachTargetController {
                     self.last_move_pos_time = now;
                 }
 
-                let refresh_server = if now.duration_since(self.last_move_sync) >= MOVE_SYNC_INTERVAL
-                {
-                    self.last_move_sync = now;
-                    true
-                } else {
-                    false
-                };
+                let refresh_server =
+                    if now.duration_since(self.last_move_sync) >= MOVE_SYNC_INTERVAL {
+                        self.last_move_sync = now;
+                        true
+                    } else {
+                        false
+                    };
 
                 ControllerUpdate::new(ControllerStatus::Active).with_effect(
                     ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
@@ -244,11 +246,13 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
-                heading: std::f32::consts::PI,
-                speed: 4.5,
-                refresh_server: true,
-            })]
+            vec![ApproachTargetEffect::Locomotion(
+                LocomotionPrimitive::Drive {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                    refresh_server: true,
+                }
+            )]
         );
     }
 
@@ -286,11 +290,13 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
-                heading: std::f32::consts::PI,
-                speed: 4.5,
-                refresh_server: true,
-            })]
+            vec![ApproachTargetEffect::Locomotion(
+                LocomotionPrimitive::Drive {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                    refresh_server: true,
+                }
+            )]
         );
     }
 
@@ -316,11 +322,13 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
-                heading: std::f32::consts::PI,
-                speed: 4.5,
-                refresh_server: false,
-            })]
+            vec![ApproachTargetEffect::Locomotion(
+                LocomotionPrimitive::Drive {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                    refresh_server: false,
+                }
+            )]
         );
     }
 

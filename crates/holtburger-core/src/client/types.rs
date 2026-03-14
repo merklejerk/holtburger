@@ -1,6 +1,6 @@
-use crate::client::locomotion::LocomotionPrimitive;
-use holtburger_common::{Guid, Vector3};
+use crate::client::locomotion::{LocomotionRequest, MovementPacketMetadata};
 use holtburger_common::properties::DamageType;
+use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
@@ -193,6 +193,9 @@ pub enum ClientViewEvent {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
     },
+    PlayerGroundedUpdated {
+        grounded: bool,
+    },
     ForcedReposition {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
@@ -305,8 +308,9 @@ pub enum ClientCommand {
     SetState(u32),
     TurnTo {
         heading: f32,
+        metadata: MovementPacketMetadata,
     },
-    ExecuteLocomotion(LocomotionPrimitive),
+    ExecuteLocomotion(LocomotionRequest),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,
@@ -373,7 +377,9 @@ pub enum ClientCommand {
     SetCombatMode(CombatMode),
     SetNoClip(bool),
     CancelAttack,
-    StopMoving,
+    StopMoving {
+        metadata: MovementPacketMetadata,
+    },
     SyncPosition,
     QueryEntityDebugInfo(Guid),
     Quit,

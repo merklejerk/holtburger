@@ -1,5 +1,7 @@
 use super::*;
+use crate::StateEvent;
 use crate::WorldState;
+use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
@@ -546,7 +548,6 @@ fn test_update_motion_caches_last_non_zero_player_style() {
 
 #[test]
 fn test_magic_purge_enchantments_preserves_vitae_only() {
-    use crate::StateEvent;
     use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsEventData,
@@ -612,6 +613,21 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
         _ => None,
     });
     assert_eq!(latest_derived_vitae, Some(0.88));
+}
+
+#[test]
+fn test_update_position_from_server_caches_grounded_state() {
+    let mut player = PlayerState::new();
+    player.guid = Guid(0x50000001);
+
+    let mut events = Vec::<StateEvent>::new();
+    let pos = WorldPosition::default();
+
+    player.update_position_from_server(pos, 1, 2, 3, 4, false, &mut events);
+    assert_eq!(player.server_grounded, Some(false));
+
+    player.update_position_from_server(pos, 5, 6, 7, 4, true, &mut events);
+    assert_eq!(player.server_grounded, Some(true));
 }
 
 #[test]

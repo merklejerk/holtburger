@@ -51,7 +51,10 @@ fn level_enabled(filter: log::LevelFilter, level: log::Level) -> bool {
         log::LevelFilter::Error => matches!(level, log::Level::Error),
         log::LevelFilter::Warn => matches!(level, log::Level::Error | log::Level::Warn),
         log::LevelFilter::Info => {
-            matches!(level, log::Level::Error | log::Level::Warn | log::Level::Info)
+            matches!(
+                level,
+                log::Level::Error | log::Level::Warn | log::Level::Info
+            )
         }
         log::LevelFilter::Debug => !matches!(level, log::Level::Trace),
         log::LevelFilter::Trace => true,
@@ -87,7 +90,8 @@ impl log::Log for TuiLogger {
         if self.enabled(record.metadata()) {
             let log_msg = format!("[{}] {}", record.level(), record.args());
 
-            if self.file.is_some() && level_enabled(self.file_level, record.level())
+            if self.file.is_some()
+                && level_enabled(self.file_level, record.level())
                 && let Some(file_mutex) = &self.file
                 && let Ok(mut file) = file_mutex.lock()
             {
@@ -408,12 +412,7 @@ mod tests {
 
     #[test]
     fn debug_verbosity_requires_debug_log() {
-        let result = Args::try_parse_from([
-            "tui",
-            "--account",
-            "acct",
-            "-V",
-        ]);
+        let result = Args::try_parse_from(["tui", "--account", "acct", "-V"]);
 
         assert!(result.is_err());
     }
@@ -431,7 +430,10 @@ mod tests {
         .expect("debug log args should parse");
 
         assert_eq!(args.debug_verbosity, 2);
-        assert_eq!(debug_file_level_filter(args.debug_verbosity), log::LevelFilter::Info);
+        assert_eq!(
+            debug_file_level_filter(args.debug_verbosity),
+            log::LevelFilter::Info
+        );
     }
 
     #[test]

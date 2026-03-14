@@ -1,6 +1,7 @@
 use crate::StateEvent;
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::state::WorldState;
+use holtburger_protocol::messages::position::UpdatePositionFlag;
 use holtburger_protocol::messages::*;
 
 pub(crate) fn handle_message(
@@ -27,6 +28,7 @@ pub(crate) fn handle_message(
                     data.pos.position_sequence,
                     data.pos.teleport_sequence,
                     data.pos.force_position_sequence,
+                    data.pos.flags.contains(UpdatePositionFlag::IS_GROUNDED),
                     events,
                 );
             }

@@ -275,6 +275,10 @@ mod tests {
         };
 
         let heading = player.heading_to(&target);
-        assert!((heading - std::f32::consts::PI).abs() < 1e-6, "Heading was {}", heading);
+        assert!(
+            (heading - std::f32::consts::PI).abs() < 1e-6,
+            "Heading was {}",
+            heading
+        );
     }
 }

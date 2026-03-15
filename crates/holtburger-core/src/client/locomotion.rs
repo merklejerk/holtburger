@@ -1,4 +1,5 @@
 use holtburger_common::Vector3;
+use holtburger_protocol::messages::movement::MotionStance;
 
 const RUN_ANIM_SPEED: f32 = 4.0;
 
@@ -6,7 +7,7 @@ const RUN_ANIM_SPEED: f32 = 4.0;
 pub enum MotionStyle {
     #[default]
     PreserveServer,
-    Explicit(u32),
+    Explicit(MotionStance),
     Omit,
 }
 
@@ -141,9 +142,10 @@ mod tests {
 
     #[test]
     fn metadata_can_override_motion_style_without_contact() {
-        let metadata = MovementPacketMetadata::with_motion_style(MotionStyle::Explicit(0x1234_5678));
+        let metadata =
+            MovementPacketMetadata::with_motion_style(MotionStyle::Explicit(MotionStance::Magic));
 
         assert_eq!(metadata.contact, None);
-        assert_eq!(metadata.motion_style, MotionStyle::Explicit(0x1234_5678));
+        assert_eq!(metadata.motion_style, MotionStyle::Explicit(MotionStance::Magic));
     }
 }

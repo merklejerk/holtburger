@@ -37,13 +37,11 @@ pub(super) fn raw_motion_state_with_motion_style(
     match motion_style {
         MotionStyle::PreserveServer => {
             if let Some(current_style) = world.player.last_server_motion_style {
-                raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
-                raw_motion_state.current_style = Some(current_style);
+                raw_motion_state.set_current_stance(current_style);
             }
         }
         MotionStyle::Explicit(current_style) => {
-            raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
-            raw_motion_state.current_style = Some(current_style);
+            raw_motion_state.set_current_stance(current_style);
         }
         MotionStyle::Omit => {
             raw_motion_state.flags.remove(RawMotionFlags::CURRENT_STYLE);
@@ -320,6 +318,7 @@ impl MovementSystem {
 mod tests {
     use super::*;
     use holtburger_common::Vector3;
+    use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_world::WorldState;
 
     #[test]
@@ -362,7 +361,7 @@ mod tests {
     #[test]
     fn test_raw_motion_state_preserves_cached_server_style_by_default() {
         let mut world = WorldState::new(None, None);
-        world.player.last_server_motion_style = Some(0x8000_003e);
+        world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
 
         let raw_motion_state = raw_motion_state_with_motion_style(
             &world,
@@ -388,7 +387,7 @@ mod tests {
                 .flags
                 .contains(RawMotionFlags::FORWARD_COMMAND)
         );
-        assert_eq!(raw_motion_state.current_style, Some(0x8000_003e));
+        assert_eq!(raw_motion_state.current_stance(), Some(MotionStance::SwordCombat));
         assert_eq!(raw_motion_state.current_hold_key, Some(HoldKey::Run as u32));
         assert_eq!(
             raw_motion_state.forward_command,
@@ -400,28 +399,28 @@ mod tests {
     #[test]
     fn test_raw_motion_state_can_override_cached_server_style() {
         let mut world = WorldState::new(None, None);
-        world.player.last_server_motion_style = Some(0x8000_003e);
+        world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
 
         let raw_motion_state = raw_motion_state_with_motion_style(
             &world,
             RawMotionState::default(),
-            MotionStyle::Explicit(0x1111_2222),
+            MotionStyle::Explicit(MotionStance::Magic),
         );
 
         assert!(raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
-        assert_eq!(raw_motion_state.current_style, Some(0x1111_2222));
+        assert_eq!(raw_motion_state.current_stance(), Some(MotionStance::Magic));
     }
 
     #[test]
     fn test_raw_motion_state_can_omit_cached_server_style() {
         let mut world = WorldState::new(None, None);
-        world.player.last_server_motion_style = Some(0x8000_003e);
+        world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
 
         let raw_motion_state = raw_motion_state_with_motion_style(
             &world,
             RawMotionState {
                 flags: RawMotionFlags::CURRENT_STYLE,
-                current_style: Some(0x9999_0000),
+                current_style: Some(MotionStance::Magic as u32),
                 ..Default::default()
             },
             MotionStyle::Omit,

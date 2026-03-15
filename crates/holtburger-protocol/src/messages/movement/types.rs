@@ -70,6 +70,42 @@ pub enum HoldKey {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr)]
 #[repr(u32)]
+pub enum MotionStance {
+    Invalid = 0x8000_0000,
+    HandCombat = 0x8000_003c,
+    NonCombat = 0x8000_003d,
+    SwordCombat = 0x8000_003e,
+    BowCombat = 0x8000_003f,
+    SwordShieldCombat = 0x8000_0040,
+    CrossbowCombat = 0x8000_0041,
+    UnusedCombat = 0x8000_0042,
+    SlingCombat = 0x8000_0043,
+    TwoHandedSwordCombat = 0x8000_0044,
+    TwoHandedStaffCombat = 0x8000_0045,
+    DualWieldCombat = 0x8000_0046,
+    ThrownWeaponCombat = 0x8000_0047,
+    Graze = 0x8000_0048,
+    Magic = 0x8000_0049,
+    BowNoAmmo = 0x8000_00e8,
+    CrossbowNoAmmo = 0x8000_00e9,
+    AtlatlCombat = 0x8000_013b,
+    ThrownShieldCombat = 0x8000_013c,
+}
+
+impl MotionStance {
+    const RAW_PREFIX: u32 = 0x8000_0000;
+
+    pub fn from_interpreted(style: u16) -> Option<Self> {
+        Self::from_repr(Self::RAW_PREFIX | u32::from(style))
+    }
+
+    pub const fn interpreted(self) -> u16 {
+        (self as u32 & 0xFFFF) as u16
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr)]
+#[repr(u32)]
 pub enum PositionType {
     Undef = 0,
     Location = 1,
@@ -438,5 +474,39 @@ impl ProtocolPack for RawMotionState {
         for command in &self.commands {
             command.pack(buf);
         }
+    }
+}
+
+impl RawMotionState {
+    pub fn current_stance(&self) -> Option<MotionStance> {
+        self.current_style.and_then(MotionStance::from_repr)
+    }
+
+    pub fn set_current_stance(&mut self, stance: MotionStance) {
+        self.flags |= RawMotionFlags::CURRENT_STYLE;
+        self.current_style = Some(stance as u32);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn motion_stance_round_trips_interpreted_style() {
+        let stance = MotionStance::from_interpreted(0x003e);
+
+        assert_eq!(stance, Some(MotionStance::SwordCombat));
+        assert_eq!(MotionStance::SwordCombat.interpreted(), 0x003e);
+    }
+
+    #[test]
+    fn raw_motion_state_can_set_typed_current_stance() {
+        let mut state = RawMotionState::default();
+        state.set_current_stance(MotionStance::Magic);
+
+        assert!(state.flags.contains(RawMotionFlags::CURRENT_STYLE));
+        assert_eq!(state.current_style, Some(MotionStance::Magic as u32));
+        assert_eq!(state.current_stance(), Some(MotionStance::Magic));
     }
 }

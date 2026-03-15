@@ -8,6 +8,7 @@ use holtburger_common::properties::{
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::movement::MotionStance;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -64,7 +65,7 @@ pub struct PlayerState {
     /// Sequence for server-controlled movement/actions.
     pub server_control_sequence: u16,
     /// Last non-zero server-reported motion stance/style cached for outbound movement packets.
-    pub last_server_motion_style: Option<u32>,
+    pub last_server_motion_style: Option<MotionStance>,
     /// Sequence for teleportation events to ignore stale position updates.
     pub teleport_sequence: u16,
     /// Sequence for server-forced repositions (e.g. rubberbanding or physics corrections).

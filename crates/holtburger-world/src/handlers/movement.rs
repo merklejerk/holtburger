@@ -1,7 +1,27 @@
 use crate::StateEvent;
+use crate::entity::EntityMotionSnapshot;
 use crate::state::WorldState;
 use holtburger_common::math::Quaternion;
+use holtburger_common::Guid;
 use holtburger_protocol::messages::{GameMessage, MovementTypeData};
+
+fn update_entity_motion_snapshot(
+    state: &mut WorldState,
+    guid: Guid,
+    snapshot: Option<EntityMotionSnapshot>,
+    events: &mut Vec<StateEvent>,
+) {
+    let Some(entity) = state.entities.get_mut(guid) else {
+        return;
+    };
+
+    if entity.motion_snapshot != snapshot {
+        entity.motion_snapshot = snapshot;
+        if let Some(snapshot) = snapshot {
+            events.push(StateEvent::EntityMotionUpdated { guid, snapshot });
+        }
+    }
+}
 
 pub(crate) fn handle_message(
     state: &mut WorldState,
@@ -39,6 +59,13 @@ pub(crate) fn handle_message(
         }
         GameMessage::UpdateMotion(data) => {
             let guid = data.guid;
+
+            update_entity_motion_snapshot(
+                state,
+                guid,
+                EntityMotionSnapshot::from_movement_event(data),
+                events,
+            );
 
             let mut target_info = None;
             if let MovementTypeData::TurnToObject(turn) = &data.data

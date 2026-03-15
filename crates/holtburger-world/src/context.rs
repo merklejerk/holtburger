@@ -4,6 +4,19 @@ use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, ItemType, Usable, WorldObjectExt};
 use holtburger_protocol::messages::combat::CombatMode;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CombatTargetStatus {
+    Available,
+    Unavailable,
+    DeathMotionObserved,
+}
+
+impl CombatTargetStatus {
+    pub const fn is_available(self) -> bool {
+        matches!(self, Self::Available)
+    }
+}
+
 /// Provides access to the world state for common logic.
 pub trait WorldContext {
     fn get_player_guid(&self) -> Option<Guid>;
@@ -16,6 +29,29 @@ pub trait WorldContext {
 
 /// Common game logic shared across all clients.
 pub trait WorldContextExt: WorldContext {
+    fn combat_target_status(&self, guid: Guid) -> CombatTargetStatus {
+        if Some(guid) == self.get_player_guid() {
+            return CombatTargetStatus::Unavailable;
+        }
+
+        let Some(entity) = self.get_entity(guid) else {
+            return CombatTargetStatus::Unavailable;
+        };
+
+        if entity.position.landblock_id == Guid::NULL || !entity.is_creature() {
+            return CombatTargetStatus::Unavailable;
+        }
+
+        if entity
+            .motion_snapshot
+            .is_some_and(|snapshot| snapshot.indicates_death_motion())
+        {
+            return CombatTargetStatus::DeathMotionObserved;
+        }
+
+        CombatTargetStatus::Available
+    }
+
     fn is_in_player_inventory(&self, guid: Guid) -> bool {
         self.iter_inventory().any(|candidate| candidate == guid)
     }
@@ -392,13 +428,14 @@ impl<T: WorldContext + ?Sized> WorldContextExt for T {}
 mod tests {
     use std::collections::{HashMap, HashSet};
 
-    use super::{WorldContext, WorldContextExt};
-    use crate::entity::Entity;
+    use super::{CombatTargetStatus, WorldContext, WorldContextExt};
+    use crate::entity::{Entity, EntityMotionSnapshot};
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::EquipMask;
     use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyInt, Usable};
     use holtburger_protocol::messages::combat::CombatMode;
+    use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 
     #[derive(Default)]
     struct TestWorld {
@@ -525,6 +562,59 @@ mod tests {
             .insert(PropertyInt::ItemUseable, Usable::REMOTE.bits() as i32);
 
         assert!(world.can_use(item_guid));
+    }
+
+    #[test]
+    fn combat_target_status_reports_available_creature_targets() {
+        let player_guid = Guid(0x5000_0001);
+        let target_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            ..Default::default()
+        };
+
+        let mut target = entity(target_guid, "Drudge");
+        target.position.landblock_id = Guid(0x0100_0001);
+        target
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.entities.insert(target_guid, target);
+
+        assert_eq!(world.combat_target_status(target_guid), CombatTargetStatus::Available);
+        assert!(world.combat_target_status(target_guid).is_available());
+    }
+
+    #[test]
+    fn combat_target_status_reports_death_motion_observed() {
+        let player_guid = Guid(0x5000_0001);
+        let target_guid = Guid(0x8000_0001);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            ..Default::default()
+        };
+
+        let mut target = entity(target_guid, "Drudge");
+        target.position.landblock_id = Guid(0x0100_0001);
+        target
+            .properties
+            .ints
+            .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            sidestep_command: None,
+            turn_command: None,
+        });
+        world.entities.insert(target_guid, target);
+
+        assert_eq!(
+            world.combat_target_status(target_guid),
+            CombatTargetStatus::DeathMotionObserved
+        );
+        assert!(!world.combat_target_status(target_guid).is_available());
     }
 
     #[test]

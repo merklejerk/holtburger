@@ -1,13 +1,15 @@
 use super::*;
 use crate::StateEvent;
 use crate::WorldState;
+use crate::entity::Entity;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_protocol::messages::movement::MotionStance;
+use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use holtburger_protocol::messages::{
-    GameMessage, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
+    GameMessage, InterpretedMotionState, MovementEventData, MovementInvalid,
+    MovementStateFlags, MovementType, MovementTypeData,
 };
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
@@ -550,6 +552,55 @@ fn test_update_motion_caches_last_non_zero_server_style() {
     assert_eq!(
         state.player.last_server_motion_style,
         Some(MotionStance::SwordCombat)
+    );
+}
+
+#[test]
+fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x60000001);
+
+    state.add_entity(Entity::new(guid, "Drudge".to_string(), WorldPosition::default()));
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 7,
+        movement_sequence: 8,
+        server_control_sequence: 9,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: MotionStance::NonCombat.interpreted(),
+        data: MovementTypeData::Invalid(MovementInvalid {
+            state: InterpretedMotionState {
+                flags: MovementStateFlags::CURRENT_STYLE | MovementStateFlags::FORWARD_COMMAND,
+                num_commands: 0,
+                current_style: Some(MotionStance::NonCombat.interpreted()),
+                forward_command: Some(InterpretedMotionCommand::DEAD),
+                ..Default::default()
+            },
+            sticky_object: None,
+        }),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    let snapshot = state
+        .entities
+        .get(guid)
+        .and_then(|entity| entity.motion_snapshot)
+        .expect("expected motion snapshot to be cached");
+
+    assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
+    assert_eq!(snapshot.forward_command, Some(InterpretedMotionCommand::DEAD));
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            StateEvent::EntityMotionUpdated { guid: target, snapshot }
+                if *target == guid
+                && snapshot.current_style == Some(MotionStance::NonCombat)
+                && snapshot.forward_command == Some(InterpretedMotionCommand::DEAD)
+        ))
     );
 }
 

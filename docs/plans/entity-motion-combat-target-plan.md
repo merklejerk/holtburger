@@ -108,6 +108,9 @@ Frontends decide how to render motion and when to enable automation, but they sh
 
 ### Phase 1: Add Shared Entity Motion Snapshot In World
 
+Status:
+- Completed on 2026-03-15
+
 #### Deliverables
 - Add a compact motion snapshot type owned by `holtburger-world`.
 - Store that snapshot per entity, either directly on `Entity` in [crates/holtburger-world/src/entity.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/entity.rs) or in a dedicated world-owned side store if that proves cleaner.
@@ -120,7 +123,16 @@ Frontends decide how to render motion and when to enable automation, but they sh
 - Existing motion and rotation behavior remains unchanged.
 - New world tests cover motion snapshot ingestion for remote entities.
 
+#### Implementation Notes
+- Added `EntityMotionSnapshot` and `MOTION_COMMAND_DEAD_INTERPRETED` to [crates/holtburger-world/src/entity.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/entity.rs).
+- Stored `Option<EntityMotionSnapshot>` directly on `Entity`.
+- Updated [crates/holtburger-world/src/handlers/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/handlers/movement.rs) to cache motion snapshots from `UpdateMotion` and emit `StateEvent::EntityMotionUpdated` when the snapshot changes.
+- Added remote entity ingestion coverage in [crates/holtburger-world/src/player/tests.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/player/tests.rs).
+
 ### Phase 2: Add Shared Combat-Target Status Query
+
+Status:
+- Completed on 2026-03-15
 
 #### Deliverables
 - Add a world-level query in [crates/holtburger-world/src/context.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/context.rs) to answer combat-target viability.
@@ -138,7 +150,15 @@ Frontends decide how to render motion and when to enable automation, but they sh
 - The query returns a distinct status when death motion was observed.
 - No caller needs to know the magic `0x0011` value outside the world-motion ingest path.
 
+#### Implementation Notes
+- Added `CombatTargetStatus` and `CombatTargetStatus::is_available()` to [crates/holtburger-world/src/context.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/context.rs).
+- Added `WorldContextExt::combat_target_status()` with the initial shared rules: not self, entity exists, in-world, creature, and no observed death motion.
+- Added shared query tests for available creatures and death-motion-observed invalidation in [crates/holtburger-world/src/context.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/context.rs).
+
 ### Phase 3: Expose Motion And Target Semantics Through Core
+
+Status:
+- Completed on 2026-03-15
 
 #### Deliverables
 - Extend core-facing types so frontends can receive entity motion updates when needed.
@@ -151,7 +171,15 @@ Frontends decide how to render motion and when to enable automation, but they sh
 - Core can feed combat automation from shared world semantics rather than frontend-local `is_valid_combat_target()` logic.
 - Motion projection remains optional for frontends that do not care about it.
 
+#### Implementation Notes
+- Added `StateEvent::EntityMotionUpdated` in [crates/holtburger-world/src/events.rs](/home/cluracan/code/holtburger/crates/holtburger-world/src/events.rs).
+- Added projected `ClientViewEvent::EntityMotionUpdated` in [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs).
+- Updated [crates/holtburger-core/src/client/mod.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/mod.rs) to forward world motion updates onto the client view event stream.
+
 ### Phase 4: Migrate TUI Combat Automation Off Frontend-Owned Inference
+
+Status:
+- Completed on 2026-03-15
 
 #### Deliverables
 - Replace the TUI-local `is_valid_combat_target()` logic in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) with shared target-status consumption.
@@ -167,7 +195,15 @@ Frontends decide how to render motion and when to enable automation, but they sh
 - Existing CLI combat tests still pass after the migration.
 - Targeting a slain creature in death animation causes auto-combat to stop treating it as viable once the death motion arrives.
 
+#### Implementation Notes
+- Updated [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) to cache `EntityMotionUpdated` snapshots into the local entity cache.
+- Replaced the old creature-only validity check with shared `combat_target_status()` plus the existing navigation reachability check.
+- Added a CLI regression test ensuring death motion blocks stale attack refresh for a currently targeted creature.
+
 ### Phase 5: Prepare The Frontend Motion Surface For A Future 3D Client
+
+Status:
+- Completed on 2026-03-15
 
 #### Deliverables
 - Add or document the canonical compact motion event shape for frontends.
@@ -177,6 +213,10 @@ Frontends decide how to render motion and when to enable automation, but they sh
 #### Acceptance Criteria
 - The repo has a documented boundary between raw or compact motion projection and shared gameplay semantics.
 - A future 3D client can subscribe to motion updates without having to own dead-motion combat inference.
+
+#### Implementation Notes
+- The compact frontend motion event surface now exists via `EntityMotionUpdated`.
+- Added frontend-boundary documentation in [crates/holtburger-world/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-world/ARCHITECTURE.md) and [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md).
 
 ## Recommended Data Shapes
 
@@ -306,13 +346,13 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Confirm the final storage location for `EntityMotionSnapshot`.
-- [ ] Add motion snapshot ingestion in world movement handling.
-- [ ] Add world-level combat-target status query.
-- [ ] Add tests for death-motion ingestion and target invalidation.
-- [ ] Add core-facing motion projection surface.
-- [ ] Migrate TUI combat-target validity off frontend-owned inference.
-- [ ] Update docs for the new motion and targetability boundary.
+- [x] Confirm the final storage location for `EntityMotionSnapshot`.
+- [x] Add motion snapshot ingestion in world movement handling.
+- [x] Add world-level combat-target status query.
+- [x] Add tests for death-motion ingestion and target invalidation.
+- [x] Add core-facing motion projection surface.
+- [x] Migrate TUI combat-target validity off frontend-owned inference.
+- [x] Update docs for the new motion and targetability boundary.
 
 ### Decisions Log
 - Store compact motion state in world rather than making frontends own packet interpretation.
@@ -324,7 +364,14 @@ Mitigation:
 - Keep `CombatTargetStatus` rich in shared APIs, but allow the first TUI migration to consume it as a boolean availability check.
 
 ### Verification Log
-- Pending implementation.
+- 2026-03-15: `get_errors` reported no diagnostics in updated world files after Phase 1 and Phase 2 changes.
+- 2026-03-15: `get_errors` reported no diagnostics in updated core and CLI files after Phase 3 and Phase 4 changes.
+- 2026-03-15: `cargo test -p holtburger-world` passed.
+- 2026-03-15: `cargo test -p holtburger-core` passed.
+- 2026-03-15: `cargo test -p holtburger-cli death_motion_blocks_stale_attack_refresh_for_targeted_creature` passed.
+- 2026-03-15: `cargo test -p holtburger-cli switching_to_non_creature_target_cancels_attack_sequence` passed.
+- 2026-03-15: `cargo test -p holtburger-cli handle_tick_refreshes_stale_queued_attack_sequence` passed.
+- 2026-03-15: `cargo test -p holtburger-cli` passed.
 
 ### Open Questions
 - None currently blocking. The initial recommendations are:

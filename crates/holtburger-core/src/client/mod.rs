@@ -345,6 +345,14 @@ impl Client {
                         pos: *pos,
                     });
             }
+            StateEvent::EntityMotionUpdated { guid, snapshot } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityMotionUpdated {
+                        guid: *guid,
+                        snapshot: *snapshot,
+                    });
+            }
             StateEvent::PlayerGroundedUpdated { grounded } => {
                 let _ = self
                     .client_view_event_tx

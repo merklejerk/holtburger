@@ -48,6 +48,14 @@ Frontend adoption pattern today:
 3. Interpret its emitted primitive effects, such as `LocomotionPrimitive`, in the frontend's own orchestration layer.
 4. Execute those primitives through the frontend's preferred runtime path. Command-channel frontends can submit `LocomotionPrimitive` values through `ClientCommand::ExecuteLocomotion`, while direct embedders can call into a `Client` more directly.
 
+The same split applies to entity motion coming back from the server:
+
+1. `holtburger-world` owns compact authoritative motion snapshots per entity.
+2. `holtburger-core` projects those snapshots into client-view events for frontends that want to render or inspect motion.
+3. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
+
+That boundary keeps 3D-client rendering needs compatible with shared combat logic: frontends can observe motion directly, but they should not become the authority for interpreting death motion or similar gameplay signals.
+
 The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). After extracting real movement and combat controllers, it has been refined down to the proven shared surface and currently standardizes only:
 
 - a broad controller trait shape

@@ -105,6 +105,11 @@ File: [src/context.rs](src/context.rs)
 lossy projections or UI layers answer gameplay questions without duplicating rules or depending on
 engine-thread state directly.
 
+This is also the boundary for shared combat-target semantics. Frontends may receive compact motion
+updates for rendering or inspection, but gameplay queries such as combat-target viability should be
+derived from world-owned state through `WorldContextExt` rather than reinterpreting motion packets
+independently in each client.
+
 ## Dispatch Flow
 
 ```mermaid
@@ -171,6 +176,10 @@ world helpers rather than layering on handler-specific cleanup.
 ### Event emission boundary
 `StateEvent` emission should describe meaningful observable changes after mutation, not serve as a
 shadow source of truth.
+
+Compact entity motion snapshots now follow this rule too: `holtburger-world` owns the authoritative
+per-entity motion snapshot and emits state events when that snapshot changes. Consumers may project
+or render from those events, but the motion snapshot itself remains world-owned state.
 
 ## Adding New Functionality
 

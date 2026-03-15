@@ -1,4 +1,4 @@
-use crate::entity::Entity;
+use crate::entity::{Entity, EntityMotionSnapshot};
 use crate::state;
 use crate::stats;
 use crate::vendor;
@@ -47,6 +47,10 @@ pub enum StateEvent {
         guid: Guid,
         velocity: holtburger_common::math::Vector3,
         omega: holtburger_common::math::Vector3,
+    },
+    EntityMotionUpdated {
+        guid: Guid,
+        snapshot: EntityMotionSnapshot,
     },
     EntityDespawned(Guid),
     VitalUpdated(stats::Vital),
@@ -113,6 +117,7 @@ pub enum EventDedupeKey {
     ServerTime,
     EntityPosition(Guid),
     EntityVector(Guid),
+    EntityMotion(Guid),
     EntityState(Guid),
 }
 
@@ -132,6 +137,9 @@ impl holtburger_common::traits::Deduplicable for StateEvent {
             StateEvent::EntityMoved { guid, .. } => Some(EventDedupeKey::EntityPosition(*guid)),
             StateEvent::EntityVectorUpdated { guid, .. } => {
                 Some(EventDedupeKey::EntityVector(*guid))
+            }
+            StateEvent::EntityMotionUpdated { guid, .. } => {
+                Some(EventDedupeKey::EntityMotion(*guid))
             }
             StateEvent::EntityStateUpdated { guid, .. } => Some(EventDedupeKey::EntityState(*guid)),
             _ => None,

@@ -104,6 +104,61 @@ impl MotionStance {
     }
 }
 
+/// Low 16-bit interpreted motion command value derived from ACE MotionCommand.
+///
+/// This remains an open wrapper instead of a closed enum because ACE's command
+/// space is large and not all values carried through interpreted motion are
+/// modeled here. Named constants below cover the high-signal commands we
+/// currently care about while preserving unknown values losslessly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct InterpretedMotionCommand(pub u16);
+
+impl InterpretedMotionCommand {
+    pub const STOP: Self = Self(0x0004);
+    pub const WALK_FORWARD: Self = Self(0x0005);
+    pub const WALK_BACKWARDS: Self = Self(0x0006);
+    pub const RUN_FORWARD: Self = Self(0x0007);
+    pub const TURN_RIGHT: Self = Self(0x000d);
+    pub const TURN_LEFT: Self = Self(0x000e);
+    pub const SIDESTEP_RIGHT: Self = Self(0x000f);
+    pub const SIDESTEP_LEFT: Self = Self(0x0010);
+    pub const DEAD: Self = Self(0x0011);
+
+    pub const fn raw(self) -> u16 {
+        self.0
+    }
+
+    pub const fn is_dead(self) -> bool {
+        self.0 == Self::DEAD.0
+    }
+
+    pub const fn is_forward_locomotion(self) -> bool {
+        self.0 == Self::WALK_FORWARD.0 || self.0 == Self::RUN_FORWARD.0
+    }
+
+    pub const fn is_locomotion(self) -> bool {
+        self.0 == Self::WALK_FORWARD.0
+            || self.0 == Self::WALK_BACKWARDS.0
+            || self.0 == Self::RUN_FORWARD.0
+            || self.0 == Self::TURN_RIGHT.0
+            || self.0 == Self::TURN_LEFT.0
+            || self.0 == Self::SIDESTEP_RIGHT.0
+            || self.0 == Self::SIDESTEP_LEFT.0
+    }
+}
+
+impl From<u16> for InterpretedMotionCommand {
+    fn from(value: u16) -> Self {
+        Self(value)
+    }
+}
+
+impl From<InterpretedMotionCommand> for u16 {
+    fn from(value: InterpretedMotionCommand) -> Self {
+        value.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr)]
 #[repr(u32)]
 pub enum PositionType {
@@ -141,9 +196,9 @@ pub struct InterpretedMotionState {
     pub flags: MovementStateFlags,
     pub num_commands: u32,
     pub current_style: Option<u16>,
-    pub forward_command: Option<u16>,
-    pub sidestep_command: Option<u16>,
-    pub turn_command: Option<u16>,
+    pub forward_command: Option<InterpretedMotionCommand>,
+    pub sidestep_command: Option<InterpretedMotionCommand>,
+    pub turn_command: Option<InterpretedMotionCommand>,
     pub forward_speed: Option<f32>,
     pub sidestep_speed: Option<f32>,
     pub turn_speed: Option<f32>,
@@ -175,7 +230,7 @@ impl ProtocolUnpack for InterpretedMotionState {
             if *offset + 2 > data.len() {
                 return None;
             }
-            forward_command = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
+            forward_command = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]).into());
             *offset += 2;
         }
 
@@ -184,7 +239,7 @@ impl ProtocolUnpack for InterpretedMotionState {
             if *offset + 2 > data.len() {
                 return None;
             }
-            sidestep_command = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
+            sidestep_command = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]).into());
             *offset += 2;
         }
 
@@ -193,7 +248,7 @@ impl ProtocolUnpack for InterpretedMotionState {
             if *offset + 2 > data.len() {
                 return None;
             }
-            turn_command = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]));
+            turn_command = Some(LittleEndian::read_u16(&data[*offset..*offset + 2]).into());
             *offset += 2;
         }
 
@@ -262,15 +317,15 @@ impl ProtocolPack for InterpretedMotionState {
         }
 
         if let Some(cmd) = self.forward_command {
-            buf.extend_from_slice(&cmd.to_le_bytes());
+            buf.extend_from_slice(&u16::from(cmd).to_le_bytes());
         }
 
         if let Some(cmd) = self.sidestep_command {
-            buf.extend_from_slice(&cmd.to_le_bytes());
+            buf.extend_from_slice(&u16::from(cmd).to_le_bytes());
         }
 
         if let Some(cmd) = self.turn_command {
-            buf.extend_from_slice(&cmd.to_le_bytes());
+            buf.extend_from_slice(&u16::from(cmd).to_le_bytes());
         }
 
         if let Some(speed) = self.forward_speed {
@@ -296,7 +351,7 @@ impl ProtocolPack for InterpretedMotionState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct MotionItem {
-    pub command: u16,
+    pub command: InterpretedMotionCommand,
     pub packed_sequence: u16, // bit 15: is_autonomous, bits 0-14: sequence
     pub speed: f32,
 }
@@ -310,10 +365,15 @@ impl MotionItem {
         (self.packed_sequence >> 15) == 1
     }
 
-    pub fn new(command: u16, sequence: u16, is_autonomous: bool, speed: f32) -> Self {
+    pub fn new(
+        command: impl Into<InterpretedMotionCommand>,
+        sequence: u16,
+        is_autonomous: bool,
+        speed: f32,
+    ) -> Self {
         let packed_sequence = (sequence & 0x7FFF) | (if is_autonomous { 1 << 15 } else { 0 });
         Self {
-            command,
+            command: command.into(),
             packed_sequence,
             speed,
         }
@@ -325,7 +385,7 @@ impl ProtocolUnpack for MotionItem {
         if data.len() < *offset + 8 {
             return None;
         }
-        let command = LittleEndian::read_u16(&data[*offset..*offset + 2]);
+        let command = LittleEndian::read_u16(&data[*offset..*offset + 2]).into();
         let packed_sequence = LittleEndian::read_u16(&data[*offset + 2..*offset + 4]);
         let speed = LittleEndian::read_f32(&data[*offset + 4..*offset + 8]);
         *offset += 8;
@@ -340,7 +400,9 @@ impl ProtocolUnpack for MotionItem {
 impl ProtocolPack for MotionItem {
     fn pack(&self, writer: &mut Vec<u8>) {
         use byteorder::{LittleEndian, WriteBytesExt};
-        writer.write_u16::<LittleEndian>(self.command).unwrap();
+        writer
+            .write_u16::<LittleEndian>(u16::from(self.command))
+            .unwrap();
         writer
             .write_u16::<LittleEndian>(self.packed_sequence)
             .unwrap();
@@ -508,5 +570,35 @@ mod tests {
         assert!(state.flags.contains(RawMotionFlags::CURRENT_STYLE));
         assert_eq!(state.current_style, Some(MotionStance::Magic as u32));
         assert_eq!(state.current_stance(), Some(MotionStance::Magic));
+    }
+
+    #[test]
+    fn interpreted_motion_command_constants_match_ace_low_bits() {
+        assert_eq!(InterpretedMotionCommand::STOP.raw(), 0x0004);
+        assert_eq!(InterpretedMotionCommand::WALK_FORWARD.raw(), 0x0005);
+        assert_eq!(InterpretedMotionCommand::WALK_BACKWARDS.raw(), 0x0006);
+        assert_eq!(InterpretedMotionCommand::RUN_FORWARD.raw(), 0x0007);
+        assert_eq!(InterpretedMotionCommand::TURN_RIGHT.raw(), 0x000d);
+        assert_eq!(InterpretedMotionCommand::TURN_LEFT.raw(), 0x000e);
+        assert_eq!(InterpretedMotionCommand::SIDESTEP_RIGHT.raw(), 0x000f);
+        assert_eq!(InterpretedMotionCommand::SIDESTEP_LEFT.raw(), 0x0010);
+        assert_eq!(InterpretedMotionCommand::DEAD.raw(), 0x0011);
+    }
+
+    #[test]
+    fn interpreted_motion_command_predicates_match_expected_commands() {
+        assert!(InterpretedMotionCommand::WALK_FORWARD.is_forward_locomotion());
+        assert!(InterpretedMotionCommand::RUN_FORWARD.is_forward_locomotion());
+        assert!(!InterpretedMotionCommand::WALK_BACKWARDS.is_forward_locomotion());
+
+        assert!(InterpretedMotionCommand::WALK_FORWARD.is_locomotion());
+        assert!(InterpretedMotionCommand::WALK_BACKWARDS.is_locomotion());
+        assert!(InterpretedMotionCommand::RUN_FORWARD.is_locomotion());
+        assert!(InterpretedMotionCommand::TURN_RIGHT.is_locomotion());
+        assert!(InterpretedMotionCommand::TURN_LEFT.is_locomotion());
+        assert!(InterpretedMotionCommand::SIDESTEP_RIGHT.is_locomotion());
+        assert!(InterpretedMotionCommand::SIDESTEP_LEFT.is_locomotion());
+        assert!(!InterpretedMotionCommand::DEAD.is_locomotion());
+        assert!(InterpretedMotionCommand::DEAD.is_dead());
     }
 }

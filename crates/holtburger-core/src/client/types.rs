@@ -9,7 +9,7 @@ use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsEventItem};
-use holtburger_world::entity::Entity;
+use holtburger_world::entity::{Entity, EntityMotionSnapshot};
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::TradeState;
 use holtburger_world::stats::{
@@ -192,6 +192,10 @@ pub enum ClientViewEvent {
     EntityMoved {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
+    },
+    EntityMotionUpdated {
+        guid: Guid,
+        snapshot: EntityMotionSnapshot,
     },
     PlayerGroundedUpdated {
         grounded: bool,

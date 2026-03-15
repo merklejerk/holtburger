@@ -156,6 +156,14 @@ impl GameState {
                 }
                 result.needs_redraw = true;
             }
+            ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
+                if let Some(entity) = self.data.entities.get_mut(&guid) {
+                    entity.motion_snapshot = Some(snapshot);
+                    self.sync_approach_target(Instant::now(), &mut result);
+                    self.sync_sticky_melee_pursuit(&mut result);
+                    result.needs_redraw = true;
+                }
+            }
             ClientViewEvent::PlayerGroundedUpdated { grounded } => {
                 self.data.player_grounded = Some(grounded);
             }
@@ -1041,10 +1049,6 @@ impl GameState {
     }
 
     fn is_valid_combat_target(&self, target_guid: Guid) -> bool {
-        if Some(target_guid) == self.data.player_guid {
-            return false;
-        }
-
         let Some(entity) = self.data.entities.get(&target_guid) else {
             return false;
         };
@@ -1058,7 +1062,7 @@ impl GameState {
             return false;
         }
 
-        entity.is_creature()
+        self.data.combat_target_status(target_guid).is_available()
     }
 
     fn reset_salvaging_state(&mut self, result: &mut UpdateResult) -> bool {
@@ -1938,6 +1942,55 @@ mod tests {
             matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
         }));
         assert!(state.data.combat_runtime.attack_queued);
+    }
+
+    #[test]
+    fn death_motion_blocks_stale_attack_refresh_for_targeted_creature() {
+        use holtburger_protocol::messages::movement::{
+            InterpretedMotionCommand, MotionStance,
+        };
+        use holtburger_world::entity::EntityMotionSnapshot;
+
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target.set_bool_prop(PropertyBool::Attackable, true);
+        state.data.entities.insert(target_guid, target);
+
+        let now = Instant::now();
+        let mut seeded = UpdateResult::new();
+        state.sync_combat_automation(now, CombatMode::Melee, true, &mut seeded);
+        state.data.combat_runtime.attack_queued = true;
+        state.data.combat_runtime.attack_sequence_active = false;
+
+        let _ = state.handle_view_event(ClientViewEvent::EntityMotionUpdated {
+            guid: target_guid,
+            snapshot: EntityMotionSnapshot {
+                current_style: Some(MotionStance::NonCombat),
+                forward_command: Some(InterpretedMotionCommand::DEAD),
+                sidestep_command: None,
+                turn_command: None,
+            },
+        });
+
+        let mut result = UpdateResult::new();
+        state.refresh_stale_attack_sequence(
+            now + Duration::from_secs(1) + Duration::from_millis(1),
+            &mut result,
+        );
+
+        assert!(!result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
+        }));
     }
 
     #[test]

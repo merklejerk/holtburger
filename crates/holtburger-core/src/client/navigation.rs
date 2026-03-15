@@ -26,6 +26,7 @@ const MELEE_ATTACK_DISTANCE: f32 = 0.6;
 const MELEE_STICKY_DISTANCE: f32 = 4.0;
 const MELEE_REPEAT_DISTANCE: f32 = 16.0;
 const STICKY_MOVE_REISSUE_INTERVAL: Duration = Duration::from_millis(250);
+const AUTOMATION_TARGET_DISTANCE_LIMIT_M: f32 = 384.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ApproachSyncInput {
@@ -70,6 +71,7 @@ pub struct NavigationAutomation {
     approach_target: Option<ApproachTargetController>,
     sticky_melee: Option<MaintainRangeController>,
     sticky_melee_config: MaintainRangeConfig,
+    automation_target_distance_limit_m: f32,
 }
 
 impl Default for NavigationAutomation {
@@ -83,11 +85,32 @@ impl Default for NavigationAutomation {
                 repeat_distance: MELEE_REPEAT_DISTANCE,
                 reissue_interval: STICKY_MOVE_REISSUE_INTERVAL,
             },
+            automation_target_distance_limit_m: AUTOMATION_TARGET_DISTANCE_LIMIT_M,
         }
     }
 }
 
 impl NavigationAutomation {
+    pub fn automation_target_position(
+        &self,
+        player_position: Option<WorldPosition>,
+        target_position: Option<WorldPosition>,
+    ) -> Option<WorldPosition> {
+        let target_position = target_position?;
+        if target_position.landblock_id == Guid::NULL {
+            return None;
+        }
+
+        if player_position.is_some_and(|player_position| {
+            player_position.distance_to(&target_position)
+                > self.automation_target_distance_limit_m
+        }) {
+            return None;
+        }
+
+        Some(target_position)
+    }
+
     pub fn active_approach_target_guid(&self) -> Option<Guid> {
         self.approach_target
             .as_ref()
@@ -114,7 +137,7 @@ impl NavigationAutomation {
         &mut self,
         target: Guid,
         arrival_distance: f32,
-        input: ApproachSyncInput,
+        mut input: ApproachSyncInput,
     ) -> NavigationUpdate {
         if let Some(controller) = self.approach_target.as_ref()
             && controller.target_guid() == target
@@ -153,10 +176,16 @@ impl NavigationAutomation {
             input.now,
         ));
 
+        input.target_position =
+            self.automation_target_position(input.player_position, input.target_position);
+
         self.sync_approach_target(input)
     }
 
-    pub fn sync_approach_target(&mut self, input: ApproachSyncInput) -> NavigationUpdate {
+    pub fn sync_approach_target(&mut self, mut input: ApproachSyncInput) -> NavigationUpdate {
+        input.target_position =
+            self.automation_target_position(input.player_position, input.target_position);
+
         let Some(controller) = self.approach_target.as_mut() else {
             return NavigationUpdate::default();
         };
@@ -205,7 +234,7 @@ impl NavigationAutomation {
         result
     }
 
-    pub fn sync_sticky_melee(&mut self, input: StickyMeleeSyncInput) -> NavigationUpdate {
+    pub fn sync_sticky_melee(&mut self, mut input: StickyMeleeSyncInput) -> NavigationUpdate {
         let Some(target_guid) = input.target_guid else {
             return self.suspend_sticky_melee(input.metadata, true);
         };
@@ -217,6 +246,9 @@ impl NavigationAutomation {
         if input.combat_mode != CombatMode::Melee || !input.attack_sequence_active {
             return self.suspend_sticky_melee(input.metadata, true);
         }
+
+        input.target_position =
+            self.automation_target_position(input.player_position, input.target_position);
 
         let update = self
             .sticky_melee
@@ -494,5 +526,19 @@ mod tests {
         }));
         assert_eq!(automation.sticky_latched_target_guid(), Some(Guid(0x1234)));
         assert!(automation.sticky_is_pursuing());
+    }
+
+    #[test]
+    fn automation_target_position_filters_far_targets() {
+        let automation = NavigationAutomation::default();
+
+        assert_eq!(
+            automation.automation_target_position(Some(position(0.0)), Some(position(100.0))),
+            Some(position(100.0))
+        );
+        assert_eq!(
+            automation.automation_target_position(Some(position(0.0)), Some(position(385.0))),
+            None
+        );
     }
 }

@@ -205,6 +205,7 @@
 - [ ] Label containers that you have recently opened.
 - [ ] Approach can overshoot target and oscillate. Ease out?
 - [ ] Use o[n] Self verb for mana charges, healing kits.
+- [ ] Need a way to cancel approach.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

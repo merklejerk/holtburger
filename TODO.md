@@ -228,4 +228,3 @@
 - [x] Do tabs need to expose `item_count()`?
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
 - [ ] Track "dead" creatures to avoid targeting them?
-- [ ] Does it make sense for core to track 

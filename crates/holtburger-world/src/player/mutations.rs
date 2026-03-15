@@ -208,8 +208,13 @@ impl PlayerState {
     }
 
     pub fn update_last_server_motion_style(&mut self, current_style: u16) {
-        if current_style != 0 {
-            self.last_server_motion_style = Some(u32::from(current_style));
+        if current_style != 0
+            && let Some(current_style) =
+                holtburger_protocol::messages::movement::MotionStance::from_interpreted(
+                    current_style,
+                )
+        {
+            self.last_server_motion_style = Some(current_style);
         }
     }
 

@@ -5,6 +5,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
+use holtburger_protocol::messages::movement::MotionStance;
 use holtburger_protocol::messages::{
     GameMessage, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
 };
@@ -524,7 +525,10 @@ fn test_update_motion_caches_last_non_zero_server_style() {
     assert_eq!(state.player.instance_sequence, 7);
     assert_eq!(state.player.movement_sequence, 8);
     assert_eq!(state.player.server_control_sequence, 9);
-    assert_eq!(state.player.last_server_motion_style, Some(62));
+    assert_eq!(
+        state.player.last_server_motion_style,
+        Some(MotionStance::SwordCombat)
+    );
 
     let second = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid: state.player.guid,
@@ -543,7 +547,10 @@ fn test_update_motion_caches_last_non_zero_server_style() {
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.movement_sequence, 11);
     assert_eq!(state.player.server_control_sequence, 12);
-    assert_eq!(state.player.last_server_motion_style, Some(62));
+    assert_eq!(
+        state.player.last_server_motion_style,
+        Some(MotionStance::SwordCombat)
+    );
 }
 
 #[test]

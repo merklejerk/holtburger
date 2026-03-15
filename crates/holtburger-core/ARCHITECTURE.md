@@ -39,7 +39,7 @@ Applications are free to use these controllers, ignore them, or layer their own 
 
 The current primitive locomotion surface lives in [src/client/locomotion.rs](src/client/locomotion.rs). It defines controller-facing locomotion primitives such as drive and stop, while [src/client/movement.rs](src/client/movement.rs) remains the executor that applies those primitives to local prediction and protocol traffic.
 
-Movement packet metadata may optionally carry an explicit motion-style choice for frontends that need direct stance control. When a frontend does not provide one, the core falls back to the last non-zero server-reported motion style so outbound `MoveToState` packets stay protocol-correct.
+Movement packet metadata may optionally carry an explicit motion stance choice for frontends that need direct stance control. When a frontend does not provide one, the core falls back to the last non-zero server-reported motion stance so outbound `MoveToState` packets stay protocol-correct.
 
 Frontend adoption pattern today:
 

@@ -582,7 +582,10 @@ mod tests {
             .insert(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
         world.entities.insert(target_guid, target);
 
-        assert_eq!(world.combat_target_status(target_guid), CombatTargetStatus::Available);
+        assert_eq!(
+            world.combat_target_status(target_guid),
+            CombatTargetStatus::Available
+        );
         assert!(world.combat_target_status(target_guid).is_available());
     }
 

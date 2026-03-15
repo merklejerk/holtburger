@@ -146,6 +146,9 @@ mod tests {
             MovementPacketMetadata::with_motion_style(MotionStyle::Explicit(MotionStance::Magic));
 
         assert_eq!(metadata.contact, None);
-        assert_eq!(metadata.motion_style, MotionStyle::Explicit(MotionStance::Magic));
+        assert_eq!(
+            metadata.motion_style,
+            MotionStyle::Explicit(MotionStance::Magic)
+        );
     }
 }

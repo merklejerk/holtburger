@@ -49,11 +49,12 @@ impl EntityMotionSnapshot {
             || snapshot.forward_command.is_some()
             || snapshot.sidestep_command.is_some()
             || snapshot.turn_command.is_some())
-            .then_some(snapshot)
+        .then_some(snapshot)
     }
 
     pub fn indicates_death_motion(self) -> bool {
-        self.forward_command.is_some_and(InterpretedMotionCommand::is_dead)
+        self.forward_command
+            .is_some_and(InterpretedMotionCommand::is_dead)
     }
 }
 

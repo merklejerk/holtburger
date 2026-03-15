@@ -4,9 +4,9 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
-use holtburger_core::client::locomotion::MovementPacketMetadata;
 #[cfg(test)]
 use holtburger_core::client::locomotion::LocomotionRequest;
+use holtburger_core::client::locomotion::MovementPacketMetadata;
 use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
 };
@@ -20,9 +20,9 @@ use holtburger_world::entity::Entity;
 use ratatui::text::Line;
 use std::fs::File;
 use std::sync::Mutex;
-use std::time::Instant;
 #[cfg(test)]
 use std::time::Duration;
+use std::time::Instant;
 
 use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
@@ -898,7 +898,10 @@ impl GameState {
         let attack_profile = self.desired_attack_profile(mode)?;
         let target_position = self.view.navigation.automation_target_position(
             self.data.player_pos,
-            self.data.entities.get(&target_guid).map(|entity| entity.position),
+            self.data
+                .entities
+                .get(&target_guid)
+                .map(|entity| entity.position),
         );
 
         Some(CombatAutomationInput::Tick {
@@ -967,27 +970,31 @@ impl GameState {
 
     fn sync_sticky_melee_pursuit(&mut self, result: &mut UpdateResult) {
         let now = Instant::now();
-        let target_guid = self.current_target_guid().filter(|guid| self.is_valid_combat_target(*guid));
-        let target_position = target_guid.and_then(|guid| {
-            self.data.entities.get(&guid).map(|entity| entity.position)
-        });
-        let update = self.view.navigation.sync_sticky_melee(StickyMeleeSyncInput {
-            now,
-            combat_mode: self.data.combat_mode,
-            attack_sequence_active: self
-                .data
-                .combat_runtime
-                .attack_activity(self.data.combat_mode)
-                .is_some(),
-            target_guid,
-            player_position: self.data.player_pos,
-            target_position,
-            move_speed: self
-                .data
-                .get_run_rate()
-                .unwrap_or(DEFAULT_APPROACH_RUN_RATE),
-            metadata: self.current_movement_metadata(),
-        });
+        let target_guid = self
+            .current_target_guid()
+            .filter(|guid| self.is_valid_combat_target(*guid));
+        let target_position = target_guid
+            .and_then(|guid| self.data.entities.get(&guid).map(|entity| entity.position));
+        let update = self
+            .view
+            .navigation
+            .sync_sticky_melee(StickyMeleeSyncInput {
+                now,
+                combat_mode: self.data.combat_mode,
+                attack_sequence_active: self
+                    .data
+                    .combat_runtime
+                    .attack_activity(self.data.combat_mode)
+                    .is_some(),
+                target_guid,
+                player_position: self.data.player_pos,
+                target_position,
+                move_speed: self
+                    .data
+                    .get_run_rate()
+                    .unwrap_or(DEFAULT_APPROACH_RUN_RATE),
+                metadata: self.current_movement_metadata(),
+            });
         result.commands.extend(update.commands);
     }
 
@@ -1004,7 +1011,11 @@ impl GameState {
             ApproachSyncInput {
                 now,
                 player_position: self.data.player_pos,
-                target_position: self.data.entities.get(&target).map(|entity| entity.position),
+                target_position: self
+                    .data
+                    .entities
+                    .get(&target)
+                    .map(|entity| entity.position),
                 move_speed: self
                     .data
                     .get_run_rate()
@@ -1020,16 +1031,23 @@ impl GameState {
             return;
         };
 
-        let update = self.view.navigation.sync_approach_target(ApproachSyncInput {
-            now,
-            player_position: self.data.player_pos,
-            target_position: self.data.entities.get(&target_guid).map(|entity| entity.position),
-            move_speed: self
-                .data
-                .get_run_rate()
-                .unwrap_or(DEFAULT_APPROACH_RUN_RATE),
-            metadata: self.current_movement_metadata(),
-        });
+        let update = self
+            .view
+            .navigation
+            .sync_approach_target(ApproachSyncInput {
+                now,
+                player_position: self.data.player_pos,
+                target_position: self
+                    .data
+                    .entities
+                    .get(&target_guid)
+                    .map(|entity| entity.position),
+                move_speed: self
+                    .data
+                    .get_run_rate()
+                    .unwrap_or(DEFAULT_APPROACH_RUN_RATE),
+                metadata: self.current_movement_metadata(),
+            });
         result.commands.extend(update.commands);
     }
 
@@ -1197,7 +1215,6 @@ impl GameState {
     pub(crate) fn current_movement_metadata(&self) -> MovementPacketMetadata {
         MovementPacketMetadata::default()
     }
-
 }
 
 #[derive(Debug, Clone)]
@@ -1693,7 +1710,8 @@ mod tests {
         state.data.combat_runtime.attack_sequence_active = true;
         state.view.active_interaction = Some(Interaction::Targeting { target_guid });
 
-        let result = state.handle_view_event(ClientViewEvent::EntityDespawned { guid: target_guid });
+        let result =
+            state.handle_view_event(ClientViewEvent::EntityDespawned { guid: target_guid });
 
         assert!(matches!(
             result.commands.first(),
@@ -1946,9 +1964,7 @@ mod tests {
 
     #[test]
     fn death_motion_blocks_stale_attack_refresh_for_targeted_creature() {
-        use holtburger_protocol::messages::movement::{
-            InterpretedMotionCommand, MotionStance,
-        };
+        use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
         use holtburger_world::entity::EntityMotionSnapshot;
 
         let player_guid = Guid(0x50000001);
@@ -2090,11 +2106,7 @@ mod tests {
 
         let target_position = WorldPosition {
             landblock_id: Guid(0x01000000),
-            coords: holtburger_common::Vector3::new(
-                385.0,
-                0.0,
-                0.0,
-            ),
+            coords: holtburger_common::Vector3::new(385.0, 0.0, 0.0),
             ..WorldPosition::default()
         };
         state.data.entities.insert(
@@ -2140,16 +2152,19 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let _ = state.view.navigation.sync_sticky_melee(StickyMeleeSyncInput {
-            now: Instant::now() - Duration::from_millis(250),
-            combat_mode: CombatMode::Melee,
-            attack_sequence_active: true,
-            target_guid: Some(target_guid),
-            player_position: state.data.player_pos,
-            target_position: Some(target_position),
-            move_speed: DEFAULT_APPROACH_RUN_RATE,
-            metadata: MovementPacketMetadata::default(),
-        });
+        let _ = state
+            .view
+            .navigation
+            .sync_sticky_melee(StickyMeleeSyncInput {
+                now: Instant::now() - Duration::from_millis(250),
+                combat_mode: CombatMode::Melee,
+                attack_sequence_active: true,
+                target_guid: Some(target_guid),
+                player_position: state.data.player_pos,
+                target_position: Some(target_position),
+                move_speed: DEFAULT_APPROACH_RUN_RATE,
+                metadata: MovementPacketMetadata::default(),
+            });
 
         let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
             CombatFeedback::AttackDone {
@@ -2309,16 +2324,18 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive:
-                        holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(
+            started.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                        primitive:
+                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                        ..
+                    })
+                )
+            })
+        );
         assert!(state.view.navigation.has_active_approach());
 
         let result = state.handle_view_event(ClientViewEvent::EntityMoved {
@@ -2382,7 +2399,6 @@ mod tests {
                 .iter()
                 .any(|command| { matches!(command, ClientCommand::TargetedMissileAttack { .. }) })
         );
-
     }
 
     #[test]
@@ -2406,40 +2422,37 @@ mod tests {
         let mut target = creature_entity(target_guid, "Drudge", target_position);
         state.data.entities.insert(target_guid, target.clone());
 
-        let _ = state.view.navigation.sync_sticky_melee(StickyMeleeSyncInput {
-            now: Instant::now() - Duration::from_millis(250),
-            combat_mode: CombatMode::Melee,
-            attack_sequence_active: true,
-            target_guid: Some(target_guid),
-            player_position: state.data.player_pos,
-            target_position: Some(WorldPosition {
-                landblock_id: Guid(0x01000000),
-                coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
-                ..WorldPosition::default()
-            }),
-            move_speed: DEFAULT_APPROACH_RUN_RATE,
-            metadata: MovementPacketMetadata::default(),
-        });
+        let _ = state
+            .view
+            .navigation
+            .sync_sticky_melee(StickyMeleeSyncInput {
+                now: Instant::now() - Duration::from_millis(250),
+                combat_mode: CombatMode::Melee,
+                attack_sequence_active: true,
+                target_guid: Some(target_guid),
+                player_position: state.data.player_pos,
+                target_position: Some(WorldPosition {
+                    landblock_id: Guid(0x01000000),
+                    coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+                    ..WorldPosition::default()
+                }),
+                move_speed: DEFAULT_APPROACH_RUN_RATE,
+                metadata: MovementPacketMetadata::default(),
+            });
 
         let in_range = state.handle_tick(0.016);
 
-        assert!(
-            in_range
-                .commands
-                .iter()
-                .any(|command| {
-                    matches!(
-                        command,
-                        ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                            primitive:
-                                holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                                    refresh_server: true,
-                                },
-                            ..
-                        })
-                    )
+        assert!(in_range.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
+                        refresh_server: true,
+                    },
+                    ..
                 })
-        );
+            )
+        }));
         assert_eq!(
             state.view.navigation.sticky_latched_target_guid(),
             Some(target_guid)

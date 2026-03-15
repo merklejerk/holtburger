@@ -387,7 +387,10 @@ mod tests {
                 .flags
                 .contains(RawMotionFlags::FORWARD_COMMAND)
         );
-        assert_eq!(raw_motion_state.current_stance(), Some(MotionStance::SwordCombat));
+        assert_eq!(
+            raw_motion_state.current_stance(),
+            Some(MotionStance::SwordCombat)
+        );
         assert_eq!(raw_motion_state.current_hold_key, Some(HoldKey::Run as u32));
         assert_eq!(
             raw_motion_state.forward_command,
@@ -407,7 +410,11 @@ mod tests {
             MotionStyle::Explicit(MotionStance::Magic),
         );
 
-        assert!(raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::CURRENT_STYLE)
+        );
         assert_eq!(raw_motion_state.current_stance(), Some(MotionStance::Magic));
     }
 
@@ -426,7 +433,11 @@ mod tests {
             MotionStyle::Omit,
         );
 
-        assert!(!raw_motion_state.flags.contains(RawMotionFlags::CURRENT_STYLE));
+        assert!(
+            !raw_motion_state
+                .flags
+                .contains(RawMotionFlags::CURRENT_STYLE)
+        );
         assert_eq!(raw_motion_state.current_style, None);
     }
 }

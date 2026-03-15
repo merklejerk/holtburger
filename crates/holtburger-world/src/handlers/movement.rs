@@ -1,8 +1,8 @@
 use crate::StateEvent;
 use crate::entity::EntityMotionSnapshot;
 use crate::state::WorldState;
-use holtburger_common::math::Quaternion;
 use holtburger_common::Guid;
+use holtburger_common::math::Quaternion;
 use holtburger_protocol::messages::{GameMessage, MovementTypeData};
 
 fn update_entity_motion_snapshot(

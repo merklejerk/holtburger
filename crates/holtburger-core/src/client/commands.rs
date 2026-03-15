@@ -1,6 +1,4 @@
-use crate::client::movement::{
-    encode_contact_long_jump, raw_motion_state_with_motion_style,
-};
+use crate::client::movement::{encode_contact_long_jump, raw_motion_state_with_motion_style};
 use crate::client::types::{ClientCommand, TargetSlot};
 use crate::client::{Client, ClientState};
 use anyhow::Result;

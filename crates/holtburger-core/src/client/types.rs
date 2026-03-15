@@ -1,6 +1,6 @@
 use crate::client::locomotion::{LocomotionRequest, MovementPacketMetadata};
-use holtburger_common::properties::DamageType;
 use holtburger_common::Guid;
+use holtburger_common::properties::DamageType;
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,

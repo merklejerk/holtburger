@@ -8,8 +8,8 @@ use holtburger_common::properties::{
 };
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use holtburger_protocol::messages::{
-    GameMessage, InterpretedMotionState, MovementEventData, MovementInvalid,
-    MovementStateFlags, MovementType, MovementTypeData,
+    GameMessage, InterpretedMotionState, MovementEventData, MovementInvalid, MovementStateFlags,
+    MovementType, MovementTypeData,
 };
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
@@ -560,7 +560,11 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     let mut state = WorldState::new(None, None);
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(guid, "Drudge".to_string(), WorldPosition::default()));
+    state.add_entity(Entity::new(
+        guid,
+        "Drudge".to_string(),
+        WorldPosition::default(),
+    ));
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -592,16 +596,17 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         .expect("expected motion snapshot to be cached");
 
     assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
-    assert_eq!(snapshot.forward_command, Some(InterpretedMotionCommand::DEAD));
-    assert!(
-        events.iter().any(|event| matches!(
-            event,
-            StateEvent::EntityMotionUpdated { guid: target, snapshot }
-                if *target == guid
-                && snapshot.current_style == Some(MotionStance::NonCombat)
-                && snapshot.forward_command == Some(InterpretedMotionCommand::DEAD)
-        ))
+    assert_eq!(
+        snapshot.forward_command,
+        Some(InterpretedMotionCommand::DEAD)
     );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        StateEvent::EntityMotionUpdated { guid: target, snapshot }
+            if *target == guid
+            && snapshot.current_style == Some(MotionStance::NonCombat)
+            && snapshot.forward_command == Some(InterpretedMotionCommand::DEAD)
+    )));
 }
 
 #[test]

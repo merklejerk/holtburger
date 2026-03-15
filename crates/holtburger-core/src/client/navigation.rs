@@ -102,8 +102,7 @@ impl NavigationAutomation {
         }
 
         if player_position.is_some_and(|player_position| {
-            player_position.distance_to(&target_position)
-                > self.automation_target_distance_limit_m
+            player_position.distance_to(&target_position) > self.automation_target_distance_limit_m
         }) {
             return None;
         }
@@ -206,7 +205,12 @@ impl NavigationAutomation {
         let controller_snapshot = *controller;
         let mut result = NavigationUpdate::default();
         for effect in update.effects {
-            self.apply_approach_target_effect(controller_snapshot, effect, input.metadata, &mut result);
+            self.apply_approach_target_effect(
+                controller_snapshot,
+                effect,
+                input.metadata,
+                &mut result,
+            );
         }
 
         if completed {
@@ -373,9 +377,7 @@ impl NavigationAutomation {
                     log::warn!("approach: target became unavailable");
                 }
                 ApproachTargetFinishReason::NoProgress => {
-                    log::warn!(
-                        "approach: controller aborted because the player made no progress"
-                    );
+                    log::warn!("approach: controller aborted because the player made no progress");
                 }
                 ApproachTargetFinishReason::ForcedReposition => {
                     log::warn!("approach: controller aborted after forced reposition");
@@ -481,9 +483,8 @@ mod tests {
             },
         );
 
-        let result = automation.cancel_active_approach_due_to_forced_reposition(
-            MovementPacketMetadata::default(),
-        );
+        let result = automation
+            .cancel_active_approach_due_to_forced_reposition(MovementPacketMetadata::default());
 
         assert!(result.commands.iter().any(|command| {
             matches!(

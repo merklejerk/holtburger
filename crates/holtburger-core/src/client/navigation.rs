@@ -238,6 +238,21 @@ impl NavigationAutomation {
         result
     }
 
+    pub fn cancel_active_approach(&mut self, metadata: MovementPacketMetadata) -> NavigationUpdate {
+        let Some(controller) = self.approach_target.as_mut() else {
+            return NavigationUpdate::default();
+        };
+
+        let controller_snapshot = *controller;
+        let update = controller.handle(&ApproachTargetInput::Cancel);
+        let mut result = NavigationUpdate::default();
+        for effect in update.effects {
+            self.apply_approach_target_effect(controller_snapshot, effect, metadata, &mut result);
+        }
+        self.approach_target = None;
+        result
+    }
+
     pub fn sync_sticky_melee(&mut self, mut input: StickyMeleeSyncInput) -> NavigationUpdate {
         let Some(target_guid) = input.target_guid else {
             return self.suspend_sticky_melee(input.metadata, true);
@@ -378,6 +393,9 @@ impl NavigationAutomation {
                 }
                 ApproachTargetFinishReason::NoProgress => {
                     log::warn!("approach: controller aborted because the player made no progress");
+                }
+                ApproachTargetFinishReason::Cancelled => {
+                    log::info!("approach: controller cancelled by user");
                 }
                 ApproachTargetFinishReason::ForcedReposition => {
                     log::warn!("approach: controller aborted after forced reposition");

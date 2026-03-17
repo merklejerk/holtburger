@@ -22,6 +22,7 @@ pub enum ApproachTargetInput {
         target_position: Option<WorldPosition>,
         move_speed: f32,
     },
+    Cancel,
     ForcedReposition,
 }
 
@@ -30,6 +31,7 @@ pub enum ApproachTargetFinishReason {
     Arrived,
     TargetUnavailable,
     NoProgress,
+    Cancelled,
     ForcedReposition,
 }
 
@@ -79,6 +81,13 @@ impl Controller for ApproachTargetController {
 
     fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
         match *input {
+            ApproachTargetInput::Cancel => ControllerUpdate::new(ControllerStatus::Completed)
+                .with_effect(ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
+                    refresh_server: true,
+                }))
+                .with_effect(ApproachTargetEffect::Finished(
+                    ApproachTargetFinishReason::Cancelled,
+                )),
             ApproachTargetInput::ForcedReposition => {
                 ControllerUpdate::new(ControllerStatus::Completed)
                     .with_effect(ApproachTargetEffect::Locomotion(
@@ -271,6 +280,25 @@ mod tests {
                     refresh_server: false,
                 }),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::ForcedReposition),
+            ]
+        );
+    }
+
+    #[test]
+    fn cancel_finishes_and_stops_movement() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+
+        let update = controller.handle(&ApproachTargetInput::Cancel);
+
+        assert_eq!(update.status, ControllerStatus::Completed);
+        assert_eq!(
+            update.effects,
+            vec![
+                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
+                    refresh_server: true,
+                }),
+                ApproachTargetEffect::Finished(ApproachTargetFinishReason::Cancelled),
             ]
         );
     }

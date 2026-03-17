@@ -8,7 +8,7 @@ use holtburger_common::properties::{
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
-use holtburger_protocol::messages::movement::MotionStance;
+use holtburger_protocol::messages::movement::{MotionStance, PositionType};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -76,6 +76,8 @@ pub struct PlayerState {
     pub server_grounded: Option<bool>,
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
+    /// Sparse authoritative storage for non-live position properties keyed by packet `PositionType`.
+    pub position_properties: HashMap<PositionType, WorldPosition>,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
     pub enchantments: Vec<Enchantment>,
     /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
@@ -121,6 +123,7 @@ impl PlayerState {
             position_sequence: 0,
             server_grounded: None,
             movement_sequence: 0,
+            position_properties: HashMap::new(),
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
             hotbar_spells: vec![Vec::new(); 8],
@@ -175,6 +178,14 @@ impl PlayerState {
 
     pub fn vitae(&self) -> f32 {
         crate::magic::get_total_vitae(&self.enchantments)
+    }
+
+    pub fn position_property(&self, position_type: PositionType) -> Option<WorldPosition> {
+        self.position_properties.get(&position_type).copied()
+    }
+
+    pub fn set_position_property(&mut self, position_type: PositionType, position: WorldPosition) {
+        self.position_properties.insert(position_type, position);
     }
 
     pub(crate) fn get_resistance_augmentation(&self, prop: PropertyFloat) -> i32 {

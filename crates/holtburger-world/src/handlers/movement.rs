@@ -38,16 +38,11 @@ pub(crate) fn handle_message(
             }
         }
         GameMessage::PrivateUpdatePosition(data) => {
-            events.extend(state.set_player_position(data.pos));
+            state.apply_private_position_update(data.position_type, data.pos, events);
             true
         }
         GameMessage::PublicUpdatePosition(data) => {
-            if data.guid == state.player.guid {
-                events.extend(state.set_player_position(data.pos));
-                true
-            } else {
-                state.move_entity_to_position(data.guid, data.pos, events)
-            }
+            state.apply_public_position_update(data.guid, data.position_type, data.pos, events)
         }
         GameMessage::AutonomousPosition(data) => {
             if data.guid == state.player.guid {

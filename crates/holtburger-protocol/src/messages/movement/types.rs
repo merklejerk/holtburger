@@ -159,7 +159,7 @@ impl From<InterpretedMotionCommand> for u16 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, FromRepr)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, FromRepr)]
 #[repr(u32)]
 pub enum PositionType {
     Undef = 0,

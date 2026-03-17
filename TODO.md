@@ -190,6 +190,8 @@
     - I think related to dead/dying targets.
 - [x] There's a stray `[X] Close` verb showing up on in-world containers.
 - [x] Don't auto-attack targets too far away or marked for deletion.
+- [x] Need a way to cancel approach.
+    - Should it just be an interaction?
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -205,8 +207,6 @@
 - [ ] Label containers that you have recently opened.
 - [ ] Approach can overshoot target and oscillate. Ease out?
 - [ ] Use o[n] Self verb for mana charges, healing kits.
-- [ ] Need a way to cancel approach.
-    - Should it just be an interaction?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

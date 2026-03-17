@@ -291,6 +291,12 @@ impl TabController for NearbyTab {
                     }
                     return verbs;
                 }
+                Interaction::Approaching { target_guid } => {
+                    if e.guid == target_guid {
+                        verbs.push(Verb::new(AppAction::CancelInteraction, '\x1b', "Cancel approach"));
+                    }
+                    return verbs;
+                }
                 _ => {}
             }
         }

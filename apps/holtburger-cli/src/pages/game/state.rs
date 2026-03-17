@@ -303,6 +303,13 @@ impl GameState {
             }
             AppAction::Approach { guid } => {
                 self.start_approach_target(guid, GENERIC_APPROACH_DISTANCE, &mut result);
+                if self.view.navigation.has_active_approach() {
+                    self.set_active_interaction(
+                        Some(Interaction::Approaching { target_guid: guid }),
+                        &mut result,
+                    );
+                    result.needs_redraw = true;
+                }
             }
             AppAction::Drop { guid } => {
                 result.commands.push(ClientCommand::Drop(guid));
@@ -794,6 +801,14 @@ impl GameState {
         let previous_interaction = self.view.active_interaction;
         self.view.active_interaction = next_interaction;
 
+        if self.should_cancel_active_approach(previous_interaction, next_interaction) {
+            let update = self
+                .view
+                .navigation
+                .cancel_active_approach(self.current_movement_metadata());
+            result.commands.extend(update.commands);
+        }
+
         if self.should_cancel_attack(previous_interaction, next_interaction) {
             result.commands.push(ClientCommand::CancelAttack);
             self.data.combat_runtime.cancel_attack();
@@ -827,6 +842,7 @@ impl GameState {
                 None
                 | Some(Interaction::Moving { .. })
                 | Some(Interaction::Healing { .. })
+                | Some(Interaction::Approaching { .. })
                 | Some(Interaction::Combining { .. })
                 | Some(Interaction::Salvaging),
             ) => true,
@@ -848,6 +864,7 @@ impl GameState {
             (
                 None | Some(Interaction::Moving { .. })
                     | Some(Interaction::Healing { .. })
+                    | Some(Interaction::Approaching { .. })
                     | Some(Interaction::Combining { .. })
                     | Some(Interaction::Salvaging)
                     | Some(Interaction::Targeting { .. }),
@@ -855,6 +872,25 @@ impl GameState {
                 CombatMode::Melee | CombatMode::Missile
             )
         )
+    }
+
+    fn should_cancel_active_approach(
+        &self,
+        previous_interaction: Option<Interaction>,
+        next_interaction: Option<Interaction>,
+    ) -> bool {
+        match (previous_interaction, next_interaction) {
+            (
+                Some(Interaction::Approaching {
+                    target_guid: previous_target,
+                }),
+                Some(Interaction::Approaching {
+                    target_guid: next_target,
+                }),
+            ) => previous_target != next_target,
+            (Some(Interaction::Approaching { .. }), _) => true,
+            _ => false,
+        }
     }
 
     fn queue_auto_attack_for_mode(&mut self, mode: CombatMode, result: &mut UpdateResult) {
@@ -1028,6 +1064,7 @@ impl GameState {
 
     fn sync_approach_target(&mut self, now: Instant, result: &mut UpdateResult) {
         let Some(target_guid) = self.view.navigation.active_approach_target_guid() else {
+            self.clear_finished_approach_interaction(result);
             return;
         };
 
@@ -1049,6 +1086,10 @@ impl GameState {
                 metadata: self.current_movement_metadata(),
             });
         result.commands.extend(update.commands);
+
+            if !self.view.navigation.has_active_approach() {
+                self.clear_finished_approach_interaction(result);
+            }
     }
 
     fn cancel_active_approach_due_to_forced_reposition(&mut self, result: &mut UpdateResult) {
@@ -1057,7 +1098,18 @@ impl GameState {
             .navigation
             .cancel_active_approach_due_to_forced_reposition(self.current_movement_metadata());
         result.commands.extend(update.commands);
+            self.clear_finished_approach_interaction(result);
     }
+
+        fn clear_finished_approach_interaction(&mut self, result: &mut UpdateResult) {
+            if matches!(
+                self.view.active_interaction,
+                Some(Interaction::Approaching { .. })
+            ) {
+                self.view.active_interaction = None;
+                result.needs_redraw = true;
+            }
+        }
 
     fn current_target_guid(&self) -> Option<Guid> {
         match self.view.active_interaction {
@@ -2276,6 +2328,10 @@ mod tests {
             })
         );
         assert!(state.view.navigation.has_active_approach());
+        assert_eq!(
+            state.view.active_interaction,
+            Some(Interaction::Approaching { target_guid })
+        );
 
         let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
             guid: player_guid,
@@ -2299,6 +2355,52 @@ mod tests {
             )
         }));
         assert!(!state.view.navigation.has_active_approach());
+        assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn cancel_interaction_stops_active_approach_and_clears_mode() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(5.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(target_guid, "Drudge", target_position),
+        );
+
+        let _ = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
+
+        assert!(state.view.navigation.has_active_approach());
+        assert_eq!(
+            state.view.active_interaction,
+            Some(Interaction::Approaching { target_guid })
+        );
+
+        let result = state.handle_action(AppAction::CancelInteraction).unwrap();
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
+                        refresh_server: true,
+                    },
+                    ..
+                })
+            )
+        }));
+        assert!(!state.view.navigation.has_active_approach());
+        assert_eq!(state.view.active_interaction, None);
     }
 
     #[test]

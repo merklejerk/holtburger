@@ -250,6 +250,134 @@ fn test_stale_player_autonomous_sync_is_ignored() {
 }
 
 #[test]
+fn test_private_update_position_non_location_is_stored_without_moving_player() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    state.player.guid = player_guid;
+
+    let live_position = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(5.0, 5.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.position = live_position;
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), live_position));
+
+    let saved_position = WorldPosition {
+        landblock_id: Guid(0x56780000),
+        coords: Vector3::new(42.0, 24.0, 9.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let events = state.handle_message(&GameMessage::PrivateUpdatePosition(Box::new(
+        PrivateUpdatePositionData {
+            sequence: 1,
+            position_type: PositionType::LastOutsideDeath,
+            pos: saved_position,
+        },
+    )));
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, live_position);
+    assert_eq!(state.entities.get(player_guid).unwrap().position, live_position);
+    assert_eq!(
+        state
+            .player
+            .position_property(PositionType::LastOutsideDeath),
+        Some(saved_position)
+    );
+}
+
+#[test]
+fn test_public_update_position_non_location_for_player_is_stored_without_moving_player() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    state.player.guid = player_guid;
+
+    let live_position = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.position = live_position;
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), live_position));
+
+    let sanctuary_position = WorldPosition {
+        landblock_id: Guid(0x9ABC0000),
+        coords: Vector3::new(11.0, 12.0, 13.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let events = state.handle_message(&GameMessage::PublicUpdatePosition(Box::new(
+        PublicUpdatePositionData {
+            sequence: 2,
+            guid: player_guid,
+            position_type: PositionType::Sanctuary,
+            pos: sanctuary_position,
+        },
+    )));
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, live_position);
+    assert_eq!(state.entities.get(player_guid).unwrap().position, live_position);
+    assert_eq!(
+        state.player.position_property(PositionType::Sanctuary),
+        Some(sanctuary_position)
+    );
+}
+
+#[test]
+fn test_public_update_position_non_location_for_other_entity_does_not_move_it() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    let other_guid = Guid(0x50000999);
+    state.player.guid = player_guid;
+
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let live_position = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(3.0, 4.0, 5.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.entities.insert(Entity::new(
+        other_guid,
+        "Other".to_string(),
+        live_position,
+    ));
+
+    let non_live_position = WorldPosition {
+        landblock_id: Guid(0x56780000),
+        coords: Vector3::new(30.0, 40.0, 50.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let events = state.handle_message(&GameMessage::PublicUpdatePosition(Box::new(
+        PublicUpdatePositionData {
+            sequence: 3,
+            guid: other_guid,
+            position_type: PositionType::LinkedPortalOne,
+            pos: non_live_position,
+        },
+    )));
+
+    assert!(events.is_empty());
+    assert_eq!(state.entities.get(other_guid).unwrap().position, live_position);
+    assert_eq!(
+        state.player.position_property(PositionType::LinkedPortalOne),
+        None
+    );
+}
+
+#[test]
 fn test_inventory_put_obj_in_container() {
     let mut state = WorldState::new(None, None);
     let item_guid = Guid(0x1);

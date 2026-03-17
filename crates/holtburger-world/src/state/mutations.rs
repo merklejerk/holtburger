@@ -2,6 +2,7 @@ use super::*;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_protocol::messages::movement::PositionType;
 
 impl WorldState {
     pub(crate) fn mark_entity_immediately_eligible_for_pruning_if_unretained(
@@ -127,6 +128,43 @@ impl WorldState {
         } else {
             false
         }
+    }
+
+    pub(crate) fn apply_private_position_update(
+        &mut self,
+        position_type: PositionType,
+        position: WorldPosition,
+        events: &mut Vec<StateEvent>,
+    ) {
+        if position_type == PositionType::Location {
+            events.extend(self.set_player_position(position));
+            return;
+        }
+
+        self.player.set_position_property(position_type, position);
+    }
+
+    pub(crate) fn apply_public_position_update(
+        &mut self,
+        guid: Guid,
+        position_type: PositionType,
+        position: WorldPosition,
+        events: &mut Vec<StateEvent>,
+    ) -> bool {
+        if position_type == PositionType::Location {
+            if guid == self.player.guid {
+                events.extend(self.set_player_position(position));
+                return true;
+            }
+
+            return self.move_entity_to_position(guid, position, events);
+        }
+
+        if guid == self.player.guid {
+            self.player.set_position_property(position_type, position);
+        }
+
+        true
     }
 
     pub(crate) fn update_entity_velocity(

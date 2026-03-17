@@ -2,6 +2,18 @@
 
 ## Context & Boundaries
 
+## Progress Update
+
+### 2026-03-17: Phase 1 Completed
+
+- Added sparse player-owned `PositionType -> WorldPosition` retention on `PlayerState` for non-live self position-property updates.
+- Routed `PrivateUpdatePosition` and `PublicUpdatePosition` through named world helpers so only `PositionType::Location` mutates live world transforms.
+- Kept generic entity state lean: non-self public non-`Location` updates are now treated as non-live and ignored rather than being surfaced onto entities.
+- Added focused `holtburger-world` tests covering self private/public non-`Location` retention and non-self public non-`Location` no-op behavior.
+- Verified with:
+  - `cargo test -p holtburger-world position_non_location`
+  - `cargo test -p holtburger-world stale_player_autonomous_sync_is_ignored`
+
 ### Goal
 
 Close the remaining movement-authority gaps after the initial stale `UpdatePosition` and forced-reposition fixes, while preserving the project boundary that `holtburger-world` owns authoritative state and frontends own higher-level controller policy.
@@ -220,13 +232,10 @@ Acceptance Criteria:
   - `crates/holtburger-world/src/handlers/movement.rs`
   - `crates/holtburger-world/src/player/types.rs` and `crates/holtburger-world/src/player/mutations.rs`
   - possibly a player/world query surface if we expose the retained data upward
-- Surprise already found:
-  - `PrivateUpdatePosition` currently updates live player position for every `PositionType`.
-  - This is definitely wrong for `LastOutsideDeath` based on ACE.
-- Gap:
-  - There is no existing player position-property storage model in `PlayerState`, so Phase 1 needs a small new sparse map rather than piggybacking on an existing property bag.
-- No-surprise mitigation:
-  - Implement this in two substeps: semantic guard first, then sparse storage wiring in the same phase once live-position corruption is blocked.
+- Outcome:
+  - Implemented as planned with no significant pivot.
+  - Added a small sparse `PlayerState` map keyed by `PositionType` and named world helpers for private/public position-property application.
+  - Chose not to widen generic `Entity` state for non-self public non-`Location` updates; those packets are now consumed as non-live data and intentionally dropped.
 
 ### Phase 2 Dry Run
 
@@ -265,9 +274,9 @@ Acceptance Criteria:
 
 ## Task Checklist
 
-- [ ] Phase 1: stop position-property packets from mutating live movement indiscriminately
-- [ ] Phase 1: add sparse player-owned `PositionType -> WorldPosition` storage for observed non-location updates
-- [ ] Phase 1: add tests for non-location private/public position updates
+- [x] Phase 1: stop position-property packets from mutating live movement indiscriminately
+- [x] Phase 1: add sparse player-owned `PositionType -> WorldPosition` storage for observed non-location updates
+- [x] Phase 1: add tests for non-location private/public position updates
 - [ ] Phase 2: add self non-autonomous `UpdateMotion` stale guard
 - [ ] Phase 2: add tests for stale/current server-controlled motion
 - [ ] Phase 3: surface teleport-start event or engine hook
@@ -283,6 +292,7 @@ Acceptance Criteria:
 - Non-location position-property packets must not be treated as live world position.
 - Non-location position-property updates should be retained in sparse authoritative player-owned storage keyed by `PositionType`, not a fat dedicated struct with one field per variant.
 - These retained position properties should not live on generic `Entity`; if surfaced to clients, do it through player-scoped access/query boundaries.
+- For Phase 1, self non-`Location` private/public updates are retained on `PlayerState`; non-self public non-`Location` updates are intentionally ignored until a proven player-facing need justifies a broader model.
 
 ## Open Questions
 

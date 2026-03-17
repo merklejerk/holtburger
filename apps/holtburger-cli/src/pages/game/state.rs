@@ -169,7 +169,7 @@ impl GameState {
             }
             ClientViewEvent::ForcedReposition { guid, .. } => {
                 if Some(guid) == self.data.player_guid {
-                    self.cancel_active_approach_due_to_forced_reposition(&mut result);
+                    self.handle_forced_reposition(&mut result);
                 }
             }
             ClientViewEvent::EntityDespawned { guid } => {
@@ -1087,29 +1087,29 @@ impl GameState {
             });
         result.commands.extend(update.commands);
 
-            if !self.view.navigation.has_active_approach() {
-                self.clear_finished_approach_interaction(result);
-            }
+        if !self.view.navigation.has_active_approach() {
+            self.clear_finished_approach_interaction(result);
+        }
     }
 
-    fn cancel_active_approach_due_to_forced_reposition(&mut self, result: &mut UpdateResult) {
+    fn handle_forced_reposition(&mut self, result: &mut UpdateResult) {
         let update = self
             .view
             .navigation
-            .cancel_active_approach_due_to_forced_reposition(self.current_movement_metadata());
+            .handle_forced_reposition(self.current_movement_metadata());
         result.commands.extend(update.commands);
-            self.clear_finished_approach_interaction(result);
+        self.clear_finished_approach_interaction(result);
     }
 
-        fn clear_finished_approach_interaction(&mut self, result: &mut UpdateResult) {
-            if matches!(
-                self.view.active_interaction,
-                Some(Interaction::Approaching { .. })
-            ) {
-                self.view.active_interaction = None;
-                result.needs_redraw = true;
-            }
+    fn clear_finished_approach_interaction(&mut self, result: &mut UpdateResult) {
+        if matches!(
+            self.view.active_interaction,
+            Some(Interaction::Approaching { .. })
+        ) {
+            self.view.active_interaction = None;
+            result.needs_redraw = true;
         }
+    }
 
     fn current_target_guid(&self) -> Option<Guid> {
         match self.view.active_interaction {
@@ -2378,7 +2378,9 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let _ = state.handle_action(AppAction::Approach { guid: target_guid }).unwrap();
+        let _ = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
 
         assert!(state.view.navigation.has_active_approach());
         assert_eq!(

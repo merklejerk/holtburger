@@ -82,9 +82,11 @@ impl Controller for ApproachTargetController {
     fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
         match *input {
             ApproachTargetInput::Cancel => ControllerUpdate::new(ControllerStatus::Completed)
-                .with_effect(ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: true,
-                }))
+                .with_effect(ApproachTargetEffect::Locomotion(
+                    LocomotionPrimitive::Stop {
+                        refresh_server: true,
+                    },
+                ))
                 .with_effect(ApproachTargetEffect::Finished(
                     ApproachTargetFinishReason::Cancelled,
                 )),

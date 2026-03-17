@@ -720,6 +720,88 @@ fn test_update_position_from_server_caches_grounded_state() {
 }
 
 #[test]
+fn test_stale_update_position_is_ignored_when_teleport_sequence_regresses() {
+    use holtburger_common::Vector3;
+    use holtburger_protocol::messages::movement::messages::position::{
+        PositionPack, UpdatePositionFlag,
+    };
+
+    let mut player = PlayerState::new();
+    player.guid = Guid(0x50000001);
+    player.position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..Default::default()
+    };
+    player.teleport_sequence = 10;
+    player.force_position_sequence = 4;
+
+    let original_position = player.position;
+    let mut events = Vec::<StateEvent>::new();
+    let applied = player.apply_position_from_server(
+        &PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x02000000),
+                coords: Vector3::new(9.0, 9.0, 9.0),
+                ..Default::default()
+            },
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 9,
+            force_position_sequence: 99,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+        &mut events,
+    );
+
+    assert!(!applied);
+    assert_eq!(player.position, original_position);
+    assert!(events.is_empty());
+}
+
+#[test]
+fn test_stale_update_position_is_ignored_when_force_sequence_regresses() {
+    use holtburger_common::Vector3;
+    use holtburger_protocol::messages::movement::messages::position::{
+        PositionPack, UpdatePositionFlag,
+    };
+
+    let mut player = PlayerState::new();
+    player.guid = Guid(0x50000001);
+    player.position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..Default::default()
+    };
+    player.teleport_sequence = 10;
+    player.force_position_sequence = 7;
+
+    let original_position = player.position;
+    let mut events = Vec::<StateEvent>::new();
+    let applied = player.apply_position_from_server(
+        &PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x02000000),
+                coords: Vector3::new(9.0, 9.0, 9.0),
+                ..Default::default()
+            },
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 10,
+            force_position_sequence: 6,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+        &mut events,
+    );
+
+    assert!(!applied);
+    assert_eq!(player.position, original_position);
+    assert!(events.is_empty());
+}
+
+#[test]
 fn test_heal_command_updates() {
     use crate::state::WorldState;
     use holtburger_protocol::messages::{

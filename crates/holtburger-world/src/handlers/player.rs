@@ -21,7 +21,10 @@ pub(crate) fn handle_message(
         GameMessage::UpdatePosition(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
-                state.player.update_position_from_server(&data.pos, events);
+                if state.player.apply_position_from_server(&data.pos, events) {
+                    events.extend(state.set_player_position(data.pos.pos));
+                }
+                return true;
             }
             false
         }

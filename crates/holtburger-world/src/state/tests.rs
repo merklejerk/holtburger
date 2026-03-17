@@ -207,6 +207,49 @@ fn test_player_mirror_invariant_on_autonomous_sync() {
 }
 
 #[test]
+fn test_stale_player_autonomous_sync_is_ignored() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    state.player.guid = player_guid;
+    state.player.teleport_sequence = 30;
+    state.player.force_position_sequence = 40;
+
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(5.0, 5.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.position = initial_pos;
+    let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+    state.entities.insert(player_entity);
+
+    let sync_data = ServerAutonomousPositionData {
+        guid: player_guid,
+        position: WorldPosition {
+            landblock_id: Guid(0x56780000),
+            coords: Vector3::new(1.0, 1.0, 1.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        },
+        instance_sequence: 10,
+        server_control_sequence: 20,
+        teleport_sequence: 30,
+        force_position_sequence: 39,
+        contact_flags: 0,
+    };
+
+    let events = state.apply_player_autonomous_position(&sync_data);
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, initial_pos);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        initial_pos
+    );
+    assert_eq!(state.player.teleport_sequence, 30);
+    assert_eq!(state.player.force_position_sequence, 40);
+}
+
+#[test]
 fn test_inventory_put_obj_in_container() {
     let mut state = WorldState::new(None, None);
     let item_guid = Guid(0x1);

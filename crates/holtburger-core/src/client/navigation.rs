@@ -238,6 +238,15 @@ impl NavigationAutomation {
         result
     }
 
+    pub fn handle_forced_reposition(
+        &mut self,
+        metadata: MovementPacketMetadata,
+    ) -> NavigationUpdate {
+        let mut result = self.cancel_active_approach_due_to_forced_reposition(metadata);
+        result.extend(self.pause_sticky_melee_due_to_forced_reposition(metadata));
+        result
+    }
+
     pub fn cancel_active_approach(&mut self, metadata: MovementPacketMetadata) -> NavigationUpdate {
         let Some(controller) = self.approach_target.as_mut() else {
             return NavigationUpdate::default();
@@ -323,6 +332,38 @@ impl NavigationAutomation {
             }
         }
         self.sticky_melee = None;
+        result
+    }
+
+    fn pause_sticky_melee_due_to_forced_reposition(
+        &mut self,
+        metadata: MovementPacketMetadata,
+    ) -> NavigationUpdate {
+        let Some(controller) = self.sticky_melee.as_mut() else {
+            return NavigationUpdate::default();
+        };
+
+        let update = controller.handle(&MaintainRangeInput::Suspend { clear_latch: false });
+        let mut result = NavigationUpdate::default();
+        for effect in update.effects {
+            match effect {
+                MaintainRangeEffect::StartApproach { .. } => unreachable!(),
+                MaintainRangeEffect::Stop => {
+                    log::warn!("sticky melee: pausing pursuit after forced reposition");
+                    self.approach_target = None;
+                    result.push_command(Self::locomotion_command(
+                        LocomotionPrimitive::Stop {
+                            refresh_server: false,
+                        },
+                        metadata,
+                    ));
+                }
+                MaintainRangeEffect::Finished(MaintainRangeFinishReason::Suspended) => {}
+                MaintainRangeEffect::Finished(reason) => {
+                    self.log_sticky_melee_finish(reason);
+                }
+            }
+        }
         result
     }
 
@@ -516,6 +557,67 @@ mod tests {
             )
         }));
         assert!(!automation.has_active_approach());
+    }
+
+    #[test]
+    fn forced_reposition_pauses_sticky_melee_but_preserves_latch() {
+        let now = Instant::now();
+        let mut automation = NavigationAutomation::default();
+        let target_guid = Guid(0x1234);
+
+        let initial = automation.sync_sticky_melee(StickyMeleeSyncInput {
+            now,
+            combat_mode: CombatMode::Melee,
+            attack_sequence_active: true,
+            target_guid: Some(target_guid),
+            player_position: Some(position(0.0)),
+            target_position: Some(position(1.5)),
+            move_speed: 4.5,
+            metadata: MovementPacketMetadata::default(),
+        });
+
+        assert!(!initial.commands.is_empty());
+        assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
+        assert!(automation.sticky_is_pursuing());
+
+        let paused = automation.handle_forced_reposition(MovementPacketMetadata::default());
+
+        assert!(paused.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: LocomotionPrimitive::Stop {
+                        refresh_server: false,
+                    },
+                    ..
+                })
+            )
+        }));
+        assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
+        assert!(!automation.sticky_is_pursuing());
+
+        let resumed = automation.sync_sticky_melee(StickyMeleeSyncInput {
+            now: now + Duration::from_millis(1),
+            combat_mode: CombatMode::Melee,
+            attack_sequence_active: true,
+            target_guid: Some(target_guid),
+            player_position: Some(position(10.0)),
+            target_position: Some(position(11.5)),
+            move_speed: 4.5,
+            metadata: MovementPacketMetadata::default(),
+        });
+
+        assert!(resumed.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: LocomotionPrimitive::Drive { .. },
+                    ..
+                })
+            )
+        }));
+        assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
+        assert!(automation.sticky_is_pursuing());
     }
 
     #[test]

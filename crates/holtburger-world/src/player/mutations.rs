@@ -4,6 +4,7 @@ use crate::player::types::{SkillBase, VitalBase};
 use crate::stats;
 use holtburger_common::Guid;
 use holtburger_common::properties::{EnchantmentTypeFlags, PropertyString};
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::*;
 
@@ -164,10 +165,9 @@ impl PlayerState {
     /// Updates the player's world position and associated sequences.
     pub fn update_position_from_server(
         &mut self,
-        pos_pack: &holtburger_protocol::messages::movement::messages::position::PositionPack,
+        pos_pack: &PositionPack,
         events: &mut Vec<StateEvent>,
     ) {
-        use holtburger_common::sequence::is_newer_u16;
         let old_forced_seq = self.force_position_sequence;
         let old_grounded = self.server_grounded;
 
@@ -178,7 +178,7 @@ impl PlayerState {
         self.force_position_sequence = pos_pack.force_position_sequence;
         let is_grounded = pos_pack
             .flags
-            .contains(holtburger_protocol::messages::movement::messages::position::UpdatePositionFlag::IS_GROUNDED);
+            .contains(UpdatePositionFlag::IS_GROUNDED);
         self.server_grounded = Some(is_grounded);
 
         if old_grounded != Some(is_grounded) {
@@ -194,6 +194,45 @@ impl PlayerState {
                 sequence: self.force_position_sequence,
             });
         }
+    }
+
+    /// Returns whether a server-authored player position update should be accepted.
+    ///
+    /// Teleport sequence is the primary ordering key. Within the same teleport epoch,
+    /// force-position sequence distinguishes newer rubber-band corrections from older ones.
+    pub fn should_accept_server_position_sequences(
+        &self,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+    ) -> bool {
+        if is_newer_u16(self.teleport_sequence, teleport_sequence) {
+            return false;
+        }
+
+        if teleport_sequence == self.teleport_sequence
+            && is_newer_u16(self.force_position_sequence, force_position_sequence)
+        {
+            return false;
+        }
+
+        true
+    }
+
+    /// Applies a server-authored player position update when its sequencing is current.
+    pub fn apply_position_from_server(
+        &mut self,
+        pos_pack: &PositionPack,
+        events: &mut Vec<StateEvent>,
+    ) -> bool {
+        if !self.should_accept_server_position_sequences(
+            pos_pack.teleport_sequence,
+            pos_pack.force_position_sequence,
+        ) {
+            return false;
+        }
+
+        self.update_position_from_server(pos_pack, events);
+        true
     }
 
     pub fn update_motion_sequences(

@@ -556,6 +556,39 @@ fn test_update_motion_caches_last_non_zero_server_style() {
 }
 
 #[test]
+fn test_stale_non_autonomous_update_motion_is_ignored_for_self() {
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
+    state.player.instance_sequence = 10;
+    state.player.movement_sequence = 20;
+    state.player.server_control_sequence = 30;
+    state.player.last_server_motion_style = Some(MotionStance::SwordCombat);
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid: state.player.guid,
+        object_instance_sequence: 11,
+        movement_sequence: 21,
+        server_control_sequence: 29,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: MotionStance::Magic.interpreted(),
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.instance_sequence, 10);
+    assert_eq!(state.player.movement_sequence, 20);
+    assert_eq!(state.player.server_control_sequence, 30);
+    assert_eq!(
+        state.player.last_server_motion_style,
+        Some(MotionStance::SwordCombat)
+    );
+}
+
+#[test]
 fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     let mut state = WorldState::new(None, None);
     let guid = Guid(0x60000001);

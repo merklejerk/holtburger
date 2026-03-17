@@ -235,6 +235,35 @@ impl PlayerState {
         true
     }
 
+    /// Returns whether a self non-autonomous server-controlled movement packet is current.
+    ///
+    /// ACE increments `server_control_sequence` for non-autonomous `UpdateMotion`, so older or
+    /// duplicate epochs should not be re-applied locally.
+    pub fn should_accept_server_controlled_motion(&self, server_control_sequence: u16) -> bool {
+        if server_control_sequence == self.server_control_sequence {
+            return false;
+        }
+
+        !is_newer_u16(self.server_control_sequence, server_control_sequence)
+    }
+
+    /// Applies self `UpdateMotion` sequencing and cached style only when the packet is current.
+    pub fn apply_self_update_motion(&mut self, data: &MovementEventData) -> bool {
+        if !data.is_autonomous
+            && !self.should_accept_server_controlled_motion(data.server_control_sequence)
+        {
+            return false;
+        }
+
+        self.update_motion_sequences(
+            data.object_instance_sequence,
+            data.server_control_sequence,
+            data.movement_sequence,
+        );
+        self.update_last_server_motion_style(data.current_style);
+        true
+    }
+
     pub fn update_motion_sequences(
         &mut self,
         instance_sequence: u16,

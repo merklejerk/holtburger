@@ -14,6 +14,17 @@
   - `cargo test -p holtburger-world position_non_location`
   - `cargo test -p holtburger-world stale_player_autonomous_sync_is_ignored`
 
+### 2026-03-17: Phase 2 Completed
+
+- Added `PlayerState` acceptance/apply helpers for self `UpdateMotion` so non-autonomous packets are sequence-gated before mutating player motion state.
+- Changed the player handler to consume stale self non-autonomous `UpdateMotion` before the generic movement handler can apply stale self rotation or motion-snapshot changes.
+- Changed the client message path to precompute the same acceptance decision before world mutation and skip `handle_server_controlled_movement` for stale packets, preventing duplicate/stale AutonomousPosition heartbeats.
+- Added focused tests covering stale self non-autonomous world-state rejection and current/stale client heartbeat behavior.
+- Verified with:
+  - `cargo test -p holtburger-world stale_non_autonomous_update_motion`
+  - `cargo test -p holtburger-world update_motion_caches_last_non_zero_server_style`
+  - `cargo test -p holtburger-core server_controlled_update_motion`
+
 ### Goal
 
 Close the remaining movement-authority gaps after the initial stale `UpdatePosition` and forced-reposition fixes, while preserving the project boundary that `holtburger-world` owns authoritative state and frontends own higher-level controller policy.
@@ -201,6 +212,27 @@ Acceptance Criteria:
 - Bootstrap `ObjectCreate` remains unchanged except for tests/docs.
 - Diagnostic logs clearly identify which sequence advanced.
 
+## Cleanup Follow-up
+
+### Cleanup A: Surface self `UpdateMotion` acceptance from world state
+
+Motivation:
+
+- Phase 2 currently precomputes the self non-autonomous `UpdateMotion` acceptance decision in `holtburger-core` before `world.handle_message()` runs.
+- That is correct, but the decision point is awkwardly far from the `UpdateMotion` match arm because the client currently applies world mutation before client-specific server-controlled movement handling.
+
+Preferred cleanup shape:
+
+- Have `holtburger-world` surface explicit acceptance metadata for self `UpdateMotion` after applying the message.
+- Let `holtburger-core` consume that world-owned result instead of precomputing acceptance against pre-mutation state.
+- Keep sequencing authority in `PlayerState` / `holtburger-world`; do not migrate the stale-order decision into a client-owned policy layer.
+
+Why deferred:
+
+- The current Phase 2 implementation is correct and test-backed.
+- This is a cleanup of message-pipeline shape rather than a remaining correctness gap.
+- It fits better as follow-up work when we next touch client/world coordination for movement events or diagnostics.
+
 ## Risks & Mitigations
 
 - Risk: non-`Location` position properties currently have nowhere obvious to live.
@@ -244,10 +276,10 @@ Acceptance Criteria:
   - `crates/holtburger-core/src/client/messages.rs`
   - `crates/holtburger-core/src/client/movement.rs`
   - tests in `crates/holtburger-core/src/client/movement.rs` or nearby focused test modules
-- Surprise already avoided:
-  - ACE confirms `ObjectServerControl` is incremented for non-autonomous `UpdateMotion`, so we do have a real ordering key.
-- Gap:
-  - We do not currently persist any “last accepted non-autonomous server control sequence” separate from the generic player sequence fields, so the helper design needs care.
+- Outcome:
+  - Implemented without adding a new dedicated sequence field; `PlayerState.server_control_sequence` now remains the last accepted epoch for self motion.
+  - The stale guard had to live in two coordinated places: player-sequence application and client-side precheck, because `world.handle_message()` runs before client-specific server-controlled movement handling.
+  - We also had to consume stale self non-autonomous packets in the player handler so they could not leak through to the generic movement handler and mutate self rotation ahead of the client-side gate.
 
 ### Phase 3 Dry Run
 
@@ -278,12 +310,14 @@ Acceptance Criteria:
 - [x] Phase 1: add sparse player-owned `PositionType -> WorldPosition` storage for observed non-location updates
 - [x] Phase 1: add tests for non-location private/public position updates
 - [ ] Phase 2: add self non-autonomous `UpdateMotion` stale guard
-- [ ] Phase 2: add tests for stale/current server-controlled motion
+- [x] Phase 2: add self non-autonomous `UpdateMotion` stale guard
+- [x] Phase 2: add tests for stale/current server-controlled motion
 - [ ] Phase 3: surface teleport-start event or engine hook
 - [ ] Phase 3: implement teleport-start automation teardown policy in CLI/core
 - [ ] Phase 3: test teleport-start automation behavior
 - [ ] Phase 4: add bootstrap intent regression coverage for self `ObjectCreate`
 - [ ] Phase 4: expand movement diagnostics beyond force-position only
+- [ ] Cleanup A: surface self `UpdateMotion` acceptance from `holtburger-world` to remove the precomputed client-side gate
 
 ## Decisions Log
 
@@ -293,6 +327,8 @@ Acceptance Criteria:
 - Non-location position-property updates should be retained in sparse authoritative player-owned storage keyed by `PositionType`, not a fat dedicated struct with one field per variant.
 - These retained position properties should not live on generic `Entity`; if surfaced to clients, do it through player-scoped access/query boundaries.
 - For Phase 1, self non-`Location` private/public updates are retained on `PlayerState`; non-self public non-`Location` updates are intentionally ignored until a proven player-facing need justifies a broader model.
+- For Phase 2, self non-autonomous `UpdateMotion` acceptance is keyed by the last accepted `server_control_sequence`; stale packets are consumed before they reach generic self movement application or client heartbeat handling.
+- Phase 2 intentionally deferred a small pipeline cleanup: `holtburger-core` still snapshots the self `UpdateMotion` acceptance decision before `world.handle_message()` because the world/client coordination contract does not yet surface that result explicitly.
 
 ## Open Questions
 

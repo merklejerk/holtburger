@@ -40,15 +40,8 @@ pub(crate) fn handle_message(
         GameMessage::UpdateMotion(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
-                state.player.update_motion_sequences(
-                    data.object_instance_sequence,
-                    data.server_control_sequence,
-                    data.movement_sequence,
-                );
-                state
-                    .player
-                    .update_last_server_motion_style(data.current_style);
-                return false;
+                let accepted = state.player.apply_self_update_motion(data);
+                return !data.is_autonomous && !accepted;
             }
             false
         }

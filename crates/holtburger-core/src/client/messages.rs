@@ -36,6 +36,17 @@ impl Client {
         }
         let message = message.unwrap();
 
+        let should_process_server_controlled_motion = matches!(
+            &message,
+            GameMessage::UpdateMotion(data)
+                if data.guid == self.world.player.guid
+                    && !data.is_autonomous
+                    && self
+                        .world
+                        .player
+                        .should_accept_server_controlled_motion(data.server_control_sequence)
+        );
+
         log::debug!("GameMessage: {:?}", message);
 
         self.emit_wire_event(WireEvent::GameMessage(Box::new(message.clone())));
@@ -71,7 +82,10 @@ impl Client {
                 Ok(())
             }
             GameMessage::UpdateMotion(data) => {
-                if data.guid == self.world.player.guid && !data.is_autonomous {
+                if data.guid == self.world.player.guid
+                    && !data.is_autonomous
+                    && should_process_server_controlled_motion
+                {
                     let Client {
                         movement,
                         world,
@@ -406,5 +420,105 @@ impl Client {
             self.send_status_event();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
+    use holtburger_common::position::WorldPosition;
+    use holtburger_protocol::messages::movement::MotionStance;
+    use holtburger_protocol::traits::ProtocolPack;
+    use holtburger_session::Session;
+    use holtburger_world::WorldState;
+    use tokio::sync::broadcast;
+
+    fn build_test_client() -> Client {
+        let (wire_event_tx, _) = broadcast::channel(32);
+        let (state_event_tx, _) = broadcast::channel(32);
+        let (client_view_event_tx, _) = broadcast::channel(32);
+
+        Client {
+            session: Session::new_test(),
+            world: WorldState::new(None, None),
+            state: ClientState::Connected,
+            wire_event_tx,
+            state_event_tx,
+            client_view_event_tx,
+            command_rx: None,
+            message_dump_dir: None,
+            message_counter: 0,
+            movement: MovementSystem::new(),
+            auth: AuthState::new("test".to_string()),
+        }
+    }
+
+    fn encode_message(message: &GameMessage) -> Vec<u8> {
+        let mut encoded = Vec::new();
+        message.pack(&mut encoded);
+        encoded
+    }
+
+    fn server_controlled_motion(
+        guid: holtburger_common::Guid,
+        server_control_sequence: u16,
+        movement_sequence: u16,
+    ) -> GameMessage {
+        GameMessage::UpdateMotion(Box::new(MovementEventData {
+            guid,
+            object_instance_sequence: 7,
+            movement_sequence,
+            server_control_sequence,
+            is_autonomous: false,
+            movement_type: MovementType::Invalid,
+            motion_flags: 0,
+            current_style: MotionStance::SwordCombat.interpreted(),
+            data: MovementTypeData::Invalid(MovementInvalid::default()),
+        }))
+    }
+
+    #[tokio::test]
+    async fn test_current_server_controlled_update_motion_sends_heartbeat() {
+        let mut client = build_test_client();
+        let player_guid = holtburger_common::Guid(0x50000001);
+        client.world.player.guid = player_guid;
+        client.world.player.server_control_sequence = 9;
+        client.world.player.position = WorldPosition::default();
+        client.world.add_entity(holtburger_world::entity::Entity::new(
+            player_guid,
+            "Player".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let encoded = encode_message(&server_controlled_motion(player_guid, 10, 20));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert_eq!(client.session.packet_sequence, 2);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn test_stale_server_controlled_update_motion_skips_heartbeat() {
+        let mut client = build_test_client();
+        let player_guid = holtburger_common::Guid(0x50000001);
+        client.world.player.guid = player_guid;
+        client.world.player.server_control_sequence = 10;
+        client.world.player.position = WorldPosition::default();
+        client.world.add_entity(holtburger_world::entity::Entity::new(
+            player_guid,
+            "Player".to_string(),
+            WorldPosition::default(),
+        ));
+
+        let encoded = encode_message(&server_controlled_motion(player_guid, 9, 19));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert_eq!(client.world.player.server_control_sequence, 10);
+        assert_eq!(client.session.packet_sequence, 1);
+        assert_eq!(client.session.bytes_out, 0);
     }
 }

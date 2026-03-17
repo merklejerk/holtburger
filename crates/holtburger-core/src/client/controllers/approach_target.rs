@@ -24,6 +24,7 @@ pub enum ApproachTargetInput {
     },
     Cancel,
     ForcedReposition,
+    TeleportStarted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +34,7 @@ pub enum ApproachTargetFinishReason {
     NoProgress,
     Cancelled,
     ForcedReposition,
+    TeleportStarted,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -101,6 +103,15 @@ impl Controller for ApproachTargetController {
                         ApproachTargetFinishReason::ForcedReposition,
                     ))
             }
+            ApproachTargetInput::TeleportStarted => ControllerUpdate::new(ControllerStatus::Completed)
+                .with_effect(ApproachTargetEffect::Locomotion(
+                    LocomotionPrimitive::Stop {
+                        refresh_server: false,
+                    },
+                ))
+                .with_effect(ApproachTargetEffect::Finished(
+                    ApproachTargetFinishReason::TeleportStarted,
+                )),
             ApproachTargetInput::Tick {
                 now,
                 player_position,
@@ -282,6 +293,25 @@ mod tests {
                     refresh_server: false,
                 }),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::ForcedReposition),
+            ]
+        );
+    }
+
+    #[test]
+    fn teleport_start_finishes_and_stops_movement() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+
+        let update = controller.handle(&ApproachTargetInput::TeleportStarted);
+
+        assert_eq!(update.status, ControllerStatus::Completed);
+        assert_eq!(
+            update.effects,
+            vec![
+                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
+                    refresh_server: false,
+                }),
+                ApproachTargetEffect::Finished(ApproachTargetFinishReason::TeleportStarted),
             ]
         );
     }

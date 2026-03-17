@@ -340,6 +340,11 @@ impl Client {
                     "Portal transition started (seq: {})",
                     data.teleport_sequence
                 );
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::TeleportStarted {
+                        sequence: data.teleport_sequence,
+                    });
                 self.send_login_complete().await?;
                 Ok(())
             }
@@ -476,6 +481,28 @@ mod tests {
             current_style: MotionStance::SwordCombat.interpreted(),
             data: MovementTypeData::Invalid(MovementInvalid::default()),
         }))
+    }
+
+    #[tokio::test]
+    async fn test_player_teleport_emits_teleport_started_view_event() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        let encoded = encode_message(&GameMessage::PlayerTeleport(Box::new(PlayerTeleportData {
+            teleport_sequence: 42,
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_teleport_started = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::TeleportStarted { sequence: 42 }) {
+                saw_teleport_started = true;
+                break;
+            }
+        }
+
+        assert!(saw_teleport_started);
     }
 
     #[tokio::test]

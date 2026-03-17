@@ -684,6 +684,43 @@ fn test_object_create_reuses_upsert_path_and_clears_explicit_delete() {
 }
 
 #[test]
+fn test_self_object_create_bootstraps_player_position() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000042);
+
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.player.position = initial_pos;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        initial_pos,
+    ));
+
+    let bootstrap_pos = WorldPosition {
+        landblock_id: Guid(0x12340010),
+        coords: Vector3::new(11.0, 22.0, 33.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let mut data = ObjectDescriptionData::with_guid(player_guid);
+    data.public_weenie_desc.name = Some("Player".to_string());
+    data.pos = Some(bootstrap_pos);
+
+    let msg = GameMessage::ObjectCreate(Box::new(data));
+    let events = state.handle_message(&msg);
+
+    assert_eq!(state.player.position, bootstrap_pos);
+    assert_eq!(state.entities.get(player_guid).unwrap().position, bootstrap_pos);
+    assert!(state.entity_lifecycle_state(player_guid).is_none());
+    assert!(!events.is_empty());
+}
+
+#[test]
 fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
     let mut state = WorldState::new(None, None);
     let guid = Guid(0x90000002);

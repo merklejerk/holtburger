@@ -35,6 +35,14 @@
   - `cargo test -p holtburger-core teleport_start`
   - `cargo test -p holtburger-cli teleport_start`
 
+### 2026-03-17: Phase 4 Completed
+
+- Added a regression test proving self `ObjectCreate` continues to act as bootstrap hydration for player position instead of going through live movement semantics.
+- Replaced the single force-position sequence tracker with a richer movement diagnostics snapshot that tracks force-position, teleport, and server-control epochs.
+- Upgraded movement logs to distinguish stale force-correction packets, teleport-epoch shifts, and server-controlled motion reordering.
+- Verified with:
+  - `cargo test -p holtburger-world self_object_create_bootstraps_player_position`
+
 ### Goal
 
 Close the remaining movement-authority gaps after the initial stale `UpdatePosition` and forced-reposition fixes, while preserving the project boundary that `holtburger-world` owns authoritative state and frontends own higher-level controller policy.

@@ -4,6 +4,7 @@ use crate::client::locomotion::{
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
@@ -60,14 +61,112 @@ pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
     u8::from(metadata.contact.unwrap_or(true))
 }
 
+#[derive(Debug, Default)]
+pub(super) struct MovementSequenceDiagnostics {
+    last_force_position_sequence: Option<u16>,
+    last_teleport_sequence: Option<u16>,
+    last_server_control_sequence: Option<u16>,
+}
+
+impl MovementSequenceDiagnostics {
+    pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
+        if let Some(old_seq) = self.last_force_position_sequence {
+            if is_newer_u16(force_position_sequence, old_seq) {
+                log::warn!(
+                    "Server forced reposition (rubber band): force seq {} -> {}",
+                    old_seq,
+                    force_position_sequence
+                );
+            } else if force_position_sequence != old_seq {
+                log::debug!(
+                    "Ignoring stale forced reposition: force seq {} after {}",
+                    force_position_sequence,
+                    old_seq
+                );
+            }
+        }
+
+        self.last_force_position_sequence = Some(force_position_sequence);
+    }
+
+    pub(super) fn record_autonomous_position_sequences(
+        &mut self,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        server_control_sequence: u16,
+    ) {
+        match self.last_teleport_sequence {
+            Some(old_seq) if is_newer_u16(teleport_sequence, old_seq) => {
+                log::info!(
+                    "Server-forced resync teleport epoch advanced: teleport seq {} -> {} (force seq {}, server-control seq {})",
+                    old_seq,
+                    teleport_sequence,
+                    force_position_sequence,
+                    server_control_sequence
+                );
+            }
+            Some(old_seq) if teleport_sequence != old_seq => {
+                log::debug!(
+                    "Ignoring stale server-forced resync: teleport seq {} after {} (force seq {}, server-control seq {})",
+                    teleport_sequence,
+                    old_seq,
+                    force_position_sequence,
+                    server_control_sequence
+                );
+            }
+            None => {
+                log::info!(
+                    "Tracking teleport sequence {} for autonomous resync (force seq {}, server-control seq {})",
+                    teleport_sequence,
+                    force_position_sequence,
+                    server_control_sequence
+                );
+            }
+            _ => {}
+        }
+
+        self.last_teleport_sequence = Some(teleport_sequence);
+        self.last_force_position_sequence = Some(force_position_sequence);
+        self.last_server_control_sequence = Some(server_control_sequence);
+    }
+
+    pub(super) fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
+        match self.last_server_control_sequence {
+            Some(old_seq) if is_newer_u16(server_control_sequence, old_seq) => {
+                log::debug!(
+                    "Server-controlled motion epoch advanced: {} -> {}",
+                    old_seq,
+                    server_control_sequence
+                );
+            }
+            Some(old_seq) if server_control_sequence != old_seq => {
+                log::warn!(
+                    "Server-controlled motion reordered/stale: {} after {}",
+                    server_control_sequence,
+                    old_seq
+                );
+            }
+            None => {
+                log::debug!(
+                    "Tracking server-controlled motion sequence: {}",
+                    server_control_sequence
+                );
+            }
+            _ => {}
+        }
+
+        self.last_server_control_sequence = Some(server_control_sequence);
+    }
+}
+
 pub(super) struct MovementSystem {
-    pub(super) last_sent_pos_seq: Option<u16>,
+    pub(super) sequence_diagnostics: MovementSequenceDiagnostics,
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
-            last_sent_pos_seq: None,
+            sequence_diagnostics: MovementSequenceDiagnostics::default(),
         }
     }
 

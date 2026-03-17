@@ -247,6 +247,12 @@ impl NavigationAutomation {
         result
     }
 
+    pub fn handle_teleport_start(&mut self, metadata: MovementPacketMetadata) -> NavigationUpdate {
+        let mut result = self.cancel_active_approach_due_to_teleport_start(metadata);
+        result.extend(self.reset_sticky_melee_due_to_teleport_start(metadata));
+        result
+    }
+
     pub fn cancel_active_approach(&mut self, metadata: MovementPacketMetadata) -> NavigationUpdate {
         let Some(controller) = self.approach_target.as_mut() else {
             return NavigationUpdate::default();
@@ -254,6 +260,24 @@ impl NavigationAutomation {
 
         let controller_snapshot = *controller;
         let update = controller.handle(&ApproachTargetInput::Cancel);
+        let mut result = NavigationUpdate::default();
+        for effect in update.effects {
+            self.apply_approach_target_effect(controller_snapshot, effect, metadata, &mut result);
+        }
+        self.approach_target = None;
+        result
+    }
+
+    fn cancel_active_approach_due_to_teleport_start(
+        &mut self,
+        metadata: MovementPacketMetadata,
+    ) -> NavigationUpdate {
+        let Some(controller) = self.approach_target.as_mut() else {
+            return NavigationUpdate::default();
+        };
+
+        let controller_snapshot = *controller;
+        let update = controller.handle(&ApproachTargetInput::TeleportStarted);
         let mut result = NavigationUpdate::default();
         for effect in update.effects {
             self.apply_approach_target_effect(controller_snapshot, effect, metadata, &mut result);
@@ -367,6 +391,39 @@ impl NavigationAutomation {
         result
     }
 
+    fn reset_sticky_melee_due_to_teleport_start(
+        &mut self,
+        metadata: MovementPacketMetadata,
+    ) -> NavigationUpdate {
+        let Some(controller) = self.sticky_melee.as_mut() else {
+            return NavigationUpdate::default();
+        };
+
+        let update = controller.handle(&MaintainRangeInput::Suspend { clear_latch: true });
+        let mut result = NavigationUpdate::default();
+        for effect in update.effects {
+            match effect {
+                MaintainRangeEffect::StartApproach { .. } => unreachable!(),
+                MaintainRangeEffect::Stop => {
+                    log::info!("sticky melee: clearing pursuit after teleport start");
+                    self.approach_target = None;
+                    result.push_command(Self::locomotion_command(
+                        LocomotionPrimitive::Stop {
+                            refresh_server: false,
+                        },
+                        metadata,
+                    ));
+                }
+                MaintainRangeEffect::Finished(MaintainRangeFinishReason::Suspended) => {}
+                MaintainRangeEffect::Finished(reason) => {
+                    self.log_sticky_melee_finish(reason);
+                }
+            }
+        }
+        self.sticky_melee = None;
+        result
+    }
+
     fn apply_sticky_melee_effect(
         &mut self,
         effect: MaintainRangeEffect,
@@ -440,6 +497,9 @@ impl NavigationAutomation {
                 }
                 ApproachTargetFinishReason::ForcedReposition => {
                     log::warn!("approach: controller aborted after forced reposition");
+                }
+                ApproachTargetFinishReason::TeleportStarted => {
+                    log::info!("approach: controller cleared after teleport start");
                 }
             },
         }
@@ -618,6 +678,41 @@ mod tests {
         }));
         assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
         assert!(automation.sticky_is_pursuing());
+    }
+
+    #[test]
+    fn teleport_start_clears_sticky_melee_and_latch() {
+        let now = Instant::now();
+        let mut automation = NavigationAutomation::default();
+        let target_guid = Guid(0x1234);
+
+        let _ = automation.sync_sticky_melee(StickyMeleeSyncInput {
+            now,
+            combat_mode: CombatMode::Melee,
+            attack_sequence_active: true,
+            target_guid: Some(target_guid),
+            player_position: Some(position(0.0)),
+            target_position: Some(position(1.5)),
+            move_speed: 4.5,
+            metadata: MovementPacketMetadata::default(),
+        });
+
+        let cleared = automation.handle_teleport_start(MovementPacketMetadata::default());
+
+        assert!(cleared.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: LocomotionPrimitive::Stop {
+                        refresh_server: false,
+                    },
+                    ..
+                })
+            )
+        }));
+        assert_eq!(automation.sticky_latched_target_guid(), None);
+        assert!(!automation.sticky_is_pursuing());
+        assert!(!automation.has_active_approach());
     }
 
     #[test]

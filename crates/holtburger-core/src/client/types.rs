@@ -205,6 +205,9 @@ pub enum ClientViewEvent {
         pos: holtburger_common::position::WorldPosition,
         sequence: u16,
     },
+    TeleportStarted {
+        sequence: u16,
+    },
     EntityDespawned {
         guid: Guid,
     },

@@ -172,6 +172,9 @@ impl GameState {
                     self.handle_forced_reposition(&mut result);
                 }
             }
+            ClientViewEvent::TeleportStarted { .. } => {
+                self.handle_teleport_start(&mut result);
+            }
             ClientViewEvent::EntityDespawned { guid } => {
                 result.merge(self.handle_entity_removed(guid));
                 self.sync_approach_target(Instant::now(), &mut result);
@@ -1099,6 +1102,29 @@ impl GameState {
             .handle_forced_reposition(self.current_movement_metadata());
         result.commands.extend(update.commands);
         self.clear_finished_approach_interaction(result);
+    }
+
+    fn handle_teleport_start(&mut self, result: &mut UpdateResult) {
+        let update = self
+            .view
+            .navigation
+            .handle_teleport_start(self.current_movement_metadata());
+        result.commands.extend(update.commands);
+
+        if matches!(self.view.active_interaction, Some(Interaction::Approaching { .. })) {
+            self.view.active_interaction = None;
+            result.needs_redraw = true;
+        }
+
+        if matches!(self.view.active_interaction, Some(Interaction::Targeting { .. })) {
+            if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) {
+                result.commands.push(ClientCommand::CancelAttack);
+                self.data.combat_runtime.cancel_attack();
+                self.view.combat_automation = None;
+            }
+            self.view.active_interaction = None;
+            result.needs_redraw = true;
+        }
     }
 
     fn clear_finished_approach_interaction(&mut self, result: &mut UpdateResult) {
@@ -2356,6 +2382,109 @@ mod tests {
         }));
         assert!(!state.view.navigation.has_active_approach());
         assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn teleport_start_cancels_frontend_owned_approach_controller() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(5.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(target_guid, "Drudge", target_position),
+        );
+
+        let started = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
+        assert!(started.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive:
+                        holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                    ..
+                })
+            )
+        }));
+        assert!(state.view.navigation.has_active_approach());
+
+        let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
+                        refresh_server: false,
+                    },
+                    ..
+                })
+            )
+        }));
+        assert!(!state.view.navigation.has_active_approach());
+        assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn teleport_start_clears_sticky_melee_targeting_and_attack() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+        state.data.combat_mode = CombatMode::Melee;
+        state.data.combat_runtime.attack_sequence_active = true;
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(target_guid, "Drudge", target_position),
+        );
+        state.view.active_interaction = Some(Interaction::Targeting { target_guid });
+
+        let mut initial = UpdateResult::new();
+        state.sync_sticky_melee_pursuit(&mut initial);
+
+        assert!(state.view.navigation.sticky_is_pursuing());
+        assert_eq!(state.view.navigation.sticky_latched_target_guid(), Some(target_guid));
+
+        let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
+                        refresh_server: false,
+                    },
+                    ..
+                })
+            )
+        }));
+        assert!(result.commands.iter().any(|command| {
+            matches!(command, ClientCommand::CancelAttack)
+        }));
+        assert_eq!(state.view.active_interaction, None);
+        assert_eq!(state.view.navigation.sticky_latched_target_guid(), None);
+        assert!(!state.view.navigation.sticky_is_pursuing());
+        assert!(!state.data.combat_runtime.attack_sequence_active);
     }
 
     #[test]

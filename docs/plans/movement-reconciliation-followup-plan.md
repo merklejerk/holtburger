@@ -25,6 +25,16 @@
   - `cargo test -p holtburger-world update_motion_caches_last_non_zero_server_style`
   - `cargo test -p holtburger-core server_controlled_update_motion`
 
+### 2026-03-17: Phase 3 Completed
+
+- Added a frontend-visible `ClientViewEvent::TeleportStarted` emitted directly from the core `PlayerTeleport` message path.
+- Added a dedicated teleport-start reset path in core navigation that clears active approach and sticky-melee latch using local-only stop commands instead of reusing forced-reposition semantics.
+- Changed the CLI to react to teleport start by tearing down frontend-owned approach automation immediately and clearing targeting state; melee/missile targeting also cancels the in-flight attack so sticky pursuit cannot reacquire on the next tick.
+- Added focused core and CLI tests covering teleport-start event emission, approach reset, and sticky-targeting teardown.
+- Verified with:
+  - `cargo test -p holtburger-core teleport_start`
+  - `cargo test -p holtburger-cli teleport_start`
+
 ### Goal
 
 Close the remaining movement-authority gaps after the initial stale `UpdatePosition` and forced-reposition fixes, while preserving the project boundary that `holtburger-world` owns authoritative state and frontends own higher-level controller policy.
@@ -288,10 +298,10 @@ Why deferred:
   - `crates/holtburger-core/src/client/messages.rs`
   - `apps/holtburger-cli/src/pages/game/state.rs`
   - `crates/holtburger-core/src/client/navigation.rs` if we add a dedicated teleport reset helper
-- Surprise already found:
-  - There is no `ClientViewEvent` for teleport start today.
-- Gap:
-  - Need an explicit event/hook addition, but the sticky policy decision is now resolved: teleport start should clear the sticky latch and active approach entirely.
+- Outcome:
+  - Implemented with a new `ClientViewEvent::TeleportStarted` plus a dedicated teleport-start navigation reset helper.
+  - The reset had to clear CLI targeting state in addition to helper-owned sticky latch, otherwise sticky pursuit could be recreated on the next sync tick from the still-active targeting interaction.
+  - Teleport-start teardown uses local-only stop commands (`refresh_server: false`) because the reset is driven by an authoritative server transition rather than a user cancel.
 
 ### Phase 4 Dry Run
 
@@ -309,12 +319,11 @@ Why deferred:
 - [x] Phase 1: stop position-property packets from mutating live movement indiscriminately
 - [x] Phase 1: add sparse player-owned `PositionType -> WorldPosition` storage for observed non-location updates
 - [x] Phase 1: add tests for non-location private/public position updates
-- [ ] Phase 2: add self non-autonomous `UpdateMotion` stale guard
 - [x] Phase 2: add self non-autonomous `UpdateMotion` stale guard
 - [x] Phase 2: add tests for stale/current server-controlled motion
-- [ ] Phase 3: surface teleport-start event or engine hook
-- [ ] Phase 3: implement teleport-start automation teardown policy in CLI/core
-- [ ] Phase 3: test teleport-start automation behavior
+- [x] Phase 3: surface teleport-start event or engine hook
+- [x] Phase 3: implement teleport-start automation teardown policy in CLI/core
+- [x] Phase 3: test teleport-start automation behavior
 - [ ] Phase 4: add bootstrap intent regression coverage for self `ObjectCreate`
 - [ ] Phase 4: expand movement diagnostics beyond force-position only
 - [ ] Cleanup A: surface self `UpdateMotion` acceptance from `holtburger-world` to remove the precomputed client-side gate
@@ -329,6 +338,7 @@ Why deferred:
 - For Phase 1, self non-`Location` private/public updates are retained on `PlayerState`; non-self public non-`Location` updates are intentionally ignored until a proven player-facing need justifies a broader model.
 - For Phase 2, self non-autonomous `UpdateMotion` acceptance is keyed by the last accepted `server_control_sequence`; stale packets are consumed before they reach generic self movement application or client heartbeat handling.
 - Phase 2 intentionally deferred a small pipeline cleanup: `holtburger-core` still snapshots the self `UpdateMotion` acceptance decision before `world.handle_message()` because the world/client coordination contract does not yet surface that result explicitly.
+- For Phase 3, teleport start is a stronger reset than forced reposition: it clears helper-owned approach state, clears sticky latch, and tears down CLI targeting/attack state so pursuit cannot immediately reacquire from stale frontend intent.
 
 ## Open Questions
 

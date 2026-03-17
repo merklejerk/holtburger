@@ -1,7 +1,6 @@
 use super::{Client, types::*};
 use anyhow::Result;
 use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
 use holtburger_world::StateEvent;
@@ -65,19 +64,9 @@ impl Client {
             GameMessage::UpdatePosition(data) => {
                 if data.guid == self.world.player.guid {
                     let force_pos_seq = data.pos.force_position_sequence;
-
-                    if let Some(old_seq) = self.movement.last_sent_pos_seq
-                        && is_newer_u16(force_pos_seq, old_seq)
-                    {
-                        log::warn!(
-                            "Server forced reposition (rubber band): seq {} -> {}",
-                            old_seq,
-                            force_pos_seq
-                        );
-                        // We don't abort movement here, we just accept the new sequence
-                        // WorldState already updated the position via delegation above
-                    }
-                    self.movement.last_sent_pos_seq = Some(force_pos_seq);
+                    self.movement
+                        .sequence_diagnostics
+                        .record_force_position_sequence(force_pos_seq);
                 }
                 Ok(())
             }
@@ -86,6 +75,9 @@ impl Client {
                     && !data.is_autonomous
                     && should_process_server_controlled_motion
                 {
+                    self.movement
+                        .sequence_diagnostics
+                        .record_server_control_sequence(data.server_control_sequence);
                     let Client {
                         movement,
                         world,
@@ -106,13 +98,12 @@ impl Client {
             }
             GameMessage::AutonomousPosition(data) => {
                 if data.guid == self.world.player.guid {
-                    log::info!(
-                        ">>> Server-forced resync: {:?}. Force Seq: {}",
-                        data.position,
-                        data.force_position_sequence
+                    self.movement.sequence_diagnostics.record_autonomous_position_sequences(
+                        data.teleport_sequence,
+                        data.force_position_sequence,
+                        data.server_control_sequence,
                     );
                     // WorldState already updated position and sequences via self.world.handle_message()
-                    self.movement.last_sent_pos_seq = Some(data.force_position_sequence);
                 }
                 Ok(())
             }

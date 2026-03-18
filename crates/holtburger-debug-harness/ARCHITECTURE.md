@@ -4,7 +4,7 @@ The `holtburger-debug-harness` is a bespoke, headless, non-interactive integrati
 
 ## Core Philosophical Principles
 - **Programmable Scenarios**: Allows developers to script exact "Walk to point A, cast spell B, verify server response C" workflows through code.
-- **Headless Execution**: Bypasses rendering loops and UI state projections. It executes strictly against the `ClientViewEvent` standard or even lower `WireEvent`/`StateEvent` layers if debugging core network mechanics.
+- **Headless Execution**: Bypasses rendering loops and UI state projections. It executes strictly against the `ClientViewEvent` standard or even lower `WireEvent`/`WorldEvent` layers if debugging core network mechanics.
 - **Isolate and Diagnose**: Before complex data translation bugs get obfuscated by UI projection (lossy design), you can halt execution right at the protocol translation boundary here.
 
 ## Key Components

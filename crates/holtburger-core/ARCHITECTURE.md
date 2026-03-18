@@ -18,8 +18,8 @@ To instantiate a client, we use the `ClientBuilder` ([src/client/builder.rs](src
 We use a 3-layer event model to separate protocol fidelity from UI ergonomics, solving the monolithic object-cloning problem via highly granular Delta Events:
 
 1. **`WireEvent`** (Protocol): 1:1 raw packet semantics from `holtburger-session`. Used for logging, debugging, or deep client control.
-2. **`StateEvent`** (World): Authoritative state mutations managed by `holtburger-world` (e.g., `EntitySpawned`, `PropertyUpdated`).
-3. **`WorldViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed. The core listens to incoming `WireEvent`s and `StateEvent`s and collapses them onto THIS SINGLE CHANNEL line.
+2. **`WorldEvent`** (World): World-layer events emitted by `holtburger-world`, including authoritative mutations and packet-scoped processing outcomes.
+3. **`WorldViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed. The core listens to incoming `WireEvent`s and `WorldEvent`s and collapses them onto THIS SINGLE CHANNEL line.
    - Consumers (like `holtburger-cli`) **ONLY** subscribe to `WorldViewEvent` because it is lightweight. It broadcasts granular semantic delta-events (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
 
 #### Interaction
@@ -123,15 +123,15 @@ sequenceDiagram
 
     Net->>Core: WireEvent (Unpacked Packet)
     Core->>World: Mutate Authority (e.g. Spawn)
-    World->>Core: StateEvent (e.g EntitySpawned)
+    World->>Core: WorldEvent (e.g EntitySpawned)
     Core->>View: Emit as Semantic Delta
     View->>UI: Process In-Place Projection Update
 ```
 
 1. **Networking**: `holtburger-session` parses UDP packets.
 2. **Engine**: `Client` processes the `WireEvent` and emits intents to `holtburger-world`'s `WorldState`.
-3. **Authority**: `WorldState` performs the mutation and emits a `StateEvent`.
-4. **Projection**: `Client` translates the `StateEvent` directly into a granular `WorldViewEvent` delta snapshot.
+3. **Authority**: `WorldState` performs the mutation and emits a `WorldEvent`.
+4. **Projection**: `Client` translates the `WorldEvent` directly into a granular `WorldViewEvent` delta snapshot.
 5. **UI**: Consumers receive the delta and mutate their local cached models safely without lock contention (`Arc<RwLock>`) or massive memory allocations.
 
 ## 🛠️ Developer Onboarding
@@ -140,7 +140,7 @@ sequenceDiagram
 1. **Identify**: Find the opcode in the ACE Server source (ground truth).
 2. **Update Protocol**: Add the message structure to `holtburger-protocol`.
 3. **Handle in Core**: Add a case to the core loop in [src/client/messages.rs](src/client/messages.rs).
-4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `StateEvent`.
+4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `WorldEvent`.
 5. **Map to View**: Update the `WorldViewEvent` stream in `emit_wire_event` or `emit_world_view_projection` inside [src/client/mod.rs](src/client/mod.rs) to share the new delta with the UI.
 
 ### Adding or Refactoring a Reusable Controller

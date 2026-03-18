@@ -1,4 +1,4 @@
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::state::WorldState;
 use holtburger_protocol::messages::*;
@@ -6,7 +6,7 @@ use holtburger_protocol::messages::*;
 pub(crate) fn handle_message(
     state: &mut WorldState,
     message: &GameMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
         GameMessage::ObjectCreate(data) => {
@@ -41,12 +41,22 @@ pub(crate) fn handle_message(
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
                 let accepted = state.player.apply_self_update_motion(data);
+                if !data.is_autonomous {
+                    events.push(WorldEvent::SelfUpdateMotionProcessed {
+                        server_control_sequence: data.server_control_sequence,
+                        movement_sequence: data.movement_sequence,
+                        accepted,
+                    });
+                }
                 return !data.is_autonomous && !accepted;
             }
             false
         }
         GameMessage::PlayerTeleport(data) => {
             state.player.set_teleport_sequence(data.teleport_sequence);
+            events.push(WorldEvent::TeleportStarted {
+                sequence: data.teleport_sequence,
+            });
             true
         }
         GameMessage::PrivateUpdateAttribute(data) => {
@@ -192,7 +202,7 @@ pub(crate) fn handle_message(
 pub(crate) fn handle_event(
     state: &mut WorldState,
     event: &GameEventMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
         GameEvent::PlayerDescription(data) => {

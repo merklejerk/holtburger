@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub use holtburger_world::StateEvent;
+pub use holtburger_world::WorldEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetSlot {

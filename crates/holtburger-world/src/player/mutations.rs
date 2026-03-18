@@ -1,5 +1,5 @@
 use super::PlayerState;
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::player::types::{SkillBase, VitalBase};
 use crate::stats;
 use holtburger_common::Guid;
@@ -36,7 +36,7 @@ impl PlayerState {
         start: u32,
         xp: u32,
         xp_table: Option<&holtburger_dat::file_type::XpTable>,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         if let Some(attr_type) = stats::AttributeType::from_repr(attr_id) {
             let base = start + ranks;
@@ -55,13 +55,13 @@ impl PlayerState {
             };
 
             self.attributes.insert(attr_type, attr_obj.clone());
-            events.push(StateEvent::AttributeUpdated(attr_obj));
+            events.push(WorldEvent::AttributeUpdated(attr_obj));
             self.emit_derived_stats(events);
         }
     }
 
     /// Hydrates a skill from a network update message.
-    pub fn update_skill(&mut self, params: SkillUpdateParams, events: &mut Vec<StateEvent>) {
+    pub fn update_skill(&mut self, params: SkillUpdateParams, events: &mut Vec<WorldEvent>) {
         let SkillUpdateParams {
             skill_id,
             ranks,
@@ -107,13 +107,13 @@ impl PlayerState {
             };
 
             self.skills.insert(skill_type, skill_obj.clone());
-            events.push(StateEvent::SkillUpdated(skill_obj));
+            events.push(WorldEvent::SkillUpdated(skill_obj));
             self.emit_derived_stats(events);
         }
     }
 
     /// Hydrates a vital from a network update message.
-    pub fn update_vital(&mut self, params: VitalUpdateParams, events: &mut Vec<StateEvent>) {
+    pub fn update_vital(&mut self, params: VitalUpdateParams, events: &mut Vec<WorldEvent>) {
         let VitalUpdateParams {
             vital_id,
             ranks,
@@ -142,7 +142,7 @@ impl PlayerState {
                 current,
             };
             self.vitals.insert(vital_type, vital_obj.clone());
-            events.push(StateEvent::VitalUpdated(vital_obj));
+            events.push(WorldEvent::VitalUpdated(vital_obj));
             self.emit_derived_stats(events);
         }
     }
@@ -152,13 +152,13 @@ impl PlayerState {
         &mut self,
         vital_id: u32,
         current: u32,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         if let Some(vital_type) = stats::VitalType::from_id(vital_id)
             && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
         {
             vital_obj.current = current;
-            events.push(StateEvent::VitalUpdated(vital_obj.clone()));
+            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
         }
     }
 
@@ -166,7 +166,7 @@ impl PlayerState {
     pub fn update_position_from_server(
         &mut self,
         pos_pack: &PositionPack,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         let old_forced_seq = self.force_position_sequence;
         let old_grounded = self.server_grounded;
@@ -182,13 +182,13 @@ impl PlayerState {
         self.server_grounded = Some(is_grounded);
 
         if old_grounded != Some(is_grounded) {
-            events.push(StateEvent::PlayerGroundedUpdated {
+            events.push(WorldEvent::PlayerGroundedUpdated {
                 grounded: is_grounded,
             });
         }
 
         if is_newer_u16(self.force_position_sequence, old_forced_seq) {
-            events.push(StateEvent::ForcedReposition {
+            events.push(WorldEvent::ForcedReposition {
                 guid: self.guid,
                 pos: self.position,
                 sequence: self.force_position_sequence,
@@ -222,7 +222,7 @@ impl PlayerState {
     pub fn apply_position_from_server(
         &mut self,
         pos_pack: &PositionPack,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if !self.should_accept_server_position_sequences(
             pos_pack.teleport_sequence,
@@ -299,7 +299,7 @@ impl PlayerState {
         data: &PlayerDescriptionEventData,
         xp_table: Option<&holtburger_dat::file_type::XpTable>,
         skill_table: Option<&holtburger_dat::file_type::SkillTable>,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         self.guid = data.guid;
         self.enchantments = data.enchantments.clone();
@@ -431,7 +431,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         enchantment: Enchantment,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -455,7 +455,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         enchantments: &[Enchantment],
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -482,7 +482,7 @@ impl PlayerState {
         target: Guid,
         spell_id: u16,
         layer: u16,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -498,7 +498,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         spells: &[(u16, u16)],
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -517,7 +517,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         keep_bad: bool,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -537,24 +537,24 @@ impl PlayerState {
         true
     }
 
-    pub fn add_spell(&mut self, spell_id: u32, events: &mut Vec<StateEvent>) {
+    pub fn add_spell(&mut self, spell_id: u32, events: &mut Vec<WorldEvent>) {
         self.spells.insert(spell_id, 0.0);
-        events.push(StateEvent::SpellUpdated {
+        events.push(WorldEvent::SpellUpdated {
             spell_id,
             name: None,
         });
     }
 
-    pub fn remove_spell(&mut self, spell_id: u32, events: &mut Vec<StateEvent>) {
+    pub fn remove_spell(&mut self, spell_id: u32, events: &mut Vec<WorldEvent>) {
         self.spells.remove(&spell_id);
-        events.push(StateEvent::SpellRemoved { spell_id });
+        events.push(WorldEvent::SpellRemoved { spell_id });
     }
 
     pub fn update_health_fraction(
         &mut self,
         target: Guid,
         health: f32,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         let target_guid = if target == Guid::NULL {
             self.guid
@@ -569,15 +569,15 @@ impl PlayerState {
         if let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health) {
             let new_current = (health * vital_obj.buffed_max as f32) as u32;
             vital_obj.current = new_current;
-            events.push(StateEvent::VitalUpdated(vital_obj.clone()));
+            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
             true
         } else {
             false
         }
     }
 
-    fn emit_enchantments_updated(&mut self, events: &mut Vec<StateEvent>) {
-        events.push(StateEvent::PlayerEnchantmentsUpdated {
+    fn emit_enchantments_updated(&mut self, events: &mut Vec<WorldEvent>) {
+        events.push(WorldEvent::PlayerEnchantmentsUpdated {
             enchantments: self.enchantments.clone(),
         });
         self.emit_derived_stats(events);

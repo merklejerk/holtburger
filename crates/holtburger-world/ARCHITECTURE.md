@@ -27,7 +27,7 @@ The refactor goal was simple: **handlers orchestrate, models mutate**.
 Files: [src/handlers](src/handlers)
 
 This layer is responsible for turning decoded protocol messages into state mutations and
-`StateEvent`s.
+`WorldEvent`s.
 
 - `routing`: central dispatch order plus final event decoration such as spell-name resolution
 - `player`: player-local updates, stat hydration, enchantments/spells, and movement sequence tracking
@@ -67,7 +67,7 @@ File: [src/state/mod.rs](src/state/mod.rs)
 - DAT-backed lookup tables such as XP, skill, and spell data
 
 `WorldState::handle_message()` remains the stable public entry point, but its role is now to
-delegate into the handler layer and return emitted `StateEvent`s.
+delegate into the handler layer and return emitted `WorldEvent`s.
 
 ### Entities & Hydration
 Files: [src/entity.rs](src/entity.rs), [src/hydration.rs](src/hydration.rs)
@@ -118,20 +118,20 @@ sequenceDiagram
         participant World as WorldState
         participant Handlers as handlers/*
         participant Models as PlayerState / WorldState helpers
-        participant Events as StateEvent[]
+        participant Events as WorldEvent[]
 
         Core->>World: handle_message(GameMessage)
         World->>Handlers: delegate dispatch
         Handlers->>Models: apply narrow mutations
         Handlers->>Events: emit state events
-        World-->>Core: Vec<StateEvent>
+        World-->>Core: Vec<WorldEvent>
 ```
 
 1. `holtburger-core` decodes a protocol message and calls `WorldState::handle_message()`.
 2. `WorldState` delegates dispatch to [src/handlers/routing.rs](src/handlers/routing.rs).
 3. `routing.rs` applies an explicit precedence order across handler modules.
 4. The relevant feature handler applies mutations through `PlayerState` or `WorldState` helpers.
-5. Handlers emit `StateEvent`s describing the observable outcome.
+5. Handlers emit `WorldEvent`s describing the observable outcome.
 6. Final event decoration, currently including spell-name resolution, happens in the routing layer
     before control returns to the caller.
 
@@ -174,7 +174,7 @@ If you change entity ownership or visibility rules, update retention reconciliat
 world helpers rather than layering on handler-specific cleanup.
 
 ### Event emission boundary
-`StateEvent` emission should describe meaningful observable changes after mutation, not serve as a
+`WorldEvent` emission should describe meaningful observable changes or packet-scoped processing outcomes after mutation, not serve as a
 shadow source of truth.
 
 Compact entity motion snapshots now follow this rule too: `holtburger-world` owns the authoritative
@@ -189,7 +189,7 @@ When introducing a new tracked domain:
 2. Add state storage to the owning model (`PlayerState`, `WorldState`, or a nested world module).
 3. Add focused mutation helpers that encode the new invariants.
 4. Route protocol messages through a feature handler under [src/handlers](src/handlers).
-5. Emit `StateEvent`s only for meaningful external observations.
+5. Emit `WorldEvent`s only for meaningful world/core observations.
 
 ## Non-Goals
 

@@ -502,7 +502,7 @@ impl Client {
                 next_pos.rotation = Quaternion::from_heading(heading);
                 let world_events = self.world.set_player_position(next_pos);
                 for event in world_events {
-                    self.emit_state_event(event);
+                    self.emit_world_event(event);
                 }
 
                 let obj_inst = self.world.player.instance_sequence;
@@ -537,7 +537,7 @@ impl Client {
                     .execute_locomotion_request(request, &mut self.world, &mut self.session)
                     .await?;
                 for event in world_events {
-                    self.emit_state_event(event);
+                    self.emit_world_event(event);
                 }
                 Ok(())
             }

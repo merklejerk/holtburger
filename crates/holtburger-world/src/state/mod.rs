@@ -9,7 +9,7 @@ pub mod types;
 pub use trade::{TradeSide, TradeState};
 pub use types::{ServerTimeSync, WorldState};
 
-use super::StateEvent;
+use super::WorldEvent;
 pub(crate) use super::entity::Entity;
 use super::vendor::{CoreVendorItem, VendorState};
 pub(crate) use crate::hydration::WorldObjectPropertiesHydrationExt;

@@ -133,7 +133,7 @@ impl WorldState {
 
         false
     }
-    pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<StateEvent> {
+    pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let now = self.current_server_time();
         self.sweep_eviction_queue(now, &mut events);
@@ -172,7 +172,7 @@ impl WorldState {
     }
     /// Updates the player's position, ensuring the record in PlayerState,
     /// the mirrored Entity, and the SpatialScene stay in sync.
-    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<StateEvent> {
+    pub fn set_player_position(&mut self, mut pos: WorldPosition) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
@@ -195,7 +195,7 @@ impl WorldState {
         }
         self.scene.update_entity(guid, old_lb, pos.landblock_id);
 
-        events.push(StateEvent::EntityMoved { guid, pos });
+        events.push(WorldEvent::EntityMoved { guid, pos });
         events
     }
 
@@ -227,7 +227,7 @@ impl WorldState {
     }
 
     /// Updates the player's velocity in both PlayerState (if mirrored) and the Entity map.
-    pub fn set_player_velocity(&mut self, velocity: Vector3) -> Vec<StateEvent> {
+    pub fn set_player_velocity(&mut self, velocity: Vector3) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
@@ -236,7 +236,7 @@ impl WorldState {
 
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.velocity = velocity;
-            events.push(StateEvent::EntityVectorUpdated {
+            events.push(WorldEvent::EntityVectorUpdated {
                 guid,
                 velocity,
                 omega: Vector3::zero(), // Entities don't currently store omega
@@ -245,7 +245,7 @@ impl WorldState {
         events
     }
 
-    pub fn set_player_vector(&mut self, velocity: Vector3, omega: Vector3) -> Vec<StateEvent> {
+    pub fn set_player_vector(&mut self, velocity: Vector3, omega: Vector3) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let guid = self.player.guid;
         if guid == Guid::NULL {
@@ -255,7 +255,7 @@ impl WorldState {
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.velocity = velocity;
             entity.omega = omega;
-            events.push(StateEvent::EntityVectorUpdated {
+            events.push(WorldEvent::EntityVectorUpdated {
                 guid,
                 velocity,
                 omega,
@@ -268,7 +268,7 @@ impl WorldState {
     pub fn apply_player_autonomous_position(
         &mut self,
         data: &ServerAutonomousPositionData,
-    ) -> Vec<StateEvent> {
+    ) -> Vec<WorldEvent> {
         if !self.player.should_accept_server_position_sequences(
             data.teleport_sequence,
             data.force_position_sequence,

@@ -1,4 +1,4 @@
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::entity::EntityMotionSnapshot;
 use crate::state::WorldState;
 use holtburger_common::Guid;
@@ -9,7 +9,7 @@ fn update_entity_motion_snapshot(
     state: &mut WorldState,
     guid: Guid,
     snapshot: Option<EntityMotionSnapshot>,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) {
     let Some(entity) = state.entities.get_mut(guid) else {
         return;
@@ -18,7 +18,7 @@ fn update_entity_motion_snapshot(
     if entity.motion_snapshot != snapshot {
         entity.motion_snapshot = snapshot;
         if let Some(snapshot) = snapshot {
-            events.push(StateEvent::EntityMotionUpdated { guid, snapshot });
+            events.push(WorldEvent::EntityMotionUpdated { guid, snapshot });
         }
     }
 }
@@ -26,7 +26,7 @@ fn update_entity_motion_snapshot(
 pub(crate) fn handle_message(
     state: &mut WorldState,
     message: &GameMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
         GameMessage::UpdatePosition(data) => {

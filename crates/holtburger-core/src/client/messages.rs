@@ -3,11 +3,11 @@ use anyhow::Result;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
-use holtburger_world::StateEvent;
+use holtburger_world::WorldEvent;
 use holtburger_world::entity::Entity;
 
 impl Client {
-    pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<StateEvent>> {
+    pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
         self.emit_wire_event(WireEvent::RawMessage(data.to_vec()));
 
         if let Some(ref dump_dir) = self.message_dump_dir {
@@ -35,17 +35,6 @@ impl Client {
         }
         let message = message.unwrap();
 
-        let should_process_server_controlled_motion = matches!(
-            &message,
-            GameMessage::UpdateMotion(data)
-                if data.guid == self.world.player.guid
-                    && !data.is_autonomous
-                    && self
-                        .world
-                        .player
-                        .should_accept_server_controlled_motion(data.server_control_sequence)
-        );
-
         log::debug!("GameMessage: {:?}", message);
 
         self.emit_wire_event(WireEvent::GameMessage(Box::new(message.clone())));
@@ -53,11 +42,8 @@ impl Client {
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);
 
-        // Deduplicate events that are snapshots/derived
-        let world_events = holtburger_world::dedupe_state_events(world_events);
-
         for event in world_events.iter() {
-            self.emit_state_event(event.clone());
+            self.emit_world_event(event.clone());
         }
 
         match message {
@@ -71,27 +57,37 @@ impl Client {
                 Ok(())
             }
             GameMessage::UpdateMotion(data) => {
-                if data.guid == self.world.player.guid
-                    && !data.is_autonomous
-                    && should_process_server_controlled_motion
-                {
-                    self.movement
-                        .sequence_diagnostics
-                        .record_server_control_sequence(data.server_control_sequence);
-                    let Client {
-                        movement,
-                        world,
-                        session,
-                        ..
-                    } = self;
-                    let (wire_events, state_events) = movement
-                        .handle_server_controlled_movement(*data, world, session)
-                        .await?;
-                    for event in wire_events {
-                        self.emit_wire_event(event);
-                    }
-                    for event in state_events {
-                        self.emit_state_event(event);
+                if data.guid == self.world.player.guid && !data.is_autonomous {
+                    let accepted = world_events.iter().find_map(|event| match event {
+                        WorldEvent::SelfUpdateMotionProcessed {
+                            server_control_sequence,
+                            accepted,
+                            ..
+                        } if *server_control_sequence == data.server_control_sequence => Some(*accepted),
+                        _ => None,
+                    }).unwrap_or(false);
+
+                    if accepted {
+                        self.movement
+                            .sequence_diagnostics
+                            .record_server_control_sequence(data.server_control_sequence);
+                        let (wire_events, state_events) = {
+                            let Client {
+                                movement,
+                                world,
+                                session,
+                                ..
+                            } = self;
+                            movement
+                                .handle_server_controlled_movement(*data, world, session)
+                                .await?
+                        };
+                        for event in wire_events {
+                            self.emit_wire_event(event);
+                        }
+                        for event in state_events {
+                            self.emit_world_event(event);
+                        }
                     }
                 }
                 Ok(())
@@ -331,11 +327,6 @@ impl Client {
                     "Portal transition started (seq: {})",
                     data.teleport_sequence
                 );
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::TeleportStarted {
-                        sequence: data.teleport_sequence,
-                    });
                 self.send_login_complete().await?;
                 Ok(())
             }
@@ -432,7 +423,7 @@ mod tests {
 
     fn build_test_client() -> Client {
         let (wire_event_tx, _) = broadcast::channel(32);
-        let (state_event_tx, _) = broadcast::channel(32);
+        let (world_event_tx, _) = broadcast::channel(32);
         let (client_view_event_tx, _) = broadcast::channel(32);
 
         Client {
@@ -440,7 +431,7 @@ mod tests {
             world: WorldState::new(None, None),
             state: ClientState::Connected,
             wire_event_tx,
-            state_event_tx,
+            world_event_tx,
             client_view_event_tx,
             command_rx: None,
             message_dump_dir: None,

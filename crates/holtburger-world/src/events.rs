@@ -13,11 +13,15 @@ pub struct PlayerInfoData {
     pub guid: Guid,
     pub name: String,
     pub pos: Option<WorldPosition>,
+    pub player_entity: Option<Box<Entity>>,
     pub attributes: Vec<stats::Attribute>,
     pub vitals: Vec<stats::Vital>,
     pub skills: Vec<stats::Skill>,
     pub enchantments: Vec<Enchantment>,
     pub spells: Vec<u32>,
+    pub level_info: stats::CharacterLevelInfo,
+    pub resistances: stats::Resistances,
+    pub armor: i32,
     pub vitae: f32,
     pub spell_names: std::collections::HashMap<u32, String>,
     pub inventory: std::collections::HashSet<Guid>,
@@ -35,7 +39,7 @@ pub struct DerivedStatsData {
 }
 
 #[derive(Debug, Clone)]
-pub enum StateEvent {
+pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
     EntityMoved {
@@ -78,10 +82,18 @@ pub enum StateEvent {
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
     NoClipUpdated(bool),
     ServerTimeUpdate(f64),
+    TeleportStarted {
+        sequence: u16,
+    },
     DerivedStatsUpdated(Box<DerivedStatsData>),
     EntityStateUpdated {
         guid: Guid,
         physics_state: holtburger_common::properties::PhysicsState,
+    },
+    SelfUpdateMotionProcessed {
+        server_control_sequence: u16,
+        movement_sequence: u16,
+        accepted: bool,
     },
     ForcedReposition {
         guid: Guid,
@@ -103,50 +115,4 @@ pub enum StateEvent {
     VendorStateUpdated(Option<vendor::VendorState>),
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
     TradeStateUpdated(Option<state::TradeState>),
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum EventDedupeKey {
-    DerivedStats,
-    Vital(stats::VitalType),
-    Attribute(stats::AttributeType),
-    Skill(stats::SkillType),
-    CombatMode,
-    PlayerGrounded,
-    LevelInfo,
-    ServerTime,
-    EntityPosition(Guid),
-    EntityVector(Guid),
-    EntityMotion(Guid),
-    EntityState(Guid),
-}
-
-impl holtburger_common::traits::Deduplicable for StateEvent {
-    type Key = EventDedupeKey;
-
-    fn dedupe_key(&self) -> Option<Self::Key> {
-        match self {
-            StateEvent::DerivedStatsUpdated(_) => Some(EventDedupeKey::DerivedStats),
-            StateEvent::VitalUpdated(v) => Some(EventDedupeKey::Vital(v.vital_type)),
-            StateEvent::AttributeUpdated(a) => Some(EventDedupeKey::Attribute(a.attr_type)),
-            StateEvent::SkillUpdated(s) => Some(EventDedupeKey::Skill(s.skill_type)),
-            StateEvent::CombatModeUpdated(_) => Some(EventDedupeKey::CombatMode),
-            StateEvent::PlayerGroundedUpdated { .. } => Some(EventDedupeKey::PlayerGrounded),
-            StateEvent::LevelInfoUpdated(_) => Some(EventDedupeKey::LevelInfo),
-            StateEvent::ServerTimeUpdate(_) => Some(EventDedupeKey::ServerTime),
-            StateEvent::EntityMoved { guid, .. } => Some(EventDedupeKey::EntityPosition(*guid)),
-            StateEvent::EntityVectorUpdated { guid, .. } => {
-                Some(EventDedupeKey::EntityVector(*guid))
-            }
-            StateEvent::EntityMotionUpdated { guid, .. } => {
-                Some(EventDedupeKey::EntityMotion(*guid))
-            }
-            StateEvent::EntityStateUpdated { guid, .. } => Some(EventDedupeKey::EntityState(*guid)),
-            _ => None,
-        }
-    }
-}
-
-pub fn dedupe_state_events(events: Vec<StateEvent>) -> Vec<StateEvent> {
-    holtburger_common::traits::dedupe_events(events)
 }

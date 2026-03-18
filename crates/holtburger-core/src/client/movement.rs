@@ -10,7 +10,7 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use holtburger_world::{StateEvent, WorldState};
+use holtburger_world::{WorldEvent, WorldState};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
@@ -175,7 +175,7 @@ impl MovementSystem {
         request: LocomotionRequest,
         world: &mut WorldState,
         session: &mut Session,
-    ) -> Result<Vec<StateEvent>> {
+    ) -> Result<Vec<WorldEvent>> {
         let primitive = request.primitive;
         let state_events = self.apply_locomotion_primitive(primitive, world);
 
@@ -201,7 +201,7 @@ impl MovementSystem {
         &mut self,
         primitive: LocomotionPrimitive,
         world: &mut WorldState,
-    ) -> Vec<StateEvent> {
+    ) -> Vec<WorldEvent> {
         let mut events = Vec::new();
 
         if let LocomotionPrimitive::Drive { heading, .. } = primitive {
@@ -283,7 +283,7 @@ impl MovementSystem {
         data: MovementEventData,
         world: &mut WorldState,
         session: &mut Session,
-    ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
+    ) -> Result<(Vec<WireEvent>, Vec<WorldEvent>)> {
         let mut wire_events = Vec::new();
         log::info!(
             ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",

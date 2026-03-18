@@ -48,9 +48,9 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn emit_level_info(&self, events: &mut Vec<StateEvent>) {
+    pub(crate) fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
         if let Some(info) = self.get_level_info() {
-            events.push(StateEvent::LevelInfoUpdated(info));
+            events.push(WorldEvent::LevelInfoUpdated(info));
         }
     }
 
@@ -59,17 +59,21 @@ impl WorldState {
         guid: Guid,
         name: String,
         pos: Option<WorldPosition>,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
-        events.push(StateEvent::PlayerInfo(Box::new(crate::PlayerInfoData {
+        events.push(WorldEvent::PlayerInfo(Box::new(crate::PlayerInfoData {
             guid,
             name,
             pos,
+            player_entity: self.entities.get(guid).map(|entity| Box::new(entity.clone())),
             attributes: self.player.get_attributes(),
             vitals: self.player.get_vitals(),
             skills: self.player.get_skills(),
             enchantments: self.player.enchantments.clone(),
             spells: self.player.spells.keys().cloned().collect(),
+            level_info: self.get_level_info().unwrap_or_default(),
+            resistances: self.player.resistances(),
+            armor: self.player.armor(),
             vitae: self.player.vitae(),
             spell_names: self.get_player_spell_names(),
             inventory: self.player.inventory.clone(),
@@ -82,7 +86,7 @@ impl WorldState {
         guid: Guid,
         name: &str,
         pos: Option<WorldPosition>,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.set_string_prop(PropertyString::Name, name.to_string());
@@ -117,13 +121,13 @@ impl WorldState {
         &mut self,
         guid: Guid,
         pos: WorldPosition,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if let Some(entity) = self.entities.get_mut(guid) {
             let old_lb = entity.position.landblock_id;
             entity.position = pos;
             self.scene.update_entity(guid, old_lb, pos.landblock_id);
-            events.push(StateEvent::EntityMoved { guid, pos });
+            events.push(WorldEvent::EntityMoved { guid, pos });
             true
         } else {
             false
@@ -134,7 +138,7 @@ impl WorldState {
         &mut self,
         position_type: PositionType,
         position: WorldPosition,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         if position_type == PositionType::Location {
             events.extend(self.set_player_position(position));
@@ -149,7 +153,7 @@ impl WorldState {
         guid: Guid,
         position_type: PositionType,
         position: WorldPosition,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if position_type == PositionType::Location {
             if guid == self.player.guid {
@@ -172,12 +176,12 @@ impl WorldState {
         guid: Guid,
         velocity: Vector3,
         omega: Vector3,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.velocity = velocity;
             entity.omega = omega;
-            events.push(StateEvent::EntityVectorUpdated {
+            events.push(WorldEvent::EntityVectorUpdated {
                 guid,
                 velocity,
                 omega,
@@ -192,11 +196,11 @@ impl WorldState {
         &mut self,
         guid: Guid,
         rotation: Quaternion,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.position.rotation = rotation;
-            events.push(StateEvent::EntityMoved {
+            events.push(WorldEvent::EntityMoved {
                 guid,
                 pos: entity.position,
             });
@@ -221,7 +225,7 @@ impl WorldState {
         &mut self,
         item_guid: Guid,
         container_guid: Guid,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if let Some(entity) = self.entities.get_mut(item_guid) {
             entity.set_iid_prop(PropertyInstanceId::Container, container_guid);
@@ -238,7 +242,7 @@ impl WorldState {
         self.sync_player_ownership_for_entity(item_guid);
         let _ = self.reconcile_entity_retention(item_guid);
 
-        events.push(StateEvent::PropertiesUpdated {
+        events.push(WorldEvent::PropertiesUpdated {
             guid: item_guid,
             updates: vec![
                 PropertyUpdate::InstanceId(PropertyInstanceId::Container, container_guid),
@@ -256,7 +260,7 @@ impl WorldState {
     pub(crate) fn move_entity_into_world(
         &mut self,
         guid: Guid,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if let Some(entity) = self.entities.get_mut(guid) {
             entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
@@ -271,7 +275,7 @@ impl WorldState {
         self.sync_player_ownership_for_entity(guid);
         let _ = self.reconcile_entity_retention(guid);
 
-        events.push(StateEvent::PropertiesUpdated {
+        events.push(WorldEvent::PropertiesUpdated {
             guid,
             updates: vec![
                 PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
@@ -291,7 +295,7 @@ impl WorldState {
         object_guid: Guid,
         wielder_guid: Guid,
         equip_mask: EquipMask,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if let Some(entity) = self.entities.get_mut(object_guid) {
             entity.set_iid_prop(PropertyInstanceId::Wielder, wielder_guid);
@@ -308,7 +312,7 @@ impl WorldState {
         self.sync_player_ownership_for_entity(object_guid);
         let _ = self.reconcile_entity_retention(object_guid);
 
-        events.push(StateEvent::PropertiesUpdated {
+        events.push(WorldEvent::PropertiesUpdated {
             guid: object_guid,
             updates: vec![
                 PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, wielder_guid),
@@ -409,12 +413,12 @@ impl WorldState {
     pub(crate) fn apply_set_state_update(
         &mut self,
         data: &SetStateData,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if let Some(entity) = self.entities.get_mut(data.guid) {
             entity.physics_state = data.physics_state;
             entity.properties.hydrate_from_set_state(data);
-            events.push(StateEvent::EntityStateUpdated {
+            events.push(WorldEvent::EntityStateUpdated {
                 guid: data.guid,
                 physics_state: data.physics_state,
             });
@@ -424,7 +428,7 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn handle_trade_complete(&mut self, events: &mut Vec<StateEvent>) {
+    pub(crate) fn handle_trade_complete(&mut self, events: &mut Vec<WorldEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
         self.mark_trade_preview_entities_for_prune(&trade_item_guids);
 
@@ -433,7 +437,7 @@ impl WorldState {
             trade.partner_side.accepted = false;
             trade.self_side.items.clear();
             trade.partner_side.items.clear();
-            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
         }
     }
 
@@ -441,7 +445,7 @@ impl WorldState {
         &mut self,
         initiator: Guid,
         partner: Guid,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         let partner_guid = if initiator == self.player.guid {
             partner
@@ -466,14 +470,14 @@ impl WorldState {
         };
 
         self.trade = Some(trade_state.clone());
-        events.push(StateEvent::TradeStateUpdated(Some(trade_state)));
+        events.push(WorldEvent::TradeStateUpdated(Some(trade_state)));
     }
 
     pub(crate) fn add_trade_item(
         &mut self,
         trade_side: u32,
         object_guid: Guid,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         let should_mark_preview = self
             .retention_snapshot(object_guid, self.current_server_time())
@@ -487,7 +491,7 @@ impl WorldState {
             }
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
-            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
         }
 
         if should_mark_preview {
@@ -495,18 +499,18 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn accept_trade(&mut self, who_accepted: Guid, events: &mut Vec<StateEvent>) {
+    pub(crate) fn accept_trade(&mut self, who_accepted: Guid, events: &mut Vec<WorldEvent>) {
         if let Some(trade) = self.trade.as_mut() {
             if who_accepted == self.player.guid {
                 trade.self_side.accepted = true;
             } else {
                 trade.partner_side.accepted = true;
             }
-            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
         }
     }
 
-    pub(crate) fn reset_trade(&mut self, events: &mut Vec<StateEvent>) {
+    pub(crate) fn reset_trade(&mut self, events: &mut Vec<WorldEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
         self.mark_trade_preview_entities_for_prune(&trade_item_guids);
 
@@ -515,23 +519,23 @@ impl WorldState {
             trade.partner_side.accepted = false;
             trade.self_side.items.clear();
             trade.partner_side.items.clear();
-            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
         }
     }
 
-    pub(crate) fn clear_trade_acceptance(&mut self, events: &mut Vec<StateEvent>) {
+    pub(crate) fn clear_trade_acceptance(&mut self, events: &mut Vec<WorldEvent>) {
         if let Some(trade) = self.trade.as_mut() {
             trade.self_side.accepted = false;
             trade.partner_side.accepted = false;
-            events.push(StateEvent::TradeStateUpdated(Some(trade.clone())));
+            events.push(WorldEvent::TradeStateUpdated(Some(trade.clone())));
         }
     }
 
-    pub(crate) fn close_trade(&mut self, events: &mut Vec<StateEvent>) {
+    pub(crate) fn close_trade(&mut self, events: &mut Vec<WorldEvent>) {
         let trade_item_guids = self.current_trade_item_guids();
         self.mark_trade_preview_entities_for_prune(&trade_item_guids);
         self.trade = None;
-        events.push(StateEvent::TradeStateUpdated(None));
+        events.push(WorldEvent::TradeStateUpdated(None));
     }
 
     pub(crate) fn current_trade_item_guids(&self) -> Vec<Guid> {
@@ -597,7 +601,7 @@ impl WorldState {
     pub(crate) fn set_vendor_state(
         &mut self,
         data: &ApproachVendorEventData,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         let items = data
             .items
@@ -617,6 +621,6 @@ impl WorldState {
         };
 
         self.vendor = Some(vendor_state.clone());
-        events.push(StateEvent::VendorStateUpdated(Some(vendor_state)));
+        events.push(WorldEvent::VendorStateUpdated(Some(vendor_state)));
     }
 }

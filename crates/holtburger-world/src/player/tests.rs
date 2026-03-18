@@ -1,5 +1,5 @@
 use super::*;
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::WorldState;
 use crate::entity::Entity;
 use holtburger_common::position::WorldPosition;
@@ -388,7 +388,7 @@ fn test_health_rounding() {
 
 #[test]
 fn test_vector_update_routing() {
-    use crate::StateEvent;
+    use crate::WorldEvent;
     use crate::entity::Entity;
     use crate::state::WorldState;
     use holtburger_common::Vector3;
@@ -416,7 +416,7 @@ fn test_vector_update_routing() {
 
     assert_eq!(events.len(), 1);
     assert_eq!(state.player.instance_sequence, 123);
-    if let StateEvent::EntityVectorUpdated {
+    if let WorldEvent::EntityVectorUpdated {
         guid,
         velocity,
         omega,
@@ -432,7 +432,7 @@ fn test_vector_update_routing() {
 
 #[test]
 fn test_magic_purge_bad_enchantments_preserves_vitae() {
-    use crate::StateEvent;
+    use crate::WorldEvent;
     use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsEventData,
@@ -496,10 +496,10 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, StateEvent::PlayerEnchantmentsUpdated { .. }))
+            .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated { .. }))
     );
     let derived_vitae = events.iter().find_map(|e| match e {
-        StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+        WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
         _ => None,
     });
     assert_eq!(derived_vitae, Some(0.95));
@@ -522,11 +522,19 @@ fn test_update_motion_caches_last_non_zero_server_style() {
         data: MovementTypeData::Invalid(MovementInvalid::default()),
     }));
 
-    state.handle_message(&first);
+    let events = state.handle_message(&first);
 
     assert_eq!(state.player.instance_sequence, 7);
     assert_eq!(state.player.movement_sequence, 8);
     assert_eq!(state.player.server_control_sequence, 9);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfUpdateMotionProcessed {
+            server_control_sequence: 9,
+            movement_sequence: 8,
+            accepted: true,
+        }
+    )));
     assert_eq!(
         state.player.last_server_motion_style,
         Some(MotionStance::SwordCombat)
@@ -544,11 +552,19 @@ fn test_update_motion_caches_last_non_zero_server_style() {
         data: MovementTypeData::Invalid(MovementInvalid::default()),
     }));
 
-    state.handle_message(&second);
+    let events = state.handle_message(&second);
 
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.movement_sequence, 11);
     assert_eq!(state.player.server_control_sequence, 12);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfUpdateMotionProcessed {
+            server_control_sequence: 12,
+            movement_sequence: 11,
+            accepted: true,
+        }
+    )));
     assert_eq!(
         state.player.last_server_motion_style,
         Some(MotionStance::SwordCombat)
@@ -578,10 +594,18 @@ fn test_stale_non_autonomous_update_motion_is_ignored_for_self() {
 
     let events = state.handle_message(&msg);
 
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 1);
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.movement_sequence, 20);
     assert_eq!(state.player.server_control_sequence, 30);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfUpdateMotionProcessed {
+            server_control_sequence: 29,
+            movement_sequence: 21,
+            accepted: false,
+        }
+    )));
     assert_eq!(
         state.player.last_server_motion_style,
         Some(MotionStance::SwordCombat)
@@ -635,7 +659,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     );
     assert!(events.iter().any(|event| matches!(
         event,
-        StateEvent::EntityMotionUpdated { guid: target, snapshot }
+        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
             if *target == guid
             && snapshot.current_style == Some(MotionStance::NonCombat)
             && snapshot.forward_command == Some(InterpretedMotionCommand::DEAD)
@@ -705,7 +729,7 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
     assert_eq!(state.player.vitae(), 0.88);
 
     let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
-        StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+        WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
         _ => None,
     });
     assert_eq!(latest_derived_vitae, Some(0.88));
@@ -716,7 +740,7 @@ fn test_update_position_from_server_caches_grounded_state() {
     let mut player = PlayerState::new();
     player.guid = Guid(0x50000001);
 
-    let mut events = Vec::<StateEvent>::new();
+    let mut events = Vec::<WorldEvent>::new();
     let pos = WorldPosition::default();
 
     use holtburger_protocol::messages::movement::messages::position::{
@@ -770,7 +794,7 @@ fn test_stale_update_position_is_ignored_when_teleport_sequence_regresses() {
     player.force_position_sequence = 4;
 
     let original_position = player.position;
-    let mut events = Vec::<StateEvent>::new();
+    let mut events = Vec::<WorldEvent>::new();
     let applied = player.apply_position_from_server(
         &PositionPack {
             pos: WorldPosition {
@@ -811,7 +835,7 @@ fn test_stale_update_position_is_ignored_when_force_sequence_regresses() {
     player.force_position_sequence = 7;
 
     let original_position = player.position;
-    let mut events = Vec::<StateEvent>::new();
+    let mut events = Vec::<WorldEvent>::new();
     let applied = player.apply_position_from_server(
         &PositionPack {
             pos: WorldPosition {

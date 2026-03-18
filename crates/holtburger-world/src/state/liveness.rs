@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::entity::Entity;
 use crate::state::WorldState;
 
@@ -230,14 +230,14 @@ impl WorldState {
         &mut self,
         guid: Guid,
         now: f64,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if !self.should_evict_entity(guid, now) {
             return false;
         }
 
         if self.remove_entity(guid).is_some() {
-            events.push(StateEvent::EntityDespawned(guid));
+            events.push(WorldEvent::EntityDespawned(guid));
             true
         } else {
             self.entity_lifecycle.clear(guid);
@@ -245,7 +245,7 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn sweep_eviction_queue(&mut self, now: f64, events: &mut Vec<StateEvent>) {
+    pub(crate) fn sweep_eviction_queue(&mut self, now: f64, events: &mut Vec<WorldEvent>) {
         let candidates: Vec<_> = self.entity_lifecycle.tracked_guids().collect();
         for guid in candidates {
             let _ = self.sweep_entity(guid, now, events);
@@ -278,7 +278,7 @@ impl WorldState {
     pub(crate) fn upsert_entity_from_create(
         &mut self,
         entity: Entity,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> EntityUpsertKind {
         let guid = entity.guid;
         let new_lb = entity.position.landblock_id;
@@ -307,11 +307,11 @@ impl WorldState {
         {
             self.entities.insert(entity.clone());
             self.scene.update_entity(guid, old_lb, new_lb);
-            events.push(StateEvent::EntityReplaced(Box::new(entity)));
+            events.push(WorldEvent::EntityReplaced(Box::new(entity)));
             EntityUpsertKind::Replaced
         } else {
             self.add_entity(entity.clone());
-            events.push(StateEvent::EntitySpawned(Box::new(entity)));
+            events.push(WorldEvent::EntitySpawned(Box::new(entity)));
             EntityUpsertKind::Inserted
         }
     }

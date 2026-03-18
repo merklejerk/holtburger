@@ -195,7 +195,17 @@ fn test_player_mirror_invariant_on_autonomous_sync() {
         contact_flags: 0,
     };
 
-    state.apply_player_autonomous_position(&sync_data);
+    let events = state.apply_player_autonomous_position(&sync_data);
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfAutonomousPositionObserved {
+            teleport_sequence: 30,
+            force_position_sequence: 40,
+            server_control_sequence: 20,
+            accepted: true,
+        }
+    )));
 
     assert_eq!(state.player.position, sync_data.position);
     assert_eq!(
@@ -239,7 +249,16 @@ fn test_stale_player_autonomous_sync_is_ignored() {
 
     let events = state.apply_player_autonomous_position(&sync_data);
 
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 1);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfAutonomousPositionObserved {
+            teleport_sequence: 30,
+            force_position_sequence: 39,
+            server_control_sequence: 20,
+            accepted: false,
+        }
+    )));
     assert_eq!(state.player.position, initial_pos);
     assert_eq!(
         state.entities.get(player_guid).unwrap().position,

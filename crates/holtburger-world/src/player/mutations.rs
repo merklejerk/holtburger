@@ -28,7 +28,13 @@ pub struct VitalUpdateParams<'a> {
 }
 
 impl PlayerState {
-    /// Hydrates an attribute from a network update message.
+    fn current_spell_ids(&self) -> Vec<u32> {
+        let mut spell_ids: Vec<u32> = self.spells.keys().cloned().collect();
+        spell_ids.sort();
+        spell_ids
+    }
+
+    /// Applies a server-authored attribute update and refreshes derived player stats.
     pub fn update_attribute(
         &mut self,
         attr_id: u32,
@@ -60,7 +66,7 @@ impl PlayerState {
         }
     }
 
-    /// Hydrates a skill from a network update message.
+    /// Applies a server-authored skill update and refreshes derived player stats.
     pub fn update_skill(&mut self, params: SkillUpdateParams, events: &mut Vec<WorldEvent>) {
         let SkillUpdateParams {
             skill_id,
@@ -112,7 +118,7 @@ impl PlayerState {
         }
     }
 
-    /// Hydrates a vital from a network update message.
+    /// Applies a server-authored vital update and refreshes derived player stats.
     pub fn update_vital(&mut self, params: VitalUpdateParams, events: &mut Vec<WorldEvent>) {
         let VitalUpdateParams {
             vital_id,
@@ -147,7 +153,7 @@ impl PlayerState {
         }
     }
 
-    /// Updates the current value of a vital.
+    /// Updates a vital's current pool without recalculating unrelated derived stats.
     pub fn update_vital_current(
         &mut self,
         vital_id: u32,
@@ -162,7 +168,8 @@ impl PlayerState {
         }
     }
 
-    /// Updates the player's world position and associated sequences.
+    /// Copies a server-authored player position snapshot into player state and emits
+    /// grounded or forced-reposition events when those observable outcomes change.
     pub fn update_position_from_server(
         &mut self,
         pos_pack: &PositionPack,
@@ -218,7 +225,8 @@ impl PlayerState {
         true
     }
 
-    /// Applies a server-authored player position update when its sequencing is current.
+    /// Applies a server-authored player position update only when its teleport and
+    /// force-position sequencing is still current.
     pub fn apply_position_from_server(
         &mut self,
         pos_pack: &PositionPack,
@@ -235,10 +243,10 @@ impl PlayerState {
         true
     }
 
-    /// Returns whether a self non-autonomous server-controlled movement packet is current.
+    /// Returns whether a self non-autonomous `UpdateMotion` packet is current.
     ///
     /// ACE increments `server_control_sequence` for non-autonomous `UpdateMotion`, so older or
-    /// duplicate epochs should not be re-applied locally.
+    /// duplicate epochs must not be re-applied or forwarded into the client heartbeat path.
     pub fn should_accept_server_controlled_motion(&self, server_control_sequence: u16) -> bool {
         if server_control_sequence == self.server_control_sequence {
             return false;
@@ -247,7 +255,8 @@ impl PlayerState {
         !is_newer_u16(self.server_control_sequence, server_control_sequence)
     }
 
-    /// Applies self `UpdateMotion` sequencing and cached style only when the packet is current.
+    /// Applies self `UpdateMotion` sequencing and cached server style only when the packet is
+    /// current.
     pub fn apply_self_update_motion(&mut self, data: &MovementEventData) -> bool {
         if !data.is_autonomous
             && !self.should_accept_server_controlled_motion(data.server_control_sequence)
@@ -542,12 +551,16 @@ impl PlayerState {
         events.push(WorldEvent::SpellUpdated {
             spell_id,
             name: None,
+            spell_ids: self.current_spell_ids(),
         });
     }
 
     pub fn remove_spell(&mut self, spell_id: u32, events: &mut Vec<WorldEvent>) {
         self.spells.remove(&spell_id);
-        events.push(WorldEvent::SpellRemoved { spell_id });
+        events.push(WorldEvent::SpellRemoved {
+            spell_id,
+            spell_ids: self.current_spell_ids(),
+        });
     }
 
     pub fn update_health_fraction(

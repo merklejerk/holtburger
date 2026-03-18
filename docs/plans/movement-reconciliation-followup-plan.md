@@ -45,7 +45,7 @@
 
 ### 2026-03-17: Cleanup A Completed
 
-- Surfaced self non-autonomous `UpdateMotion` acceptance from `holtburger-world` via an explicit `WorldEvent::SelfUpdateMotionProcessed` instead of precomputing the decision in `holtburger-core`.
+- Surfaced self non-autonomous `UpdateMotion` outcomes from `holtburger-world` via explicit accepted/rejected world events instead of precomputing the decision in `holtburger-core`.
 - Changed the client message path to consume the world-owned acceptance result after `world.handle_message()` runs, keeping the stale-order decision in the world layer.
 - Removed world-event deduping and renamed the world/core boundary type from `StateEvent` to `WorldEvent` so packet-scoped processing outcomes fit the contract cleanly.
 - Added focused player motion tests covering the surfaced acceptance event for current and stale self non-autonomous packets.
@@ -357,7 +357,7 @@ Why deferred:
 - For Phase 1, self non-`Location` private/public updates are retained on `PlayerState`; non-self public non-`Location` updates are intentionally ignored until a proven player-facing need justifies a broader model.
 - For Phase 2, self non-autonomous `UpdateMotion` acceptance is keyed by the last accepted `server_control_sequence`; stale packets are consumed before they reach generic self movement application or client heartbeat handling.
 - Phase 2 intentionally deferred a small pipeline cleanup: `holtburger-core` still snapshots the self `UpdateMotion` acceptance decision before `world.handle_message()` because the world/client coordination contract does not yet surface that result explicitly.
-- Cleanup A removed that precheck by surfacing the acceptance result from `holtburger-world` via `WorldEvent::SelfUpdateMotionProcessed` and consuming it in `holtburger-core` after world mutation.
+- Cleanup A removed that precheck by surfacing self server-controlled motion outcomes from `holtburger-world` and consuming them in `holtburger-core` after world mutation.
 - For Phase 3, teleport start is a stronger reset than forced reposition: it clears helper-owned approach state, clears sticky latch, and tears down CLI targeting/attack state so pursuit cannot immediately reacquire from stale frontend intent.
 
 ## Open Questions

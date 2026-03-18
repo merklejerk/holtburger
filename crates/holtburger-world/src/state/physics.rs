@@ -269,14 +269,23 @@ impl WorldState {
         &mut self,
         data: &ServerAutonomousPositionData,
     ) -> Vec<WorldEvent> {
-        if !self.player.should_accept_server_position_sequences(
+        let accepted = self.player.should_accept_server_position_sequences(
             data.teleport_sequence,
             data.force_position_sequence,
-        ) {
-            return Vec::new();
+        );
+
+        let mut events = vec![WorldEvent::SelfAutonomousPositionObserved {
+            teleport_sequence: data.teleport_sequence,
+            force_position_sequence: data.force_position_sequence,
+            server_control_sequence: data.server_control_sequence,
+            accepted,
+        }];
+
+        if !accepted {
+            return events;
         }
 
-        let events = self.set_player_position(data.position);
+        events.extend(self.set_player_position(data.position));
 
         self.player.instance_sequence = data.instance_sequence;
         self.player.server_control_sequence = data.server_control_sequence;

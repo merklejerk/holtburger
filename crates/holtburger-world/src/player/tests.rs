@@ -529,11 +529,8 @@ fn test_update_motion_caches_last_non_zero_server_style() {
     assert_eq!(state.player.server_control_sequence, 9);
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::SelfUpdateMotionProcessed {
-            server_control_sequence: 9,
-            movement_sequence: 8,
-            accepted: true,
-        }
+        WorldEvent::AcceptedSelfServerControlledMotion(data)
+            if data.server_control_sequence == 9 && data.movement_sequence == 8
     )));
     assert_eq!(
         state.player.last_server_motion_style,
@@ -559,11 +556,8 @@ fn test_update_motion_caches_last_non_zero_server_style() {
     assert_eq!(state.player.server_control_sequence, 12);
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::SelfUpdateMotionProcessed {
-            server_control_sequence: 12,
-            movement_sequence: 11,
-            accepted: true,
-        }
+        WorldEvent::AcceptedSelfServerControlledMotion(data)
+            if data.server_control_sequence == 12 && data.movement_sequence == 11
     )));
     assert_eq!(
         state.player.last_server_motion_style,
@@ -600,10 +594,9 @@ fn test_stale_non_autonomous_update_motion_is_ignored_for_self() {
     assert_eq!(state.player.server_control_sequence, 30);
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::SelfUpdateMotionProcessed {
+        WorldEvent::RejectedSelfServerControlledMotion {
             server_control_sequence: 29,
             movement_sequence: 21,
-            accepted: false,
         }
     )));
     assert_eq!(

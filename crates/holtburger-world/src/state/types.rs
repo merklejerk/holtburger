@@ -115,26 +115,6 @@ impl WorldState {
         })
     }
 
-    pub fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
-        let mut names = std::collections::HashMap::new();
-        if let Some(catalog) = &self.spell_catalog {
-            // Player's known spells
-            for spell_id in self.player.spells.keys() {
-                if let Some(spell) = catalog.get(*spell_id) {
-                    names.insert(*spell_id, spell.name.clone());
-                }
-            }
-            // Enchantments currently active on the player
-            for enc in &self.player.enchantments {
-                let spell_id = enc.spell_id as u32;
-                if let Some(spell) = catalog.get(spell_id) {
-                    names.insert(spell_id, spell.name.clone());
-                }
-            }
-        }
-        names
-    }
-
     pub fn resolve_spell_name(&self, spell_id: u32) -> Option<String> {
         self.spell_catalog
             .as_ref()?

@@ -75,7 +75,6 @@ impl WorldState {
             resistances: self.player.resistances(),
             armor: self.player.armor(),
             vitae: self.player.vitae(),
-            spell_names: self.get_player_spell_names(),
             inventory: self.player.inventory.clone(),
             equipment: self.player.equipment.clone(),
         })));

@@ -100,6 +100,7 @@ impl GameState {
             }
             ClientViewEvent::PlayerEnchantmentsUpdated { .. }
             | ClientViewEvent::PlayerStatsSkillsUpdated { .. }
+            | ClientViewEvent::PlayerLevelInfoUpdated { .. }
             | ClientViewEvent::PlayerVitalsUpdated { .. }
             | ClientViewEvent::PlayerSpellsUpdated { .. }
             | ClientViewEvent::CombatModeUpdated { .. } => {
@@ -673,10 +674,7 @@ impl GameState {
 
     pub(crate) fn handle_player_event(&mut self, event: ClientViewEvent) {
         match event {
-            ClientViewEvent::PlayerEnchantmentsUpdated {
-                enchantments,
-                resolved_names: _,
-            } => {
+            ClientViewEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 self.data.player_enchantments = enchantments;
             }
             ClientViewEvent::PlayerStatsSkillsUpdated {
@@ -685,13 +683,14 @@ impl GameState {
                 resistances,
                 armor,
                 vitae,
-                level_info,
             } => {
                 self.data.attributes = attributes;
                 self.data.skills = skills;
                 self.data.resistances = resistances;
                 self.data.armor = armor;
                 self.data.vitae = vitae;
+            }
+            ClientViewEvent::PlayerLevelInfoUpdated { level_info } => {
                 self.data.level_info = Some(level_info);
             }
             ClientViewEvent::PlayerVitalsUpdated { vitals } => {

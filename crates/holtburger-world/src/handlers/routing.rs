@@ -6,7 +6,7 @@ use holtburger_protocol::messages::GameMessage;
 fn resolve_spell_names(state: &WorldState, events: &mut [WorldEvent]) {
     for event in events.iter_mut() {
         match event {
-            WorldEvent::SpellUpdated { spell_id, name } if name.is_none() => {
+            WorldEvent::SpellUpdated { spell_id, name, .. } if name.is_none() => {
                 *name = state.resolve_spell_name(*spell_id);
             }
             _ => {}

@@ -8,6 +8,7 @@ use holtburger_common::properties::{
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::movement::{MotionStance, PositionType};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -63,8 +64,8 @@ pub struct PlayerState {
     pub instance_sequence: u16,
     /// Sequence for server-controlled movement/actions.
     pub server_control_sequence: u16,
-    /// Last non-zero server-reported motion stance/style for local movement packet preservation.
-    pub current_motion_style: Option<u32>,
+    /// Last non-zero server-reported motion stance/style cached for outbound movement packets.
+    pub last_server_motion_style: Option<MotionStance>,
     /// Sequence for teleportation events to ignore stale position updates.
     pub teleport_sequence: u16,
     /// Sequence for server-forced repositions (e.g. rubberbanding or physics corrections).
@@ -75,6 +76,8 @@ pub struct PlayerState {
     pub server_grounded: Option<bool>,
     /// Monotonically increasing sequence for autonomous movement steps.
     pub movement_sequence: u16,
+    /// Sparse authoritative storage for non-live position properties keyed by packet `PositionType`.
+    pub position_properties: HashMap<PositionType, WorldPosition>,
     /// List of all active enchantments (buffs/debuffs) currently affecting the player.
     pub enchantments: Vec<Enchantment>,
     /// Master list of known spells (Knowledge). Maps SpellID -> Power/Modifier level.
@@ -114,12 +117,13 @@ impl PlayerState {
             position: WorldPosition::default(),
             instance_sequence: 0,
             server_control_sequence: 0,
-            current_motion_style: None,
+            last_server_motion_style: None,
             teleport_sequence: 0,
             force_position_sequence: 0,
             position_sequence: 0,
             server_grounded: None,
             movement_sequence: 0,
+            position_properties: HashMap::new(),
             enchantments: Vec::new(),
             spells: BTreeMap::new(),
             hotbar_spells: vec![Vec::new(); 8],
@@ -174,6 +178,14 @@ impl PlayerState {
 
     pub fn vitae(&self) -> f32 {
         crate::magic::get_total_vitae(&self.enchantments)
+    }
+
+    pub fn position_property(&self, position_type: PositionType) -> Option<WorldPosition> {
+        self.position_properties.get(&position_type).copied()
+    }
+
+    pub fn set_position_property(&mut self, position_type: PositionType, position: WorldPosition) {
+        self.position_properties.insert(position_type, position);
     }
 
     pub(crate) fn get_resistance_augmentation(&self, prop: PropertyFloat) -> i32 {

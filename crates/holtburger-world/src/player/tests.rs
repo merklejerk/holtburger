@@ -1,12 +1,15 @@
 use super::*;
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::WorldState;
+use crate::entity::{Entity, EntityMotionSnapshot};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
+use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use holtburger_protocol::messages::{
-    GameMessage, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
+    GameMessage, InterpretedMotionState, MovementEventData, MovementInvalid, MovementStateFlags,
+    MovementType, MovementTypeData,
 };
 
 fn set_attr(player: &mut PlayerState, attr: stats::AttributeType, val: u32) {
@@ -385,7 +388,7 @@ fn test_health_rounding() {
 
 #[test]
 fn test_vector_update_routing() {
-    use crate::StateEvent;
+    use crate::WorldEvent;
     use crate::entity::Entity;
     use crate::state::WorldState;
     use holtburger_common::Vector3;
@@ -413,7 +416,7 @@ fn test_vector_update_routing() {
 
     assert_eq!(events.len(), 1);
     assert_eq!(state.player.instance_sequence, 123);
-    if let StateEvent::EntityVectorUpdated {
+    if let WorldEvent::EntityVectorUpdated {
         guid,
         velocity,
         omega,
@@ -429,7 +432,7 @@ fn test_vector_update_routing() {
 
 #[test]
 fn test_magic_purge_bad_enchantments_preserves_vitae() {
-    use crate::StateEvent;
+    use crate::WorldEvent;
     use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsEventData,
@@ -493,17 +496,17 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, StateEvent::PlayerEnchantmentsUpdated { .. }))
+            .any(|e| matches!(e, WorldEvent::PlayerEnchantmentsUpdated { .. }))
     );
     let derived_vitae = events.iter().find_map(|e| match e {
-        StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+        WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
         _ => None,
     });
     assert_eq!(derived_vitae, Some(0.95));
 }
 
 #[test]
-fn test_update_motion_caches_last_non_zero_player_style() {
+fn test_update_motion_caches_last_non_zero_server_style() {
     let mut state = WorldState::new(None, None);
     state.player.guid = Guid(0x50000001);
 
@@ -519,12 +522,20 @@ fn test_update_motion_caches_last_non_zero_player_style() {
         data: MovementTypeData::Invalid(MovementInvalid::default()),
     }));
 
-    state.handle_message(&first);
+    let events = state.handle_message(&first);
 
     assert_eq!(state.player.instance_sequence, 7);
     assert_eq!(state.player.movement_sequence, 8);
     assert_eq!(state.player.server_control_sequence, 9);
-    assert_eq!(state.player.current_motion_style, Some(62));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfServerControlledMotion(data)
+            if data.server_control_sequence == 9 && data.movement_sequence == 8
+    )));
+    assert_eq!(
+        state.player.last_server_motion_style,
+        Some(MotionStance::SwordCombat)
+    );
 
     let second = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid: state.player.guid,
@@ -538,12 +549,149 @@ fn test_update_motion_caches_last_non_zero_player_style() {
         data: MovementTypeData::Invalid(MovementInvalid::default()),
     }));
 
-    state.handle_message(&second);
+    let events = state.handle_message(&second);
 
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.movement_sequence, 11);
     assert_eq!(state.player.server_control_sequence, 12);
-    assert_eq!(state.player.current_motion_style, Some(62));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfServerControlledMotion(data)
+            if data.server_control_sequence == 12 && data.movement_sequence == 11
+    )));
+    assert_eq!(
+        state.player.last_server_motion_style,
+        Some(MotionStance::SwordCombat)
+    );
+}
+
+#[test]
+fn test_stale_non_autonomous_update_motion_is_ignored_for_self() {
+    let mut state = WorldState::new(None, None);
+    state.player.guid = Guid(0x50000001);
+    state.player.instance_sequence = 10;
+    state.player.movement_sequence = 20;
+    state.player.server_control_sequence = 30;
+    state.player.last_server_motion_style = Some(MotionStance::SwordCombat);
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid: state.player.guid,
+        object_instance_sequence: 11,
+        movement_sequence: 21,
+        server_control_sequence: 29,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: MotionStance::Magic.interpreted(),
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.instance_sequence, 10);
+    assert_eq!(state.player.movement_sequence, 20);
+    assert_eq!(state.player.server_control_sequence, 30);
+    assert_eq!(
+        state.player.last_server_motion_style,
+        Some(MotionStance::SwordCombat)
+    );
+}
+
+#[test]
+fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x60000001);
+
+    state.add_entity(Entity::new(
+        guid,
+        "Drudge".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 7,
+        movement_sequence: 8,
+        server_control_sequence: 9,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: MotionStance::NonCombat.interpreted(),
+        data: MovementTypeData::Invalid(MovementInvalid {
+            state: InterpretedMotionState {
+                flags: MovementStateFlags::CURRENT_STYLE | MovementStateFlags::FORWARD_COMMAND,
+                num_commands: 0,
+                current_style: Some(MotionStance::NonCombat.interpreted()),
+                forward_command: Some(InterpretedMotionCommand::DEAD),
+                ..Default::default()
+            },
+            sticky_object: None,
+        }),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    let snapshot = state
+        .entities
+        .get(guid)
+        .and_then(|entity| entity.motion_snapshot)
+        .expect("expected motion snapshot to be cached");
+
+    assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
+    assert_eq!(
+        snapshot.forward_command,
+        Some(InterpretedMotionCommand::DEAD)
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+            if *target == guid
+            && snapshot.as_ref().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
+            && snapshot.as_ref().is_some_and(|snapshot| snapshot.forward_command == Some(InterpretedMotionCommand::DEAD))
+    )));
+}
+
+#[test]
+fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x60000001);
+
+    let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.motion_snapshot = Some(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::WALK_FORWARD),
+        sidestep_command: None,
+        turn_command: None,
+    });
+    state.add_entity(entity);
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 1,
+        movement_sequence: 2,
+        server_control_sequence: 3,
+        is_autonomous: true,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 1,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.motion_snapshot),
+        None
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+            if *target == guid && snapshot.is_none()
+    )));
 }
 
 #[test]
@@ -609,7 +757,7 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
     assert_eq!(state.player.vitae(), 0.88);
 
     let latest_derived_vitae = events.iter().rev().find_map(|e| match e {
-        StateEvent::DerivedStatsUpdated(data) => Some(data.vitae),
+        WorldEvent::DerivedStatsUpdated(data) => Some(data.vitae),
         _ => None,
     });
     assert_eq!(latest_derived_vitae, Some(0.88));
@@ -620,7 +768,7 @@ fn test_update_position_from_server_caches_grounded_state() {
     let mut player = PlayerState::new();
     player.guid = Guid(0x50000001);
 
-    let mut events = Vec::<StateEvent>::new();
+    let mut events = Vec::<WorldEvent>::new();
     let pos = WorldPosition::default();
 
     use holtburger_protocol::messages::movement::messages::position::{
@@ -654,6 +802,88 @@ fn test_update_position_from_server_caches_grounded_state() {
         &mut events,
     );
     assert_eq!(player.server_grounded, Some(true));
+}
+
+#[test]
+fn test_stale_update_position_is_ignored_when_teleport_sequence_regresses() {
+    use holtburger_common::Vector3;
+    use holtburger_protocol::messages::movement::messages::position::{
+        PositionPack, UpdatePositionFlag,
+    };
+
+    let mut player = PlayerState::new();
+    player.guid = Guid(0x50000001);
+    player.position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..Default::default()
+    };
+    player.teleport_sequence = 10;
+    player.force_position_sequence = 4;
+
+    let original_position = player.position;
+    let mut events = Vec::<WorldEvent>::new();
+    let applied = player.apply_position_from_server(
+        &PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x02000000),
+                coords: Vector3::new(9.0, 9.0, 9.0),
+                ..Default::default()
+            },
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 9,
+            force_position_sequence: 99,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+        &mut events,
+    );
+
+    assert!(!applied);
+    assert_eq!(player.position, original_position);
+    assert!(events.is_empty());
+}
+
+#[test]
+fn test_stale_update_position_is_ignored_when_force_sequence_regresses() {
+    use holtburger_common::Vector3;
+    use holtburger_protocol::messages::movement::messages::position::{
+        PositionPack, UpdatePositionFlag,
+    };
+
+    let mut player = PlayerState::new();
+    player.guid = Guid(0x50000001);
+    player.position = WorldPosition {
+        landblock_id: Guid(0x01000000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        ..Default::default()
+    };
+    player.teleport_sequence = 10;
+    player.force_position_sequence = 7;
+
+    let original_position = player.position;
+    let mut events = Vec::<WorldEvent>::new();
+    let applied = player.apply_position_from_server(
+        &PositionPack {
+            pos: WorldPosition {
+                landblock_id: Guid(0x02000000),
+                coords: Vector3::new(9.0, 9.0, 9.0),
+                ..Default::default()
+            },
+            instance_sequence: 1,
+            position_sequence: 2,
+            teleport_sequence: 10,
+            force_position_sequence: 6,
+            flags: UpdatePositionFlag::NONE,
+            ..Default::default()
+        },
+        &mut events,
+    );
+
+    assert!(!applied);
+    assert_eq!(player.position, original_position);
+    assert!(events.is_empty());
 }
 
 #[test]

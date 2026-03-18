@@ -1,4 +1,4 @@
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::state::WorldState;
 use holtburger_protocol::messages::*;
@@ -6,7 +6,7 @@ use holtburger_protocol::messages::*;
 pub(crate) fn handle_message(
     state: &mut WorldState,
     message: &GameMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
         GameMessage::ObjectCreate(data) => {
@@ -21,7 +21,15 @@ pub(crate) fn handle_message(
         GameMessage::UpdatePosition(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
-                state.player.update_position_from_server(&data.pos, events);
+                let accepted = state.player.apply_position_from_server(&data.pos, events);
+                if accepted {
+                    events.push(WorldEvent::SelfUpdatePosition {
+                        teleport_sequence: data.pos.teleport_sequence,
+                        force_position_sequence: data.pos.force_position_sequence,
+                    });
+                    events.extend(state.set_player_position(data.pos.pos));
+                }
+                return true;
             }
             false
         }
@@ -37,18 +45,21 @@ pub(crate) fn handle_message(
         GameMessage::UpdateMotion(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
-                state.player.update_motion_sequences(
-                    data.object_instance_sequence,
-                    data.server_control_sequence,
-                    data.movement_sequence,
-                );
-                state.player.update_current_motion_style(data.current_style);
-                return false;
+                let accepted = state.player.apply_self_update_motion(data);
+                if accepted && !data.is_autonomous {
+                    events.push(WorldEvent::SelfServerControlledMotion(Box::new(
+                        (**data).clone(),
+                    )));
+                }
+                return !data.is_autonomous && !accepted;
             }
             false
         }
         GameMessage::PlayerTeleport(data) => {
             state.player.set_teleport_sequence(data.teleport_sequence);
+            events.push(WorldEvent::TeleportStarted {
+                sequence: data.teleport_sequence,
+            });
             true
         }
         GameMessage::PrivateUpdateAttribute(data) => {
@@ -194,7 +205,7 @@ pub(crate) fn handle_message(
 pub(crate) fn handle_event(
     state: &mut WorldState,
     event: &GameEventMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
         GameEvent::PlayerDescription(data) => {

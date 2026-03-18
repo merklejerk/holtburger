@@ -195,7 +195,16 @@ fn test_player_mirror_invariant_on_autonomous_sync() {
         contact_flags: 0,
     };
 
-    state.apply_player_autonomous_position(&sync_data);
+    let events = state.apply_player_autonomous_position(&sync_data);
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::SelfAutonomousPosition {
+            teleport_sequence: 30,
+            force_position_sequence: 40,
+            server_control_sequence: 20,
+        }
+    )));
 
     assert_eq!(state.player.position, sync_data.position);
     assert_eq!(
@@ -204,6 +213,190 @@ fn test_player_mirror_invariant_on_autonomous_sync() {
     );
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.server_control_sequence, 20);
+}
+
+#[test]
+fn test_stale_player_autonomous_sync_is_ignored() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    state.player.guid = player_guid;
+    state.player.teleport_sequence = 30;
+    state.player.force_position_sequence = 40;
+
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(5.0, 5.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.position = initial_pos;
+    let player_entity = Entity::new(player_guid, "Player".to_string(), initial_pos);
+    state.entities.insert(player_entity);
+
+    let sync_data = ServerAutonomousPositionData {
+        guid: player_guid,
+        position: WorldPosition {
+            landblock_id: Guid(0x56780000),
+            coords: Vector3::new(1.0, 1.0, 1.0),
+            rotation: holtburger_common::math::Quaternion::identity(),
+        },
+        instance_sequence: 10,
+        server_control_sequence: 20,
+        teleport_sequence: 30,
+        force_position_sequence: 39,
+        contact_flags: 0,
+    };
+
+    let events = state.apply_player_autonomous_position(&sync_data);
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, initial_pos);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        initial_pos
+    );
+    assert_eq!(state.player.teleport_sequence, 30);
+    assert_eq!(state.player.force_position_sequence, 40);
+}
+
+#[test]
+fn test_private_update_position_non_location_is_stored_without_moving_player() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    state.player.guid = player_guid;
+
+    let live_position = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(5.0, 5.0, 0.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.position = live_position;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        live_position,
+    ));
+
+    let saved_position = WorldPosition {
+        landblock_id: Guid(0x56780000),
+        coords: Vector3::new(42.0, 24.0, 9.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let events = state.handle_message(&GameMessage::PrivateUpdatePosition(Box::new(
+        PrivateUpdatePositionData {
+            sequence: 1,
+            position_type: PositionType::LastOutsideDeath,
+            pos: saved_position,
+        },
+    )));
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, live_position);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        live_position
+    );
+    assert_eq!(
+        state
+            .player
+            .position_property(PositionType::LastOutsideDeath),
+        Some(saved_position)
+    );
+}
+
+#[test]
+fn test_public_update_position_non_location_for_player_is_stored_without_moving_player() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    state.player.guid = player_guid;
+
+    let live_position = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.position = live_position;
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        live_position,
+    ));
+
+    let sanctuary_position = WorldPosition {
+        landblock_id: Guid(0x9ABC0000),
+        coords: Vector3::new(11.0, 12.0, 13.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let events = state.handle_message(&GameMessage::PublicUpdatePosition(Box::new(
+        PublicUpdatePositionData {
+            sequence: 2,
+            guid: player_guid,
+            position_type: PositionType::Sanctuary,
+            pos: sanctuary_position,
+        },
+    )));
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, live_position);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        live_position
+    );
+    assert_eq!(
+        state.player.position_property(PositionType::Sanctuary),
+        Some(sanctuary_position)
+    );
+}
+
+#[test]
+fn test_public_update_position_non_location_for_other_entity_does_not_move_it() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000123);
+    let other_guid = Guid(0x50000999);
+    state.player.guid = player_guid;
+
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let live_position = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(3.0, 4.0, 5.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state
+        .entities
+        .insert(Entity::new(other_guid, "Other".to_string(), live_position));
+
+    let non_live_position = WorldPosition {
+        landblock_id: Guid(0x56780000),
+        coords: Vector3::new(30.0, 40.0, 50.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let events = state.handle_message(&GameMessage::PublicUpdatePosition(Box::new(
+        PublicUpdatePositionData {
+            sequence: 3,
+            guid: other_guid,
+            position_type: PositionType::LinkedPortalOne,
+            pos: non_live_position,
+        },
+    )));
+
+    assert!(events.is_empty());
+    assert_eq!(
+        state.entities.get(other_guid).unwrap().position,
+        live_position
+    );
+    assert_eq!(
+        state
+            .player
+            .position_property(PositionType::LinkedPortalOne),
+        None
+    );
 }
 
 #[test]
@@ -238,9 +431,9 @@ fn test_inventory_put_obj_in_container() {
     assert_eq!(entity.container_id(), Some(container_guid));
     assert_eq!(entity.position.landblock_id, Guid::NULL);
 
-    // Check for StateEvent::PropertiesUpdated
+    // Check for WorldEvent::PropertiesUpdated
     assert!(events.iter().any(|e| {
-        if let StateEvent::PropertiesUpdated { guid, updates } = e {
+        if let WorldEvent::PropertiesUpdated { guid, updates } = e {
             *guid == item_guid
                 && updates.iter().any(|u| {
                     matches!(u, PropertyUpdate::InstanceId(PropertyInstanceId::Container, val) if *val == container_guid)
@@ -278,7 +471,7 @@ fn test_inventory_put_object_in_3d() {
     assert_eq!(entity.wielder_id(), None);
 
     assert!(events.iter().any(|e| {
-        if let StateEvent::PropertiesUpdated { guid, updates } = e {
+        if let WorldEvent::PropertiesUpdated { guid, updates } = e {
             *guid == obj_guid
                 && updates.iter().any(|u| {
                     matches!(
@@ -322,7 +515,7 @@ fn test_wield_object() {
     assert_eq!(entity.container_id(), None);
 
     assert!(events.iter().any(|e| {
-        if let StateEvent::PropertiesUpdated { guid, updates } = e {
+        if let WorldEvent::PropertiesUpdated { guid, updates } = e {
             *guid == obj_guid
                 && updates.iter().any(|u| {
                     matches!(u, PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, val) if *val == wielder_guid)
@@ -360,7 +553,7 @@ fn test_inventory_remove_object() {
     assert!(
         !events
             .iter()
-            .any(|e| matches!(e, StateEvent::EntityDespawned(guid) if *guid == obj_guid))
+            .any(|e| matches!(e, WorldEvent::EntityDespawned(guid) if *guid == obj_guid))
     );
 }
 
@@ -506,10 +699,48 @@ fn test_object_create_reuses_upsert_path_and_clears_explicit_delete() {
     let events = state.handle_message(&msg);
 
     assert!(
-        matches!(events.first(), Some(StateEvent::EntityReplaced(entity)) if entity.name() == "Replacement")
+        matches!(events.first(), Some(WorldEvent::EntityReplaced(entity)) if entity.name() == "Replacement")
     );
     assert_eq!(state.entities.get(guid).unwrap().name(), "Replacement");
     assert!(state.entity_lifecycle_state(guid).is_none());
+}
+
+#[test]
+fn test_self_object_create_bootstraps_player_position() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000042);
+
+    let initial_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+    state.player.guid = player_guid;
+    state.player.position = initial_pos;
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), initial_pos));
+
+    let bootstrap_pos = WorldPosition {
+        landblock_id: Guid(0x12340010),
+        coords: Vector3::new(11.0, 22.0, 33.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    let mut data = ObjectDescriptionData::with_guid(player_guid);
+    data.public_weenie_desc.name = Some("Player".to_string());
+    data.pos = Some(bootstrap_pos);
+
+    let msg = GameMessage::ObjectCreate(Box::new(data));
+    let events = state.handle_message(&msg);
+
+    assert_eq!(state.player.position, bootstrap_pos);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        bootstrap_pos
+    );
+    assert!(state.entity_lifecycle_state(player_guid).is_none());
+    assert!(!events.is_empty());
 }
 
 #[test]
@@ -536,7 +767,7 @@ fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntityDespawned(target) if *target == guid))
+            .any(|event| matches!(event, WorldEvent::EntityDespawned(target) if *target == guid))
     );
 }
 
@@ -670,7 +901,7 @@ fn test_upsert_entity_from_create_replaces_in_place() {
 
     let original = Entity::new(guid, "Original".to_string(), WorldPosition::default());
     state.upsert_entity_from_create(original, &mut events);
-    assert!(matches!(events.first(), Some(StateEvent::EntitySpawned(_))));
+    assert!(matches!(events.first(), Some(WorldEvent::EntitySpawned(_))));
 
     state.mark_entity_explicit_delete(guid);
     events.clear();
@@ -681,12 +912,12 @@ fn test_upsert_entity_from_create_replaces_in_place() {
     assert!(matches!(outcome, EntityUpsertKind::Replaced));
     assert!(matches!(
         events.first(),
-        Some(StateEvent::EntityReplaced(_))
+        Some(WorldEvent::EntityReplaced(_))
     ));
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntitySpawned(entity) if entity.guid == guid))
+            .any(|event| matches!(event, WorldEvent::EntitySpawned(entity) if entity.guid == guid))
     );
     assert!(state.entity_lifecycle_state(guid).is_none());
     assert_eq!(state.entities.get(guid).unwrap().name(), "Replacement");
@@ -716,7 +947,7 @@ fn test_tick_sweeps_explicit_delete_without_movement() {
     assert!(state.entities.get(target_guid).is_none());
     assert!(
         events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
         )
     );
 }
@@ -744,7 +975,7 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
     assert!(state.entities.get(target_guid).is_none());
     assert!(
         events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
         )
     );
 }
@@ -791,7 +1022,7 @@ fn test_tick_runs_sweep_without_player_guid() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntityDespawned(target) if *target == guid))
+            .any(|event| matches!(event, WorldEvent::EntityDespawned(target) if *target == guid))
     );
 }
 
@@ -874,7 +1105,7 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
     assert!(state.entities.get(target_guid).is_none());
     assert!(
         events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
         )
     );
 }
@@ -926,7 +1157,7 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
     assert!(state.entity_lifecycle_state(target_guid).is_none());
     assert!(
         !tick_events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == target_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == target_guid)
         )
     );
 }
@@ -1087,7 +1318,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
     assert!(state.entities.get(preview_guid).is_some());
     assert!(
         !events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
         )
     );
     assert!(
@@ -1106,7 +1337,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
     assert!(state.entities.get(preview_guid).is_none());
     assert!(
         tick_events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
         )
     );
 }
@@ -1153,7 +1384,7 @@ fn test_clear_trade_acceptance_does_not_sweep_preview_entities() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, StateEvent::TradeStateUpdated(Some(_))))
+            .any(|event| matches!(event, WorldEvent::TradeStateUpdated(Some(_))))
     );
 }
 
@@ -1197,11 +1428,11 @@ fn test_close_trade_sweeps_preview_only_entities() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, StateEvent::TradeStateUpdated(None)))
+            .any(|event| matches!(event, WorldEvent::TradeStateUpdated(None)))
     );
     assert!(
         !events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
         )
     );
 
@@ -1214,7 +1445,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
     assert!(state.entities.get(preview_guid).is_none());
     assert!(
         tick_events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
         )
     );
 }
@@ -1273,7 +1504,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     );
     assert!(
         !events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
         )
     );
 
@@ -1286,7 +1517,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
     assert!(state.entities.get(preview_guid).is_none());
     assert!(
         tick_events.iter().any(
-            |event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == preview_guid)
+            |event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == preview_guid)
         )
     );
 }
@@ -1315,10 +1546,10 @@ fn test_view_contents_ignores_unknown_guid_without_synthesizing_entity() {
     assert!(state.entities.get(item_guid).is_none());
     assert!(state.entity_lifecycle_state(item_guid).is_none());
     assert!(events.iter().any(
-        |event| matches!(event, StateEvent::ContainerOpened(guid) if *guid == container_guid)
+        |event| matches!(event, WorldEvent::ContainerOpened(guid) if *guid == container_guid)
     ));
     assert!(!events.iter().any(
-        |event| matches!(event, StateEvent::EntitySpawned(entity) if entity.guid == item_guid)
+        |event| matches!(event, WorldEvent::EntitySpawned(entity) if entity.guid == item_guid)
     ));
 }
 
@@ -1362,7 +1593,7 @@ fn test_view_contents_marks_existing_entity_as_container_preview() {
             .is_some_and(|state| state.container_preview)
     );
     assert!(events.iter().any(
-        |event| matches!(event, StateEvent::ContainerOpened(guid) if *guid == container_guid)
+        |event| matches!(event, WorldEvent::ContainerOpened(guid) if *guid == container_guid)
     ));
 }
 
@@ -1419,7 +1650,7 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
     );
 
     state.server_time = Some(ServerTimeSync {
@@ -1432,7 +1663,7 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
     assert!(
         tick_events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
     );
 }
 
@@ -1664,7 +1895,7 @@ fn test_close_ground_container_preserves_entity_with_other_retention() {
     assert!(
         !events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
     );
 }
 
@@ -1794,7 +2025,7 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
     );
 }
 
@@ -1841,6 +2072,6 @@ fn test_remove_entity_marks_contained_dependents_for_prune() {
     assert!(
         events
             .iter()
-            .any(|event| matches!(event, StateEvent::EntityDespawned(guid) if *guid == item_guid))
+            .any(|event| matches!(event, WorldEvent::EntityDespawned(guid) if *guid == item_guid))
     );
 }

@@ -1,12 +1,12 @@
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::handlers::{inventory, login, movement, player, properties, system, trade};
 use crate::state::WorldState;
 use holtburger_protocol::messages::GameMessage;
 
-fn resolve_spell_names(state: &WorldState, events: &mut [StateEvent]) {
+fn resolve_spell_names(state: &WorldState, events: &mut [WorldEvent]) {
     for event in events.iter_mut() {
         match event {
-            StateEvent::SpellUpdated { spell_id, name } if name.is_none() => {
+            WorldEvent::SpellUpdated { spell_id, name, .. } if name.is_none() => {
                 *name = state.resolve_spell_name(*spell_id);
             }
             _ => {}
@@ -18,7 +18,7 @@ fn resolve_spell_names(state: &WorldState, events: &mut [StateEvent]) {
 ///
 /// This is the entry point for all game messages received from the server.
 /// It orchestrates mutations across [PlayerState] and [WorldState].
-pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mut Vec<StateEvent>) {
+pub fn handle_message(state: &mut WorldState, message: &GameMessage, events: &mut Vec<WorldEvent>) {
     if player::handle_message(state, message, events) {
         resolve_spell_names(state, events);
         return;

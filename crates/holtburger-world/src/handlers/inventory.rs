@@ -1,4 +1,4 @@
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::entity::Entity;
 use crate::state::WorldState;
 use crate::state::liveness::EntityUpsertKind;
@@ -12,7 +12,7 @@ use holtburger_protocol::messages::{GameEvent, GameEventMessage, GameMessage};
 pub(crate) fn handle_message(
     state: &mut WorldState,
     message: &GameMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
         GameMessage::ObjectCreate(data) => {
@@ -100,7 +100,7 @@ pub(crate) fn handle_message(
 pub(crate) fn handle_event(
     state: &mut WorldState,
     event: &GameEventMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
         GameEvent::InventoryPutObjInContainer(data) => {
@@ -111,7 +111,7 @@ pub(crate) fn handle_event(
         }
         GameEvent::ViewContents(data) => {
             state.open_containers.insert(data.container);
-            events.push(StateEvent::ContainerOpened(data.container));
+            events.push(WorldEvent::ContainerOpened(data.container));
 
             for item in &data.items {
                 let guid = item.guid;
@@ -125,7 +125,7 @@ pub(crate) fn handle_event(
                             state.scene.remove_entity(guid, old_lb);
                         }
 
-                        events.push(StateEvent::PropertiesUpdated {
+                        events.push(WorldEvent::PropertiesUpdated {
                             guid,
                             updates: vec![PropertyUpdate::InstanceId(
                                 PropertyInstanceId::Container,
@@ -145,7 +145,7 @@ pub(crate) fn handle_event(
         GameEvent::CloseGroundContainer(data) => {
             let item_guids = state.current_container_preview_item_guids(data.container_guid);
             state.open_containers.remove(&data.container_guid);
-            events.push(StateEvent::ContainerClosed(data.container_guid));
+            events.push(WorldEvent::ContainerClosed(data.container_guid));
             state.mark_container_preview_entities_for_prune(&item_guids);
             true
         }
@@ -153,7 +153,7 @@ pub(crate) fn handle_event(
             let guid = data.object_guid;
             if let Some(entity) = state.entities.get_mut(guid) {
                 if entity.apply_identify_response(data) {
-                    events.push(StateEvent::EntityIdentified(Box::new(entity.clone())));
+                    events.push(WorldEvent::EntityIdentified(Box::new(entity.clone())));
                     true
                 } else {
                     false
@@ -162,7 +162,7 @@ pub(crate) fn handle_event(
                 && let Some(item) = vendor.items.iter_mut().find(|item| item.guid == guid)
             {
                 if item.apply_identify_response(data) {
-                    events.push(StateEvent::VendorItemIdentified(Box::new(item.clone())));
+                    events.push(WorldEvent::VendorItemIdentified(Box::new(item.clone())));
                     true
                 } else {
                     false

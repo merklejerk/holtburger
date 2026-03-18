@@ -27,7 +27,6 @@ pub struct Client {
     pub world: WorldState,
     state: ClientState,
     wire_event_tx: broadcast::Sender<WireEvent>,
-    world_event_tx: broadcast::Sender<WorldEvent>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     pub message_dump_dir: Option<std::path::PathBuf>,
@@ -49,10 +48,6 @@ impl Client {
 
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
         self.wire_event_tx.subscribe()
-    }
-
-    pub fn subscribe_world_events(&self) -> broadcast::Receiver<WorldEvent> {
-        self.world_event_tx.subscribe()
     }
 
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
@@ -195,23 +190,20 @@ impl Client {
         let _ = self.wire_event_tx.send(event);
     }
 
-    pub fn emit_world_event(&self, event: WorldEvent) {
-        self.emit_world_view_projection(&event);
-        let _ = self.world_event_tx.send(event);
+    pub fn handle_world_event(&self, event: &WorldEvent) {
+        self.emit_world_view_projection(event);
     }
 
     fn emit_world_view_projection(&self, event: &WorldEvent) {
         match event {
             WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
-                let _ =
-                    self.client_view_event_tx
-                        .send(ClientViewEvent::PlayerEnchantmentsUpdated {
-                            enchantments: enchantments.clone(),
-                            resolved_names: self.world.get_player_spell_names(),
-                        });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerEnchantmentsUpdated {
+                        enchantments: enchantments.clone(),
+                    });
             }
             WorldEvent::DerivedStatsUpdated(data) => {
-                let level_info = self.world.get_level_info().unwrap_or_default();
                 let attributes = data
                     .attributes
                     .iter()
@@ -239,30 +231,17 @@ impl Client {
                         resistances: data.resistances.clone(),
                         armor: data.armor,
                         vitae: data.vitae,
-                        level_info,
                     });
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
-            WorldEvent::AttributeUpdated(_)
-            | WorldEvent::SkillUpdated(_)
-            | WorldEvent::LevelInfoUpdated(_) => {
-                let level_info = self.world.get_level_info().unwrap_or_default();
+            WorldEvent::AttributeUpdated(_) | WorldEvent::SkillUpdated(_) => {}
+            WorldEvent::LevelInfoUpdated(level_info) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
-                        attributes: self.world.player.attributes.clone(),
-                        skills: self.world.player.skills.clone(),
-                        resistances: self.world.player.resistances(),
-                        armor: self.world.player.armor(),
-                        vitae: self.world.player.vitae(),
+                    .send(ClientViewEvent::PlayerLevelInfoUpdated {
                         level_info: level_info.clone(),
-                    });
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerVitalsUpdated {
-                        vitals: self.world.player.vitals.clone(),
                     });
             }
             WorldEvent::VitalUpdated(vital) => {
@@ -272,13 +251,13 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
-            WorldEvent::SpellUpdated { .. } | WorldEvent::SpellRemoved { .. } => {
-                let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();
-                spell_ids.sort();
-
+            WorldEvent::SpellUpdated { spell_ids, .. }
+            | WorldEvent::SpellRemoved { spell_ids, .. } => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids });
+                    .send(ClientViewEvent::PlayerSpellsUpdated {
+                        spell_ids: spell_ids.clone(),
+                    });
             }
             WorldEvent::PlayerInfo(data) => {
                 self.emit_spell_catalog_loaded();
@@ -286,7 +265,6 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerEnchantmentsUpdated {
                         enchantments: data.enchantments.clone(),
-                        resolved_names: data.spell_names.clone(),
                     });
 
                 let attributes = data
@@ -315,6 +293,10 @@ impl Client {
                         resistances: data.resistances.clone(),
                         armor: data.armor,
                         vitae: data.vitae,
+                    });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerLevelInfoUpdated {
                         level_info: data.level_info.clone(),
                     });
                 let _ = self
@@ -523,7 +505,7 @@ impl Client {
                                             .world
                                             .set_server_time_sync(server_time, Instant::now());
                                         for event in world_events {
-                                            self.emit_world_event(event);
+                                            self.handle_world_event(&event);
                                         }
                                     }
                                 }
@@ -554,7 +536,7 @@ impl Client {
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);
                     for event in physics_events {
-                        self.emit_world_event(event);
+                        self.handle_world_event(&event);
                     }
                 }
             }

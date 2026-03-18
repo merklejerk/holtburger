@@ -156,6 +156,8 @@ pub enum ClientViewEvent {
         resistances: Resistances,
         armor: i32,
         vitae: f32,
+    },
+    PlayerLevelInfoUpdated {
         level_info: CharacterLevelInfo,
     },
     PlayerVitalsUpdated {
@@ -169,7 +171,6 @@ pub enum ClientViewEvent {
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
-        resolved_names: HashMap<u32, String>,
     },
     ErrorRaised {
         source: ErrorSource,

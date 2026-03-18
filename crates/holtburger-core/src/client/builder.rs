@@ -121,7 +121,6 @@ impl Client {
         }
 
         let (wire_event_tx, _) = broadcast::channel(1024);
-        let (world_event_tx, _) = broadcast::channel(512);
         let (client_view_event_tx, _) = broadcast::channel(256);
 
         Ok(Client {
@@ -129,7 +128,6 @@ impl Client {
             world: WorldState::new(portal_dat, cell_dat),
             state: ClientState::Connected,
             wire_event_tx,
-            world_event_tx,
             client_view_event_tx,
             command_rx: None,
             message_dump_dir: None,

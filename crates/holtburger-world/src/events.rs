@@ -7,6 +7,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyUpdate;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_protocol::messages::MovementEventData;
 
 #[derive(Debug, Clone)]
 pub struct PlayerInfoData {
@@ -23,7 +24,6 @@ pub struct PlayerInfoData {
     pub resistances: stats::Resistances,
     pub armor: i32,
     pub vitae: f32,
-    pub spell_names: std::collections::HashMap<u32, String>,
     pub inventory: std::collections::HashSet<Guid>,
     pub equipment: std::collections::HashMap<Guid, holtburger_protocol::messages::EquipMask>,
 }
@@ -72,12 +72,25 @@ pub enum WorldEvent {
     PlayerGroundedUpdated {
         grounded: bool,
     },
+    SelfUpdatePositionObserved {
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        accepted: bool,
+    },
+    SelfAutonomousPositionObserved {
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        server_control_sequence: u16,
+        accepted: bool,
+    },
     SpellUpdated {
         spell_id: u32,
         name: Option<String>,
+        spell_ids: Vec<u32>,
     },
     SpellRemoved {
         spell_id: u32,
+        spell_ids: Vec<u32>,
     },
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
     NoClipUpdated(bool),
@@ -90,10 +103,10 @@ pub enum WorldEvent {
         guid: Guid,
         physics_state: holtburger_common::properties::PhysicsState,
     },
-    SelfUpdateMotionProcessed {
+    AcceptedSelfServerControlledMotion(Box<MovementEventData>),
+    RejectedSelfServerControlledMotion {
         server_control_sequence: u16,
         movement_sequence: u16,
-        accepted: bool,
     },
     ForcedReposition {
         guid: Guid,

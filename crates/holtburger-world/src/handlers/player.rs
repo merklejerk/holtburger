@@ -21,7 +21,13 @@ pub(crate) fn handle_message(
         GameMessage::UpdatePosition(data) => {
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
-                if state.player.apply_position_from_server(&data.pos, events) {
+                let accepted = state.player.apply_position_from_server(&data.pos, events);
+                events.push(WorldEvent::SelfUpdatePositionObserved {
+                    teleport_sequence: data.pos.teleport_sequence,
+                    force_position_sequence: data.pos.force_position_sequence,
+                    accepted,
+                });
+                if accepted {
                     events.extend(state.set_player_position(data.pos.pos));
                 }
                 return true;
@@ -42,11 +48,16 @@ pub(crate) fn handle_message(
             {
                 let accepted = state.player.apply_self_update_motion(data);
                 if !data.is_autonomous {
-                    events.push(WorldEvent::SelfUpdateMotionProcessed {
-                        server_control_sequence: data.server_control_sequence,
-                        movement_sequence: data.movement_sequence,
-                        accepted,
-                    });
+                    if accepted {
+                        events.push(WorldEvent::AcceptedSelfServerControlledMotion(Box::new(
+                            (**data).clone(),
+                        )));
+                    } else {
+                        events.push(WorldEvent::RejectedSelfServerControlledMotion {
+                            server_control_sequence: data.server_control_sequence,
+                            movement_sequence: data.movement_sequence,
+                        });
+                    }
                 }
                 return !data.is_autonomous && !accepted;
             }

@@ -7,6 +7,69 @@ use holtburger_world::WorldEvent;
 use holtburger_world::entity::Entity;
 
 impl Client {
+    async fn handle_world_events(&mut self, initial_events: Vec<WorldEvent>) -> Result<()> {
+        let mut pending_events = initial_events;
+
+        while !pending_events.is_empty() {
+            for event in &pending_events {
+                self.handle_world_event(event);
+            }
+
+            let mut follow_up_events = Vec::new();
+            for event in pending_events {
+                match event {
+                    WorldEvent::AcceptedSelfServerControlledMotion(data) => {
+                        self.movement
+                            .sequence_diagnostics
+                            .record_server_control_sequence(data.server_control_sequence);
+                        let (wire_events, world_events) = {
+                            let Client {
+                                movement,
+                                world,
+                                session,
+                                ..
+                            } = self;
+                            movement
+                                .handle_server_controlled_movement(*data, world, session)
+                                .await?
+                        };
+                        for event in wire_events {
+                            self.emit_wire_event(event);
+                        }
+                        follow_up_events.extend(world_events);
+                    }
+                    WorldEvent::SelfUpdatePositionObserved {
+                        force_position_sequence,
+                        ..
+                    } => {
+                        self.movement
+                            .sequence_diagnostics
+                            .record_force_position_sequence(force_position_sequence);
+                    }
+                    WorldEvent::SelfAutonomousPositionObserved {
+                        teleport_sequence,
+                        force_position_sequence,
+                        server_control_sequence,
+                        ..
+                    } => {
+                        self.movement
+                            .sequence_diagnostics
+                            .record_autonomous_position_sequences(
+                                teleport_sequence,
+                                force_position_sequence,
+                                server_control_sequence,
+                            );
+                    }
+                    _ => {}
+                }
+            }
+
+            pending_events = follow_up_events;
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
         self.emit_wire_event(WireEvent::RawMessage(data.to_vec()));
 
@@ -41,68 +104,12 @@ impl Client {
 
         // Pass to world state for tracking positioning and spawning
         let world_events = self.world.handle_message(&message);
-
-        for event in world_events.iter() {
-            self.emit_world_event(event.clone());
-        }
+        self.handle_world_events(world_events.clone()).await?;
 
         match message {
-            GameMessage::UpdatePosition(data) => {
-                if data.guid == self.world.player.guid {
-                    let force_pos_seq = data.pos.force_position_sequence;
-                    self.movement
-                        .sequence_diagnostics
-                        .record_force_position_sequence(force_pos_seq);
-                }
-                Ok(())
-            }
-            GameMessage::UpdateMotion(data) => {
-                if data.guid == self.world.player.guid && !data.is_autonomous {
-                    let accepted = world_events.iter().find_map(|event| match event {
-                        WorldEvent::SelfUpdateMotionProcessed {
-                            server_control_sequence,
-                            accepted,
-                            ..
-                        } if *server_control_sequence == data.server_control_sequence => Some(*accepted),
-                        _ => None,
-                    }).unwrap_or(false);
-
-                    if accepted {
-                        self.movement
-                            .sequence_diagnostics
-                            .record_server_control_sequence(data.server_control_sequence);
-                        let (wire_events, state_events) = {
-                            let Client {
-                                movement,
-                                world,
-                                session,
-                                ..
-                            } = self;
-                            movement
-                                .handle_server_controlled_movement(*data, world, session)
-                                .await?
-                        };
-                        for event in wire_events {
-                            self.emit_wire_event(event);
-                        }
-                        for event in state_events {
-                            self.emit_world_event(event);
-                        }
-                    }
-                }
-                Ok(())
-            }
-            GameMessage::AutonomousPosition(data) => {
-                if data.guid == self.world.player.guid {
-                    self.movement.sequence_diagnostics.record_autonomous_position_sequences(
-                        data.teleport_sequence,
-                        data.force_position_sequence,
-                        data.server_control_sequence,
-                    );
-                    // WorldState already updated position and sequences via self.world.handle_message()
-                }
-                Ok(())
-            }
+            GameMessage::UpdatePosition(_) => Ok(()),
+            GameMessage::UpdateMotion(_) => Ok(()),
+            GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
                 self.auth.characters = data.characters.clone();
 
@@ -418,12 +425,13 @@ mod tests {
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_session::Session;
+    use holtburger_world::WorldEvent;
+    use holtburger_world::stats::CharacterLevelInfo;
     use holtburger_world::WorldState;
     use tokio::sync::broadcast;
 
     fn build_test_client() -> Client {
         let (wire_event_tx, _) = broadcast::channel(32);
-        let (world_event_tx, _) = broadcast::channel(32);
         let (client_view_event_tx, _) = broadcast::channel(32);
 
         Client {
@@ -431,7 +439,6 @@ mod tests {
             world: WorldState::new(None, None),
             state: ClientState::Connected,
             wire_event_tx,
-            world_event_tx,
             client_view_event_tx,
             command_rx: None,
             message_dump_dir: None,
@@ -529,5 +536,63 @@ mod tests {
         assert_eq!(client.world.player.server_control_sequence, 10);
         assert_eq!(client.session.packet_sequence, 1);
         assert_eq!(client.session.bytes_out, 0);
+    }
+
+    #[tokio::test]
+    async fn test_level_info_world_event_projects_directly() {
+        let client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client.handle_world_event(&WorldEvent::LevelInfoUpdated(CharacterLevelInfo {
+            level: 23,
+            current_xp: 1234,
+            unspent_xp: 456,
+            unspent_skill_points: 7,
+            available_luminance: 89,
+            next_level_xp: 9999,
+            xp_into_level: 111,
+            xp_for_next_level: 222,
+        }));
+
+        let mut saw_level_info = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::PlayerLevelInfoUpdated {
+                    level_info: CharacterLevelInfo { level: 23, .. }
+                }
+            ) {
+                saw_level_info = true;
+                break;
+            }
+        }
+
+        assert!(saw_level_info);
+    }
+
+    #[tokio::test]
+    async fn test_spell_world_event_projects_supplied_snapshot() {
+        let client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client.handle_world_event(&WorldEvent::SpellUpdated {
+            spell_id: 100,
+            name: Some("Test Spell".to_string()),
+            spell_ids: vec![300, 100, 200],
+        });
+
+        let mut saw_spell_snapshot = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::PlayerSpellsUpdated { spell_ids }
+                    if spell_ids == vec![300, 100, 200]
+            ) {
+                saw_spell_snapshot = true;
+                break;
+            }
+        }
+
+        assert!(saw_spell_snapshot);
     }
 }

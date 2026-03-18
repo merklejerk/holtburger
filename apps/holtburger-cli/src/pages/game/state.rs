@@ -159,7 +159,7 @@ impl GameState {
             }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
-                    entity.motion_snapshot = Some(snapshot);
+                    entity.motion_snapshot = snapshot;
                     self.sync_approach_target(Instant::now(), &mut result);
                     self.sync_sticky_melee_pursuit(&mut result);
                     result.needs_redraw = true;
@@ -2076,12 +2076,12 @@ mod tests {
 
         let _ = state.handle_view_event(ClientViewEvent::EntityMotionUpdated {
             guid: target_guid,
-            snapshot: EntityMotionSnapshot {
+            snapshot: Some(EntityMotionSnapshot {
                 current_style: Some(MotionStance::NonCombat),
                 forward_command: Some(InterpretedMotionCommand::DEAD),
                 sidestep_command: None,
                 turn_command: None,
-            },
+            }),
         });
 
         let mut result = UpdateResult::new();
@@ -2093,6 +2093,43 @@ mod tests {
         assert!(!result.commands.iter().any(|command| {
             matches!(command, ClientCommand::TargetedMeleeAttack { target, .. } if *target == target_guid)
         }));
+    }
+
+    #[test]
+    fn entity_motion_updated_none_clears_cached_motion_snapshot() {
+        use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
+        use holtburger_world::entity::EntityMotionSnapshot;
+
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        };
+        let mut target = Entity::new(target_guid, "Drudge".to_string(), target_position);
+        target.motion_snapshot = Some(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(InterpretedMotionCommand::DEAD),
+            sidestep_command: None,
+            turn_command: None,
+        });
+        state.data.entities.insert(target_guid, target);
+
+        let _ = state.handle_view_event(ClientViewEvent::EntityMotionUpdated {
+            guid: target_guid,
+            snapshot: None,
+        });
+
+        assert_eq!(
+            state
+                .data
+                .entities
+                .get(&target_guid)
+                .and_then(|entity| entity.motion_snapshot),
+            None
+        );
     }
 
     #[test]

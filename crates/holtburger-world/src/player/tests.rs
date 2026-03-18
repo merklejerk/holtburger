@@ -1,7 +1,7 @@
 use super::*;
 use crate::WorldEvent;
 use crate::WorldState;
-use crate::entity::Entity;
+use crate::entity::{Entity, EntityMotionSnapshot};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
@@ -647,8 +647,47 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         event,
         WorldEvent::EntityMotionUpdated { guid: target, snapshot }
             if *target == guid
-            && snapshot.current_style == Some(MotionStance::NonCombat)
-            && snapshot.forward_command == Some(InterpretedMotionCommand::DEAD)
+            && snapshot.as_ref().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
+            && snapshot.as_ref().is_some_and(|snapshot| snapshot.forward_command == Some(InterpretedMotionCommand::DEAD))
+    )));
+}
+
+#[test]
+fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x60000001);
+
+    let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.motion_snapshot = Some(EntityMotionSnapshot {
+        current_style: Some(MotionStance::NonCombat),
+        forward_command: Some(InterpretedMotionCommand::WALK_FORWARD),
+        sidestep_command: None,
+        turn_command: None,
+    });
+    state.add_entity(entity);
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 1,
+        movement_sequence: 2,
+        server_control_sequence: 3,
+        is_autonomous: true,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: 1,
+        data: MovementTypeData::Invalid(MovementInvalid::default()),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert_eq!(
+        state.entities.get(guid).and_then(|entity| entity.motion_snapshot),
+        None
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+            if *target == guid && snapshot.is_none()
     )));
 }
 

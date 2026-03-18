@@ -17,9 +17,7 @@ fn update_entity_motion_snapshot(
 
     if entity.motion_snapshot != snapshot {
         entity.motion_snapshot = snapshot;
-        if let Some(snapshot) = snapshot {
-            events.push(WorldEvent::EntityMotionUpdated { guid, snapshot });
-        }
+        events.push(WorldEvent::EntityMotionUpdated { guid, snapshot });
     }
 }
 

@@ -22,12 +22,11 @@ pub(crate) fn handle_message(
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
                 let accepted = state.player.apply_position_from_server(&data.pos, events);
-                events.push(WorldEvent::SelfUpdatePositionObserved {
-                    teleport_sequence: data.pos.teleport_sequence,
-                    force_position_sequence: data.pos.force_position_sequence,
-                    accepted,
-                });
                 if accepted {
+                    events.push(WorldEvent::SelfUpdatePosition {
+                        teleport_sequence: data.pos.teleport_sequence,
+                        force_position_sequence: data.pos.force_position_sequence,
+                    });
                     events.extend(state.set_player_position(data.pos.pos));
                 }
                 return true;
@@ -47,17 +46,10 @@ pub(crate) fn handle_message(
             if data.guid == state.player.guid && state.player.guid != holtburger_common::Guid::NULL
             {
                 let accepted = state.player.apply_self_update_motion(data);
-                if !data.is_autonomous {
-                    if accepted {
-                        events.push(WorldEvent::AcceptedSelfServerControlledMotion(Box::new(
-                            (**data).clone(),
-                        )));
-                    } else {
-                        events.push(WorldEvent::RejectedSelfServerControlledMotion {
-                            server_control_sequence: data.server_control_sequence,
-                            movement_sequence: data.movement_sequence,
-                        });
-                    }
+                if accepted && !data.is_autonomous {
+                    events.push(WorldEvent::SelfServerControlledMotion(Box::new(
+                        (**data).clone(),
+                    )));
                 }
                 return !data.is_autonomous && !accepted;
             }

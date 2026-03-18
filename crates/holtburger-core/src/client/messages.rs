@@ -18,7 +18,7 @@ impl Client {
             let mut follow_up_events = Vec::new();
             for event in pending_events {
                 match event {
-                    WorldEvent::AcceptedSelfServerControlledMotion(data) => {
+                    WorldEvent::SelfServerControlledMotion(data) => {
                         self.movement
                             .sequence_diagnostics
                             .record_server_control_sequence(data.server_control_sequence);
@@ -38,7 +38,7 @@ impl Client {
                         }
                         follow_up_events.extend(world_events);
                     }
-                    WorldEvent::SelfUpdatePositionObserved {
+                    WorldEvent::SelfUpdatePosition {
                         force_position_sequence,
                         ..
                     } => {
@@ -46,11 +46,10 @@ impl Client {
                             .sequence_diagnostics
                             .record_force_position_sequence(force_position_sequence);
                     }
-                    WorldEvent::SelfAutonomousPositionObserved {
+                    WorldEvent::SelfAutonomousPosition {
                         teleport_sequence,
                         force_position_sequence,
                         server_control_sequence,
-                        ..
                     } => {
                         self.movement
                             .sequence_diagnostics

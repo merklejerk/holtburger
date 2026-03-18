@@ -39,6 +39,7 @@ pub fn render_dynamic_pane(
             " {} | [ESC] to cancel ",
             match interaction {
                 Interaction::Targeting { .. } => "Targeting",
+                Interaction::Approaching { .. } => "Approaching",
                 Interaction::Healing { .. } => "Healing",
                 Interaction::Moving { .. } => "Moving",
                 Interaction::Combining { .. } => "Combining",
@@ -109,6 +110,7 @@ pub fn render_dynamic_pane(
             Interaction::Moving { item_guid } => item_guid,
             Interaction::Healing { item_guid } => item_guid,
             Interaction::Targeting { target_guid } => target_guid,
+            Interaction::Approaching { target_guid } => target_guid,
             Interaction::Combining { item_guid } => item_guid,
             Interaction::Salvaging => unreachable!(),
         };

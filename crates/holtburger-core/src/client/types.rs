@@ -1,6 +1,6 @@
 use crate::client::locomotion::{LocomotionRequest, MovementPacketMetadata};
+use holtburger_common::Guid;
 use holtburger_common::properties::DamageType;
-use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
@@ -9,7 +9,7 @@ use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsEventItem};
-use holtburger_world::entity::Entity;
+use holtburger_world::entity::{Entity, EntityMotionSnapshot};
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::TradeState;
 use holtburger_world::stats::{
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-pub use holtburger_world::StateEvent;
+pub use holtburger_world::WorldEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetSlot {
@@ -156,6 +156,8 @@ pub enum ClientViewEvent {
         resistances: Resistances,
         armor: i32,
         vitae: f32,
+    },
+    PlayerLevelInfoUpdated {
         level_info: CharacterLevelInfo,
     },
     PlayerVitalsUpdated {
@@ -169,7 +171,6 @@ pub enum ClientViewEvent {
     },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
-        resolved_names: HashMap<u32, String>,
     },
     ErrorRaised {
         source: ErrorSource,
@@ -193,12 +194,19 @@ pub enum ClientViewEvent {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
     },
+    EntityMotionUpdated {
+        guid: Guid,
+        snapshot: Option<EntityMotionSnapshot>,
+    },
     PlayerGroundedUpdated {
         grounded: bool,
     },
     ForcedReposition {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
+        sequence: u16,
+    },
+    TeleportStarted {
         sequence: u16,
     },
     EntityDespawned {
@@ -301,11 +309,6 @@ pub enum ClientCommand {
         slot: Option<TargetSlot>,
         amount: u32,
     },
-    Jump {
-        extent: f32,
-        velocity: Vector3,
-    },
-    SetState(u32),
     TurnTo {
         heading: f32,
         metadata: MovementPacketMetadata,
@@ -375,12 +378,7 @@ pub enum ClientCommand {
         accuracy_level: f32,
     },
     SetCombatMode(CombatMode),
-    SetNoClip(bool),
     CancelAttack,
-    StopMoving {
-        metadata: MovementPacketMetadata,
-    },
-    SyncPosition,
     QueryEntityDebugInfo(Guid),
     Quit,
 }

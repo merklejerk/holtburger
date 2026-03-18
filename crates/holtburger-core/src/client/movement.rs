@@ -1,13 +1,16 @@
 use crate::client::WireEvent;
-use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
+use crate::client::locomotion::{
+    LocomotionPrimitive, LocomotionRequest, MotionStyle, MovementPacketMetadata,
+};
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use holtburger_world::{StateEvent, WorldState};
+use holtburger_world::{WorldEvent, WorldState};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
@@ -27,13 +30,24 @@ fn calculate_arrival_position(
     }
 }
 
-pub(super) fn raw_motion_state_with_player_style(
+pub(super) fn raw_motion_state_with_motion_style(
     world: &WorldState,
     mut raw_motion_state: RawMotionState,
+    motion_style: MotionStyle,
 ) -> RawMotionState {
-    if let Some(current_style) = world.player.current_motion_style {
-        raw_motion_state.flags |= RawMotionFlags::CURRENT_STYLE;
-        raw_motion_state.current_style = Some(current_style);
+    match motion_style {
+        MotionStyle::PreserveServer => {
+            if let Some(current_style) = world.player.last_server_motion_style {
+                raw_motion_state.set_current_stance(current_style);
+            }
+        }
+        MotionStyle::Explicit(current_style) => {
+            raw_motion_state.set_current_stance(current_style);
+        }
+        MotionStyle::Omit => {
+            raw_motion_state.flags.remove(RawMotionFlags::CURRENT_STYLE);
+            raw_motion_state.current_style = None;
+        }
     }
 
     raw_motion_state
@@ -47,14 +61,112 @@ pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
     u8::from(metadata.contact.unwrap_or(true))
 }
 
+#[derive(Debug, Default)]
+pub(super) struct MovementSequenceDiagnostics {
+    last_force_position_sequence: Option<u16>,
+    last_teleport_sequence: Option<u16>,
+    last_server_control_sequence: Option<u16>,
+}
+
+impl MovementSequenceDiagnostics {
+    pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
+        if let Some(old_seq) = self.last_force_position_sequence {
+            if is_newer_u16(force_position_sequence, old_seq) {
+                log::warn!(
+                    "Server forced reposition (rubber band): force seq {} -> {}",
+                    old_seq,
+                    force_position_sequence
+                );
+            } else if force_position_sequence != old_seq {
+                log::debug!(
+                    "Ignoring stale forced reposition: force seq {} after {}",
+                    force_position_sequence,
+                    old_seq
+                );
+            }
+        }
+
+        self.last_force_position_sequence = Some(force_position_sequence);
+    }
+
+    pub(super) fn record_autonomous_position_sequences(
+        &mut self,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        server_control_sequence: u16,
+    ) {
+        match self.last_teleport_sequence {
+            Some(old_seq) if is_newer_u16(teleport_sequence, old_seq) => {
+                log::info!(
+                    "Server-forced resync teleport epoch advanced: teleport seq {} -> {} (force seq {}, server-control seq {})",
+                    old_seq,
+                    teleport_sequence,
+                    force_position_sequence,
+                    server_control_sequence
+                );
+            }
+            Some(old_seq) if teleport_sequence != old_seq => {
+                log::debug!(
+                    "Ignoring stale server-forced resync: teleport seq {} after {} (force seq {}, server-control seq {})",
+                    teleport_sequence,
+                    old_seq,
+                    force_position_sequence,
+                    server_control_sequence
+                );
+            }
+            None => {
+                log::info!(
+                    "Tracking teleport sequence {} for autonomous resync (force seq {}, server-control seq {})",
+                    teleport_sequence,
+                    force_position_sequence,
+                    server_control_sequence
+                );
+            }
+            _ => {}
+        }
+
+        self.last_teleport_sequence = Some(teleport_sequence);
+        self.last_force_position_sequence = Some(force_position_sequence);
+        self.last_server_control_sequence = Some(server_control_sequence);
+    }
+
+    pub(super) fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
+        match self.last_server_control_sequence {
+            Some(old_seq) if is_newer_u16(server_control_sequence, old_seq) => {
+                log::debug!(
+                    "Server-controlled motion epoch advanced: {} -> {}",
+                    old_seq,
+                    server_control_sequence
+                );
+            }
+            Some(old_seq) if server_control_sequence != old_seq => {
+                log::warn!(
+                    "Server-controlled motion reordered/stale: {} after {}",
+                    server_control_sequence,
+                    old_seq
+                );
+            }
+            None => {
+                log::debug!(
+                    "Tracking server-controlled motion sequence: {}",
+                    server_control_sequence
+                );
+            }
+            _ => {}
+        }
+
+        self.last_server_control_sequence = Some(server_control_sequence);
+    }
+}
+
 pub(super) struct MovementSystem {
-    pub(super) last_sent_pos_seq: Option<u16>,
+    pub(super) sequence_diagnostics: MovementSequenceDiagnostics,
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
-            last_sent_pos_seq: None,
+            sequence_diagnostics: MovementSequenceDiagnostics::default(),
         }
     }
 
@@ -63,7 +175,7 @@ impl MovementSystem {
         request: LocomotionRequest,
         world: &mut WorldState,
         session: &mut Session,
-    ) -> Result<Vec<StateEvent>> {
+    ) -> Result<Vec<WorldEvent>> {
         let primitive = request.primitive;
         let state_events = self.apply_locomotion_primitive(primitive, world);
 
@@ -89,7 +201,7 @@ impl MovementSystem {
         &mut self,
         primitive: LocomotionPrimitive,
         world: &mut WorldState,
-    ) -> Vec<StateEvent> {
+    ) -> Vec<WorldEvent> {
         let mut events = Vec::new();
 
         if let LocomotionPrimitive::Drive { heading, .. } = primitive {
@@ -116,7 +228,7 @@ impl MovementSystem {
         position.rotation = Quaternion::from_heading(heading);
 
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_player_style(
+            raw_motion_state: raw_motion_state_with_motion_style(
                 world,
                 RawMotionState {
                     flags: RawMotionFlags::CURRENT_HOLD_KEY
@@ -127,6 +239,7 @@ impl MovementSystem {
                     forward_speed: Some(speed),
                     ..Default::default()
                 },
+                metadata.motion_style,
             ),
             position,
             instance_sequence: world.player.instance_sequence,
@@ -147,7 +260,11 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_player_style(world, RawMotionState::default()),
+            raw_motion_state: raw_motion_state_with_motion_style(
+                world,
+                RawMotionState::default(),
+                metadata.motion_style,
+            ),
             position: world.player.position,
             instance_sequence: world.player.instance_sequence,
             server_control_sequence: world.player.server_control_sequence,
@@ -166,7 +283,7 @@ impl MovementSystem {
         data: MovementEventData,
         world: &mut WorldState,
         session: &mut Session,
-    ) -> Result<(Vec<WireEvent>, Vec<StateEvent>)> {
+    ) -> Result<(Vec<WireEvent>, Vec<WorldEvent>)> {
         let mut wire_events = Vec::new();
         log::info!(
             ">>> Processing server-initiated movement: {:?}. Control Sequence: {}",
@@ -300,6 +417,7 @@ impl MovementSystem {
 mod tests {
     use super::*;
     use holtburger_common::Vector3;
+    use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_world::WorldState;
 
     #[test]
@@ -340,11 +458,11 @@ mod tests {
     }
 
     #[test]
-    fn test_raw_motion_state_preserves_cached_player_style() {
+    fn test_raw_motion_state_preserves_cached_server_style_by_default() {
         let mut world = WorldState::new(None, None);
-        world.player.current_motion_style = Some(0x8000_003e);
+        world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
 
-        let raw_motion_state = raw_motion_state_with_player_style(
+        let raw_motion_state = raw_motion_state_with_motion_style(
             &world,
             RawMotionState {
                 flags: RawMotionFlags::CURRENT_HOLD_KEY
@@ -355,6 +473,7 @@ mod tests {
                 forward_speed: Some(7.0),
                 ..Default::default()
             },
+            MotionStyle::PreserveServer,
         );
 
         assert!(
@@ -367,12 +486,57 @@ mod tests {
                 .flags
                 .contains(RawMotionFlags::FORWARD_COMMAND)
         );
-        assert_eq!(raw_motion_state.current_style, Some(0x8000_003e));
+        assert_eq!(
+            raw_motion_state.current_stance(),
+            Some(MotionStance::SwordCombat)
+        );
         assert_eq!(raw_motion_state.current_hold_key, Some(HoldKey::Run as u32));
         assert_eq!(
             raw_motion_state.forward_command,
             Some(WALK_FORWARD_MOTION_COMMAND)
         );
         assert_eq!(raw_motion_state.forward_speed, Some(7.0));
+    }
+
+    #[test]
+    fn test_raw_motion_state_can_override_cached_server_style() {
+        let mut world = WorldState::new(None, None);
+        world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
+
+        let raw_motion_state = raw_motion_state_with_motion_style(
+            &world,
+            RawMotionState::default(),
+            MotionStyle::Explicit(MotionStance::Magic),
+        );
+
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::CURRENT_STYLE)
+        );
+        assert_eq!(raw_motion_state.current_stance(), Some(MotionStance::Magic));
+    }
+
+    #[test]
+    fn test_raw_motion_state_can_omit_cached_server_style() {
+        let mut world = WorldState::new(None, None);
+        world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
+
+        let raw_motion_state = raw_motion_state_with_motion_style(
+            &world,
+            RawMotionState {
+                flags: RawMotionFlags::CURRENT_STYLE,
+                current_style: Some(MotionStance::Magic as u32),
+                ..Default::default()
+            },
+            MotionStyle::Omit,
+        );
+
+        assert!(
+            !raw_motion_state
+                .flags
+                .contains(RawMotionFlags::CURRENT_STYLE)
+        );
+        assert_eq!(raw_motion_state.current_style, None);
     }
 }

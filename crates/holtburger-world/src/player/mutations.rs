@@ -1,9 +1,10 @@
 use super::PlayerState;
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::player::types::{SkillBase, VitalBase};
 use crate::stats;
 use holtburger_common::Guid;
 use holtburger_common::properties::{EnchantmentTypeFlags, PropertyString};
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::*;
 
@@ -27,7 +28,13 @@ pub struct VitalUpdateParams<'a> {
 }
 
 impl PlayerState {
-    /// Hydrates an attribute from a network update message.
+    fn current_spell_ids(&self) -> Vec<u32> {
+        let mut spell_ids: Vec<u32> = self.spells.keys().cloned().collect();
+        spell_ids.sort();
+        spell_ids
+    }
+
+    /// Applies a server-authored attribute update and refreshes derived player stats.
     pub fn update_attribute(
         &mut self,
         attr_id: u32,
@@ -35,7 +42,7 @@ impl PlayerState {
         start: u32,
         xp: u32,
         xp_table: Option<&holtburger_dat::file_type::XpTable>,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         if let Some(attr_type) = stats::AttributeType::from_repr(attr_id) {
             let base = start + ranks;
@@ -54,13 +61,13 @@ impl PlayerState {
             };
 
             self.attributes.insert(attr_type, attr_obj.clone());
-            events.push(StateEvent::AttributeUpdated(attr_obj));
+            events.push(WorldEvent::AttributeUpdated(attr_obj));
             self.emit_derived_stats(events);
         }
     }
 
-    /// Hydrates a skill from a network update message.
-    pub fn update_skill(&mut self, params: SkillUpdateParams, events: &mut Vec<StateEvent>) {
+    /// Applies a server-authored skill update and refreshes derived player stats.
+    pub fn update_skill(&mut self, params: SkillUpdateParams, events: &mut Vec<WorldEvent>) {
         let SkillUpdateParams {
             skill_id,
             ranks,
@@ -106,13 +113,13 @@ impl PlayerState {
             };
 
             self.skills.insert(skill_type, skill_obj.clone());
-            events.push(StateEvent::SkillUpdated(skill_obj));
+            events.push(WorldEvent::SkillUpdated(skill_obj));
             self.emit_derived_stats(events);
         }
     }
 
-    /// Hydrates a vital from a network update message.
-    pub fn update_vital(&mut self, params: VitalUpdateParams, events: &mut Vec<StateEvent>) {
+    /// Applies a server-authored vital update and refreshes derived player stats.
+    pub fn update_vital(&mut self, params: VitalUpdateParams, events: &mut Vec<WorldEvent>) {
         let VitalUpdateParams {
             vital_id,
             ranks,
@@ -141,33 +148,33 @@ impl PlayerState {
                 current,
             };
             self.vitals.insert(vital_type, vital_obj.clone());
-            events.push(StateEvent::VitalUpdated(vital_obj));
+            events.push(WorldEvent::VitalUpdated(vital_obj));
             self.emit_derived_stats(events);
         }
     }
 
-    /// Updates the current value of a vital.
+    /// Updates a vital's current pool without recalculating unrelated derived stats.
     pub fn update_vital_current(
         &mut self,
         vital_id: u32,
         current: u32,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         if let Some(vital_type) = stats::VitalType::from_id(vital_id)
             && let Some(vital_obj) = self.vitals.get_mut(&vital_type)
         {
             vital_obj.current = current;
-            events.push(StateEvent::VitalUpdated(vital_obj.clone()));
+            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
         }
     }
 
-    /// Updates the player's world position and associated sequences.
+    /// Copies a server-authored player position snapshot into player state and emits
+    /// grounded or forced-reposition events when those observable outcomes change.
     pub fn update_position_from_server(
         &mut self,
-        pos_pack: &holtburger_protocol::messages::movement::messages::position::PositionPack,
-        events: &mut Vec<StateEvent>,
+        pos_pack: &PositionPack,
+        events: &mut Vec<WorldEvent>,
     ) {
-        use holtburger_common::sequence::is_newer_u16;
         let old_forced_seq = self.force_position_sequence;
         let old_grounded = self.server_grounded;
 
@@ -176,24 +183,92 @@ impl PlayerState {
         self.position_sequence = pos_pack.position_sequence;
         self.teleport_sequence = pos_pack.teleport_sequence;
         self.force_position_sequence = pos_pack.force_position_sequence;
-        let is_grounded = pos_pack
-            .flags
-            .contains(holtburger_protocol::messages::movement::messages::position::UpdatePositionFlag::IS_GROUNDED);
+        let is_grounded = pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED);
         self.server_grounded = Some(is_grounded);
 
         if old_grounded != Some(is_grounded) {
-            events.push(StateEvent::PlayerGroundedUpdated {
+            events.push(WorldEvent::PlayerGroundedUpdated {
                 grounded: is_grounded,
             });
         }
 
         if is_newer_u16(self.force_position_sequence, old_forced_seq) {
-            events.push(StateEvent::ForcedReposition {
+            events.push(WorldEvent::ForcedReposition {
                 guid: self.guid,
                 pos: self.position,
                 sequence: self.force_position_sequence,
             });
         }
+    }
+
+    /// Returns whether a server-authored player position update should be accepted.
+    ///
+    /// Teleport sequence is the primary ordering key. Within the same teleport epoch,
+    /// force-position sequence distinguishes newer rubber-band corrections from older ones.
+    pub fn should_accept_server_position_sequences(
+        &self,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+    ) -> bool {
+        if is_newer_u16(self.teleport_sequence, teleport_sequence) {
+            return false;
+        }
+
+        if teleport_sequence == self.teleport_sequence
+            && is_newer_u16(self.force_position_sequence, force_position_sequence)
+        {
+            return false;
+        }
+
+        true
+    }
+
+    /// Applies a server-authored player position update only when its teleport and
+    /// force-position sequencing is still current.
+    pub fn apply_position_from_server(
+        &mut self,
+        pos_pack: &PositionPack,
+        events: &mut Vec<WorldEvent>,
+    ) -> bool {
+        if !self.should_accept_server_position_sequences(
+            pos_pack.teleport_sequence,
+            pos_pack.force_position_sequence,
+        ) {
+            return false;
+        }
+
+        self.update_position_from_server(pos_pack, events);
+        true
+    }
+
+    /// Returns whether a self non-autonomous `UpdateMotion` packet is current.
+    ///
+    /// ACE increments `server_control_sequence` for non-autonomous `UpdateMotion`, so older or
+    /// duplicate epochs must not be re-applied or forwarded into the client heartbeat path.
+    pub fn should_accept_server_controlled_motion(&self, server_control_sequence: u16) -> bool {
+        if server_control_sequence == self.server_control_sequence {
+            return false;
+        }
+
+        !is_newer_u16(self.server_control_sequence, server_control_sequence)
+    }
+
+    /// Applies self `UpdateMotion` sequencing and cached server style only when the packet is
+    /// current.
+    pub fn apply_self_update_motion(&mut self, data: &MovementEventData) -> bool {
+        if !data.is_autonomous
+            && !self.should_accept_server_controlled_motion(data.server_control_sequence)
+        {
+            return false;
+        }
+
+        self.update_motion_sequences(
+            data.object_instance_sequence,
+            data.server_control_sequence,
+            data.movement_sequence,
+        );
+        self.update_last_server_motion_style(data.current_style);
+        true
     }
 
     pub fn update_motion_sequences(
@@ -207,9 +282,14 @@ impl PlayerState {
         self.movement_sequence = movement_sequence;
     }
 
-    pub fn update_current_motion_style(&mut self, current_style: u16) {
-        if current_style != 0 {
-            self.current_motion_style = Some(u32::from(current_style));
+    pub fn update_last_server_motion_style(&mut self, current_style: u16) {
+        if current_style != 0
+            && let Some(current_style) =
+                holtburger_protocol::messages::movement::MotionStance::from_interpreted(
+                    current_style,
+                )
+        {
+            self.last_server_motion_style = Some(current_style);
         }
     }
 
@@ -226,7 +306,7 @@ impl PlayerState {
         data: &PlayerDescriptionEventData,
         xp_table: Option<&holtburger_dat::file_type::XpTable>,
         skill_table: Option<&holtburger_dat::file_type::SkillTable>,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) {
         self.guid = data.guid;
         self.enchantments = data.enchantments.clone();
@@ -358,7 +438,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         enchantment: Enchantment,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -382,7 +462,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         enchantments: &[Enchantment],
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -409,7 +489,7 @@ impl PlayerState {
         target: Guid,
         spell_id: u16,
         layer: u16,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -425,7 +505,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         spells: &[(u16, u16)],
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -444,7 +524,7 @@ impl PlayerState {
         &mut self,
         target: Guid,
         keep_bad: bool,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         if target != self.guid {
             return false;
@@ -464,24 +544,28 @@ impl PlayerState {
         true
     }
 
-    pub fn add_spell(&mut self, spell_id: u32, events: &mut Vec<StateEvent>) {
+    pub fn add_spell(&mut self, spell_id: u32, events: &mut Vec<WorldEvent>) {
         self.spells.insert(spell_id, 0.0);
-        events.push(StateEvent::SpellUpdated {
+        events.push(WorldEvent::SpellUpdated {
             spell_id,
             name: None,
+            spell_ids: self.current_spell_ids(),
         });
     }
 
-    pub fn remove_spell(&mut self, spell_id: u32, events: &mut Vec<StateEvent>) {
+    pub fn remove_spell(&mut self, spell_id: u32, events: &mut Vec<WorldEvent>) {
         self.spells.remove(&spell_id);
-        events.push(StateEvent::SpellRemoved { spell_id });
+        events.push(WorldEvent::SpellRemoved {
+            spell_id,
+            spell_ids: self.current_spell_ids(),
+        });
     }
 
     pub fn update_health_fraction(
         &mut self,
         target: Guid,
         health: f32,
-        events: &mut Vec<StateEvent>,
+        events: &mut Vec<WorldEvent>,
     ) -> bool {
         let target_guid = if target == Guid::NULL {
             self.guid
@@ -496,15 +580,15 @@ impl PlayerState {
         if let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health) {
             let new_current = (health * vital_obj.buffed_max as f32) as u32;
             vital_obj.current = new_current;
-            events.push(StateEvent::VitalUpdated(vital_obj.clone()));
+            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
             true
         } else {
             false
         }
     }
 
-    fn emit_enchantments_updated(&mut self, events: &mut Vec<StateEvent>) {
-        events.push(StateEvent::PlayerEnchantmentsUpdated {
+    fn emit_enchantments_updated(&mut self, events: &mut Vec<WorldEvent>) {
+        events.push(WorldEvent::PlayerEnchantmentsUpdated {
             enchantments: self.enchantments.clone(),
         });
         self.emit_derived_stats(events);

@@ -1,11 +1,11 @@
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::state::WorldState;
 use holtburger_protocol::messages::{GameEvent, GameEventMessage};
 
 pub(crate) fn handle_event(
     state: &mut WorldState,
     event: &GameEventMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match &event.event {
         GameEvent::PlayerDescription(data) => {

@@ -9,7 +9,7 @@ use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 use holtburger_protocol::messages::GameMessage;
 use std::sync::Arc;
 
-use crate::StateEvent;
+use crate::WorldEvent;
 use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::SpatialScene;
@@ -58,10 +58,22 @@ impl WorldState {
     ///
     /// Feature handlers own the orchestration order; this method preserves the external API while
     /// keeping routing separate from the state model itself.
-    pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<StateEvent> {
+    pub fn handle_message(&mut self, msg: &GameMessage) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         crate::handlers::handle_message(self, msg, &mut events);
         events
+    }
+
+    pub fn set_server_time_sync(
+        &mut self,
+        server_time: f64,
+        local_time: std::time::Instant,
+    ) -> Vec<WorldEvent> {
+        self.server_time = Some(ServerTimeSync {
+            server_time,
+            local_time,
+        });
+        vec![WorldEvent::ServerTimeUpdate(server_time)]
     }
 
     pub fn get_level_info(&self) -> Option<stats::CharacterLevelInfo> {
@@ -101,26 +113,6 @@ impl WorldState {
             xp_into_level: total_xp.saturating_sub(level_xp),
             xp_for_next_level: next_level_xp.saturating_sub(level_xp),
         })
-    }
-
-    pub fn get_player_spell_names(&self) -> std::collections::HashMap<u32, String> {
-        let mut names = std::collections::HashMap::new();
-        if let Some(catalog) = &self.spell_catalog {
-            // Player's known spells
-            for spell_id in self.player.spells.keys() {
-                if let Some(spell) = catalog.get(*spell_id) {
-                    names.insert(*spell_id, spell.name.clone());
-                }
-            }
-            // Enchantments currently active on the player
-            for enc in &self.player.enchantments {
-                let spell_id = enc.spell_id as u32;
-                if let Some(spell) = catalog.get(spell_id) {
-                    names.insert(spell_id, spell.name.clone());
-                }
-            }
-        }
-        names
     }
 
     pub fn resolve_spell_name(&self, spell_id: u32) -> Option<String> {

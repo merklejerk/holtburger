@@ -7,12 +7,56 @@ use holtburger_common::properties::{
     WorldObjectProperties, WorldObjectPropertyAccessorsMut,
 };
 use holtburger_common::{Guid, Vector3};
+use holtburger_protocol::messages::movement::{
+    InterpretedMotionCommand, MotionStance, MovementEventData, MovementTypeData,
+};
 use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::messages::description::ObjectDescriptionData;
 use holtburger_protocol::messages::object::types::{
     ArmorLevels, ArmorProfile, CreatureProfile, HookProfile, WeaponProfile,
 };
 use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EntityMotionSnapshot {
+    pub current_style: Option<MotionStance>,
+    pub forward_command: Option<InterpretedMotionCommand>,
+    pub sidestep_command: Option<InterpretedMotionCommand>,
+    pub turn_command: Option<InterpretedMotionCommand>,
+}
+
+impl EntityMotionSnapshot {
+    pub fn from_movement_event(data: &MovementEventData) -> Option<Self> {
+        let mut snapshot = Self {
+            current_style: MotionStance::from_interpreted(data.current_style),
+            ..Self::default()
+        };
+
+        if let MovementTypeData::Invalid(invalid) = &data.data {
+            if let Some(style) = invalid
+                .state
+                .current_style
+                .and_then(MotionStance::from_interpreted)
+            {
+                snapshot.current_style = Some(style);
+            }
+            snapshot.forward_command = invalid.state.forward_command;
+            snapshot.sidestep_command = invalid.state.sidestep_command;
+            snapshot.turn_command = invalid.state.turn_command;
+        }
+
+        (snapshot.current_style.is_some()
+            || snapshot.forward_command.is_some()
+            || snapshot.sidestep_command.is_some()
+            || snapshot.turn_command.is_some())
+        .then_some(snapshot)
+    }
+
+    pub fn indicates_death_motion(self) -> bool {
+        self.forward_command
+            .is_some_and(InterpretedMotionCommand::is_dead)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Entity {
@@ -31,6 +75,7 @@ pub struct Entity {
     pub physics_state: PhysicsState,
     pub physics_parent_id: Option<Guid>,
     pub autonomous_movement: bool,
+    pub motion_snapshot: Option<EntityMotionSnapshot>,
 
     pub sequences: [u16; 9],
 
@@ -164,6 +209,7 @@ impl Entity {
             physics_state: PhysicsState::NONE,
             physics_parent_id: None,
             autonomous_movement: false,
+            motion_snapshot: None,
             sequences: [0; 9],
             properties,
             armor_profile: None,

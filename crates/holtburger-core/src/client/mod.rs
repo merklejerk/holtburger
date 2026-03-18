@@ -1,7 +1,7 @@
 use anyhow::Result;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_session::Session;
-use holtburger_world::{StateEvent, WorldState, state::ServerTimeSync};
+use holtburger_world::{WorldEvent, WorldState};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
@@ -13,6 +13,7 @@ pub mod controllers;
 pub mod locomotion;
 mod messages;
 mod movement;
+pub mod navigation;
 pub mod types;
 use auth::AuthState;
 use movement::MovementSystem;
@@ -26,7 +27,6 @@ pub struct Client {
     pub world: WorldState,
     state: ClientState,
     wire_event_tx: broadcast::Sender<WireEvent>,
-    state_event_tx: broadcast::Sender<StateEvent>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     command_rx: Option<mpsc::UnboundedReceiver<ClientCommand>>,
     pub message_dump_dir: Option<std::path::PathBuf>,
@@ -48,10 +48,6 @@ impl Client {
 
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
         self.wire_event_tx.subscribe()
-    }
-
-    pub fn subscribe_state_events(&self) -> broadcast::Receiver<StateEvent> {
-        self.state_event_tx.subscribe()
     }
 
     pub fn subscribe_client_view_events(&self) -> broadcast::Receiver<ClientViewEvent> {
@@ -194,23 +190,20 @@ impl Client {
         let _ = self.wire_event_tx.send(event);
     }
 
-    pub fn emit_state_event(&self, event: StateEvent) {
-        self.emit_world_view_projection(&event);
-        let _ = self.state_event_tx.send(event);
+    pub fn handle_world_event(&self, event: &WorldEvent) {
+        self.emit_world_view_projection(event);
     }
 
-    fn emit_world_view_projection(&self, event: &StateEvent) {
+    fn emit_world_view_projection(&self, event: &WorldEvent) {
         match event {
-            StateEvent::PlayerEnchantmentsUpdated { enchantments } => {
+            WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 let _ =
                     self.client_view_event_tx
                         .send(ClientViewEvent::PlayerEnchantmentsUpdated {
                             enchantments: enchantments.clone(),
-                            resolved_names: self.world.get_player_spell_names(),
                         });
             }
-            StateEvent::DerivedStatsUpdated(data) => {
-                let level_info = self.world.get_level_info().unwrap_or_default();
+            WorldEvent::DerivedStatsUpdated(data) => {
                 let attributes = data
                     .attributes
                     .iter()
@@ -238,97 +231,126 @@ impl Client {
                         resistances: data.resistances.clone(),
                         armor: data.armor,
                         vitae: data.vitae,
-                        level_info,
                     });
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
-            StateEvent::AttributeUpdated(_)
-            | StateEvent::SkillUpdated(_)
-            | StateEvent::LevelInfoUpdated(_) => {
-                let level_info = self.world.get_level_info().unwrap_or_default();
+            WorldEvent::AttributeUpdated(_) | WorldEvent::SkillUpdated(_) => {}
+            WorldEvent::LevelInfoUpdated(level_info) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
-                        attributes: self.world.player.attributes.clone(),
-                        skills: self.world.player.skills.clone(),
-                        resistances: self.world.player.resistances(),
-                        armor: self.world.player.armor(),
-                        vitae: self.world.player.vitae(),
+                    .send(ClientViewEvent::PlayerLevelInfoUpdated {
                         level_info: level_info.clone(),
                     });
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerVitalsUpdated {
-                        vitals: self.world.player.vitals.clone(),
-                    });
             }
-            StateEvent::VitalUpdated(vital) => {
+            WorldEvent::VitalUpdated(vital) => {
                 let mut vitals = HashMap::new();
                 vitals.insert(vital.vital_type, vital.clone());
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
             }
-            StateEvent::SpellUpdated { .. } | StateEvent::SpellRemoved { .. } => {
-                let mut spell_ids: Vec<u32> = self.world.player.spells.keys().cloned().collect();
-                spell_ids.sort();
+            WorldEvent::SpellUpdated { spell_ids, .. }
+            | WorldEvent::SpellRemoved { spell_ids, .. } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerSpellsUpdated {
+                        spell_ids: spell_ids.clone(),
+                    });
+            }
+            WorldEvent::PlayerInfo(data) => {
+                self.emit_spell_catalog_loaded();
+                let _ =
+                    self.client_view_event_tx
+                        .send(ClientViewEvent::PlayerEnchantmentsUpdated {
+                            enchantments: data.enchantments.clone(),
+                        });
 
+                let attributes = data
+                    .attributes
+                    .iter()
+                    .cloned()
+                    .map(|attribute| (attribute.attr_type, attribute))
+                    .collect();
+                let skills = data
+                    .skills
+                    .iter()
+                    .cloned()
+                    .map(|skill| (skill.skill_type, skill))
+                    .collect();
+                let vitals = data
+                    .vitals
+                    .iter()
+                    .cloned()
+                    .map(|vital| (vital.vital_type, vital))
+                    .collect();
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerStatsSkillsUpdated {
+                        attributes,
+                        skills,
+                        resistances: data.resistances.clone(),
+                        armor: data.armor,
+                        vitae: data.vitae,
+                    });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerLevelInfoUpdated {
+                        level_info: data.level_info.clone(),
+                    });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::PlayerVitalsUpdated { vitals });
+
+                let mut spell_ids = data.spells.clone();
+                spell_ids.sort();
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerSpellsUpdated { spell_ids });
-            }
-            StateEvent::PlayerInfo(_) => {
-                self.emit_spell_catalog_loaded();
-                // Emit all snapshots
-                self.emit_world_view_projection(&StateEvent::PlayerEnchantmentsUpdated {
-                    enchantments: self.world.player.enchantments.clone(),
-                });
-                self.emit_world_view_projection(&StateEvent::LevelInfoUpdated(
-                    self.world.get_level_info().unwrap_or_default(),
-                ));
-                self.emit_world_view_projection(&StateEvent::SpellUpdated {
-                    spell_id: 0,
-                    name: None,
-                }); // Trigger spell sync
 
-                // Emit player entity snapshot if available
-                if let Some(entity) = self.world.entities.get(self.world.player.guid) {
+                if let Some(entity) = &data.player_entity {
                     let _ = self
                         .client_view_event_tx
                         .send(ClientViewEvent::EntitySpawned {
-                            entity: Box::new(entity.clone()),
+                            entity: entity.clone(),
                         });
                 }
             }
-            StateEvent::EntitySpawned(entity) => {
+            WorldEvent::TeleportStarted { sequence } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::TeleportStarted {
+                        sequence: *sequence,
+                    });
+            }
+            WorldEvent::EntitySpawned(entity) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntitySpawned {
                         entity: entity.clone(),
                     });
             }
-            StateEvent::EntityReplaced(entity) => {
+            WorldEvent::EntityReplaced(entity) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityReplaced {
                         entity: entity.clone(),
                     });
             }
-            StateEvent::EntityIdentified(entity) => {
+            WorldEvent::EntityIdentified(entity) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityIdentified {
                         entity: entity.clone(),
                     });
             }
-            StateEvent::EntityDespawned(guid) => {
+            WorldEvent::EntityDespawned(guid) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityDespawned { guid: *guid });
             }
-            StateEvent::PropertiesUpdated { guid, updates } => {
+            WorldEvent::PropertiesUpdated { guid, updates } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityPropertiesUpdated {
@@ -336,7 +358,7 @@ impl Client {
                         updates: updates.clone(),
                     });
             }
-            StateEvent::EntityMoved { guid, pos } => {
+            WorldEvent::EntityMoved { guid, pos } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityMoved {
@@ -344,14 +366,22 @@ impl Client {
                         pos: *pos,
                     });
             }
-            StateEvent::PlayerGroundedUpdated { grounded } => {
+            WorldEvent::EntityMotionUpdated { guid, snapshot } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityMotionUpdated {
+                        guid: *guid,
+                        snapshot: *snapshot,
+                    });
+            }
+            WorldEvent::PlayerGroundedUpdated { grounded } => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::PlayerGroundedUpdated {
                         grounded: *grounded,
                     });
             }
-            StateEvent::ForcedReposition {
+            WorldEvent::ForcedReposition {
                 guid,
                 pos,
                 sequence,
@@ -364,47 +394,47 @@ impl Client {
                         sequence: *sequence,
                     });
             }
-            StateEvent::EntityStateUpdated { .. } | StateEvent::EntityVectorUpdated { .. } => {}
-            StateEvent::ServerTimeUpdate(time) => {
+            WorldEvent::EntityStateUpdated { .. } | WorldEvent::EntityVectorUpdated { .. } => {}
+            WorldEvent::ServerTimeUpdate(time) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ServerTimeUpdated { time: *time });
             }
-            StateEvent::CombatModeUpdated(mode) => {
+            WorldEvent::CombatModeUpdated(mode) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CombatModeUpdated { mode: *mode });
             }
-            StateEvent::NoClipUpdated(enabled) => {
+            WorldEvent::NoClipUpdated(enabled) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::NoClipUpdated { enabled: *enabled });
             }
-            StateEvent::VendorStateUpdated(vendor) => {
+            WorldEvent::VendorStateUpdated(vendor) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::VendorStateUpdated {
                         vendor: vendor.clone(),
                     });
             }
-            StateEvent::VendorItemIdentified(item) => {
+            WorldEvent::VendorItemIdentified(item) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::VendorItemIdentified(item.clone()));
             }
-            StateEvent::TradeStateUpdated(trade) => {
+            WorldEvent::TradeStateUpdated(trade) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::TradeStateUpdated {
                         trade: trade.clone(),
                     });
             }
-            StateEvent::ContainerOpened(guid) => {
+            WorldEvent::ContainerOpened(guid) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ContainerOpened { guid: *guid });
             }
-            StateEvent::ContainerClosed(guid) => {
+            WorldEvent::ContainerClosed(guid) => {
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::ContainerClosed { guid: *guid });
@@ -471,13 +501,12 @@ impl Client {
                                         self.auth.handle_handshake_response(cookie, client_id, &mut self.session).await?;
                                     }
                                     SessionEvent::TimeSync(server_time) => {
-                                        self.world.server_time = Some(ServerTimeSync {
-                                            server_time,
-                                            local_time: Instant::now(),
-                                        });
-                                        self.emit_state_event(
-                                            StateEvent::ServerTimeUpdate(server_time),
-                                        );
+                                        let world_events = self
+                                            .world
+                                            .set_server_time_sync(server_time, Instant::now());
+                                        for event in world_events {
+                                            self.handle_world_event(&event);
+                                        }
                                     }
                                 }
                             }
@@ -506,9 +535,8 @@ impl Client {
 
                     // TODO: Use actual player radius from DAT/Properties
                     let physics_events = self.world.tick(dt, 0.35);
-                    let physics_events = holtburger_world::dedupe_state_events(physics_events);
                     for event in physics_events {
-                        self.emit_state_event(event);
+                        self.handle_world_event(&event);
                     }
                 }
             }

@@ -1,4 +1,4 @@
-use crate::entity::Entity;
+use crate::entity::{Entity, EntityMotionSnapshot};
 use crate::state;
 use crate::stats;
 use crate::vendor;
@@ -6,6 +6,7 @@ use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyUpdate;
 use holtburger_protocol::errors::WeenieError;
+use holtburger_protocol::messages::MovementEventData;
 use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
@@ -13,13 +14,16 @@ pub struct PlayerInfoData {
     pub guid: Guid,
     pub name: String,
     pub pos: Option<WorldPosition>,
+    pub player_entity: Option<Box<Entity>>,
     pub attributes: Vec<stats::Attribute>,
     pub vitals: Vec<stats::Vital>,
     pub skills: Vec<stats::Skill>,
     pub enchantments: Vec<Enchantment>,
     pub spells: Vec<u32>,
+    pub level_info: stats::CharacterLevelInfo,
+    pub resistances: stats::Resistances,
+    pub armor: i32,
     pub vitae: f32,
-    pub spell_names: std::collections::HashMap<u32, String>,
     pub inventory: std::collections::HashSet<Guid>,
     pub equipment: std::collections::HashMap<Guid, holtburger_protocol::messages::EquipMask>,
 }
@@ -35,7 +39,7 @@ pub struct DerivedStatsData {
 }
 
 #[derive(Debug, Clone)]
-pub enum StateEvent {
+pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
     EntityMoved {
@@ -47,6 +51,10 @@ pub enum StateEvent {
         guid: Guid,
         velocity: holtburger_common::math::Vector3,
         omega: holtburger_common::math::Vector3,
+    },
+    EntityMotionUpdated {
+        guid: Guid,
+        snapshot: Option<EntityMotionSnapshot>,
     },
     EntityDespawned(Guid),
     VitalUpdated(stats::Vital),
@@ -64,21 +72,38 @@ pub enum StateEvent {
     PlayerGroundedUpdated {
         grounded: bool,
     },
+    SelfUpdatePosition {
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+    },
+    SelfAutonomousPosition {
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        server_control_sequence: u16,
+    },
     SpellUpdated {
         spell_id: u32,
         name: Option<String>,
+        spell_ids: Vec<u32>,
     },
     SpellRemoved {
         spell_id: u32,
+        spell_ids: Vec<u32>,
     },
     CombatModeUpdated(holtburger_protocol::messages::combat::CombatMode),
     NoClipUpdated(bool),
     ServerTimeUpdate(f64),
+    TeleportStarted {
+        sequence: u16,
+    },
     DerivedStatsUpdated(Box<DerivedStatsData>),
     EntityStateUpdated {
         guid: Guid,
         physics_state: holtburger_common::properties::PhysicsState,
     },
+    // Keep the full protocol payload for now: a future 3D client will likely need
+    // richer server-authored movement detail than the current core/TUI consumer.
+    SelfServerControlledMotion(Box<MovementEventData>),
     ForcedReposition {
         guid: Guid,
         pos: WorldPosition,
@@ -99,46 +124,4 @@ pub enum StateEvent {
     VendorStateUpdated(Option<vendor::VendorState>),
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
     TradeStateUpdated(Option<state::TradeState>),
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum EventDedupeKey {
-    DerivedStats,
-    Vital(stats::VitalType),
-    Attribute(stats::AttributeType),
-    Skill(stats::SkillType),
-    CombatMode,
-    PlayerGrounded,
-    LevelInfo,
-    ServerTime,
-    EntityPosition(Guid),
-    EntityVector(Guid),
-    EntityState(Guid),
-}
-
-impl holtburger_common::traits::Deduplicable for StateEvent {
-    type Key = EventDedupeKey;
-
-    fn dedupe_key(&self) -> Option<Self::Key> {
-        match self {
-            StateEvent::DerivedStatsUpdated(_) => Some(EventDedupeKey::DerivedStats),
-            StateEvent::VitalUpdated(v) => Some(EventDedupeKey::Vital(v.vital_type)),
-            StateEvent::AttributeUpdated(a) => Some(EventDedupeKey::Attribute(a.attr_type)),
-            StateEvent::SkillUpdated(s) => Some(EventDedupeKey::Skill(s.skill_type)),
-            StateEvent::CombatModeUpdated(_) => Some(EventDedupeKey::CombatMode),
-            StateEvent::PlayerGroundedUpdated { .. } => Some(EventDedupeKey::PlayerGrounded),
-            StateEvent::LevelInfoUpdated(_) => Some(EventDedupeKey::LevelInfo),
-            StateEvent::ServerTimeUpdate(_) => Some(EventDedupeKey::ServerTime),
-            StateEvent::EntityMoved { guid, .. } => Some(EventDedupeKey::EntityPosition(*guid)),
-            StateEvent::EntityVectorUpdated { guid, .. } => {
-                Some(EventDedupeKey::EntityVector(*guid))
-            }
-            StateEvent::EntityStateUpdated { guid, .. } => Some(EventDedupeKey::EntityState(*guid)),
-            _ => None,
-        }
-    }
-}
-
-pub fn dedupe_state_events(events: Vec<StateEvent>) -> Vec<StateEvent> {
-    holtburger_common::traits::dedupe_events(events)
 }

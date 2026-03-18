@@ -274,16 +274,15 @@ impl WorldState {
             data.force_position_sequence,
         );
 
-        let mut events = vec![WorldEvent::SelfAutonomousPositionObserved {
+        if !accepted {
+            return Vec::new();
+        }
+
+        let mut events = vec![WorldEvent::SelfAutonomousPosition {
             teleport_sequence: data.teleport_sequence,
             force_position_sequence: data.force_position_sequence,
             server_control_sequence: data.server_control_sequence,
-            accepted,
         }];
-
-        if !accepted {
-            return events;
-        }
 
         events.extend(self.set_player_position(data.position));
 

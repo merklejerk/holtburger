@@ -529,7 +529,7 @@ fn test_update_motion_caches_last_non_zero_server_style() {
     assert_eq!(state.player.server_control_sequence, 9);
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::AcceptedSelfServerControlledMotion(data)
+        WorldEvent::SelfServerControlledMotion(data)
             if data.server_control_sequence == 9 && data.movement_sequence == 8
     )));
     assert_eq!(
@@ -556,7 +556,7 @@ fn test_update_motion_caches_last_non_zero_server_style() {
     assert_eq!(state.player.server_control_sequence, 12);
     assert!(events.iter().any(|event| matches!(
         event,
-        WorldEvent::AcceptedSelfServerControlledMotion(data)
+        WorldEvent::SelfServerControlledMotion(data)
             if data.server_control_sequence == 12 && data.movement_sequence == 11
     )));
     assert_eq!(
@@ -588,17 +588,10 @@ fn test_stale_non_autonomous_update_motion_is_ignored_for_self() {
 
     let events = state.handle_message(&msg);
 
-    assert_eq!(events.len(), 1);
+    assert!(events.is_empty());
     assert_eq!(state.player.instance_sequence, 10);
     assert_eq!(state.player.movement_sequence, 20);
     assert_eq!(state.player.server_control_sequence, 30);
-    assert!(events.iter().any(|event| matches!(
-        event,
-        WorldEvent::RejectedSelfServerControlledMotion {
-            server_control_sequence: 29,
-            movement_sequence: 21,
-        }
-    )));
     assert_eq!(
         state.player.last_server_motion_style,
         Some(MotionStance::SwordCombat)

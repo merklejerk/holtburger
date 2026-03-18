@@ -72,16 +72,14 @@ pub enum WorldEvent {
     PlayerGroundedUpdated {
         grounded: bool,
     },
-    SelfUpdatePositionObserved {
+    SelfUpdatePosition {
         teleport_sequence: u16,
         force_position_sequence: u16,
-        accepted: bool,
     },
-    SelfAutonomousPositionObserved {
+    SelfAutonomousPosition {
         teleport_sequence: u16,
         force_position_sequence: u16,
         server_control_sequence: u16,
-        accepted: bool,
     },
     SpellUpdated {
         spell_id: u32,
@@ -103,11 +101,9 @@ pub enum WorldEvent {
         guid: Guid,
         physics_state: holtburger_common::properties::PhysicsState,
     },
-    AcceptedSelfServerControlledMotion(Box<MovementEventData>),
-    RejectedSelfServerControlledMotion {
-        server_control_sequence: u16,
-        movement_sequence: u16,
-    },
+    // Keep the full protocol payload for now: a future 3D client will likely need
+    // richer server-authored movement detail than the current core/TUI consumer.
+    SelfServerControlledMotion(Box<MovementEventData>),
     ForcedReposition {
         guid: Guid,
         pos: WorldPosition,

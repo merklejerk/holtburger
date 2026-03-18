@@ -65,7 +65,10 @@ impl WorldState {
             guid,
             name,
             pos,
-            player_entity: self.entities.get(guid).map(|entity| Box::new(entity.clone())),
+            player_entity: self
+                .entities
+                .get(guid)
+                .map(|entity| Box::new(entity.clone())),
             attributes: self.player.get_attributes(),
             vitals: self.player.get_vitals(),
             skills: self.player.get_skills(),

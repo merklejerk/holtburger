@@ -1110,13 +1110,22 @@ impl GameState {
             .handle_teleport_start(self.current_movement_metadata());
         result.commands.extend(update.commands);
 
-        if matches!(self.view.active_interaction, Some(Interaction::Approaching { .. })) {
+        if matches!(
+            self.view.active_interaction,
+            Some(Interaction::Approaching { .. })
+        ) {
             self.view.active_interaction = None;
             result.needs_redraw = true;
         }
 
-        if matches!(self.view.active_interaction, Some(Interaction::Targeting { .. })) {
-            if matches!(self.data.combat_mode, CombatMode::Melee | CombatMode::Missile) {
+        if matches!(
+            self.view.active_interaction,
+            Some(Interaction::Targeting { .. })
+        ) {
+            if matches!(
+                self.data.combat_mode,
+                CombatMode::Melee | CombatMode::Missile
+            ) {
                 result.commands.push(ClientCommand::CancelAttack);
                 self.data.combat_runtime.cancel_attack();
                 self.view.combat_automation = None;
@@ -2406,16 +2415,18 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(started.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive:
-                        holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(
+            started.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                        primitive:
+                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                        ..
+                    })
+                )
+            })
+        );
         assert!(state.view.navigation.has_active_approach());
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
@@ -2462,7 +2473,10 @@ mod tests {
         state.sync_sticky_melee_pursuit(&mut initial);
 
         assert!(state.view.navigation.sticky_is_pursuing());
-        assert_eq!(state.view.navigation.sticky_latched_target_guid(), Some(target_guid));
+        assert_eq!(
+            state.view.navigation.sticky_latched_target_guid(),
+            Some(target_guid)
+        );
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
 
@@ -2477,9 +2491,12 @@ mod tests {
                 })
             )
         }));
-        assert!(result.commands.iter().any(|command| {
-            matches!(command, ClientCommand::CancelAttack)
-        }));
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| { matches!(command, ClientCommand::CancelAttack) })
+        );
         assert_eq!(state.view.active_interaction, None);
         assert_eq!(state.view.navigation.sticky_latched_target_guid(), None);
         assert!(!state.view.navigation.sticky_is_pursuing());

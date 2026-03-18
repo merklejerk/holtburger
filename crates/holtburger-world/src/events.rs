@@ -6,8 +6,8 @@ use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::PropertyUpdate;
 use holtburger_protocol::errors::WeenieError;
-use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::MovementEventData;
+use holtburger_protocol::messages::magic::Enchantment;
 
 #[derive(Debug, Clone)]
 pub struct PlayerInfoData {

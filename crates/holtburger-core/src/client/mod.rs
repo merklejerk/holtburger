@@ -197,11 +197,11 @@ impl Client {
     fn emit_world_view_projection(&self, event: &WorldEvent) {
         match event {
             WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerEnchantmentsUpdated {
-                        enchantments: enchantments.clone(),
-                    });
+                let _ =
+                    self.client_view_event_tx
+                        .send(ClientViewEvent::PlayerEnchantmentsUpdated {
+                            enchantments: enchantments.clone(),
+                        });
             }
             WorldEvent::DerivedStatsUpdated(data) => {
                 let attributes = data
@@ -261,11 +261,11 @@ impl Client {
             }
             WorldEvent::PlayerInfo(data) => {
                 self.emit_spell_catalog_loaded();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::PlayerEnchantmentsUpdated {
-                        enchantments: data.enchantments.clone(),
-                    });
+                let _ =
+                    self.client_view_event_tx
+                        .send(ClientViewEvent::PlayerEnchantmentsUpdated {
+                            enchantments: data.enchantments.clone(),
+                        });
 
                 let attributes = data
                     .attributes

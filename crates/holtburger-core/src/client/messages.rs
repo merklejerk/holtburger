@@ -426,8 +426,8 @@ mod tests {
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_session::Session;
     use holtburger_world::WorldEvent;
-    use holtburger_world::stats::CharacterLevelInfo;
     use holtburger_world::WorldState;
+    use holtburger_world::stats::CharacterLevelInfo;
     use tokio::sync::broadcast;
 
     fn build_test_client() -> Client {
@@ -501,11 +501,13 @@ mod tests {
         client.world.player.guid = player_guid;
         client.world.player.server_control_sequence = 9;
         client.world.player.position = WorldPosition::default();
-        client.world.add_entity(holtburger_world::entity::Entity::new(
-            player_guid,
-            "Player".to_string(),
-            WorldPosition::default(),
-        ));
+        client
+            .world
+            .add_entity(holtburger_world::entity::Entity::new(
+                player_guid,
+                "Player".to_string(),
+                WorldPosition::default(),
+            ));
 
         let encoded = encode_message(&server_controlled_motion(player_guid, 10, 20));
 
@@ -523,11 +525,13 @@ mod tests {
         client.world.player.guid = player_guid;
         client.world.player.server_control_sequence = 10;
         client.world.player.position = WorldPosition::default();
-        client.world.add_entity(holtburger_world::entity::Entity::new(
-            player_guid,
-            "Player".to_string(),
-            WorldPosition::default(),
-        ));
+        client
+            .world
+            .add_entity(holtburger_world::entity::Entity::new(
+                player_guid,
+                "Player".to_string(),
+                WorldPosition::default(),
+            ));
 
         let encoded = encode_message(&server_controlled_motion(player_guid, 9, 19));
 

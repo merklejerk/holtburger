@@ -183,9 +183,7 @@ impl PlayerState {
         self.position_sequence = pos_pack.position_sequence;
         self.teleport_sequence = pos_pack.teleport_sequence;
         self.force_position_sequence = pos_pack.force_position_sequence;
-        let is_grounded = pos_pack
-            .flags
-            .contains(UpdatePositionFlag::IS_GROUNDED);
+        let is_grounded = pos_pack.flags.contains(UpdatePositionFlag::IS_GROUNDED);
         self.server_grounded = Some(is_grounded);
 
         if old_grounded != Some(is_grounded) {

@@ -103,15 +103,17 @@ impl Controller for ApproachTargetController {
                         ApproachTargetFinishReason::ForcedReposition,
                     ))
             }
-            ApproachTargetInput::TeleportStarted => ControllerUpdate::new(ControllerStatus::Completed)
-                .with_effect(ApproachTargetEffect::Locomotion(
-                    LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
-                ))
-                .with_effect(ApproachTargetEffect::Finished(
-                    ApproachTargetFinishReason::TeleportStarted,
-                )),
+            ApproachTargetInput::TeleportStarted => {
+                ControllerUpdate::new(ControllerStatus::Completed)
+                    .with_effect(ApproachTargetEffect::Locomotion(
+                        LocomotionPrimitive::Stop {
+                            refresh_server: false,
+                        },
+                    ))
+                    .with_effect(ApproachTargetEffect::Finished(
+                        ApproachTargetFinishReason::TeleportStarted,
+                    ))
+            }
             ApproachTargetInput::Tick {
                 now,
                 player_position,

@@ -280,9 +280,11 @@ fn test_private_update_position_non_location_is_stored_without_moving_player() {
         rotation: holtburger_common::math::Quaternion::identity(),
     };
     state.player.position = live_position;
-    state
-        .entities
-        .insert(Entity::new(player_guid, "Player".to_string(), live_position));
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        live_position,
+    ));
 
     let saved_position = WorldPosition {
         landblock_id: Guid(0x56780000),
@@ -300,7 +302,10 @@ fn test_private_update_position_non_location_is_stored_without_moving_player() {
 
     assert!(events.is_empty());
     assert_eq!(state.player.position, live_position);
-    assert_eq!(state.entities.get(player_guid).unwrap().position, live_position);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        live_position
+    );
     assert_eq!(
         state
             .player
@@ -321,9 +326,11 @@ fn test_public_update_position_non_location_for_player_is_stored_without_moving_
         rotation: holtburger_common::math::Quaternion::identity(),
     };
     state.player.position = live_position;
-    state
-        .entities
-        .insert(Entity::new(player_guid, "Player".to_string(), live_position));
+    state.entities.insert(Entity::new(
+        player_guid,
+        "Player".to_string(),
+        live_position,
+    ));
 
     let sanctuary_position = WorldPosition {
         landblock_id: Guid(0x9ABC0000),
@@ -342,7 +349,10 @@ fn test_public_update_position_non_location_for_player_is_stored_without_moving_
 
     assert!(events.is_empty());
     assert_eq!(state.player.position, live_position);
-    assert_eq!(state.entities.get(player_guid).unwrap().position, live_position);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        live_position
+    );
     assert_eq!(
         state.player.position_property(PositionType::Sanctuary),
         Some(sanctuary_position)
@@ -367,11 +377,9 @@ fn test_public_update_position_non_location_for_other_entity_does_not_move_it() 
         coords: Vector3::new(3.0, 4.0, 5.0),
         rotation: holtburger_common::math::Quaternion::identity(),
     };
-    state.entities.insert(Entity::new(
-        other_guid,
-        "Other".to_string(),
-        live_position,
-    ));
+    state
+        .entities
+        .insert(Entity::new(other_guid, "Other".to_string(), live_position));
 
     let non_live_position = WorldPosition {
         landblock_id: Guid(0x56780000),
@@ -389,9 +397,14 @@ fn test_public_update_position_non_location_for_other_entity_does_not_move_it() 
     )));
 
     assert!(events.is_empty());
-    assert_eq!(state.entities.get(other_guid).unwrap().position, live_position);
     assert_eq!(
-        state.player.position_property(PositionType::LinkedPortalOne),
+        state.entities.get(other_guid).unwrap().position,
+        live_position
+    );
+    assert_eq!(
+        state
+            .player
+            .position_property(PositionType::LinkedPortalOne),
         None
     );
 }
@@ -714,11 +727,9 @@ fn test_self_object_create_bootstraps_player_position() {
     };
     state.player.guid = player_guid;
     state.player.position = initial_pos;
-    state.entities.insert(Entity::new(
-        player_guid,
-        "Player".to_string(),
-        initial_pos,
-    ));
+    state
+        .entities
+        .insert(Entity::new(player_guid, "Player".to_string(), initial_pos));
 
     let bootstrap_pos = WorldPosition {
         landblock_id: Guid(0x12340010),
@@ -734,7 +745,10 @@ fn test_self_object_create_bootstraps_player_position() {
     let events = state.handle_message(&msg);
 
     assert_eq!(state.player.position, bootstrap_pos);
-    assert_eq!(state.entities.get(player_guid).unwrap().position, bootstrap_pos);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        bootstrap_pos
+    );
     assert!(state.entity_lifecycle_state(player_guid).is_none());
     assert!(!events.is_empty());
 }

@@ -1,12 +1,30 @@
-use crate::StateEvent;
+use crate::WorldEvent;
+use crate::entity::EntityMotionSnapshot;
 use crate::state::WorldState;
+use holtburger_common::Guid;
 use holtburger_common::math::Quaternion;
 use holtburger_protocol::messages::{GameMessage, MovementTypeData};
+
+fn update_entity_motion_snapshot(
+    state: &mut WorldState,
+    guid: Guid,
+    snapshot: Option<EntityMotionSnapshot>,
+    events: &mut Vec<WorldEvent>,
+) {
+    let Some(entity) = state.entities.get_mut(guid) else {
+        return;
+    };
+
+    if entity.motion_snapshot != snapshot {
+        entity.motion_snapshot = snapshot;
+        events.push(WorldEvent::EntityMotionUpdated { guid, snapshot });
+    }
+}
 
 pub(crate) fn handle_message(
     state: &mut WorldState,
     message: &GameMessage,
-    events: &mut Vec<StateEvent>,
+    events: &mut Vec<WorldEvent>,
 ) -> bool {
     match message {
         GameMessage::UpdatePosition(data) => {
@@ -18,16 +36,11 @@ pub(crate) fn handle_message(
             }
         }
         GameMessage::PrivateUpdatePosition(data) => {
-            events.extend(state.set_player_position(data.pos));
+            state.apply_private_position_update(data.position_type, data.pos, events);
             true
         }
         GameMessage::PublicUpdatePosition(data) => {
-            if data.guid == state.player.guid {
-                events.extend(state.set_player_position(data.pos));
-                true
-            } else {
-                state.move_entity_to_position(data.guid, data.pos, events)
-            }
+            state.apply_public_position_update(data.guid, data.position_type, data.pos, events)
         }
         GameMessage::AutonomousPosition(data) => {
             if data.guid == state.player.guid {
@@ -39,6 +52,13 @@ pub(crate) fn handle_message(
         }
         GameMessage::UpdateMotion(data) => {
             let guid = data.guid;
+
+            update_entity_motion_snapshot(
+                state,
+                guid,
+                EntityMotionSnapshot::from_movement_event(data),
+                events,
+            );
 
             let mut target_info = None;
             if let MovementTypeData::TurnToObject(turn) = &data.data

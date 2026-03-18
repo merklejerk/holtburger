@@ -18,8 +18,8 @@ To instantiate a client, we use the `ClientBuilder` ([src/client/builder.rs](src
 We use a 3-layer event model to separate protocol fidelity from UI ergonomics, solving the monolithic object-cloning problem via highly granular Delta Events:
 
 1. **`WireEvent`** (Protocol): 1:1 raw packet semantics from `holtburger-session`. Used for logging, debugging, or deep client control.
-2. **`StateEvent`** (World): Authoritative state mutations managed by `holtburger-world` (e.g., `EntitySpawned`, `PropertyUpdated`).
-3. **`WorldViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed. The core listens to incoming `WireEvent`s and `StateEvent`s and collapses them onto THIS SINGLE CHANNEL line.
+2. **`WorldEvent`** (World): World-layer events emitted by `holtburger-world`, including authoritative mutations and packet-scoped processing outcomes.
+3. **`WorldViewEvent`** ([src/client/types.rs](src/client/types.rs)): The unified semantic delta-event feed. The core listens to incoming `WireEvent`s and `WorldEvent`s and collapses them onto THIS SINGLE CHANNEL line.
    - Consumers (like `holtburger-cli`) **ONLY** subscribe to `WorldViewEvent` because it is lightweight. It broadcasts granular semantic delta-events (like `PropertyUpdated { guid, update }`) instead of massive `Box<Entity>` clones.
 
 #### Interaction
@@ -39,12 +39,22 @@ Applications are free to use these controllers, ignore them, or layer their own 
 
 The current primitive locomotion surface lives in [src/client/locomotion.rs](src/client/locomotion.rs). It defines controller-facing locomotion primitives such as drive and stop, while [src/client/movement.rs](src/client/movement.rs) remains the executor that applies those primitives to local prediction and protocol traffic.
 
+Movement packet metadata may optionally carry an explicit motion stance choice for frontends that need direct stance control. When a frontend does not provide one, the core falls back to the last non-zero server-reported motion stance so outbound `MoveToState` packets stay protocol-correct.
+
 Frontend adoption pattern today:
 
 1. Hold a reusable controller instance such as [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), or [src/client/controllers/combat.rs](src/client/controllers/combat.rs) in frontend state.
 2. Feed it world-derived inputs on ticks or relevant events.
 3. Interpret its emitted primitive effects, such as `LocomotionPrimitive`, in the frontend's own orchestration layer.
 4. Execute those primitives through the frontend's preferred runtime path. Command-channel frontends can submit `LocomotionPrimitive` values through `ClientCommand::ExecuteLocomotion`, while direct embedders can call into a `Client` more directly.
+
+The same split applies to entity motion coming back from the server:
+
+1. `holtburger-world` owns compact authoritative motion snapshots per entity.
+2. `holtburger-core` projects those snapshots into client-view events for frontends that want to render or inspect motion.
+3. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
+
+That boundary keeps 3D-client rendering needs compatible with shared combat logic: frontends can observe motion directly, but they should not become the authority for interpreting death motion or similar gameplay signals.
 
 The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). After extracting real movement and combat controllers, it has been refined down to the proven shared surface and currently standardizes only:
 
@@ -74,6 +84,7 @@ Movement in `holtburger-core` should converge on three distinct layers:
     - Format and send movement-related game actions.
     - Handle server-driven movement and forced reposition.
     - Maintain prediction and synchronization with the authoritative server state.
+    - Cache server-authored motion-style state needed to build correct outbound movement packets.
 2. **Primitive client actions**
     - Set heading.
     - Set movement state.
@@ -98,6 +109,8 @@ The current ownership model is explicit:
 
 This keeps controller state out of hidden engine-owned special cases while preserving a single movement executor for protocol traffic and prediction.
 
+The important boundary is that the core preserves protocol fidelity for motion-style fields, but it does not own the frontend's movement policy. A 3D client may drive locomotion directly and supply explicit motion-style choices when needed.
+
 ## Internal Data Flow
 
 ```mermaid
@@ -110,15 +123,15 @@ sequenceDiagram
 
     Net->>Core: WireEvent (Unpacked Packet)
     Core->>World: Mutate Authority (e.g. Spawn)
-    World->>Core: StateEvent (e.g EntitySpawned)
+    World->>Core: WorldEvent (e.g EntitySpawned)
     Core->>View: Emit as Semantic Delta
     View->>UI: Process In-Place Projection Update
 ```
 
 1. **Networking**: `holtburger-session` parses UDP packets.
 2. **Engine**: `Client` processes the `WireEvent` and emits intents to `holtburger-world`'s `WorldState`.
-3. **Authority**: `WorldState` performs the mutation and emits a `StateEvent`.
-4. **Projection**: `Client` translates the `StateEvent` directly into a granular `WorldViewEvent` delta snapshot.
+3. **Authority**: `WorldState` performs the mutation and emits a `WorldEvent`.
+4. **Projection**: `Client` translates the `WorldEvent` directly into a granular `WorldViewEvent` delta snapshot.
 5. **UI**: Consumers receive the delta and mutate their local cached models safely without lock contention (`Arc<RwLock>`) or massive memory allocations.
 
 ## 🛠️ Developer Onboarding
@@ -127,7 +140,7 @@ sequenceDiagram
 1. **Identify**: Find the opcode in the ACE Server source (ground truth).
 2. **Update Protocol**: Add the message structure to `holtburger-protocol`.
 3. **Handle in Core**: Add a case to the core loop in [src/client/messages.rs](src/client/messages.rs).
-4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `StateEvent`.
+4. **Update State**: If the message changes the world, add a method to `holtburger-world` and emit a `WorldEvent`.
 5. **Map to View**: Update the `WorldViewEvent` stream in `emit_wire_event` or `emit_world_view_projection` inside [src/client/mod.rs](src/client/mod.rs) to share the new delta with the UI.
 
 ### Adding or Refactoring a Reusable Controller

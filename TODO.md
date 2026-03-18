@@ -186,6 +186,12 @@
     - [x] Auto-attack on target.
 - [x] Make melee attacks "sticky".
 - [x] Cancel melee/missile attack sequence if target changes to non-creature.
+- [x] Too much attack error spam! `Attack sequence finished with ActionCancelled.` 50x.
+    - I think related to dead/dying targets.
+- [x] There's a stray `[X] Close` verb showing up on in-world containers.
+- [x] Don't auto-attack targets too far away or marked for deletion.
+- [x] Need a way to cancel approach.
+    - Should it just be an interaction?
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -197,11 +203,10 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] There's a stray `[X] Close` verb showing up on in-world containers.
 - [ ] Make target of current interaction bold in dashboard lists?
-- [ ] Don't auto-attack targets too far away or marked for deletion.
-- [ ] Too much attack error spam! `Attack sequence finished with ActionCancelled.` 50x.
 - [ ] Label containers that you have recently opened.
+- [ ] Approach can overshoot target and oscillate. Ease out?
+- [ ] Use o[n] Self verb for mana charges, healing kits.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!
@@ -223,6 +228,5 @@
 - [x] Are channels an antipattern here? It forces to TUI client to do a lot of accounting to duplicate states. Or maybe we just need to rely on more `ClientViewEvent`s.
 - [x] Is `WorldObjectPropertyAccessors` a pointless abstraction?
 - [x] Do tabs need to expose `item_count()`?
+- [x] Track "dead" creatures to avoid targeting them?
 - [ ] Salvage preview output is duplicated and wrong (maybe not?).
-- [ ] Track "dead" creatures to avoid targeting them?
-- [ ] Does it make sense for core to track 

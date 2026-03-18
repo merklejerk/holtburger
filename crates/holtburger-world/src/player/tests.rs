@@ -681,7 +681,10 @@ fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
     let events = state.handle_message(&msg);
 
     assert_eq!(
-        state.entities.get(guid).and_then(|entity| entity.motion_snapshot),
+        state
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.motion_snapshot),
         None
     );
     assert!(events.iter().any(|event| matches!(

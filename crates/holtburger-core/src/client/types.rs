@@ -196,7 +196,7 @@ pub enum ClientViewEvent {
     },
     EntityMotionUpdated {
         guid: Guid,
-        snapshot: EntityMotionSnapshot,
+        snapshot: Option<EntityMotionSnapshot>,
     },
     PlayerGroundedUpdated {
         grounded: bool,

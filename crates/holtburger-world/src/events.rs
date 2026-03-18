@@ -54,7 +54,7 @@ pub enum WorldEvent {
     },
     EntityMotionUpdated {
         guid: Guid,
-        snapshot: EntityMotionSnapshot,
+        snapshot: Option<EntityMotionSnapshot>,
     },
     EntityDespawned(Guid),
     VitalUpdated(stats::Vital),

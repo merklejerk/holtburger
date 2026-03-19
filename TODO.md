@@ -76,6 +76,7 @@
 - [x] Search/filter on list tabs. (Plan: [docs/plans/dashboard-tab-filter-plan.md](docs/plans/dashboard-tab-filter-plan.md))
 - [x] Approach verb is janky.
 - [x] Preserve selected item + scroll offset when switching tabs, with sane fallback.
+- [x] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
@@ -84,7 +85,6 @@
 - [ ] Auto-follow.
 - [ ] Add a movable cursor to the chat input.
 - [ ] `/set [CHARACTER_OPTION] ...` command.
-- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.

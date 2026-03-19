@@ -331,7 +331,7 @@ impl GameState {
                 });
             }
             AppAction::Unequip { guid } => {
-                if let Some(container) = self.data.find_non_full_pack(None) {
+                if let Some(container) = self.data.find_non_full_pack(guid, None) {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
                         container,
@@ -545,7 +545,7 @@ impl GameState {
                 item: guid,
                 container: preferred_container_id,
             } => {
-                if let Some(container_id) = self.data.find_non_full_pack(preferred_container_id) {
+                if let Some(container_id) = self.data.find_non_full_pack(guid, preferred_container_id) {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
                         container: container_id,

@@ -1,8 +1,10 @@
+use crate::pages::game::GameData;
 use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::{ItemType, WorldObjectExt};
 use holtburger_world::assessment::{
     Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
@@ -37,6 +39,7 @@ fn format_wield_requirement(req: &WieldRequirement) -> String {
 
 /// Generates a list of strings representing human-friendly assessment information for an object.
 pub fn get_assess_info(
+    data: &GameData,
     object: &InspectableObject<'_>,
     spell_lookup: Option<&SpellCatalog>,
 ) -> Vec<Line<'static>> {
@@ -226,13 +229,22 @@ pub fn get_assess_info(
         .item_type()
         .is_none_or(|t| !t.contains(ItemType::CREATURE))
     {
+        let is_player = Some(object.guid) == data.player_guid;
+
         // Item Capacity
         if let Some(item_capacity) = assess.item_capacity
             && item_capacity > 0
         {
             lines.push(Line::from(vec![
                 Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(item_capacity.to_string(), Style::default().fg(Color::White)),
+                Span::styled(
+                    if is_player {
+                        format!("{}/{}", data.player_main_pack_item_count(), item_capacity)
+                    } else {
+                        item_capacity.to_string()
+                    },
+                    Style::default().fg(Color::White),
+                ),
             ]));
         }
 
@@ -243,7 +255,11 @@ pub fn get_assess_info(
             lines.push(Line::from(vec![
                 Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
-                    container_capacity.to_string(),
+                    if is_player {
+                        format!("{}/{}", data.player_container_count(), container_capacity)
+                    } else {
+                        container_capacity.to_string()
+                    },
                     Style::default().fg(Color::White),
                 ),
             ]));

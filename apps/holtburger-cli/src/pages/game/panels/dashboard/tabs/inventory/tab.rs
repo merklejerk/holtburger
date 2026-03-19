@@ -168,7 +168,7 @@ impl InventoryTab {
         }
 
         let container_id = if let Some(item) = data.get_entity(item_guid)
-            && let Some(container_id) = data.find_non_full_pack(item.container_id())
+            && let Some(container_id) = data.find_non_full_pack(item_guid, item.container_id())
         {
             Some(container_id)
         } else {

@@ -41,6 +41,10 @@ pub fn get_assess_info(
     spell_lookup: Option<&SpellCatalog>,
 ) -> Vec<Line<'static>> {
     let assess = Assessment::from_object(object);
+    let is_mana_stone = object
+        .properties
+        .item_type()
+        .is_some_and(|item_type| item_type.contains(ItemType::MANA_STONE));
     let mut lines = Vec::new();
 
     // Header - Prominent
@@ -125,13 +129,16 @@ pub fn get_assess_info(
     // Item Mana
     if let Some(mana) = &assess.mana {
         let time_left = mana.seconds_left.map(format_duration);
+        let label = if is_mana_stone { "Charge" } else { "Mana" };
+        let value = if let Some(max) = mana.max {
+            format!("{}/{}", mana.current, max)
+        } else {
+            mana.current.to_string()
+        };
 
         lines.push(Line::from(vec![
-            Span::styled("Mana:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}/{}", mana.current, mana.max),
-                Style::default().fg(Color::Blue),
-            ),
+            Span::styled(format!("{}:  ", label), Style::default().fg(LABEL_COLOR)),
+            Span::styled(value, Style::default().fg(Color::Blue)),
             if let Some(t) = time_left {
                 Span::styled(format!(" ({} left)", t), Style::default().fg(Color::Blue))
             } else {

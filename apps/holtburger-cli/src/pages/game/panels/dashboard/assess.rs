@@ -240,7 +240,11 @@ pub fn get_assess_info(
                 Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     if is_player {
-                        format!("{}/{}", player_storage.map(|usage| usage.item_used).unwrap_or(0), item_capacity)
+                        format!(
+                            "{}/{}",
+                            player_storage.map(|usage| usage.item_used).unwrap_or(0),
+                            item_capacity
+                        )
                     } else {
                         item_capacity.to_string()
                     },
@@ -257,7 +261,13 @@ pub fn get_assess_info(
                 Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     if is_player {
-                        format!("{}/{}", player_storage.map(|usage| usage.container_used).unwrap_or(0), container_capacity)
+                        format!(
+                            "{}/{}",
+                            player_storage
+                                .map(|usage| usage.container_used)
+                                .unwrap_or(0),
+                            container_capacity
+                        )
                     } else {
                         container_capacity.to_string()
                     },

@@ -181,7 +181,9 @@ pub fn get_debug_info(
                     if Some(e.guid) == data.player_guid {
                         lines.push(Line::from(format!(
                             "  CCapacity: {}/{}",
-                            player_storage.map(|usage| usage.container_used).unwrap_or(0),
+                            player_storage
+                                .map(|usage| usage.container_used)
+                                .unwrap_or(0),
                             v
                         )));
                     } else {
@@ -635,7 +637,9 @@ fn push_object_debug_info(
             if Some(object.guid) == data.player_guid {
                 lines.push(Line::from(format!(
                     "  CCapacity: {}/{}",
-                    player_storage.map(|usage| usage.container_used).unwrap_or(0),
+                    player_storage
+                        .map(|usage| usage.container_used)
+                        .unwrap_or(0),
                     v
                 )));
             } else {

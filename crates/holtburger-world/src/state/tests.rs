@@ -281,7 +281,13 @@ fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
 
     let events = state.handle_message(&msg);
 
-    assert_eq!(state.entities.get(guid).and_then(|entity| entity.health_fraction), Some(0.5));
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.health_fraction),
+        Some(0.5)
+    );
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::EntityReplaced(entity)

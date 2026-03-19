@@ -278,7 +278,8 @@ impl GameData {
         self.open_containers.insert(guid);
 
         if self.opened_container_history_set.contains(&guid) {
-            self.opened_container_history.retain(|existing| *existing != guid);
+            self.opened_container_history
+                .retain(|existing| *existing != guid);
         } else {
             self.opened_container_history_set.insert(guid);
         }
@@ -298,45 +299,6 @@ impl GameData {
 
     pub fn has_opened_container_before(&self, guid: Guid) -> bool {
         self.opened_container_history_set.contains(&guid)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{GameData, OPENED_CONTAINER_HISTORY_LIMIT};
-    use holtburger_common::Guid;
-
-    #[test]
-    fn opened_container_history_is_bounded() {
-        let mut data = GameData::default();
-
-        for raw in 1..=(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1) {
-            data.track_container_opened(Guid(raw));
-        }
-
-        assert!(!data.has_opened_container_before(Guid(1)));
-        assert!(data.has_opened_container_before(Guid(2)));
-        assert!(data.has_opened_container_before(Guid(
-            OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1,
-        )));
-    }
-
-    #[test]
-    fn reopening_container_refreshes_history_entry() {
-        let mut data = GameData::default();
-        let first = Guid(1);
-
-        data.track_container_opened(first);
-
-        for raw in 2..=(OPENED_CONTAINER_HISTORY_LIMIT as u32) {
-            data.track_container_opened(Guid(raw));
-        }
-
-        data.track_container_opened(first);
-        data.track_container_opened(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1));
-
-        assert!(data.has_opened_container_before(first));
-        assert!(!data.has_opened_container_before(Guid(2)));
     }
 }
 
@@ -363,5 +325,42 @@ impl WorldContext for GameData {
 
     fn is_open_container(&self, guid: Guid) -> bool {
         self.open_containers.contains(&guid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GameData, OPENED_CONTAINER_HISTORY_LIMIT};
+    use holtburger_common::Guid;
+
+    #[test]
+    fn opened_container_history_is_bounded() {
+        let mut data = GameData::default();
+
+        for raw in 1..=(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1) {
+            data.track_container_opened(Guid(raw));
+        }
+
+        assert!(!data.has_opened_container_before(Guid(1)));
+        assert!(data.has_opened_container_before(Guid(2)));
+        assert!(data.has_opened_container_before(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1,)));
+    }
+
+    #[test]
+    fn reopening_container_refreshes_history_entry() {
+        let mut data = GameData::default();
+        let first = Guid(1);
+
+        data.track_container_opened(first);
+
+        for raw in 2..=(OPENED_CONTAINER_HISTORY_LIMIT as u32) {
+            data.track_container_opened(Guid(raw));
+        }
+
+        data.track_container_opened(first);
+        data.track_container_opened(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1));
+
+        assert!(data.has_opened_container_before(first));
+        assert!(!data.has_opened_container_before(Guid(2)));
     }
 }

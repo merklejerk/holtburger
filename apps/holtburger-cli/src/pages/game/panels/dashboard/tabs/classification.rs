@@ -203,16 +203,18 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
             refined_class = Some(EntityClass::LifeStone);
         } else if it.intersects(ItemType::MANA_STONE) {
             refined_class = Some(EntityClass::ManaStone);
-        } else if is_food || it.intersects(
-            ItemType::FOOD
-                | ItemType::GEM
-                | ItemType::SPELL_COMPONENTS
-                | ItemType::CRAFT_COOKING_BASE
-                | ItemType::CRAFT_ALCHEMY_BASE
-                | ItemType::CRAFT_FLETCHING_BASE
-                | ItemType::CRAFT_ALCHEMY_INTERMEDIATE
-                | ItemType::CRAFT_FLETCHING_INTERMEDIATE,
-        ) {
+        } else if is_food
+            || it.intersects(
+                ItemType::FOOD
+                    | ItemType::GEM
+                    | ItemType::SPELL_COMPONENTS
+                    | ItemType::CRAFT_COOKING_BASE
+                    | ItemType::CRAFT_ALCHEMY_BASE
+                    | ItemType::CRAFT_FLETCHING_BASE
+                    | ItemType::CRAFT_ALCHEMY_INTERMEDIATE
+                    | ItemType::CRAFT_FLETCHING_INTERMEDIATE,
+            )
+        {
             refined_class = Some(EntityClass::Consumable);
         } else if it.intersects(ItemType::MONEY | ItemType::PROMISSORY_NOTE) {
             refined_class = Some(EntityClass::Money);

@@ -386,7 +386,11 @@ pub trait WorldContextExt: WorldContext {
     /// Finds a non-full container in the player's possession that can accept the item.
     /// If preferred_container_id is given, it is checked first.
     /// Then the player itself (main pack), then all items in the inventory that are containers.
-    fn find_non_full_pack(&self, item_guid: Guid, preferred_container_id: Option<Guid>) -> Option<Guid> {
+    fn find_non_full_pack(
+        &self,
+        item_guid: Guid,
+        preferred_container_id: Option<Guid>,
+    ) -> Option<Guid> {
         let player_guid = self.get_player_guid()?;
 
         // 1. Check preferred first
@@ -587,16 +591,26 @@ mod tests {
         };
 
         let mut player = entity(player_guid, "Player");
-        player.properties.ints.insert(PropertyInt::ItemsCapacity, 10);
-        player.properties.ints.insert(PropertyInt::ContainersCapacity, 3);
+        player
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 10);
+        player
+            .properties
+            .ints
+            .insert(PropertyInt::ContainersCapacity, 3);
         world.entities.insert(player_guid, player);
 
-        world
-            .entities
-            .insert(sword_guid, item_in_container(sword_guid, player_guid, "Sword"));
+        world.entities.insert(
+            sword_guid,
+            item_in_container(sword_guid, player_guid, "Sword"),
+        );
 
         let mut side_pack = item_in_container(side_pack_guid, player_guid, "Side Pack");
-        side_pack.properties.ints.insert(PropertyInt::ItemsCapacity, 24);
+        side_pack
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 24);
         world.entities.insert(side_pack_guid, side_pack);
 
         let mut focus = item_in_container(focus_guid, player_guid, "Focus");
@@ -612,7 +626,9 @@ mod tests {
         );
 
         assert_eq!(world.get_container_count(player_guid), 3);
-        let usage = world.storage_usage(player_guid).expect("player should have storage usage");
+        let usage = world
+            .storage_usage(player_guid)
+            .expect("player should have storage usage");
         assert_eq!(usage.item_used, 1);
         assert_eq!(usage.container_used, 2);
         assert_eq!(usage.item_space_left(), 9);
@@ -634,7 +650,10 @@ mod tests {
 
         let mut player = entity(player_guid, "Player");
         player.properties.ints.insert(PropertyInt::ItemsCapacity, 0);
-        player.properties.ints.insert(PropertyInt::ContainersCapacity, 2);
+        player
+            .properties
+            .ints
+            .insert(PropertyInt::ContainersCapacity, 2);
         world.entities.insert(player_guid, player);
 
         world.entities.insert(
@@ -650,11 +669,20 @@ mod tests {
         world.entities.insert(container_item_guid, container_item);
 
         let mut side_pack = item_in_container(side_pack_guid, player_guid, "Side Pack");
-        side_pack.properties.ints.insert(PropertyInt::ItemsCapacity, 24);
+        side_pack
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 24);
         world.entities.insert(side_pack_guid, side_pack);
 
-        assert_eq!(world.find_non_full_pack(regular_item_guid, None), Some(side_pack_guid));
-        assert_eq!(world.find_non_full_pack(container_item_guid, None), Some(player_guid));
+        assert_eq!(
+            world.find_non_full_pack(regular_item_guid, None),
+            Some(side_pack_guid)
+        );
+        assert_eq!(
+            world.find_non_full_pack(container_item_guid, None),
+            Some(player_guid)
+        );
     }
 
     #[test]

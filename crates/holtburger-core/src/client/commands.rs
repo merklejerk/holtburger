@@ -23,7 +23,11 @@ fn normalize_spell_cast(
 ) -> NormalizedSpellCast {
     let player_guid = world.player.guid;
 
-    if let Some(spell) = world.spell_catalog.as_ref().and_then(|catalog| catalog.get(spell_id)) {
+    if let Some(spell) = world
+        .spell_catalog
+        .as_ref()
+        .and_then(|catalog| catalog.get(spell_id))
+    {
         if spell.is_untargeted() {
             return NormalizedSpellCast::Untargeted { spell_id };
         }
@@ -193,9 +197,9 @@ impl Client {
             }
             ClientCommand::QueryHealth(guid) => {
                 log::info!(">>> Querying health for: 0x{:08X}", guid.0);
-                self.send_game_action(GameAction::QueryHealth(Box::new(
-                    QueryHealthActionData { target_guid: guid },
-                )))
+                self.send_game_action(GameAction::QueryHealth(Box::new(QueryHealthActionData {
+                    target_guid: guid,
+                })))
                 .await
             }
             ClientCommand::Use(guid) => {
@@ -224,7 +228,8 @@ impl Client {
                 .await
             }
             ClientCommand::CastTargetedSpell { target, spell_id } => {
-                self.send_normalized_spell_cast(spell_id, Some(target)).await
+                self.send_normalized_spell_cast(spell_id, Some(target))
+                    .await
             }
             ClientCommand::CastUntargetedSpell { spell_id } => {
                 self.send_normalized_spell_cast(spell_id, None).await
@@ -651,7 +656,11 @@ impl Client {
     ) -> Result<()> {
         match normalize_spell_cast(&self.world, spell_id, requested_target) {
             NormalizedSpellCast::Targeted { target, spell_id } => {
-                log::info!(">>> Casting targeted spell {} on 0x{:08X}", spell_id, target.0);
+                log::info!(
+                    ">>> Casting targeted spell {} on 0x{:08X}",
+                    spell_id,
+                    target.0
+                );
                 self.send_game_action(GameAction::CastTargetedSpell(Box::new(
                     CastTargetedSpellActionData { target, spell_id },
                 )))
@@ -856,7 +865,10 @@ mod tests {
 
         let normalized = normalize_spell_cast(&world, 200, Some(player_guid));
 
-        assert_eq!(normalized, NormalizedSpellCast::Untargeted { spell_id: 200 });
+        assert_eq!(
+            normalized,
+            NormalizedSpellCast::Untargeted { spell_id: 200 }
+        );
     }
 
     #[test]
@@ -866,7 +878,10 @@ mod tests {
 
         let normalized = normalize_spell_cast(&world, 300, Some(player_guid));
 
-        assert_eq!(normalized, NormalizedSpellCast::Untargeted { spell_id: 300 });
+        assert_eq!(
+            normalized,
+            NormalizedSpellCast::Untargeted { spell_id: 300 }
+        );
     }
 
     #[test]

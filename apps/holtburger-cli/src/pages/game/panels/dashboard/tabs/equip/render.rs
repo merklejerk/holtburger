@@ -43,7 +43,11 @@ pub fn render_equip_tab(
     let _height = area.height as usize;
 }
 
-fn get_list_items(selected_index: usize, data: &GameData, view: &ViewState) -> Vec<ListItem<'static>> {
+fn get_list_items(
+    selected_index: usize,
+    data: &GameData,
+    view: &ViewState,
+) -> Vec<ListItem<'static>> {
     let lines = get_lines(data);
     let mut list_items = Vec::new();
     let active_subject_guid = active_interaction_subject_guid(view.active_interaction);
@@ -95,10 +99,7 @@ fn get_list_items(selected_index: usize, data: &GameData, view: &ViewState) -> V
                     name_style = name_style.add_modifier(Modifier::BOLD);
                 }
 
-                spans.push(Span::styled(
-                    decorated_name,
-                    name_style,
-                ));
+                spans.push(Span::styled(decorated_name, name_style));
 
                 list_items.push(
                     ListItem::new(Line::from(spans)).style(theme::list_item_style(is_selected)),

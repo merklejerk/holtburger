@@ -434,34 +434,32 @@ impl TabController for InventoryTab {
                 _ => {}
             }
 
-            if class == EntityClass::HealingKit {
-                if let Some(pguid) = player_guid
-                    && data.can_use_with(cur_entity.guid, pguid)
-                {
-                    verbs.push(Verb::new(
-                        vec![AppAction::UseWith {
-                            item: cur_entity.guid,
-                            target: pguid,
-                        }],
-                        'h',
-                        "Heal self",
-                    ));
-                }
+            if class == EntityClass::HealingKit
+                && let Some(pguid) = player_guid
+                && data.can_use_with(cur_entity.guid, pguid)
+            {
+                verbs.push(Verb::new(
+                    vec![AppAction::UseWith {
+                        item: cur_entity.guid,
+                        target: pguid,
+                    }],
+                    'h',
+                    "Heal self",
+                ));
             }
 
-            if class == EntityClass::ManaStone {
-                if let Some(pguid) = player_guid
-                    && data.can_use_with(cur_entity.guid, pguid)
-                {
-                    verbs.push(Verb::new(
-                        vec![AppAction::UseWith {
-                            item: cur_entity.guid,
-                            target: pguid,
-                        }],
-                        'r',
-                        "Recharge all",
-                    ));
-                }
+            if class == EntityClass::ManaStone
+                && let Some(pguid) = player_guid
+                && data.can_use_with(cur_entity.guid, pguid)
+            {
+                verbs.push(Verb::new(
+                    vec![AppAction::UseWith {
+                        item: cur_entity.guid,
+                        target: pguid,
+                    }],
+                    'r',
+                    "Recharge all",
+                ));
             }
 
             if data.can_begin_use_with(cur_entity.guid) {

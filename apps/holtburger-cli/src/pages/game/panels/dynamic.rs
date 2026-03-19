@@ -294,8 +294,8 @@ fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::{
-        TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, combat_controls_line,
-        format_target_line, health_bar_spans, render_dynamic_pane,
+        TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, combat_controls_line, format_target_line,
+        health_bar_spans, render_dynamic_pane,
     };
     use crate::pages::game::combat::{AttackActivity, combat_mode_label};
     use crate::pages::game::{GameData, ViewState};
@@ -304,10 +304,10 @@ mod tests {
     use holtburger_common::position::WorldPosition;
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
     use holtburger_world::entity::Entity;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
     use ratatui::style::Color;
-    use ratatui::Terminal;
 
     #[test]
     fn melee_controls_use_full_labels_and_tiny_indicator() {

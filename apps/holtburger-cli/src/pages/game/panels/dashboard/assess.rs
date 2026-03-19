@@ -230,6 +230,7 @@ pub fn get_assess_info(
         .is_none_or(|t| !t.contains(ItemType::CREATURE))
     {
         let is_player = Some(object.guid) == data.player_guid;
+        let player_storage = is_player.then(|| data.storage_usage(object.guid)).flatten();
 
         // Item Capacity
         if let Some(item_capacity) = assess.item_capacity
@@ -239,7 +240,7 @@ pub fn get_assess_info(
                 Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     if is_player {
-                        format!("{}/{}", data.player_main_pack_item_count(), item_capacity)
+                        format!("{}/{}", player_storage.map(|usage| usage.item_used).unwrap_or(0), item_capacity)
                     } else {
                         item_capacity.to_string()
                     },
@@ -256,7 +257,7 @@ pub fn get_assess_info(
                 Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
                     if is_player {
-                        format!("{}/{}", data.player_container_count(), container_capacity)
+                        format!("{}/{}", player_storage.map(|usage| usage.container_used).unwrap_or(0), container_capacity)
                     } else {
                         container_capacity.to_string()
                     },

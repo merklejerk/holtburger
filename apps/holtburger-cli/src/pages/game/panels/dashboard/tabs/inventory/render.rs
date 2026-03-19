@@ -37,9 +37,8 @@ pub fn render_inventory_tab(
     if let Some(player_guid) = data.player_guid
         && let Some(player_entity) = data.entities.get(&player_guid)
         && let Some(capacity) = player_entity.items_capacity()
+        && let Some(storage_usage) = data.storage_usage(player_guid)
     {
-        let item_count = data.player_main_pack_item_count();
-        let container_count = data.player_container_count();
         let container_capacity = player_entity.containers_capacity().unwrap_or(0);
 
         let chunks = Layout::default()
@@ -51,14 +50,14 @@ pub fn render_inventory_tab(
         bottom_area = chunks[1];
 
         let mut summary_spans = vec![Span::styled(
-            format!("Main Pack ({}/{})", item_count, capacity),
+            format!("Main Pack ({}/{})", storage_usage.item_used, capacity),
             Style::default().fg(theme::SUMMARY_FG),
         )];
 
         if container_capacity > 0 {
             summary_spans.push(Span::raw(" | "));
             summary_spans.push(Span::styled(
-                format!("Packs ({}/{})", container_count, container_capacity),
+                format!("Packs ({}/{})", storage_usage.container_used, container_capacity),
                 Style::default().fg(theme::SUMMARY_FG),
             ));
         }

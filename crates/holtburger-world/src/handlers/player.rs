@@ -256,9 +256,7 @@ pub(crate) fn handle_event(
             true
         }
         GameEvent::UpdateHealth(data) => {
-            state
-                .player
-                .update_health_fraction(data.target, data.health, events)
+            state.update_health_fraction(data.target, data.health, events)
         }
         GameEvent::InventoryPutObjInContainer(data) => {
             if data.container_guid == state.player.guid

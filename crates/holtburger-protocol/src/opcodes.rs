@@ -465,8 +465,9 @@ pub enum GameActionOpcode {
     // RecallAllegianceHometown = 0x02AB,
     // /// C2S: Select an active character title.
     // TitleSet = 0x002C,
-    // /// C2S: Query the current health/vitals of another player.
-    // QueryHealth = 0x01BF,
+    /// C2S: Query the current health of a selected creature or player.
+    /// Also updates the server-side selected target used for follow-up health heartbeats.
+    QueryHealth = 0x01BF,
 
     // --- Fellowship ---
     // /// C2S: Create a new fellowship group.

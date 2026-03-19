@@ -116,6 +116,24 @@ impl ProtocolPack for CancelAttackActionData {
     fn pack(&self, _writer: &mut Vec<u8>) {}
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryHealthActionData {
+    pub target_guid: Guid,
+}
+
+impl ProtocolUnpack for QueryHealthActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let target_guid = Guid::unpack(data, offset)?;
+        Some(Self { target_guid })
+    }
+}
+
+impl ProtocolPack for QueryHealthActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        self.target_guid.pack(writer);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +195,20 @@ mod tests {
         // Hex from ACE: B7010000
         // Prepend sequence: 00000000
         let fixture = hex::decode("00000000B7010000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_query_health_parity() {
+        let action = GameActionMessage {
+            sequence: 0,
+            action: GameAction::QueryHealth(Box::new(QueryHealthActionData {
+                target_guid: Guid(0x80000003),
+            })),
+        };
+
+        // Hex from ACE SyntheticProtocolTests.GenerateCombatActionFixtures.
+        let fixture = hex::decode("00000000BF01000003000080").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 }

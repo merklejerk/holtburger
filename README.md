@@ -1,6 +1,6 @@
 # Holtburger 🍔
 
-Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. It's still early days so it's not particularly useful yet, but stay tuned!
+Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. The TUI client already covers a meaningful set of gameplay, automation, and data-projection workflows, and the stack keeps expanding.
 
 ![tui client screenshot](screenshot.png)
 
@@ -21,7 +21,7 @@ Holtburger is comprised of several specialized crates:
 
 ## Current Capabilities vs Retail Client
 
-Because Holtburger is a lightweight terminal-based client, its feature set focuses on automation, protocol accuracy, and functional gameplay rather than graphical rendering. Here is a high-level matrix of what is currently implemented compared to the classic retail 3D experience:
+Because Holtburger is a terminal-first client, its current feature set emphasizes protocol accuracy, authoritative world tracking, and functional gameplay systems rather than graphical rendering. Here is a high-level matrix of what is implemented today compared to the classic retail 3D experience:
 
 | Feature | Retail Client | Holtburger TUI | Notes |
 | :--- | :---: | :---: | :--- |
@@ -30,14 +30,14 @@ Because Holtburger is a lightweight terminal-based client, its feature set focus
 | **Character Selection** | 🟢 | 🟢 | Login via terminal UI or CLI arguments. |
 | **Character Creation** | 🟢 | 🔴 | Planned for a future update. |
 | **Spatial Radar** | 🟢 | 🟢 | Live positional tracking of nearby entities. |
-| **Movement & Physics** | 🟢 | 🟡 | Basic cell navigation works. Complex collisions and jumping are WIP. |
+| **Movement & Physics** | 🟢 | 🟡 | Turn-to, locomotion primitives, sticky pursuit, and server-driven reposition handling work. Full 3D collision-aware navigation is still future-client territory. |
 | **Chat & Messaging** | 🟢 | 🟢 | Full parsing of chat channels, server messages, and emotes. |
 | **Inventory & Equipping** | 🟢 | 🟢 | Move, stack, split, drop, and equip items. |
 | **Vendors & Trade** | 🟢 | 🟢 | Full merchant interaction including alternate currencies. |
-| **Crafting** | 🟢 | 🟡 | Item combining works, but pre-craft success rate prediction is pending. |
-| **Magic System** | 🟢 | 🟡 | Spellbook parsing, enchantments, and basic casting work. |
-| **Melee & Missile Combat** | 🟢 | 🔴 | Core auto-attack routines and target looping are WIP. |
-| **Scripting / Automation** | 🔴 | 🔴 | Planned via embedded `deno-core` JavaScript integration. |
+| **Crafting** | 🟢 | 🟡 | Item combine flows and salvage preview/execution are implemented. Broader crafting coverage is still incomplete. |
+| **Magic System** | 🟢 | 🟡 | Spell catalog loading, spellbook/enchantment tracking, and targeted or untargeted casting are implemented. In the TUI, this is effectively the ceiling without scripting or a richer frontend. |
+| **Melee & Missile Combat** | 🟢 | 🟡 | Manual targeted melee and missile attacks work, and the TUI can drive shared combat-facing and sticky-melee helpers. This is the practical ceiling for the terminal client unless scripting is introduced. |
+| **Scripting / Automation** | 🔴 | 🟡 | Built-in navigation and combat automation helpers exist today. Embedded scripting remains planned, and that is the main path for pushing combat or spellcasting beyond the current TUI ceiling. |
 
 ## Disclaimers
 

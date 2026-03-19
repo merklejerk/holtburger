@@ -95,6 +95,18 @@ pub struct SpellInfo {
     pub mana_mod: u32,
 }
 
+impl SpellInfo {
+    const SELF_TARGETED_FLAG: u32 = 0x8;
+
+    pub fn is_self_targeted(&self) -> bool {
+        self.bitfield & Self::SELF_TARGETED_FLAG != 0
+    }
+
+    pub fn is_untargeted(&self) -> bool {
+        self.non_component_target_type == 0
+    }
+}
+
 impl From<DatSpellBase> for SpellInfo {
     fn from(value: DatSpellBase) -> Self {
         let components =

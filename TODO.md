@@ -198,10 +198,10 @@
 - [x] Label containers that you have recently opened.
 - [x] Approach can overshoot target and oscillate. Ease out?
 - [x] Show health of creatures in nearby list and dynamic panel.
+- [x] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
-- [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Log in chat when items are bought and sold.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.

@@ -480,7 +480,6 @@ impl GameState {
                     }
                     EnterCombatModeResult::Success(res) => {
                         result.merge(res);
-                        // TODO: Always cast on self for ring spells and never cast on self for wall spells.
                         if let Some(target) = target {
                             result
                                 .commands

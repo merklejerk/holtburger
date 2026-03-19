@@ -48,6 +48,9 @@ pub fn get_debug_info(
             let Some(e) = data.entities.get(&guid) else {
                 return lines;
             };
+            let player_storage = (Some(guid) == data.player_guid)
+                .then(|| data.storage_usage(guid))
+                .flatten();
             lines.push(Line::from(format!("DEBUG INFO: {}", e.name())));
             lines.push(Line::from(format!("GUID:   {:08X}", e.guid)));
             let class = classification::classify_entity(e);
@@ -167,7 +170,7 @@ pub fn get_debug_info(
                     if Some(e.guid) == data.player_guid {
                         lines.push(Line::from(format!(
                             "  ICapacity: {}/{}",
-                            data.player_main_pack_item_count(),
+                            player_storage.map(|usage| usage.item_used).unwrap_or(0),
                             v
                         )));
                     } else {
@@ -178,7 +181,7 @@ pub fn get_debug_info(
                     if Some(e.guid) == data.player_guid {
                         lines.push(Line::from(format!(
                             "  CCapacity: {}/{}",
-                            data.player_container_count(),
+                            player_storage.map(|usage| usage.container_used).unwrap_or(0),
                             v
                         )));
                     } else {
@@ -589,6 +592,10 @@ fn push_object_debug_info(
     object: &InspectableObject<'_>,
     spell_lookup: Option<&SpellCatalog>,
 ) {
+    let player_storage = (Some(object.guid) == data.player_guid)
+        .then(|| data.storage_usage(object.guid))
+        .flatten();
+
     lines.push(Line::from(format!("GUID:   {:08X}", object.guid)));
     lines.push(Line::from(format!("Value:  {}", object.item_value())));
     lines.push(Line::from(format!("WCID:   {:?}", object.wcid)));
@@ -617,7 +624,7 @@ fn push_object_debug_info(
             if Some(object.guid) == data.player_guid {
                 lines.push(Line::from(format!(
                     "  ICapacity: {}/{}",
-                    data.player_main_pack_item_count(),
+                    player_storage.map(|usage| usage.item_used).unwrap_or(0),
                     v
                 )));
             } else {
@@ -628,7 +635,7 @@ fn push_object_debug_info(
             if Some(object.guid) == data.player_guid {
                 lines.push(Line::from(format!(
                     "  CCapacity: {}/{}",
-                    data.player_container_count(),
+                    player_storage.map(|usage| usage.container_used).unwrap_or(0),
                     v
                 )));
             } else {

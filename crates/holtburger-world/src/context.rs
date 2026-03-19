@@ -11,6 +11,28 @@ pub enum CombatTargetStatus {
     DeathMotionObserved,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StorageUsage {
+    pub item_used: u32,
+    pub item_capacity: u32,
+    pub container_used: u32,
+    pub container_capacity: u32,
+}
+
+impl StorageUsage {
+    pub const fn total_used(self) -> u32 {
+        self.item_used + self.container_used
+    }
+
+    pub const fn item_space_left(self) -> u32 {
+        self.item_capacity.saturating_sub(self.item_used)
+    }
+
+    pub const fn container_space_left(self) -> u32 {
+        self.container_capacity.saturating_sub(self.container_used)
+    }
+}
+
 impl CombatTargetStatus {
     pub const fn is_available(self) -> bool {
         matches!(self, Self::Available)
@@ -170,81 +192,44 @@ pub trait WorldContextExt: WorldContext {
     }
 
     fn get_container_count(&self, container_id: Guid) -> u32 {
-        let mut count = 0;
-        for e in self.iter_entities() {
-            if let Some(cid) = e.container_id()
-                && cid == container_id
-            {
-                count += 1;
-            }
-        }
-        count
-    }
-
-    fn player_main_pack_item_count(&self) -> u32 {
-        let Some(player_guid) = self.get_player_guid() else {
-            return 0;
-        };
-
-        let mut count = 0;
-        for entity in self.iter_entities() {
-            if entity.container_id() == Some(player_guid) && !entity.uses_player_container_slot() {
-                count += 1;
-            }
-        }
-        count
-    }
-
-    fn player_container_count(&self) -> u32 {
-        let Some(player_guid) = self.get_player_guid() else {
-            return 0;
-        };
-
-        let mut count = 0;
-        for entity in self.iter_entities() {
-            if entity.container_id() == Some(player_guid) && entity.uses_player_container_slot() {
-                count += 1;
-            }
-        }
-        count
-    }
-
-    fn player_main_pack_space_left(&self) -> u32 {
-        let Some(player_guid) = self.get_player_guid() else {
-            return 0;
-        };
-        let Some(player) = self.get_entity(player_guid) else {
-            return 0;
-        };
-
-        player
-            .items_capacity()
+        self.storage_usage(container_id)
+            .map(StorageUsage::total_used)
             .unwrap_or(0)
-            .saturating_sub(self.player_main_pack_item_count())
     }
 
-    fn player_container_space_left(&self) -> u32 {
-        let Some(player_guid) = self.get_player_guid() else {
-            return 0;
-        };
-        let Some(player) = self.get_entity(player_guid) else {
-            return 0;
+    fn storage_usage(&self, container_id: Guid) -> Option<StorageUsage> {
+        let entity = self.get_entity(container_id)?;
+        let is_player = Some(container_id) == self.get_player_guid();
+
+        let mut usage = StorageUsage {
+            item_capacity: entity.items_capacity().unwrap_or(0),
+            container_capacity: if is_player {
+                entity.containers_capacity().unwrap_or(0)
+            } else {
+                0
+            },
+            ..StorageUsage::default()
         };
 
-        player
-            .containers_capacity()
-            .unwrap_or(0)
-            .saturating_sub(self.player_container_count())
+        for child in self.iter_entities() {
+            if child.container_id() != Some(container_id) {
+                continue;
+            }
+
+            if is_player && child.uses_player_container_slot() {
+                usage.container_used += 1;
+            } else {
+                usage.item_used += 1;
+            }
+        }
+
+        Some(usage)
     }
 
     fn container_space_left(&self, container_id: Guid) -> u32 {
-        let Some(entity) = self.get_entity(container_id) else {
-            return 0;
-        };
-
-        let capacity = entity.items_capacity().unwrap_or(0);
-        let current = self.get_container_count(container_id);
-        capacity.saturating_sub(current)
+        self.storage_usage(container_id)
+            .map(StorageUsage::item_space_left)
+            .unwrap_or(0)
     }
 
     fn container_can_accept_item(&self, container_id: Guid, item_guid: Guid) -> bool {
@@ -253,11 +238,15 @@ pub trait WorldContextExt: WorldContext {
         };
 
         if Some(container_id) == self.get_player_guid() {
+            let Some(usage) = self.storage_usage(container_id) else {
+                return false;
+            };
+
             if item.uses_player_container_slot() {
-                return self.player_container_space_left() > 0;
+                return usage.container_space_left() > 0;
             }
 
-            return self.player_main_pack_space_left() > 0;
+            return usage.item_space_left() > 0;
         }
 
         self.container_space_left(container_id) > 0
@@ -623,10 +612,11 @@ mod tests {
         );
 
         assert_eq!(world.get_container_count(player_guid), 3);
-        assert_eq!(world.player_main_pack_item_count(), 1);
-        assert_eq!(world.player_container_count(), 2);
-        assert_eq!(world.player_main_pack_space_left(), 9);
-        assert_eq!(world.player_container_space_left(), 1);
+        let usage = world.storage_usage(player_guid).expect("player should have storage usage");
+        assert_eq!(usage.item_used, 1);
+        assert_eq!(usage.container_used, 2);
+        assert_eq!(usage.item_space_left(), 9);
+        assert_eq!(usage.container_space_left(), 1);
     }
 
     #[test]

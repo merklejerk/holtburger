@@ -268,6 +268,14 @@ pub trait WorldObjectExt: WorldObjectPropertyAccessors {
         self.get_bool_prop(PropertyBool::Stuck)
     }
 
+    fn requires_backpack_slot(&self) -> bool {
+        self.get_bool_prop(PropertyBool::RequiresBackpackSlot)
+    }
+
+    fn uses_player_container_slot(&self) -> bool {
+        self.requires_backpack_slot() || self.can_hold_items()
+    }
+
     fn is_locked(&self) -> bool {
         self.get_bool_prop(PropertyBool::Locked)
     }

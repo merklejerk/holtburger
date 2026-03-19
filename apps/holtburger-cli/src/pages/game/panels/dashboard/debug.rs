@@ -7,6 +7,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
@@ -41,7 +42,7 @@ pub fn get_debug_info(
             };
             let object = InspectableObject::from_vendor_item(v);
             lines.push(Line::from(format!("ITEM: {}", v.name())));
-            push_object_debug_info(&mut lines, &object, spell_lookup);
+            push_object_debug_info(data, &mut lines, &object, spell_lookup);
         }
         InspectTarget::Entity(guid) => {
             let Some(e) = data.entities.get(&guid) else {
@@ -163,10 +164,26 @@ pub fn get_debug_info(
                     lines.push(Line::from(format!("  Plural:    {}", p)));
                 }
                 if let Some(v) = e.items_capacity() {
-                    lines.push(Line::from(format!("  ICapacity: {}", v)));
+                    if Some(e.guid) == data.player_guid {
+                        lines.push(Line::from(format!(
+                            "  ICapacity: {}/{}",
+                            data.player_main_pack_item_count(),
+                            v
+                        )));
+                    } else {
+                        lines.push(Line::from(format!("  ICapacity: {}", v)));
+                    }
                 }
                 if let Some(v) = e.containers_capacity() {
-                    lines.push(Line::from(format!("  CCapacity: {}", v)));
+                    if Some(e.guid) == data.player_guid {
+                        lines.push(Line::from(format!(
+                            "  CCapacity: {}/{}",
+                            data.player_container_count(),
+                            v
+                        )));
+                    } else {
+                        lines.push(Line::from(format!("  CCapacity: {}", v)));
+                    }
                 }
                 if let Some(v) = e.ammo_type() {
                     lines.push(Line::from(format!("  AmmoType:  {}", v)));
@@ -567,6 +584,7 @@ pub fn get_debug_info(
 }
 
 fn push_object_debug_info(
+    data: &GameData,
     lines: &mut Vec<Line<'static>>,
     object: &InspectableObject<'_>,
     spell_lookup: Option<&SpellCatalog>,
@@ -596,10 +614,26 @@ fn push_object_debug_info(
             lines.push(Line::from(format!("  Plural:    {}", p)));
         }
         if let Some(v) = object.items_capacity() {
-            lines.push(Line::from(format!("  ICapacity: {}", v)));
+            if Some(object.guid) == data.player_guid {
+                lines.push(Line::from(format!(
+                    "  ICapacity: {}/{}",
+                    data.player_main_pack_item_count(),
+                    v
+                )));
+            } else {
+                lines.push(Line::from(format!("  ICapacity: {}", v)));
+            }
         }
         if let Some(v) = object.containers_capacity() {
-            lines.push(Line::from(format!("  CCapacity: {}", v)));
+            if Some(object.guid) == data.player_guid {
+                lines.push(Line::from(format!(
+                    "  CCapacity: {}/{}",
+                    data.player_container_count(),
+                    v
+                )));
+            } else {
+                lines.push(Line::from(format!("  CCapacity: {}", v)));
+            }
         }
         if let Some(v) = object.ammo_type() {
             lines.push(Line::from(format!("  AmmoType:  {}", v)));

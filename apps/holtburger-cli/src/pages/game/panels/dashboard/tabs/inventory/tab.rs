@@ -258,6 +258,23 @@ impl TabController for InventoryTab {
                 ),
             ]);
 
+            verbs.push(
+                Verb::new(
+                    AppAction::UiAction {
+                        action: AppUiAction::BeginTabFilterInput {
+                            tab: DashboardTab::Inventory,
+                        },
+                    },
+                    'f',
+                    "Filter",
+                )
+                .with_footer_visibility(if self.active_filter.is_some() {
+                    FooterVerbVisibility::Hidden
+                } else {
+                    FooterVerbVisibility::Visible
+                }),
+            );
+
             let class = classify_entity(cur_entity);
             let player_guid = data.player_guid;
 
@@ -555,23 +572,6 @@ impl TabController for InventoryTab {
                 ));
             }
         }
-
-        verbs.push(
-            Verb::new(
-                AppAction::UiAction {
-                    action: AppUiAction::BeginTabFilterInput {
-                        tab: DashboardTab::Inventory,
-                    },
-                },
-                'f',
-                "Filter",
-            )
-            .with_footer_visibility(if self.active_filter.is_some() {
-                FooterVerbVisibility::Hidden
-            } else {
-                FooterVerbVisibility::Visible
-            }),
-        );
 
         verbs
     }

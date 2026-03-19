@@ -217,6 +217,23 @@ impl TabController for NearbyTab {
             let e = data.entities.get(&guid).unwrap();
             let class = classification::classify_entity(e);
 
+            verbs.push(
+                Verb::new(
+                    AppAction::UiAction {
+                        action: AppUiAction::BeginTabFilterInput {
+                            tab: DashboardTab::Nearby,
+                        },
+                    },
+                    'f',
+                    "Filter",
+                )
+                .with_footer_visibility(if self.active_filter.is_some() {
+                    FooterVerbVisibility::Hidden
+                } else {
+                    FooterVerbVisibility::Visible
+                }),
+            );
+
             match *interaction {
                 Interaction::Moving { item_guid } => {
                     if e.guid == item_guid {
@@ -384,23 +401,6 @@ impl TabController for NearbyTab {
                 }
             }
         }
-
-        verbs.push(
-            Verb::new(
-                AppAction::UiAction {
-                    action: AppUiAction::BeginTabFilterInput {
-                        tab: DashboardTab::Nearby,
-                    },
-                },
-                'f',
-                "Filter",
-            )
-            .with_footer_visibility(if self.active_filter.is_some() {
-                FooterVerbVisibility::Hidden
-            } else {
-                FooterVerbVisibility::Visible
-            }),
-        );
 
         verbs
     }

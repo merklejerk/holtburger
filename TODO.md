@@ -193,6 +193,7 @@
 - [x] Need a way to cancel approach.
     - Should it just be an interaction?
 - [x] Use o[n] Self verb for mana charges, healing kits.
+- [x] Show charge of mana stones.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -207,7 +208,6 @@
 - [ ] Make target of current interaction bold in dashboard lists?
 - [ ] Label containers that you have recently opened.
 - [ ] Approach can overshoot target and oscillate. Ease out?
-- [ ] Show charge of mana stones.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

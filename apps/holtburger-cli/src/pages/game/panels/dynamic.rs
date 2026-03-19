@@ -2,6 +2,7 @@ use crate::pages::game::combat::{AttackActivity, combat_mode_label};
 use crate::pages::game::{GameData, ViewState};
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::{FocusedPane, Interaction};
+use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_world::crafting::salvage::{SalvagePreviewBag, get_material_name};
@@ -11,6 +12,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
+
+const TARGET_HEALTH_BAR_WIDTH: usize = 12;
 
 pub fn render_dynamic_pane(
     f: &mut Frame,
@@ -119,20 +122,7 @@ pub fn render_dynamic_pane(
             ("Unknown Entity", target_guid.0, None)
         };
 
-        let health_label = health_fraction
-            .map(|value| format!(" {:.0}%", value.clamp(0.0, 1.0) * 100.0))
-            .unwrap_or_default();
-
-        let line = Line::from(vec![
-            Span::raw("  "),
-            Span::styled(
-                format!("{}{}", name, health_label),
-                Style::default()
-                    .add_modifier(Modifier::BOLD)
-                    .fg(Color::Yellow),
-            ),
-            Span::raw(format!(" ({:#010X})", guid)),
-        ]);
+        let line = format_target_line(name, Guid(guid), health_fraction);
 
         f.render_widget(Paragraph::new(line), chunks[0]);
     } else {
@@ -151,6 +141,60 @@ pub fn render_dynamic_pane(
     {
         f.render_widget(Paragraph::new(control_line).right_aligned(), chunks[1]);
     }
+}
+
+fn format_target_line(name: &str, guid: Guid, health_fraction: Option<f32>) -> Line<'static> {
+    let mut spans = vec![
+        Span::raw("  "),
+        Span::styled(
+            name.to_string(),
+            Style::default()
+                .add_modifier(Modifier::BOLD)
+                .fg(Color::Yellow),
+        ),
+        Span::styled(
+            format!(" ({:#010X})", guid.0),
+            Style::default().fg(Color::Gray),
+        ),
+    ];
+
+    if let Some(health_fraction) = health_fraction {
+        spans.push(Span::raw(" "));
+        spans.extend(health_bar_spans(health_fraction));
+    }
+
+    Line::from(spans)
+}
+
+fn health_bar_spans(health_fraction: f32) -> Vec<Span<'static>> {
+    let health_fraction = health_fraction.clamp(0.0, 1.0);
+    let filled_width = (health_fraction * TARGET_HEALTH_BAR_WIDTH as f32).round() as usize;
+    let label = format!("{:>3}%", (health_fraction * 100.0).round() as u32);
+    let label_chars: Vec<char> = label.chars().collect();
+    let label_start = (TARGET_HEALTH_BAR_WIDTH.saturating_sub(label_chars.len())) / 2;
+
+    let mut cells = vec![' '; TARGET_HEALTH_BAR_WIDTH];
+    for (idx, ch) in label_chars.into_iter().enumerate() {
+        if let Some(cell) = cells.get_mut(label_start + idx) {
+            *cell = ch;
+        }
+    }
+
+    let mut spans = Vec::with_capacity(TARGET_HEALTH_BAR_WIDTH + 2);
+    spans.push(Span::styled("[", Style::default().fg(Color::DarkGray)));
+
+    for (idx, ch) in cells.into_iter().enumerate() {
+        let filled = idx < filled_width;
+        let bg = if filled { Color::Green } else { Color::Red };
+        let fg = if filled { Color::Black } else { Color::White };
+        spans.push(Span::styled(
+            ch.to_string(),
+            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    spans.push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+    spans
 }
 
 fn combat_controls_line(data: &GameData, _view: &ViewState) -> Option<Line<'static>> {
@@ -249,7 +293,10 @@ fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
 
 #[cfg(test)]
 mod tests {
-    use super::{attack_indicator_span, combat_controls_line, render_dynamic_pane};
+    use super::{
+        TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, combat_controls_line,
+        format_target_line, health_bar_spans, render_dynamic_pane,
+    };
     use crate::pages::game::combat::{AttackActivity, combat_mode_label};
     use crate::pages::game::{GameData, ViewState};
     use crate::types::Interaction;
@@ -259,6 +306,7 @@ mod tests {
     use holtburger_world::entity::Entity;
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
+    use ratatui::style::Color;
     use ratatui::Terminal;
 
     #[test]
@@ -390,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn targeting_line_shows_target_health_when_available() {
+    fn targeting_line_formats_guid_and_health_bar_when_available() {
         let target_guid = Guid(0x60000001);
         let mut data = GameData::new(
             Default::default(),
@@ -421,6 +469,30 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
 
-        assert!(rendered.contains("Drudge 66%"));
+        assert!(rendered.contains("Drudge (0x60000001)"));
+        assert!(rendered.contains("66%"));
+    }
+
+    #[test]
+    fn target_health_bar_uses_fixed_width_two_color_bar_with_overlay_text() {
+        let spans = health_bar_spans(0.66);
+        let content = spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+
+        assert_eq!(content.len(), TARGET_HEALTH_BAR_WIDTH + 2);
+        assert!(content.starts_with('['));
+        assert!(content.ends_with(']'));
+        assert!(content.contains("66%"));
+        assert!(spans.iter().any(|span| span.style.bg == Some(Color::Green)));
+        assert!(spans.iter().any(|span| span.style.bg == Some(Color::Red)));
+    }
+
+    #[test]
+    fn target_line_places_health_bar_after_name_and_guid() {
+        let line = format_target_line("Drudge", Guid(0x60000001), Some(0.66));
+
+        assert_eq!(line.to_string(), "  Drudge (0x60000001) [     66%    ]");
     }
 }

@@ -603,11 +603,9 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
     let mut state = WorldState::new(None, None);
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(
-        guid,
-        "Drudge".to_string(),
-        WorldPosition::default(),
-    ));
+    let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
+    entity.health_fraction = Some(0.42);
+    state.add_entity(entity);
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -643,12 +641,21 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         snapshot.forward_command,
         Some(InterpretedMotionCommand::DEAD)
     );
+    assert_eq!(
+        state.entities.get(guid).and_then(|entity| entity.health_fraction),
+        Some(0.0)
+    );
     assert!(events.iter().any(|event| matches!(
         event,
         WorldEvent::EntityMotionUpdated { guid: target, snapshot }
             if *target == guid
             && snapshot.as_ref().is_some_and(|snapshot| snapshot.current_style == Some(MotionStance::NonCombat))
             && snapshot.as_ref().is_some_and(|snapshot| snapshot.forward_command == Some(InterpretedMotionCommand::DEAD))
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityReplaced(entity)
+            if entity.guid == guid && entity.health_fraction == Some(0.0)
     )));
 }
 

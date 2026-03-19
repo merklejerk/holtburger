@@ -20,6 +20,7 @@ impl Client {
             }
 
             ClientCommand::Identify(_)
+            | ClientCommand::QueryHealth(_)
             | ClientCommand::Use(_)
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
@@ -150,6 +151,13 @@ impl Client {
                 log::info!(">>> Identifying: 0x{:08X}", guid);
                 self.send_game_action(GameAction::IdentifyObject(Box::new(
                     IdentifyObjectActionData { guid },
+                )))
+                .await
+            }
+            ClientCommand::QueryHealth(guid) => {
+                log::info!(">>> Querying health for: 0x{:08X}", guid.0);
+                self.send_game_action(GameAction::QueryHealth(Box::new(
+                    QueryHealthActionData { target_guid: guid },
                 )))
                 .await
             }

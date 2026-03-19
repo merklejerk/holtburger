@@ -113,16 +113,20 @@ pub fn render_dynamic_pane(
             Interaction::Salvaging => unreachable!(),
         };
 
-        let (name, guid) = if let Some(entity) = data.entities.get(&target_guid) {
-            (entity.name(), entity.guid.0)
+        let (name, guid, health_fraction) = if let Some(entity) = data.entities.get(&target_guid) {
+            (entity.name(), entity.guid.0, entity.health_fraction)
         } else {
-            ("Unknown Entity", target_guid.0)
+            ("Unknown Entity", target_guid.0, None)
         };
+
+        let health_label = health_fraction
+            .map(|value| format!(" {:.0}%", value.clamp(0.0, 1.0) * 100.0))
+            .unwrap_or_default();
 
         let line = Line::from(vec![
             Span::raw("  "),
             Span::styled(
-                name,
+                format!("{}{}", name, health_label),
                 Style::default()
                     .add_modifier(Modifier::BOLD)
                     .fg(Color::Yellow),
@@ -245,11 +249,17 @@ fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
 
 #[cfg(test)]
 mod tests {
-    use super::{attack_indicator_span, combat_controls_line};
+    use super::{attack_indicator_span, combat_controls_line, render_dynamic_pane};
     use crate::pages::game::combat::{AttackActivity, combat_mode_label};
     use crate::pages::game::{GameData, ViewState};
     use crate::types::Interaction;
+    use holtburger_common::Guid;
+    use holtburger_common::position::WorldPosition;
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
+    use holtburger_world::entity::Entity;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::Terminal;
 
     #[test]
     fn melee_controls_use_full_labels_and_tiny_indicator() {
@@ -377,5 +387,40 @@ mod tests {
     #[test]
     fn combat_mode_title_uses_peace_label() {
         assert_eq!(combat_mode_label(CombatMode::NonCombat), "🕊️ PEACE");
+    }
+
+    #[test]
+    fn targeting_line_shows_target_health_when_available() {
+        let target_guid = Guid(0x60000001);
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
+        let mut entity = Entity::new(target_guid, "Drudge".to_string(), WorldPosition::default());
+        entity.health_fraction = Some(0.66);
+        data.entities.insert(target_guid, entity);
+
+        let view = ViewState {
+            active_interaction: Some(Interaction::Targeting { target_guid }),
+            ..ViewState::default()
+        };
+
+        let area = Rect::new(0, 0, 80, 3);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_dynamic_pane(frame, &data, &view, "acct", area))
+            .expect("dynamic pane should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Drudge 66%"));
     }
 }

@@ -194,6 +194,46 @@ impl WorldState {
         }
     }
 
+    pub(crate) fn update_health_fraction(
+        &mut self,
+        guid: Guid,
+        health_fraction: f32,
+        events: &mut Vec<WorldEvent>,
+    ) -> bool {
+        if guid == Guid::NULL || !health_fraction.is_finite() {
+            return false;
+        }
+
+        let health_fraction = health_fraction.clamp(0.0, 1.0);
+        let mut updated = false;
+
+        if guid == self.player.guid
+            && let Some(vital_obj) = self.player.vitals.get_mut(&crate::stats::VitalType::Health)
+        {
+            let new_current = (health_fraction * vital_obj.buffed_max as f32) as u32;
+            if vital_obj.current != new_current {
+                vital_obj.current = new_current;
+                events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
+                updated = true;
+            }
+        }
+
+        let mut replaced_entity = None;
+        if let Some(entity) = self.entities.get_mut(guid)
+            && entity.health_fraction != Some(health_fraction)
+        {
+            entity.health_fraction = Some(health_fraction);
+            replaced_entity = Some(entity.clone());
+            updated = true;
+        }
+
+        if let Some(entity) = replaced_entity {
+            events.push(WorldEvent::EntityReplaced(Box::new(entity)));
+        }
+
+        updated
+    }
+
     pub(crate) fn set_entity_rotation(
         &mut self,
         guid: Guid,

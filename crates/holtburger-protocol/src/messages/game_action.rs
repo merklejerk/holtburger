@@ -40,6 +40,7 @@ pub enum GameAction {
     NoLongerViewingContents(Box<NoLongerViewingContentsActionData>),
     UseWithTarget(Box<UseWithTargetActionData>),
     IdentifyObject(Box<IdentifyObjectActionData>),
+    QueryHealth(Box<QueryHealthActionData>),
     LoginComplete(Box<LoginCompleteActionData>),
     RaiseAttribute(Box<RaiseAttributeActionData>),
     RaiseVital(Box<RaiseVitalActionData>),
@@ -136,6 +137,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::IdentifyObject => GameAction::IdentifyObject(Box::new(
                     IdentifyObjectActionData::unpack(data, offset)?,
                 )),
+                GameActionOpcode::QueryHealth => {
+                    GameAction::QueryHealth(Box::new(QueryHealthActionData::unpack(data, offset)?))
+                }
                 GameActionOpcode::LoginComplete => GameAction::LoginComplete(Box::new(
                     LoginCompleteActionData::unpack(data, offset)?,
                 )),
@@ -310,6 +314,11 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::QueryHealth(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::QueryHealth as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::LoginComplete(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::LoginComplete as u32)
                     .unwrap();
@@ -469,6 +478,12 @@ mod tests {
     #[test]
     fn test_action_identify_parity() {
         assert_action_parity(test_fixtures::ACTION_IDENTIFY, 7);
+    }
+
+    #[test]
+    fn test_action_query_health_parity() {
+        let fixture = hex::decode("B1F7000009000000BF01000003000080").unwrap();
+        assert_action_parity(&fixture, 9);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use super::super::classification::{classify_entity, get_entity_color};
 use super::tab::InventoryTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
-use crate::utils::format_item_name;
+use crate::utils::{active_interaction_subject_guid, format_item_name};
 use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, WorldObjectExt as _};
 use holtburger_world::context::WorldContextExt;
@@ -94,6 +94,7 @@ fn get_list_items(
     selected_index: usize,
 ) -> Vec<ListItem<'static>> {
     let mut list_items = Vec::new();
+    let active_subject_guid = active_interaction_subject_guid(view.active_interaction);
 
     let equipment = &data.equipment;
 
@@ -118,6 +119,7 @@ fn get_list_items(
             is_equipped,
             is_offered,
             is_salvaging,
+            active_subject_guid == Some(e.guid),
             container_count,
         ));
     }
@@ -133,6 +135,7 @@ fn render_inventory_item(
     is_equipped: bool,
     is_offered: bool,
     is_salvaging: bool,
+    is_active_subject: bool,
     container_count: Option<u32>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
@@ -141,6 +144,9 @@ fn render_inventory_item(
 
     let mut text_style = Style::default().fg(color);
     if is_equipped || is_offered {
+        text_style = text_style.add_modifier(Modifier::ITALIC);
+    }
+    if is_active_subject {
         text_style = text_style.add_modifier(Modifier::BOLD);
     }
 
@@ -156,6 +162,10 @@ fn render_inventory_item(
         display_name_with_status = format!("{} (OFFERED)", display_name_with_status);
     } else if is_salvaging {
         display_name_with_status = format!("{} (SALVAGING)", display_name_with_status);
+    }
+
+    if is_active_subject {
+        display_name_with_status = format!(">> {} <<", display_name_with_status);
     }
 
     if !class.is_creature() {

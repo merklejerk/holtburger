@@ -1,5 +1,5 @@
 use crate::pages::game::combat::CombatRuntimeState;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
@@ -16,6 +16,8 @@ use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
 use std::sync::Arc;
+
+const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CombatProfileLevel {
@@ -122,6 +124,9 @@ pub struct GameData {
     pub trade: Option<holtburger_world::state::TradeState>,
     /// Currently open containers in the world.
     pub open_containers: HashSet<Guid>,
+    /// Recently opened world containers retained for nearby-tab labeling.
+    opened_container_history: VecDeque<Guid>,
+    opened_container_history_set: HashSet<Guid>,
 }
 
 impl Default for GameData {
@@ -151,6 +156,8 @@ impl Default for GameData {
             equipment: HashMap::new(),
             trade: None,
             open_containers: HashSet::new(),
+            opened_container_history: VecDeque::new(),
+            opened_container_history_set: HashSet::new(),
         }
     }
 }
@@ -265,6 +272,71 @@ impl GameData {
         self.spell_name(spell_id)
             .map(str::to_string)
             .unwrap_or_else(|| format!("Spell #{}", spell_id))
+    }
+
+    pub fn track_container_opened(&mut self, guid: Guid) {
+        self.open_containers.insert(guid);
+
+        if self.opened_container_history_set.contains(&guid) {
+            self.opened_container_history.retain(|existing| *existing != guid);
+        } else {
+            self.opened_container_history_set.insert(guid);
+        }
+
+        self.opened_container_history.push_back(guid);
+
+        while self.opened_container_history.len() > OPENED_CONTAINER_HISTORY_LIMIT {
+            if let Some(evicted) = self.opened_container_history.pop_front() {
+                self.opened_container_history_set.remove(&evicted);
+            }
+        }
+    }
+
+    pub fn track_container_closed(&mut self, guid: Guid) {
+        self.open_containers.remove(&guid);
+    }
+
+    pub fn has_opened_container_before(&self, guid: Guid) -> bool {
+        self.opened_container_history_set.contains(&guid)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GameData, OPENED_CONTAINER_HISTORY_LIMIT};
+    use holtburger_common::Guid;
+
+    #[test]
+    fn opened_container_history_is_bounded() {
+        let mut data = GameData::default();
+
+        for raw in 1..=(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1) {
+            data.track_container_opened(Guid(raw));
+        }
+
+        assert!(!data.has_opened_container_before(Guid(1)));
+        assert!(data.has_opened_container_before(Guid(2)));
+        assert!(data.has_opened_container_before(Guid(
+            OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1,
+        )));
+    }
+
+    #[test]
+    fn reopening_container_refreshes_history_entry() {
+        let mut data = GameData::default();
+        let first = Guid(1);
+
+        data.track_container_opened(first);
+
+        for raw in 2..=(OPENED_CONTAINER_HISTORY_LIMIT as u32) {
+            data.track_container_opened(Guid(raw));
+        }
+
+        data.track_container_opened(first);
+        data.track_container_opened(Guid(OPENED_CONTAINER_HISTORY_LIMIT as u32 + 1));
+
+        assert!(data.has_opened_container_before(first));
+        assert!(!data.has_opened_container_before(Guid(2)));
     }
 }
 

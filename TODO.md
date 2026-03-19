@@ -194,6 +194,9 @@
     - Should it just be an interaction?
 - [x] Use o[n] Self verb for mana charges, healing kits.
 - [x] Show charge of mana stones.
+- [x] Make target of current interaction bold in dashboard lists?
+- [x] Label containers that you have recently opened.
+- [x] Approach can overshoot target and oscillate. Ease out?
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -205,9 +208,6 @@
 - [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] Make target of current interaction bold in dashboard lists?
-- [ ] Label containers that you have recently opened.
-- [ ] Approach can overshoot target and oscillate. Ease out?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

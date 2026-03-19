@@ -5,9 +5,10 @@ use ratatui::widgets::{List, ListItem};
 
 use super::super::classification::{classify_entity, get_entity_color};
 use super::tab::NearbyTab;
+use crate::pages::game::panels::dashboard::tabs::classification::EntityClass;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
-use crate::utils::format_item_name;
+use crate::utils::{active_interaction_subject_guid, format_item_name};
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
@@ -16,7 +17,7 @@ pub fn render_nearby_tab(
     tab: &mut NearbyTab,
     f: &mut Frame,
     data: &GameData,
-    _view: &ViewState,
+    view: &ViewState,
     area: Rect,
 ) {
     let entities = tab.visible_entities(data);
@@ -27,7 +28,7 @@ pub fn render_nearby_tab(
         tab.selected_index.min(content_len - 1)
     };
 
-    let items = get_list_items(data, entities, selected_index);
+    let items = get_list_items(data, view, entities, selected_index);
 
     let _height = area.height as usize;
 
@@ -45,11 +46,13 @@ pub fn render_nearby_tab(
 
 fn get_list_items(
     data: &GameData,
+    view: &ViewState,
     entities: Vec<(&Entity, f32, usize)>,
     selected_index: usize,
 ) -> Vec<ListItem<'static>> {
     let container_counts = data.get_container_counts();
     let mut list_items = Vec::new();
+    let active_subject_guid = active_interaction_subject_guid(view.active_interaction);
 
     for (i, (e, dist, depth)) in entities.iter().enumerate() {
         let container_count = container_counts.get(&e.guid).cloned();
@@ -64,6 +67,8 @@ fn get_list_items(
             i == selected_index,
             container_count,
             data.open_containers.contains(&e.guid),
+            data.has_opened_container_before(e.guid),
+            active_subject_guid == Some(e.guid),
         ));
     }
 
@@ -78,6 +83,8 @@ fn render_nearby_item(
     highlight: bool,
     container_count: Option<u32>,
     is_open: bool,
+    was_opened_before: bool,
+    is_active_subject: bool,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
     let color = get_entity_color(class);
@@ -88,6 +95,10 @@ fn render_nearby_item(
     let type_marker = class.emoji();
 
     let mut display_name = format_item_name(e, e.guid);
+
+    if is_active_subject {
+        display_name = format!(">> {} <<", display_name);
+    }
 
     if e.is_locked() {
         display_name = format!("{} [Locked]", display_name);
@@ -102,6 +113,11 @@ fn render_nearby_item(
         } else if let Some(count) = container_count.filter(|&c| c > 0) {
             display_name = format!("{} ({})", display_name, count);
         }
+    } else if was_opened_before
+        && matches!(class, EntityClass::Container | EntityClass::Chest)
+        && depth == 0
+    {
+        display_name = format!("{} (👀)", display_name);
     }
 
     let indent = "  ".repeat(depth);

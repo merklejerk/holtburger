@@ -234,10 +234,10 @@ impl GameState {
                 result.merge(self.handle_navigation_event(event));
             }
             ClientViewEvent::ContainerOpened { guid } => {
-                self.data.open_containers.insert(guid);
+                self.data.track_container_opened(guid);
             }
             ClientViewEvent::ContainerClosed { guid } => {
-                self.data.open_containers.remove(&guid);
+                self.data.track_container_closed(guid);
             }
             _ => {}
         }

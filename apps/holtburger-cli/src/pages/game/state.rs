@@ -544,7 +544,9 @@ impl GameState {
                 item: guid,
                 container: preferred_container_id,
             } => {
-                if let Some(container_id) = self.data.find_non_full_pack(guid, preferred_container_id) {
+                if let Some(container_id) =
+                    self.data.find_non_full_pack(guid, preferred_container_id)
+                {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
                         container: container_id,
@@ -843,7 +845,9 @@ impl GameState {
         }
 
         match next_target {
-            Some(target_guid) => result.commands.push(ClientCommand::QueryHealth(target_guid)),
+            Some(target_guid) => result
+                .commands
+                .push(ClientCommand::QueryHealth(target_guid)),
             None if previous_target.is_some() => {
                 result.commands.push(ClientCommand::QueryHealth(Guid::NULL))
             }

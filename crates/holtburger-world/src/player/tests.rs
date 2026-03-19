@@ -642,7 +642,10 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         Some(InterpretedMotionCommand::DEAD)
     );
     assert_eq!(
-        state.entities.get(guid).and_then(|entity| entity.health_fraction),
+        state
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.health_fraction),
         Some(0.0)
     );
     assert!(events.iter().any(|event| matches!(

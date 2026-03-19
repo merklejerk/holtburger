@@ -468,7 +468,6 @@ pub enum GameActionOpcode {
     /// C2S: Query the current health of a selected creature or player.
     /// Also updates the server-side selected target used for follow-up health heartbeats.
     QueryHealth = 0x01BF,
-
     // --- Fellowship ---
     // /// C2S: Create a new fellowship group.
     // FellowshipCreate = 0x00A2,

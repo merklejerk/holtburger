@@ -57,7 +57,10 @@ pub fn render_inventory_tab(
         if container_capacity > 0 {
             summary_spans.push(Span::raw(" | "));
             summary_spans.push(Span::styled(
-                format!("Packs ({}/{})", storage_usage.container_used, container_capacity),
+                format!(
+                    "Packs ({}/{})",
+                    storage_usage.container_used, container_capacity
+                ),
                 Style::default().fg(theme::SUMMARY_FG),
             ));
         }

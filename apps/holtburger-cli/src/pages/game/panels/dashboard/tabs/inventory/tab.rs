@@ -263,27 +263,6 @@ impl TabController for InventoryTab {
 
             if let Some(active_interaction) = interaction {
                 match active_interaction {
-                    Interaction::Healing {
-                        item_guid: interact_guid,
-                    } => {
-                        if cur_entity.guid == *interact_guid
-                            && let Some(pguid) = player_guid
-                            && data.can_use_with(*interact_guid, pguid)
-                        {
-                            verbs.push(Verb::new(
-                                vec![
-                                    AppAction::UseWith {
-                                        item: *interact_guid,
-                                        target: pguid,
-                                    },
-                                    AppAction::CancelInteraction,
-                                ],
-                                '\r',
-                                "Heal yourself",
-                            ));
-                        }
-                        return verbs;
-                    }
                     Interaction::Combining {
                         item_guid: interact_guid,
                     } => {
@@ -435,40 +414,57 @@ impl TabController for InventoryTab {
                         "Target",
                     ));
                 }
-                EntityClass::HealingKit => {
-                    if data.can_begin_use_with(cur_entity.guid) {
-                        verbs.push(Verb::new(
-                            vec![AppAction::BeginInteraction {
-                                interaction: Interaction::Healing {
-                                    item_guid: cur_entity.guid,
-                                },
-                            }],
-                            'h',
-                            "Heal",
-                        ));
-                    }
+                _ => {}
+            }
+
+            if class == EntityClass::HealingKit {
+                if let Some(pguid) = player_guid
+                    && data.can_use_with(cur_entity.guid, pguid)
+                {
+                    verbs.push(Verb::new(
+                        vec![AppAction::UseWith {
+                            item: cur_entity.guid,
+                            target: pguid,
+                        }],
+                        'h',
+                        "Heal self",
+                    ));
                 }
-                _ => {
-                    if data.can_begin_use_with(cur_entity.guid) {
-                        verbs.push(Verb::new(
-                            vec![AppAction::BeginInteraction {
-                                interaction: Interaction::Combining {
-                                    item_guid: cur_entity.guid,
-                                },
-                            }],
-                            'c',
-                            "Combine",
-                        ));
-                    } else if data.can_use(cur_entity.guid) {
-                        verbs.push(Verb::new(
-                            vec![AppAction::Use {
-                                guid: cur_entity.guid,
-                            }],
-                            'u',
-                            "Use",
-                        ));
-                    }
+            }
+
+            if class == EntityClass::ManaStone {
+                if let Some(pguid) = player_guid
+                    && data.can_use_with(cur_entity.guid, pguid)
+                {
+                    verbs.push(Verb::new(
+                        vec![AppAction::UseWith {
+                            item: cur_entity.guid,
+                            target: pguid,
+                        }],
+                        'r',
+                        "Recharge all",
+                    ));
                 }
+            }
+
+            if data.can_begin_use_with(cur_entity.guid) {
+                verbs.push(Verb::new(
+                    vec![AppAction::BeginInteraction {
+                        interaction: Interaction::Combining {
+                            item_guid: cur_entity.guid,
+                        },
+                    }],
+                    'c',
+                    "Combine",
+                ));
+            } else if data.can_use(cur_entity.guid) {
+                verbs.push(Verb::new(
+                    vec![AppAction::Use {
+                        guid: cur_entity.guid,
+                    }],
+                    'u',
+                    "Use",
+                ));
             }
 
             if data.find_salvage_tool_guid().is_some() && data.is_salvage_candidate(cur_entity.guid)

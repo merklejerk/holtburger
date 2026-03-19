@@ -40,7 +40,6 @@ pub fn render_dynamic_pane(
             match interaction {
                 Interaction::Targeting { .. } => "Targeting",
                 Interaction::Approaching { .. } => "Approaching",
-                Interaction::Healing { .. } => "Healing",
                 Interaction::Moving { .. } => "Moving",
                 Interaction::Combining { .. } => "Combining",
                 Interaction::Salvaging => "Salvaging",
@@ -108,7 +107,6 @@ pub fn render_dynamic_pane(
 
         let target_guid = match interaction {
             Interaction::Moving { item_guid } => item_guid,
-            Interaction::Healing { item_guid } => item_guid,
             Interaction::Targeting { target_guid } => target_guid,
             Interaction::Approaching { target_guid } => target_guid,
             Interaction::Combining { item_guid } => item_guid,

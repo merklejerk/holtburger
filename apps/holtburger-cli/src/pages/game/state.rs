@@ -843,7 +843,6 @@ impl GameState {
                 Some(Interaction::Targeting { .. }),
                 None
                 | Some(Interaction::Moving { .. })
-                | Some(Interaction::Healing { .. })
                 | Some(Interaction::Approaching { .. })
                 | Some(Interaction::Combining { .. })
                 | Some(Interaction::Salvaging),
@@ -865,7 +864,6 @@ impl GameState {
             ),
             (
                 None | Some(Interaction::Moving { .. })
-                    | Some(Interaction::Healing { .. })
                     | Some(Interaction::Approaching { .. })
                     | Some(Interaction::Combining { .. })
                     | Some(Interaction::Salvaging)

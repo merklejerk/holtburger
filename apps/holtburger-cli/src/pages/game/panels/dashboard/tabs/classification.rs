@@ -22,6 +22,7 @@ pub enum EntityClass {
     Key,        // Keys, Lockpicks
     Writable,   // Books, Scrolls
     HealingKit,
+    ManaStone,
     Door,
     Portal,
     LifeStone,
@@ -55,6 +56,7 @@ impl EntityClass {
             EntityClass::Tool => "🔧",
             EntityClass::StaticObject => "🪧",
             EntityClass::HealingKit => "🩹",
+            EntityClass::ManaStone => "🔋",
             EntityClass::Unknown => "❓",
         }
     }
@@ -81,6 +83,7 @@ impl EntityClass {
             EntityClass::Tool => "Tool",
             EntityClass::StaticObject => "Static",
             EntityClass::HealingKit => "Healing Kit",
+            EntityClass::ManaStone => "Mana Stone",
             EntityClass::Unknown => "?",
         }
     }
@@ -101,6 +104,7 @@ pub fn get_entity_color(class: EntityClass) -> Color {
         EntityClass::Monster => Color::Red,
         EntityClass::Container | EntityClass::Chest => Color::White,
         EntityClass::LifeStone => Color::Blue,
+        EntityClass::ManaStone => Color::Cyan,
         EntityClass::Portal => Color::LightMagenta,
         EntityClass::Door | EntityClass::StaticObject => Color::White,
         EntityClass::Unknown => Color::DarkGray,
@@ -195,11 +199,12 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
             refined_class = Some(EntityClass::Portal);
         } else if it.intersects(ItemType::LIFE_STONE) {
             refined_class = Some(EntityClass::LifeStone);
+        } else if it.intersects(ItemType::MANA_STONE) {
+            refined_class = Some(EntityClass::ManaStone);
         } else if it.intersects(
             ItemType::FOOD
                 | ItemType::GEM
                 | ItemType::SPELL_COMPONENTS
-                | ItemType::MANA_STONE
                 | ItemType::CRAFT_COOKING_BASE
                 | ItemType::CRAFT_ALCHEMY_BASE
                 | ItemType::CRAFT_FLETCHING_BASE

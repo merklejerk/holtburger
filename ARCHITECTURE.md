@@ -1,15 +1,15 @@
 # Holtburger Architecture Overview 🍔
 
-Welcome to the root architecture guide for the Holtburger project. This document illustrates how all the individual crates within the workspace tie together to form a cohesive, high-performance Asheron's Call client. 
+Welcome to the root architecture guide for the Holtburger project. This document explains how the workspace crates fit together to form a cohesive Asheron's Call client stack today, while still leaving room for a future full 3D client.
 
 ## Architectural Philosophy
 
-Holtburger is designed around **strict decoupling**. The network protocol is isolated from game state, game state is isolated from the application engine, and the user interface is completely decoupled from everything, acting purely as a consumer of delta streams. 
+Holtburger is designed around **deliberate crate boundaries**. The wire protocol stays separate from world authority, the world model stays separate from transport, and the frontend talks to the engine through commands, queries, and semantic event streams instead of reaching into hidden engine state.
 
 By separating concerns into discrete library crates, we achieve:
-1. **Purity**: Networking components don't know about game entities; protocol parsers don't know about UI state.
-2. **Performance**: Heavy tasks (like UDP chunk reassembly or `DAT` file extraction) are separated from the main coordination and rendering threads.
-3. **Ergonomics**: Consumers (like the CLI/TUI) never have to manage lock contention on the world state. They receive a clean stream of semantic delta events.
+1. **Coherent ownership**: `session` owns transport, `world` owns authoritative gameplay state, and `core` owns orchestration plus reusable client behavior.
+2. **Performance**: Heavy tasks such as UDP chunk reassembly, DAT access, and world mutation stay off the rendering path.
+3. **Ergonomics**: Frontends consume `ClientViewEvent`s and pure world-query helpers, so they can keep local projection state without needing shared mutable access to engine internals.
 
 ---
 
@@ -68,22 +68,22 @@ Encapsulates pure networking logic. It handles the lowest levels of transport wi
 - **Provides**: UDP fragment reassembly, packet sequencing, RC4 stream encryption/decryption, and socket loops.
 
 ### 5. The Authority: [`holtburger-world`](crates/holtburger-world/ARCHITECTURE.md)
-The authoritative data graph for the client. Isolated from the orchestration loop, it tracks the live state of the 3D world, entity locations, and physics securely in memory.
-- **Provides**: `WorldState`, `EntityManager`, Spatial Scenes, and stateless Rule Engines.
+The authoritative in-memory world model for the client. It tracks hydrated entities, player state, spatial placement, retention/liveness rules, trade or vendor state, and world-domain helpers that other crates can query without re-deriving gameplay semantics.
+- **Provides**: `WorldState`, `PlayerState`, entity hydration, spatial and retention helpers, trade or vendor state, and world query surfaces.
 
 ### 6. The Brain: [`holtburger-core`](crates/holtburger-core/ARCHITECTURE.md)
-The primary engine orchestrator. It ties the networking (`session`) and data tracking (`world`) together. 
-- **Provides**: Handshake coordination, client movement prediction, and translates raw inbound protocol `WireEvent`s into safe `ClientViewEvent` delta streams for applications to consume.
+The primary engine orchestrator. It ties networking (`session`) and authority (`world`) together, executes movement and interaction primitives, and projects raw protocol plus world changes into frontend-safe semantic events.
+- **Provides**: Handshake coordination, primitive movement execution and prediction, protocol-to-world orchestration, optional reusable controllers, and `ClientViewEvent` streams for applications to consume.
 
 ### 7. The Frontend: [`holtburger-cli`](apps/holtburger-cli/ARCHITECTURE.md)
-A high-performance Terminal User Interface (TUI). Because of the architecture, this crate is astonishingly lightweight.
-- **Provides**: Real-time ratatui screens, responsive UI layouts, and asynchronous local projection caches built purely from the Core's delta events.
+The current interactive frontend. It is a terminal UI built on ratatui that consumes `ClientViewEvent`s, maintains local projection state for rendering, and owns frontend-specific control policy such as when to drive optional navigation or combat helpers.
+- **Provides**: Real-time ratatui screens, input mapping, local projection and modal state, and frontend orchestration around shared core controllers.
 
 ---
 
 ## System Data Flow
 
-The architecture solves the classic "massive monolithic state" problem by employing an authoritative center mapping to semantic deltas. Here is the life of a packet:
+The architecture avoids a single frontend-owned monolith by keeping authority in `world`, orchestration in `core`, and presentation or control policy in the app. Here is the life of a packet:
 
 ```mermaid
 sequenceDiagram
@@ -103,12 +103,12 @@ sequenceDiagram
     Core->>World: Issue Mutation Command (e.g., spawn, update vitals)
     World->>Core: Emit StateEvent (Authority Updated)
     
-    Core->>UI: Broadcast ClientViewEvent (Granular Delta)
-    UI->>UI: Mutate AppState Component in-place & Redraw
+    Core->>UI: Broadcast ClientViewEvent (Semantic Delta)
+    UI->>UI: Update Local Projection / Controller State / Redraw
 ```
 
 1. **Networking (`session`)** tracks sequence numbers and decrypts data.
 2. **Parser (`protocol`)** turns data into Rust struct representations.
-3. **Engine (`core`)** checks the rules and requests `world` to update the actual ground-truth layout of the environment.
-4. **Authority (`world`)** updates its maps/trees and tells the engine what changed.
-5. **App (`cli`)** receives a lightweight delta-update (e.g. `PropertyUpdated { guid, new_value }`) and updates its local screen instantly without needing lock access to the main thread's World State.
+3. **Engine (`core`)** coordinates protocol handling, movement execution, and world mutation requests.
+4. **Authority (`world`)** applies the mutation, preserves world invariants, and tells the engine what observably changed.
+5. **App (`cli`)** receives semantic deltas, updates its local projection, and may feed optional shared controllers with world-derived inputs before issuing new commands.

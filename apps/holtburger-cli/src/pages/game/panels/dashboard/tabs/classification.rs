@@ -46,7 +46,7 @@ impl EntityClass {
             EntityClass::Container => "💼",
             EntityClass::Item => "📦️",
             EntityClass::Consumable => "🍗",
-            EntityClass::Money => "💰",
+            EntityClass::Money => "💲",
             EntityClass::Key => "🔑",
             EntityClass::Writable => "📖",
             EntityClass::Door => "🚪",
@@ -108,6 +108,7 @@ pub fn get_entity_color(class: EntityClass) -> Color {
         EntityClass::Portal => Color::LightMagenta,
         EntityClass::Door | EntityClass::StaticObject => Color::White,
         EntityClass::Unknown => Color::DarkGray,
+        EntityClass::HealingKit => Color::LightMagenta,
         _ => Color::White,
     }
 }
@@ -156,6 +157,7 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
     }
     let is_stuck = flags.intersects(ObjectDescriptionFlag::STUCK);
     let is_attackable = flags.intersects(ObjectDescriptionFlag::ATTACKABLE);
+    let is_food = flags.intersects(ObjectDescriptionFlag::FOOD);
     let is_container = if let Some(it) = item_type {
         it.intersects(ItemType::CONTAINER)
     } else {
@@ -201,7 +203,7 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
             refined_class = Some(EntityClass::LifeStone);
         } else if it.intersects(ItemType::MANA_STONE) {
             refined_class = Some(EntityClass::ManaStone);
-        } else if it.intersects(
+        } else if is_food || it.intersects(
             ItemType::FOOD
                 | ItemType::GEM
                 | ItemType::SPELL_COMPONENTS

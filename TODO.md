@@ -74,7 +74,7 @@
 - [x] Resolve Spellbook entries in debug info.
 - [x] Additive resist buffs make the final derived resistance LOWER? ResistBludgeon goes from 1.0 to 0.67 when `Bludgeon Shield` (+0.67) is applied. Is the base resistance supposed to be 0?
 - [x] Search/filter on list tabs. (Plan: [docs/plans/dashboard-tab-filter-plan.md](docs/plans/dashboard-tab-filter-plan.md))
-- [ ] Approach verb is janky.
+- [x] Approach verb is janky.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
@@ -192,6 +192,7 @@
 - [x] Don't auto-attack targets too far away or marked for deletion.
 - [x] Need a way to cancel approach.
     - Should it just be an interaction?
+- [x] Use o[n] Self verb for mana charges, healing kits.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -206,7 +207,7 @@
 - [ ] Make target of current interaction bold in dashboard lists?
 - [ ] Label containers that you have recently opened.
 - [ ] Approach can overshoot target and oscillate. Ease out?
-- [ ] Use o[n] Self verb for mana charges, healing kits.
+- [ ] Show charge of mana stones.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

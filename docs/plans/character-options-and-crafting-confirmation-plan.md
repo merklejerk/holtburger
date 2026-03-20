@@ -243,10 +243,12 @@ Rationale:
 
 ## Phase 2: Player Option State Retention in holtburger-world (Complexity: Medium)
 
+**Status:** Completed on 2026-03-20.
+
 **Deliverables**
 - Extend `PlayerState` to retain player option bitfields and related option payloads already present in `PlayerDescriptionEventData`.
 - Update player bootstrap hydration so those fields are copied into world state.
-- Add typed helper methods for reading curated option values from retained state.
+- Add typed helper methods for reading and updating `CharacterOption` values from retained state.
 
 Notes:
 - `hotbar_spells` are already retained today.
@@ -261,7 +263,13 @@ Notes:
 - `PlayerDescription` hydration retains `options1`, `options2`, `spellbook_filters`, `desired_comps`, and `gameplay_options`.
 - `options1` and `options2` are represented as `bitflags!` types, not raw `u32`.
 - World-state unit tests prove those fields survive bootstrap hydration.
-- Curated option read helpers produce the expected values from bitfields.
+- Typed option helpers produce the expected values from both retained masks.
+
+**Phase 2 Outcome**
+- Extended `PlayerState` to retain `options1`, `options2`, `desired_comps`, `spellbook_filters`, and `gameplay_options` alongside already-retained `hotbar_spells`.
+- Updated player bootstrap hydration to copy those retained option payloads from `PlayerDescriptionEventData`.
+- Added low-level `PlayerState::character_option_enabled` and `PlayerState::set_character_option_enabled` helpers over the shared `CharacterOption` enum.
+- Added world tests covering both bootstrap retention and helper behavior across `CharacterOptions1` and `CharacterOptions2`.
 
 ## Phase 3: Core Client Commands + View Projection (Complexity: Medium-High)
 
@@ -371,8 +379,8 @@ Notes:
 
 ### Task Checklist
 - [x] Phase 1: Implement confirmation and single-option protocol messages with parity tests.
-- [ ] Phase 2: Retain option fields in `PlayerState` and hydrate them from `PlayerDescription`.
-- [ ] Phase 2: Add curated option mapping/helpers.
+- [x] Phase 2: Retain option fields in `PlayerState` and hydrate them from `PlayerDescription`.
+- [x] Phase 2: Add low-level typed `CharacterOption` helpers in `holtburger-world`.
 - [ ] Phase 3: Add core client commands for confirmation response and single-option updates.
 - [ ] Phase 3: Add active confirmation client state.
 - [ ] Phase 4: Add `/options` slash-command parsing and help text.
@@ -390,12 +398,15 @@ Notes:
 - Shared AC character-option and confirmation enums/bitflags live in `holtburger-common/src/character.rs`.
 - `SetSingleCharacterOption` lives under protocol `player` actions; confirmation request/response/done live under protocol `misc` actions/events.
 - `PlayerDescriptionEventData` now exposes typed character option masks at the protocol boundary instead of raw `u32` values.
+- Phase 2 world helpers stay at the low-level `CharacterOption`/bitflag layer; curated user-facing option naming remains deferred to the TUI/frontend layer.
 
 ### Verification Log
 - 2026-03-20: Generated ACE fixture hex with `SyntheticProtocolTests.GenerateCharacterOptionAndConfirmationFixtures` in `ACE.Server.Tests`.
 - 2026-03-20: Added protocol fixtures for `SetSingleCharacterOption`, `ConfirmationResponse`, `CharacterConfirmationRequest`, and `CharacterConfirmationDone`.
 - 2026-03-20: `cargo test -p holtburger-protocol` passed.
 - 2026-03-20: `cargo test -p holtburger-world --lib` passed.
+- 2026-03-20: Extended `holtburger-world` player bootstrap retention for option payloads and added typed option helper tests.
+- 2026-03-20: `cargo fmt --all && cargo test -p holtburger-world --lib` passed.
 
 ### Open Questions
 - Exact canonical slash-command names for curated options: whether to prefer terse names like `craft-success-dialog` or names closer to ACE nomenclature.

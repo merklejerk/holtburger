@@ -222,11 +222,9 @@ impl ProtocolUnpack for GameEventMessage {
                         CharacterConfirmationRequestEventData::unpack(data, offset)?,
                     ))
                 }
-                GameEventOpcode::CharacterConfirmationDone => {
-                    GameEvent::CharacterConfirmationDone(Box::new(
-                        CharacterConfirmationDoneEventData::unpack(data, offset)?,
-                    ))
-                }
+                GameEventOpcode::CharacterConfirmationDone => GameEvent::CharacterConfirmationDone(
+                    Box::new(CharacterConfirmationDoneEventData::unpack(data, offset)?),
+                ),
                 GameEventOpcode::CloseGroundContainer => GameEvent::CloseGroundContainer(Box::new(
                     CloseGroundContainerEventData::unpack(data, offset)?,
                 )),
@@ -464,10 +462,8 @@ impl ProtocolPack for GameEventMessage {
                 data.pack(buf);
             }
             GameEvent::CharacterConfirmationRequest(data) => {
-                buf.write_u32::<LittleEndian>(
-                    GameEventOpcode::CharacterConfirmationRequest as u32,
-                )
-                .unwrap();
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CharacterConfirmationRequest as u32)
+                    .unwrap();
                 data.pack(buf);
             }
             GameEvent::CharacterConfirmationDone(data) => {

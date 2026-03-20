@@ -60,7 +60,8 @@ impl ProtocolPack for ConfirmationResponseActionData {
         buf.write_u32::<LittleEndian>(self.confirmation_type as u32)
             .unwrap();
         buf.write_u32::<LittleEndian>(self.context).unwrap();
-        buf.write_i32::<LittleEndian>(i32::from(self.accepted)).unwrap();
+        buf.write_i32::<LittleEndian>(i32::from(self.accepted))
+            .unwrap();
     }
 }
 

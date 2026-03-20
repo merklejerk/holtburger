@@ -146,7 +146,9 @@ impl ProtocolUnpack for SetSingleCharacterOptionActionData {
 
 impl ProtocolPack for SetSingleCharacterOptionActionData {
     fn pack(&self, writer: &mut Vec<u8>) {
-        writer.write_u32::<LittleEndian>(self.option as u32).unwrap();
+        writer
+            .write_u32::<LittleEndian>(self.option as u32)
+            .unwrap();
         writer
             .write_u32::<LittleEndian>(u32::from(self.value))
             .unwrap();

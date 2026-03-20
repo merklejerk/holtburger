@@ -100,7 +100,20 @@ bitflags! {
 }
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Display, FromRepr)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    FromRepr,
+)]
 pub enum CharacterOption {
     AutoRepeatAttacks = 0x00,
     IgnoreAllegianceRequests = 0x01,
@@ -160,7 +173,20 @@ pub enum CharacterOption {
 }
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Display, FromRepr)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    Display,
+    FromRepr,
+)]
 pub enum ConfirmationType {
     Undefined = 0x00,
     SwearAllegiance = 0x01,

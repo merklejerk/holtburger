@@ -200,6 +200,7 @@
 - [x] Approach can overshoot target and oscillate. Ease out?
 - [x] Show health of creatures in nearby list and dynamic panel.
 - [x] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
+- [x] Crafting success chance + confirm popup.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
@@ -209,7 +210,6 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] Crafting success chance + confirm popup.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

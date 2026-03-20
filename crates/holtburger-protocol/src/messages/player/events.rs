@@ -6,7 +6,7 @@ use crate::messages::utils::{read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use holtburger_common::Guid;
+use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{PropertyString, WorldObjectProperties};
 use std::collections::BTreeMap;
@@ -117,10 +117,10 @@ pub struct PlayerDescriptionEventData {
     pub spells: BTreeMap<u32, f32>,
     /// Presence flag for vital stats; usually true for players.
     pub has_health: bool,
-    /// Primary character options bitfield (see CharacterOptionDataFlag).
-    pub options1: u32,
+    /// Primary character options bitfield.
+    pub options1: CharacterOptions1,
     /// Secondary character options bitfield for later expansion.
-    pub options2: u32,
+    pub options2: CharacterOptions2,
     /// List of user-defined shortcuts for the action bar.
     pub shortcuts: Vec<Shortcut>,
     /// List of spells assigned to the 8 magic hotbars.
@@ -506,7 +506,9 @@ impl PlayerDescriptionEventData {
         let option_flags = CharacterOptionDataFlag::from_bits_retain(LittleEndian::read_u32(
             &data[*offset..*offset + 4],
         ));
-        let options1 = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+        let options1 = CharacterOptions1::from_bits_retain(LittleEndian::read_u32(
+            &data[*offset + 4..*offset + 8],
+        ));
         *offset += 8;
 
         let mut shortcuts = Vec::new();
@@ -579,12 +581,14 @@ impl PlayerDescriptionEventData {
             0
         };
 
-        let mut options2 = 0;
+        let mut options2 = CharacterOptions2::empty();
         if option_flags.contains(CharacterOptionDataFlag::CHARACTER_OPTIONS2) {
             if *offset + 4 > data.len() {
                 return None;
             }
-            options2 = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+            options2 = CharacterOptions2::from_bits_retain(LittleEndian::read_u32(
+                &data[*offset..*offset + 4],
+            ));
             *offset += 4;
         }
 
@@ -837,7 +841,7 @@ impl ProtocolPack for PlayerDescriptionEventData {
         }
 
         buf.write_u32::<LittleEndian>(o_flags.bits()).unwrap();
-        buf.write_u32::<LittleEndian>(self.options1).unwrap();
+        buf.write_u32::<LittleEndian>(self.options1.bits()).unwrap();
 
         if o_flags.contains(CharacterOptionDataFlag::SHORTCUT) {
             buf.write_u32::<LittleEndian>(self.shortcuts.len() as u32)
@@ -880,7 +884,7 @@ impl ProtocolPack for PlayerDescriptionEventData {
         }
         buf.write_u32::<LittleEndian>(self.spellbook_filters)
             .unwrap();
-        buf.write_u32::<LittleEndian>(self.options2).unwrap();
+        buf.write_u32::<LittleEndian>(self.options2.bits()).unwrap();
         if o_flags.contains(CharacterOptionDataFlag::GAMEPLAY_OPTIONS) {
             buf.extend_from_slice(&self.gameplay_options);
         }

@@ -26,6 +26,7 @@
 - [ ] Don't show Give verb on items that are attuned/sticky.
 - [ ] Replace context panel header with entity name.
 - [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
+- [ ] `/logopolis`
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -208,6 +209,7 @@
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] Crafting success chance + confirm popup.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

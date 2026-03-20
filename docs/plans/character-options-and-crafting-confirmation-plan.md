@@ -273,6 +273,8 @@ Notes:
 
 ## Phase 3: Core Client Commands + View Projection (Complexity: Medium-High)
 
+**Status:** Completed on 2026-03-20.
+
 **Deliverables**
 - Add `ClientCommand` variants for:
   - setting a single character option;
@@ -296,6 +298,14 @@ Notes:
 - Received confirmation requests become observable client/UI state.
 - Player option state becomes observable client/UI state through an explicit projection path.
 - Confirmation completion/removal never leaves stale active state behind.
+
+**Phase 3 Outcome**
+- Added `ClientCommand::SetCharacterOption` and `ClientCommand::RespondToConfirmation` in `holtburger-core`.
+- Added projected client-view types/events for retained player option masks and active character confirmations.
+- Added core-owned active confirmation state on `Client`, fed by `CharacterConfirmationRequest` / `CharacterConfirmationDone`.
+- Projected retained player options from world state into the client-view event stream on `WorldEvent::PlayerInfo`.
+- Optimistically updated retained world/player option state and re-projected it after successful `SetSingleCharacterOption` sends.
+- Added core tests covering outbound command behavior, confirmation lifecycle projection, and player-option projection.
 
 ## Phase 4: TUI Slash Commands for Curated Character Options (Complexity: Medium)
 
@@ -381,8 +391,8 @@ Notes:
 - [x] Phase 1: Implement confirmation and single-option protocol messages with parity tests.
 - [x] Phase 2: Retain option fields in `PlayerState` and hydrate them from `PlayerDescription`.
 - [x] Phase 2: Add low-level typed `CharacterOption` helpers in `holtburger-world`.
-- [ ] Phase 3: Add core client commands for confirmation response and single-option updates.
-- [ ] Phase 3: Add active confirmation client state.
+- [x] Phase 3: Add core client commands for confirmation response and single-option updates.
+- [x] Phase 3: Add active confirmation client state.
 - [ ] Phase 4: Add `/options` slash-command parsing and help text.
 - [ ] Phase 4: Add curated option listing and toggle commands.
 - [ ] Phase 5: Add confirmation UI and input handling in the TUI.
@@ -399,6 +409,7 @@ Notes:
 - `SetSingleCharacterOption` lives under protocol `player` actions; confirmation request/response/done live under protocol `misc` actions/events.
 - `PlayerDescriptionEventData` now exposes typed character option masks at the protocol boundary instead of raw `u32` values.
 - Phase 2 world helpers stay at the low-level `CharacterOption`/bitflag layer; curated user-facing option naming remains deferred to the TUI/frontend layer.
+- Phase 3 confirmation replies use the currently active core-owned confirmation state rather than requiring frontends to pass confirmation type/context back into the command surface.
 
 ### Verification Log
 - 2026-03-20: Generated ACE fixture hex with `SyntheticProtocolTests.GenerateCharacterOptionAndConfirmationFixtures` in `ACE.Server.Tests`.
@@ -407,6 +418,8 @@ Notes:
 - 2026-03-20: `cargo test -p holtburger-world --lib` passed.
 - 2026-03-20: Extended `holtburger-world` player bootstrap retention for option payloads and added typed option helper tests.
 - 2026-03-20: `cargo fmt --all && cargo test -p holtburger-world --lib` passed.
+- 2026-03-20: Added core client commands/projection for character options and confirmation lifecycle state.
+- 2026-03-20: `cargo fmt --all && cargo test -p holtburger-core` passed.
 
 ### Open Questions
 - Exact canonical slash-command names for curated options: whether to prefer terse names like `craft-success-dialog` or names closer to ACE nomenclature.

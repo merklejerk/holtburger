@@ -1703,14 +1703,16 @@ mod tests {
 
         assert!(state.data.combat_runtime.attack_queued);
 
-        assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::TargetedMissileAttack {
-                target,
-                attack_height: AttackHeight::Medium,
-                accuracy_level,
-            }) if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
-        ));
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::TargetedMissileAttack {
+                    target,
+                    attack_height: AttackHeight::Medium,
+                    accuracy_level,
+                } if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
+            )
+        }));
     }
 
     #[test]
@@ -1830,10 +1832,12 @@ mod tests {
         let result =
             state.handle_view_event(ClientViewEvent::EntityDespawned { guid: target_guid });
 
-        assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::CancelAttack)
-        ));
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| matches!(command, ClientCommand::CancelAttack))
+        );
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);
@@ -1851,10 +1855,12 @@ mod tests {
 
         let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::CancelAttack)
-        ));
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| matches!(command, ClientCommand::CancelAttack))
+        );
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);

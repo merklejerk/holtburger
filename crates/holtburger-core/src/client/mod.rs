@@ -25,6 +25,7 @@ const PHYSICS_TICK_MS: u64 = 30;
 pub struct Client {
     pub session: Session,
     pub world: WorldState,
+    active_confirmation: Option<ActiveCharacterConfirmation>,
     state: ClientState,
     wire_event_tx: broadcast::Sender<WireEvent>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
@@ -36,6 +37,29 @@ pub struct Client {
 }
 
 impl Client {
+    fn player_character_options(&self) -> PlayerCharacterOptions {
+        PlayerCharacterOptions {
+            options1: self.world.player.options1,
+            options2: self.world.player.options2,
+        }
+    }
+
+    fn emit_player_options_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::PlayerOptionsUpdated {
+                options: self.player_character_options(),
+            });
+    }
+
+    fn emit_active_character_confirmation_updated(&self) {
+        let _ =
+            self.client_view_event_tx
+                .send(ClientViewEvent::ActiveCharacterConfirmationUpdated {
+                    confirmation: self.active_confirmation.clone(),
+                });
+    }
+
     fn emit_spell_catalog_loaded(&self) {
         if let Some(catalog) = &self.world.spell_catalog {
             let _ = self
@@ -261,6 +285,7 @@ impl Client {
             }
             WorldEvent::PlayerInfo(data) => {
                 self.emit_spell_catalog_loaded();
+                self.emit_player_options_updated();
                 let _ =
                     self.client_view_event_tx
                         .send(ClientViewEvent::PlayerEnchantmentsUpdated {

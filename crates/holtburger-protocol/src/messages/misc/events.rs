@@ -2,6 +2,7 @@ use crate::errors::WeenieError;
 use crate::messages::utils::{read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
+use holtburger_common::ConfirmationType;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WeenieErrorEventData {
@@ -75,12 +76,78 @@ impl ProtocolPack for UseDoneEventData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct CharacterConfirmationRequestEventData {
+    pub confirmation_type: ConfirmationType,
+    pub context: u32,
+    pub text: String,
+}
+
+impl ProtocolUnpack for CharacterConfirmationRequestEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let confirmation_type =
+            ConfirmationType::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
+        *offset += 4;
+        let context = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let text = read_string16(data, offset)?;
+        Some(Self {
+            confirmation_type,
+            context,
+            text,
+        })
+    }
+}
+
+impl ProtocolPack for CharacterConfirmationRequestEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&(self.confirmation_type as u32).to_le_bytes());
+        buf.extend_from_slice(&self.context.to_le_bytes());
+        write_string16(buf, &self.text);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CharacterConfirmationDoneEventData {
+    pub confirmation_type: ConfirmationType,
+    pub context: u32,
+}
+
+impl ProtocolUnpack for CharacterConfirmationDoneEventData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let confirmation_type =
+            ConfirmationType::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
+        *offset += 4;
+        let context = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        Some(Self {
+            confirmation_type,
+            context,
+        })
+    }
+}
+
+impl ProtocolPack for CharacterConfirmationDoneEventData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&(self.confirmation_type as u32).to_le_bytes());
+        buf.extend_from_slice(&self.context.to_le_bytes());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::messages::game_event::{GameEvent, GameEventMessage};
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
+    use crate::test_helpers::assert_pack_unpack_parity;
+    use holtburger_common::ConfirmationType;
     use holtburger_common::Guid;
 
     #[test]
@@ -122,5 +189,36 @@ mod tests {
         let mut packed = Vec::new();
         unpacked.pack(&mut packed);
         assert_eq!(packed, data);
+    }
+
+    #[test]
+    fn test_character_confirmation_request_fixture() {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid::NULL,
+            sequence: 0x0E,
+            event: GameEvent::CharacterConfirmationRequest(Box::new(
+                CharacterConfirmationRequestEventData {
+                    confirmation_type: ConfirmationType::CraftInteraction,
+                    context: 0xDEADBEEF,
+                    text: "Craft this item? Success chance is 42%.".to_string(),
+                },
+            )),
+        }));
+        assert_pack_unpack_parity(test_fixtures::CHARACTER_CONFIRMATION_REQUEST, &expected);
+    }
+
+    #[test]
+    fn test_character_confirmation_done_fixture() {
+        let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: Guid::NULL,
+            sequence: 0x0F,
+            event: GameEvent::CharacterConfirmationDone(Box::new(
+                CharacterConfirmationDoneEventData {
+                    confirmation_type: ConfirmationType::CraftInteraction,
+                    context: 0xDEADBEEF,
+                },
+            )),
+        }));
+        assert_pack_unpack_parity(test_fixtures::CHARACTER_CONFIRMATION_DONE, &expected);
     }
 }

@@ -1,7 +1,10 @@
+use holtburger_common::ConfirmationType;
+use holtburger_core::ActiveCharacterConfirmation;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use unicode_width::UnicodeWidthStr;
 
+use crate::components::modal::{ModalCardSpec, ModalPalette, render_modal_card};
 use crate::pages::game::GameState;
 use crate::pages::game::hud::pulse::render_pulse_panel;
 use crate::pages::game::hud::status::render_status_bar;
@@ -14,6 +17,30 @@ use crate::pages::game::panels::dynamic::render_dynamic_pane;
 use crate::state::RenderContext;
 use crate::theme::{pane_block, pane_title_style};
 use crate::types::FocusedPane;
+
+fn confirmation_title(confirmation_type: ConfirmationType) -> &'static str {
+    match confirmation_type {
+        ConfirmationType::CraftInteraction => " Craft Confirmation ",
+        _ => " Confirmation ",
+    }
+}
+
+fn render_confirmation_overlay(
+    f: &mut Frame,
+    area: Rect,
+    confirmation: &ActiveCharacterConfirmation,
+) {
+    let text = format!("{}\n\n[Enter] Accept    [Esc] Decline", confirmation.text);
+    render_modal_card(
+        f,
+        area,
+        ModalCardSpec::new(
+            confirmation_title(confirmation.confirmation_type),
+            &text,
+            ModalPalette::CONFIRMATION,
+        ),
+    );
+}
 
 impl GameState {
     pub fn update_layout(&mut self, area: Rect) {
@@ -127,7 +154,11 @@ impl GameState {
         // Pulse Panel
         render_pulse_panel(f, ctx.client_state, ctx.net_stats, input_chunks[1]);
 
-        if !ctx.is_modal_active {
+        if let Some(confirmation) = self.view.active_confirmation.as_ref() {
+            render_confirmation_overlay(f, area, confirmation);
+        }
+
+        if !ctx.is_modal_active && self.view.active_confirmation.is_none() {
             if let Some((x, y)) = dashboard_cursor {
                 f.set_cursor(x, y);
             } else if focused_pane == FocusedPane::Input {
@@ -135,5 +166,73 @@ impl GameState {
                 f.set_cursor(input_chunks[0].x + 1 + display_width, input_chunks[0].y + 1);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pages::game::GameData;
+    use crate::state::{NetStats, RenderContext};
+    use holtburger_common::Guid;
+    use holtburger_core::{ActiveCharacterConfirmation, ClientState, RetryState};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    #[test]
+    fn active_confirmation_overlay_renders_server_text_and_controls() {
+        let area = Rect::new(0, 0, 120, 40);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::CraftInteraction,
+            context: 12,
+            text: "Chance of success is 75%. Continue?".to_string(),
+        });
+
+        let logon_retry = RetryState::new(5);
+        let enter_retry = RetryState::new(5);
+        let net_stats = NetStats::default();
+        let ctx = RenderContext {
+            account_name: "account",
+            client_state: &ClientState::InWorld,
+            net_stats: &net_stats,
+            is_modal_active: false,
+            logon_retry: &logon_retry,
+            enter_retry: &enter_retry,
+            server_time: None,
+        };
+
+        terminal
+            .draw(|frame| state.render(frame, area, &ctx))
+            .expect("game page should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Craft Confirmation"));
+        assert!(rendered.contains("Chance of success is 75%. Continue?"));
+        assert!(rendered.contains("[Enter] Accept"));
+        assert!(rendered.contains("[Esc] Decline"));
+    }
+
+    #[test]
+    fn confirmation_overlay_fit_is_content_sized() {
+        let fitted = crate::components::modal::fit_modal_area(
+            Rect::new(0, 0, 120, 40),
+            " Craft Confirmation ",
+            "Chance of success is 75%. Continue?\n\n[Enter] Accept    [Esc] Decline",
+        );
+
+        assert!(fitted.width < 72);
+        assert!(fitted.height < 14);
+        assert!(fitted.width >= 24);
     }
 }

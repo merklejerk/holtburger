@@ -342,7 +342,7 @@ pub enum GameActionOpcode {
 
     // --- Interaction & Login ---
     // /// C2S: Toggles boolean character options (Appear Offline, Show Cloak, etc).
-    // SetSingleCharacterOption = 0x0005,
+    SetSingleCharacterOption = 0x0005,
     /// C2S: Sent when client finishes loading the world.
     /// Signals the server that the client is ready to receive world updates.
     LoginComplete = 0x00A1,
@@ -367,7 +367,7 @@ pub enum GameActionOpcode {
     // /// C2S: Remove a shortcut from the UI.
     // RemoveShortCut = 0x019D,
     // /// C2S: Response to a server confirmation dialog.
-    // ConfirmationResponse = 0x0275,
+    ConfirmationResponse = 0x0275,
     // /// C2S: Response to an admin plugin list query.
     // QueryPluginListResponse = 0x02AF,
     // /// C2S: Response to an admin plugin detail query.
@@ -654,9 +654,9 @@ pub enum GameEventOpcode {
     // /// S2C: Response to an age query.
     // QueryAgeResponse = 0x01C3,
     // /// S2C: Request from server for character confirmation (e.g. before deletion).
-    // CharacterConfirmationRequest = 0x0274,
+    CharacterConfirmationRequest = 0x0274,
     // /// S2C: Confirmation that a character management operation is done.
-    // CharacterConfirmationDone = 0x0276,
+    CharacterConfirmationDone = 0x0276,
     // /// S2C: Confirms the player has joined the game session.
     // JoinGameResponse = 0x0281,
     /// S2C: Acknowledge that an action (Use) is complete.

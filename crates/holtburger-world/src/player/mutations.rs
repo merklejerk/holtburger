@@ -318,7 +318,12 @@ impl PlayerState {
             .or_insert_with(|| data.name.clone());
 
         self.spells = data.spells.clone();
+        self.options1 = data.options1;
+        self.options2 = data.options2;
         self.hotbar_spells = data.hotbar_spells.clone();
+        self.desired_comps = data.desired_comps.clone();
+        self.spellbook_filters = data.spellbook_filters;
+        self.gameplay_options = data.gameplay_options.clone();
 
         self.attributes.clear();
         self.vital_bases.clear();

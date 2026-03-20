@@ -7,6 +7,7 @@ use crate::state::liveness::EntityUpsertKind;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::properties::WorldObjectProperties;
+use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 
@@ -599,6 +600,13 @@ fn test_player_description_initialization() {
     let mut state = WorldState::new(None, None);
     let player_guid = Guid(0x50000001);
     let player_name = "TestingPlayer".to_string();
+    let options1 =
+        CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG | CharacterOptions1::HEAR_ALLEGIANCE_CHAT;
+    let options2 = CharacterOptions2::SHOW_HELM | CharacterOptions2::HEAR_GENERAL_CHAT;
+    let hotbar_spells = vec![vec![111, 222], vec![333]];
+    let desired_comps = vec![(42, 7), (99, 12)];
+    let spellbook_filters = 0xA5A5_5A5A;
+    let gameplay_options = vec![0x10, 0x20, 0x30];
 
     let data = PlayerDescriptionEventData {
         guid: player_guid,
@@ -613,13 +621,13 @@ fn test_player_description_initialization() {
         enchantments: Vec::new(),
         spells: std::collections::BTreeMap::new(),
         has_health: true,
-        options1: 0,
-        options2: 0,
+        options1,
+        options2,
         shortcuts: Vec::new(),
-        hotbar_spells: Vec::new(),
-        desired_comps: Vec::new(),
-        spellbook_filters: 0,
-        gameplay_options: Vec::new(),
+        hotbar_spells: hotbar_spells.clone(),
+        desired_comps: desired_comps.clone(),
+        spellbook_filters,
+        gameplay_options: gameplay_options.clone(),
         inventory: Vec::new(),
         equipped_objects: Vec::new(),
     };
@@ -635,6 +643,27 @@ fn test_player_description_initialization() {
 
     assert_eq!(state.player.guid, player_guid);
     assert_eq!(state.player.name(), player_name);
+    assert_eq!(state.player.options1, options1);
+    assert_eq!(state.player.options2, options2);
+    assert_eq!(state.player.hotbar_spells, hotbar_spells);
+    assert_eq!(state.player.desired_comps, desired_comps);
+    assert_eq!(state.player.spellbook_filters, spellbook_filters);
+    assert_eq!(state.player.gameplay_options, gameplay_options);
+    assert!(
+        state
+            .player
+            .character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog,)
+    );
+    assert!(
+        state
+            .player
+            .character_option_enabled(CharacterOption::ShowYourHelmOrHeadGear)
+    );
+    assert!(
+        !state
+            .player
+            .character_option_enabled(CharacterOption::ListenToTradeChat)
+    );
 }
 
 #[test]

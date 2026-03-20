@@ -1,4 +1,5 @@
 use crate::types::FocusedPane;
+use crate::types::Interaction;
 use holtburger_common::Guid;
 use holtburger_common::properties::{ItemType, WorldObjectExt};
 use holtburger_world::crafting::salvage::get_material_name;
@@ -65,6 +66,17 @@ pub fn format_cost(n: u64) -> String {
         format!("{:.1}k", n as f64 / 1_000.0)
     } else {
         n.to_string()
+    }
+}
+
+pub fn active_interaction_subject_guid(interaction: Option<Interaction>) -> Option<Guid> {
+    match interaction {
+        Some(Interaction::Moving { item_guid }) | Some(Interaction::Combining { item_guid }) => {
+            Some(item_guid)
+        }
+        Some(Interaction::Targeting { target_guid })
+        | Some(Interaction::Approaching { target_guid }) => Some(target_guid),
+        Some(Interaction::Salvaging) | None => None,
     }
 }
 

@@ -22,6 +22,7 @@ pub enum EntityClass {
     Key,        // Keys, Lockpicks
     Writable,   // Books, Scrolls
     HealingKit,
+    ManaStone,
     Door,
     Portal,
     LifeStone,
@@ -45,7 +46,7 @@ impl EntityClass {
             EntityClass::Container => "💼",
             EntityClass::Item => "📦️",
             EntityClass::Consumable => "🍗",
-            EntityClass::Money => "💰",
+            EntityClass::Money => "💲",
             EntityClass::Key => "🔑",
             EntityClass::Writable => "📖",
             EntityClass::Door => "🚪",
@@ -55,6 +56,7 @@ impl EntityClass {
             EntityClass::Tool => "🔧",
             EntityClass::StaticObject => "🪧",
             EntityClass::HealingKit => "🩹",
+            EntityClass::ManaStone => "🔋",
             EntityClass::Unknown => "❓",
         }
     }
@@ -81,6 +83,7 @@ impl EntityClass {
             EntityClass::Tool => "Tool",
             EntityClass::StaticObject => "Static",
             EntityClass::HealingKit => "Healing Kit",
+            EntityClass::ManaStone => "Mana Stone",
             EntityClass::Unknown => "?",
         }
     }
@@ -101,9 +104,11 @@ pub fn get_entity_color(class: EntityClass) -> Color {
         EntityClass::Monster => Color::Red,
         EntityClass::Container | EntityClass::Chest => Color::White,
         EntityClass::LifeStone => Color::Blue,
+        EntityClass::ManaStone => Color::Cyan,
         EntityClass::Portal => Color::LightMagenta,
         EntityClass::Door | EntityClass::StaticObject => Color::White,
         EntityClass::Unknown => Color::DarkGray,
+        EntityClass::HealingKit => Color::LightMagenta,
         _ => Color::White,
     }
 }
@@ -152,6 +157,7 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
     }
     let is_stuck = flags.intersects(ObjectDescriptionFlag::STUCK);
     let is_attackable = flags.intersects(ObjectDescriptionFlag::ATTACKABLE);
+    let is_food = flags.intersects(ObjectDescriptionFlag::FOOD);
     let is_container = if let Some(it) = item_type {
         it.intersects(ItemType::CONTAINER)
     } else {
@@ -195,17 +201,20 @@ fn classify_raw(flags: ObjectDescriptionFlag, item_type: Option<ItemType>) -> En
             refined_class = Some(EntityClass::Portal);
         } else if it.intersects(ItemType::LIFE_STONE) {
             refined_class = Some(EntityClass::LifeStone);
-        } else if it.intersects(
-            ItemType::FOOD
-                | ItemType::GEM
-                | ItemType::SPELL_COMPONENTS
-                | ItemType::MANA_STONE
-                | ItemType::CRAFT_COOKING_BASE
-                | ItemType::CRAFT_ALCHEMY_BASE
-                | ItemType::CRAFT_FLETCHING_BASE
-                | ItemType::CRAFT_ALCHEMY_INTERMEDIATE
-                | ItemType::CRAFT_FLETCHING_INTERMEDIATE,
-        ) {
+        } else if it.intersects(ItemType::MANA_STONE) {
+            refined_class = Some(EntityClass::ManaStone);
+        } else if is_food
+            || it.intersects(
+                ItemType::FOOD
+                    | ItemType::GEM
+                    | ItemType::SPELL_COMPONENTS
+                    | ItemType::CRAFT_COOKING_BASE
+                    | ItemType::CRAFT_ALCHEMY_BASE
+                    | ItemType::CRAFT_FLETCHING_BASE
+                    | ItemType::CRAFT_ALCHEMY_INTERMEDIATE
+                    | ItemType::CRAFT_FLETCHING_INTERMEDIATE,
+            )
+        {
             refined_class = Some(EntityClass::Consumable);
         } else if it.intersects(ItemType::MONEY | ItemType::PROMISSORY_NOTE) {
             refined_class = Some(EntityClass::Money);

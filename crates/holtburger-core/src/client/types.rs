@@ -282,6 +282,7 @@ pub enum ClientCommand {
     },
     Ping,
     Identify(Guid),
+    QueryHealth(Guid),
     Use(Guid),
     Drop(Guid),
     Get(Guid),

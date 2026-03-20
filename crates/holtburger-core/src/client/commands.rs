@@ -8,6 +8,47 @@ use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{GameMessage, RawMotionState};
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
+use holtburger_world::spell::MagicSchool;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NormalizedSpellCast {
+    Targeted { target: Guid, spell_id: u32 },
+    Untargeted { spell_id: u32 },
+}
+
+fn normalize_spell_cast(
+    world: &holtburger_world::WorldState,
+    spell_id: u32,
+    requested_target: Option<Guid>,
+) -> NormalizedSpellCast {
+    let player_guid = world.player.guid;
+
+    if let Some(spell) = world
+        .spell_catalog
+        .as_ref()
+        .and_then(|catalog| catalog.get(spell_id))
+    {
+        if spell.is_untargeted() {
+            return NormalizedSpellCast::Untargeted { spell_id };
+        }
+
+        if spell.is_self_targeted() {
+            return NormalizedSpellCast::Targeted {
+                target: player_guid,
+                spell_id,
+            };
+        }
+
+        if requested_target == Some(player_guid) && spell.school == MagicSchool::WarMagic {
+            return NormalizedSpellCast::Untargeted { spell_id };
+        }
+    }
+
+    match requested_target {
+        Some(target) => NormalizedSpellCast::Targeted { target, spell_id },
+        None => NormalizedSpellCast::Untargeted { spell_id },
+    }
+}
 impl Client {
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
@@ -20,6 +61,7 @@ impl Client {
             }
 
             ClientCommand::Identify(_)
+            | ClientCommand::QueryHealth(_)
             | ClientCommand::Use(_)
             | ClientCommand::CloseContainer(_)
             | ClientCommand::UseWithTarget { .. }
@@ -153,6 +195,13 @@ impl Client {
                 )))
                 .await
             }
+            ClientCommand::QueryHealth(guid) => {
+                log::info!(">>> Querying health for: 0x{:08X}", guid.0);
+                self.send_game_action(GameAction::QueryHealth(Box::new(QueryHealthActionData {
+                    target_guid: guid,
+                })))
+                .await
+            }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
                 self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
@@ -179,18 +228,11 @@ impl Client {
                 .await
             }
             ClientCommand::CastTargetedSpell { target, spell_id } => {
-                log::info!(">>> Casting spell {} on 0x{:08X}", spell_id, target.0);
-                self.send_game_action(GameAction::CastTargetedSpell(Box::new(
-                    CastTargetedSpellActionData { target, spell_id },
-                )))
-                .await
+                self.send_normalized_spell_cast(spell_id, Some(target))
+                    .await
             }
             ClientCommand::CastUntargetedSpell { spell_id } => {
-                log::info!(">>> Casting spell {}", spell_id);
-                self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
-                    CastUntargetedSpellActionData { spell_id },
-                )))
-                .await
+                self.send_normalized_spell_cast(spell_id, None).await
             }
             ClientCommand::TargetedMeleeAttack {
                 target,
@@ -607,6 +649,33 @@ impl Client {
             .await
     }
 
+    async fn send_normalized_spell_cast(
+        &mut self,
+        spell_id: u32,
+        requested_target: Option<Guid>,
+    ) -> Result<()> {
+        match normalize_spell_cast(&self.world, spell_id, requested_target) {
+            NormalizedSpellCast::Targeted { target, spell_id } => {
+                log::info!(
+                    ">>> Casting targeted spell {} on 0x{:08X}",
+                    spell_id,
+                    target.0
+                );
+                self.send_game_action(GameAction::CastTargetedSpell(Box::new(
+                    CastTargetedSpellActionData { target, spell_id },
+                )))
+                .await
+            }
+            NormalizedSpellCast::Untargeted { spell_id } => {
+                log::info!(">>> Casting untargeted spell {}", spell_id);
+                self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
+                    CastUntargetedSpellActionData { spell_id },
+                )))
+                .await
+            }
+        }
+    }
+
     async fn resolve_and_clear_slots(
         &mut self,
         item: Guid,
@@ -717,5 +786,117 @@ fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> E
         }
         TargetSlot::TopClothes => PseudoEquipMask::TOP_CLOTHES.into(),
         TargetSlot::BottomClothes => PseudoEquipMask::BOTTOM_CLOTHES.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{NormalizedSpellCast, normalize_spell_cast};
+    use holtburger_common::Guid;
+    use holtburger_world::WorldState;
+    use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
+        SpellInfo {
+            name: "Test Spell".to_string(),
+            description: String::new(),
+            school,
+            icon_id: 0,
+            category: 0,
+            bitfield,
+            base_mana: 0,
+            base_range_constant: 0.0,
+            base_range_mod: 0.0,
+            power: 0,
+            spell_economy_mod: 0.0,
+            formula_version: 0,
+            component_loss: 0.0,
+            meta_spell_type: 0,
+            meta_spell_id: 0,
+            extras: SpellExtrasInfo::None,
+            components: [0; 8],
+            caster_effect: 0,
+            target_effect: 0,
+            fizzle_effect: 0,
+            recovery_interval: 0.0,
+            recovery_amount: 0.0,
+            display_order: 0,
+            non_component_target_type,
+            mana_mod: 0,
+        }
+    }
+
+    fn world_with_spell(player_guid: Guid, spell_id: u32, spell: SpellInfo) -> WorldState {
+        let mut world = WorldState::new(None, None);
+        world.player.guid = player_guid;
+        world.spell_catalog = Some(Arc::new(SpellCatalog {
+            spells: HashMap::from([(spell_id, spell)]),
+            ..Default::default()
+        }));
+        world
+    }
+
+    #[test]
+    fn self_targeted_spells_are_normalized_to_target_self() {
+        let player_guid = Guid(0x5000_0001);
+        let world = world_with_spell(
+            player_guid,
+            100,
+            spell_info(MagicSchool::CreatureEnchantment, 0x8, 1),
+        );
+
+        let normalized = normalize_spell_cast(&world, 100, None);
+
+        assert_eq!(
+            normalized,
+            NormalizedSpellCast::Targeted {
+                target: player_guid,
+                spell_id: 100,
+            }
+        );
+    }
+
+    #[test]
+    fn untargeted_spells_ignore_requested_self_target() {
+        let player_guid = Guid(0x5000_0001);
+        let world = world_with_spell(player_guid, 200, spell_info(MagicSchool::WarMagic, 0, 0));
+
+        let normalized = normalize_spell_cast(&world, 200, Some(player_guid));
+
+        assert_eq!(
+            normalized,
+            NormalizedSpellCast::Untargeted { spell_id: 200 }
+        );
+    }
+
+    #[test]
+    fn war_magic_self_casts_are_normalized_to_untargeted() {
+        let player_guid = Guid(0x5000_0001);
+        let world = world_with_spell(player_guid, 300, spell_info(MagicSchool::WarMagic, 0, 5));
+
+        let normalized = normalize_spell_cast(&world, 300, Some(player_guid));
+
+        assert_eq!(
+            normalized,
+            NormalizedSpellCast::Untargeted { spell_id: 300 }
+        );
+    }
+
+    #[test]
+    fn non_war_targeted_self_casts_remain_targeted() {
+        let player_guid = Guid(0x5000_0001);
+        let world = world_with_spell(player_guid, 400, spell_info(MagicSchool::LifeMagic, 0, 5));
+
+        let normalized = normalize_spell_cast(&world, 400, Some(player_guid));
+
+        assert_eq!(
+            normalized,
+            NormalizedSpellCast::Targeted {
+                target: player_guid,
+                spell_id: 400,
+            }
+        );
     }
 }

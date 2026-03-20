@@ -70,7 +70,7 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
     match view.context_view {
         ContextView::Assess(target) => {
             if let Some(object) = resolve_inspectable_target(data, view, target) {
-                return assess::get_assess_info(&object, data.spell_catalog.as_deref());
+                return assess::get_assess_info(data, &object, data.spell_catalog.as_deref());
             }
             vec![]
         }

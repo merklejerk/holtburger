@@ -1,8 +1,10 @@
+use crate::pages::game::GameData;
 use crate::utils::{format_duration, wrap_text};
 use holtburger_common::properties::{ItemType, WorldObjectExt};
 use holtburger_world::assessment::{
     Assessment, AttunedStatus, BondedStatus, Effect, WieldRequirement,
 };
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use ratatui::style::{Color, Modifier, Style};
@@ -37,10 +39,14 @@ fn format_wield_requirement(req: &WieldRequirement) -> String {
 
 /// Generates a list of strings representing human-friendly assessment information for an object.
 pub fn get_assess_info(
+    data: &GameData,
     object: &InspectableObject<'_>,
     spell_lookup: Option<&SpellCatalog>,
 ) -> Vec<Line<'static>> {
     let assess = Assessment::from_object(object);
+    let is_mana_stone = object
+        .item_type()
+        .is_some_and(|item_type| item_type.contains(ItemType::MANA_STONE));
     let mut lines = Vec::new();
 
     // Header - Prominent
@@ -125,13 +131,16 @@ pub fn get_assess_info(
     // Item Mana
     if let Some(mana) = &assess.mana {
         let time_left = mana.seconds_left.map(format_duration);
+        let label = if is_mana_stone { "Charge" } else { "Mana" };
+        let value = if let Some(max) = mana.max {
+            format!("{}/{}", mana.current, max)
+        } else {
+            mana.current.to_string()
+        };
 
         lines.push(Line::from(vec![
-            Span::styled("Mana:  ", Style::default().fg(LABEL_COLOR)),
-            Span::styled(
-                format!("{}/{}", mana.current, mana.max),
-                Style::default().fg(Color::Blue),
-            ),
+            Span::styled(format!("{}:  ", label), Style::default().fg(LABEL_COLOR)),
+            Span::styled(value, Style::default().fg(Color::Blue)),
             if let Some(t) = time_left {
                 Span::styled(format!(" ({} left)", t), Style::default().fg(Color::Blue))
             } else {
@@ -215,17 +224,30 @@ pub fn get_assess_info(
 
     // Only show these for non-creatures.
     if object
-        .properties
         .item_type()
         .is_none_or(|t| !t.contains(ItemType::CREATURE))
     {
+        let is_player = Some(object.guid) == data.player_guid;
+        let player_storage = is_player.then(|| data.storage_usage(object.guid)).flatten();
+
         // Item Capacity
         if let Some(item_capacity) = assess.item_capacity
             && item_capacity > 0
         {
             lines.push(Line::from(vec![
                 Span::styled("Item Cap:  ", Style::default().fg(LABEL_COLOR)),
-                Span::styled(item_capacity.to_string(), Style::default().fg(Color::White)),
+                Span::styled(
+                    if is_player {
+                        format!(
+                            "{}/{}",
+                            player_storage.map(|usage| usage.item_used).unwrap_or(0),
+                            item_capacity
+                        )
+                    } else {
+                        item_capacity.to_string()
+                    },
+                    Style::default().fg(Color::White),
+                ),
             ]));
         }
 
@@ -236,7 +258,17 @@ pub fn get_assess_info(
             lines.push(Line::from(vec![
                 Span::styled("Cont Cap:  ", Style::default().fg(LABEL_COLOR)),
                 Span::styled(
-                    container_capacity.to_string(),
+                    if is_player {
+                        format!(
+                            "{}/{}",
+                            player_storage
+                                .map(|usage| usage.container_used)
+                                .unwrap_or(0),
+                            container_capacity
+                        )
+                    } else {
+                        container_capacity.to_string()
+                    },
                     Style::default().fg(Color::White),
                 ),
             ]));

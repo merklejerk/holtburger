@@ -45,7 +45,6 @@ pub fn get_assess_info(
 ) -> Vec<Line<'static>> {
     let assess = Assessment::from_object(object);
     let is_mana_stone = object
-        .properties
         .item_type()
         .is_some_and(|item_type| item_type.contains(ItemType::MANA_STONE));
     let mut lines = Vec::new();
@@ -225,7 +224,6 @@ pub fn get_assess_info(
 
     // Only show these for non-creatures.
     if object
-        .properties
         .item_type()
         .is_none_or(|t| !t.contains(ItemType::CREATURE))
     {

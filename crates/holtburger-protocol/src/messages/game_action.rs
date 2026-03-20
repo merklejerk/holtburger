@@ -157,11 +157,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::TrainSkill => {
                     GameAction::TrainSkill(Box::new(TrainSkillActionData::unpack(data, offset)?))
                 }
-                GameActionOpcode::SetSingleCharacterOption => {
-                    GameAction::SetSingleCharacterOption(Box::new(
-                        SetSingleCharacterOptionActionData::unpack(data, offset)?,
-                    ))
-                }
+                GameActionOpcode::SetSingleCharacterOption => GameAction::SetSingleCharacterOption(
+                    Box::new(SetSingleCharacterOptionActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::GiveObjectRequest => GameAction::GiveObjectRequest(Box::new(
                     GiveObjectRequestActionData::unpack(data, offset)?,
                 )),

@@ -6,9 +6,9 @@ use crate::messages::utils::{read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
-use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{PropertyString, WorldObjectProperties};
+use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
 use std::collections::BTreeMap;
 
 bitflags! {

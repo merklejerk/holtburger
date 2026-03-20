@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use crate::state::liveness::EntityUpsertKind;
 
+use holtburger_common::{CharacterOptions1, CharacterOptions2};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::properties::WorldObjectProperties;
@@ -613,8 +614,8 @@ fn test_player_description_initialization() {
         enchantments: Vec::new(),
         spells: std::collections::BTreeMap::new(),
         has_health: true,
-        options1: 0,
-        options2: 0,
+        options1: CharacterOptions1::empty(),
+        options2: CharacterOptions2::empty(),
         shortcuts: Vec::new(),
         hotbar_spells: Vec::new(),
         desired_comps: Vec::new(),

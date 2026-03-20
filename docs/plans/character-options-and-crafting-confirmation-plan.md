@@ -204,6 +204,8 @@ Rationale:
 
 ## Phase 1: Protocol Foundations (Complexity: Medium)
 
+**Status:** Completed on 2026-03-20.
+
 **Deliverables**
 - Uncomment and implement protocol opcodes and message structs for:
   - `CharacterConfirmationRequest` (`0x0274`)
@@ -230,6 +232,14 @@ Rationale:
 - Existing fixture builders and tests compile cleanly with typed option-mask fields.
 - No manual or guessed fixtures are introduced.
 - Existing protocol tests remain green.
+
+**Phase 1 Outcome**
+- Implemented shared `CharacterOptions1`, `CharacterOptions2`, `CharacterOption`, and `ConfirmationType` in `holtburger-common`.
+- Implemented `SetSingleCharacterOption` in `crates/holtburger-protocol/src/messages/player/actions.rs`.
+- Implemented `ConfirmationResponse`, `CharacterConfirmationRequest`, and `CharacterConfirmationDone` in `crates/holtburger-protocol/src/messages/misc/...`.
+- Converted `PlayerDescriptionEventData.options1` / `.options2` to typed bitflags.
+- Added ACE-generated fixtures for all four new protocol packets.
+- Verified with `cargo test -p holtburger-protocol` and `cargo test -p holtburger-world --lib`.
 
 ## Phase 2: Player Option State Retention in holtburger-world (Complexity: Medium)
 
@@ -360,7 +370,7 @@ Notes:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: Implement confirmation and single-option protocol messages with parity tests.
+- [x] Phase 1: Implement confirmation and single-option protocol messages with parity tests.
 - [ ] Phase 2: Retain option fields in `PlayerState` and hydrate them from `PlayerDescription`.
 - [ ] Phase 2: Add curated option mapping/helpers.
 - [ ] Phase 3: Add core client commands for confirmation response and single-option updates.
@@ -377,9 +387,15 @@ Notes:
 - Character option masks should use shared `bitflags!` types rather than being passed around as raw `u32` values.
 - Curated option naming and command UX are frontend policy and should stay out of shared crates.
 - Confirmation lifecycle state should live in `holtburger-core`, not `holtburger-world`, unless a later shared-world use case proves otherwise.
+- Shared AC character-option and confirmation enums/bitflags live in `holtburger-common/src/character.rs`.
+- `SetSingleCharacterOption` lives under protocol `player` actions; confirmation request/response/done live under protocol `misc` actions/events.
+- `PlayerDescriptionEventData` now exposes typed character option masks at the protocol boundary instead of raw `u32` values.
 
 ### Verification Log
-- Pending implementation.
+- 2026-03-20: Generated ACE fixture hex with `SyntheticProtocolTests.GenerateCharacterOptionAndConfirmationFixtures` in `ACE.Server.Tests`.
+- 2026-03-20: Added protocol fixtures for `SetSingleCharacterOption`, `ConfirmationResponse`, `CharacterConfirmationRequest`, and `CharacterConfirmationDone`.
+- 2026-03-20: `cargo test -p holtburger-protocol` passed.
+- 2026-03-20: `cargo test -p holtburger-world --lib` passed.
 
 ### Open Questions
 - Exact canonical slash-command names for curated options: whether to prefer terse names like `craft-success-dialog` or names closer to ACE nomenclature.

@@ -46,6 +46,7 @@ pub enum GameAction {
     RaiseVital(Box<RaiseVitalActionData>),
     RaiseSkill(Box<RaiseSkillActionData>),
     TrainSkill(Box<TrainSkillActionData>),
+    SetSingleCharacterOption(Box<SetSingleCharacterOptionActionData>),
     GiveObjectRequest(Box<GiveObjectRequestActionData>),
     CastTargetedSpell(Box<CastTargetedSpellActionData>),
     CastUntargetedSpell(Box<CastUntargetedSpellActionData>),
@@ -53,6 +54,7 @@ pub enum GameAction {
     CancelAttack(Box<CancelAttackActionData>),
     Buy(Box<BuyActionData>),
     Sell(Box<SellActionData>),
+    ConfirmationResponse(Box<ConfirmationResponseActionData>),
     OpenTradeNegotiations(Box<OpenTradeNegotiationsActionData>),
     CloseTradeNegotiations(Box<CloseTradeNegotiationsActionData>),
     AddToTrade(Box<AddToTradeActionData>),
@@ -155,6 +157,11 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::TrainSkill => {
                     GameAction::TrainSkill(Box::new(TrainSkillActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::SetSingleCharacterOption => {
+                    GameAction::SetSingleCharacterOption(Box::new(
+                        SetSingleCharacterOptionActionData::unpack(data, offset)?,
+                    ))
+                }
                 GameActionOpcode::GiveObjectRequest => GameAction::GiveObjectRequest(Box::new(
                     GiveObjectRequestActionData::unpack(data, offset)?,
                 )),
@@ -176,6 +183,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Sell => {
                     GameAction::Sell(Box::new(SellActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::ConfirmationResponse => GameAction::ConfirmationResponse(
+                    Box::new(ConfirmationResponseActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::OpenTradeNegotiations => GameAction::OpenTradeNegotiations(
                     Box::new(OpenTradeNegotiationsActionData::unpack(data, offset)?),
                 ),
@@ -344,6 +354,11 @@ impl ProtocolPack for GameActionMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameAction::SetSingleCharacterOption(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::SetSingleCharacterOption as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameAction::GiveObjectRequest(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::GiveObjectRequest as u32)
                     .unwrap();
@@ -376,6 +391,11 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::Sell(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Sell as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::ConfirmationResponse(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::ConfirmationResponse as u32)
                     .unwrap();
                 data.pack(buf);
             }

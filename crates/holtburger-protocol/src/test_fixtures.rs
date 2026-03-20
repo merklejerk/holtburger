@@ -59,6 +59,10 @@ pub const ACTION_IDENTIFY: &[u8] = include_bytes!("../tests/fixtures/action_iden
 pub const ACTION_LOGIN_COMPLETE: &[u8] =
     include_bytes!("../tests/fixtures/action_login_complete.bin");
 pub const ACTION_PING_REQUEST: &[u8] = include_bytes!("../tests/fixtures/action_ping_request.bin");
+pub const ACTION_SET_SINGLE_CHARACTER_OPTION: &[u8] =
+    include_bytes!("../tests/fixtures/action_set_single_character_option.bin");
+pub const ACTION_CONFIRMATION_RESPONSE: &[u8] =
+    include_bytes!("../tests/fixtures/action_confirmation_response.bin");
 pub const FORCE_OBJ_DESC_SEND: &[u8] = include_bytes!("../tests/fixtures/force_obj_desc_send.bin");
 pub const OBJ_DESC_EVENT: &[u8] = include_bytes!("../tests/fixtures/obj_desc_event.bin");
 pub const UPDATE_SKILL_LEVEL_PRIVATE: &[u8] =
@@ -92,3 +96,7 @@ pub const OBJECT_CREATE_MINIMAL: &[u8] =
     include_bytes!("../tests/fixtures/object_create_minimal.bin");
 pub const OBJECT_CREATE_COMPLEX: &[u8] =
     include_bytes!("../tests/fixtures/object_create_complex.bin");
+pub const CHARACTER_CONFIRMATION_REQUEST: &[u8] =
+    include_bytes!("../tests/fixtures/character_confirmation_request.bin");
+pub const CHARACTER_CONFIRMATION_DONE: &[u8] =
+    include_bytes!("../tests/fixtures/character_confirmation_done.bin");

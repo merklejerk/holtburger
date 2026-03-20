@@ -11,7 +11,7 @@ use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
 };
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::client::types::CombatFeedback;
+use holtburger_core::client::types::{ActiveCharacterConfirmation, CombatFeedback};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -104,6 +104,7 @@ impl GameState {
             | ClientViewEvent::PlayerVitalsUpdated { .. }
             | ClientViewEvent::PlayerSpellsUpdated { .. }
             | ClientViewEvent::PlayerOptionsUpdated { .. }
+            | ClientViewEvent::ActiveCharacterConfirmationUpdated { .. }
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
                 self.sync_sticky_melee_pursuit(&mut result);
@@ -705,6 +706,9 @@ impl GameState {
             }
             ClientViewEvent::PlayerOptionsUpdated { options } => {
                 self.data.player_options = Some(options);
+            }
+            ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
+                self.view.active_confirmation = confirmation;
             }
             ClientViewEvent::CombatModeUpdated { mode } => {
                 if mode != CombatMode::NonCombat {
@@ -1366,6 +1370,8 @@ pub struct ViewState {
     pub navigation: NavigationAutomation,
     /// Current reusable combat automation controller for desired attack maintenance.
     pub combat_automation: Option<CombatAutomationController>,
+    /// Current core-projected confirmation request being surfaced by the game page.
+    pub active_confirmation: Option<ActiveCharacterConfirmation>,
     /// Cache of the exact bounding boxes computed during update_layout.
     pub layout_cache: LayoutCache,
 }
@@ -1392,6 +1398,7 @@ impl Default for ViewState {
             last_trade_initiation: None,
             navigation: NavigationAutomation::default(),
             combat_automation: None,
+            active_confirmation: None,
             layout_cache: LayoutCache::default(),
         }
     }
@@ -2828,6 +2835,29 @@ mod tests {
                 options1: holtburger_common::CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
                 options2: holtburger_common::CharacterOptions2::HEAR_GENERAL_CHAT,
             })
+        ));
+    }
+
+    #[test]
+    fn projected_active_confirmation_updates_view_state() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+
+        let result = state.handle_view_event(ClientViewEvent::ActiveCharacterConfirmationUpdated {
+            confirmation: Some(ActiveCharacterConfirmation {
+                confirmation_type: holtburger_common::ConfirmationType::CraftInteraction,
+                context: 7,
+                text: "Apply the tinkering attempt?".to_string(),
+            }),
+        });
+
+        assert!(result.needs_redraw);
+        assert!(matches!(
+            state.view.active_confirmation,
+            Some(ActiveCharacterConfirmation {
+                confirmation_type: holtburger_common::ConfirmationType::CraftInteraction,
+                context: 7,
+                ref text,
+            }) if text == "Apply the tinkering attempt?"
         ));
     }
 

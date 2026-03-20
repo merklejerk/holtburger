@@ -342,22 +342,23 @@ Notes:
 ## Phase 5: TUI Confirmation UX for Crafting Flow (Complexity: Medium)
 
 **Deliverables**
-- Surface active confirmation requests in the TUI using existing modal or focused interaction patterns.
+- Surface active confirmation requests in the game page as a modal-like overlay, without routing them through the app-global retry modal path.
 - Show the exact server-sent confirmation text.
 - Bind accept/decline inputs to confirmation response commands.
 - Clear confirmation UI on response or `CharacterConfirmationDone`.
+- Keep confirmation ownership game-page-scoped in the CLI while treating `holtburger-core` as the source of truth for the active confirmation lifecycle.
 
 **Files**
 - `apps/holtburger-cli/src/pages/game/state.rs`
-- `apps/holtburger-cli/src/update/input.rs`
-- `apps/holtburger-cli/src/components/modal.rs` or equivalent render path
+- `apps/holtburger-cli/src/pages/game/input.rs`
 - `apps/holtburger-cli/src/pages/game/render.rs`
 
 **Acceptance Criteria**
 - A crafting confirmation request is visible and actionable in the TUI.
 - Accepting sends a `true` confirmation response; declining sends `false`.
 - Timeout / completion removes the confirmation prompt.
-- Existing modal/input precedence remains coherent and does not break quit or chat input behavior.
+- The game-page overlay takes precedence over page-local chat, dashboard, and mouse interactions while active.
+- Existing app-global retry modal behavior remains unchanged, and `Ctrl-Q` still works while a confirmation is active.
 
 ## Risks & Mitigations
 
@@ -376,8 +377,8 @@ Notes:
 ### Risk 3: Optimistic local option updates could drift from server state
 **Mitigation:** Limit optimism to the curated single-toggle path and treat `PlayerDescription` bootstrap as the next authoritative refresh; log unexpected server-side discrepancies if observed.
 
-### Risk 4: Modal confirmation UX could conflict with existing chat input and dashboard-local input flows
-**Mitigation:** Reuse the app’s existing modal precedence in `update/input.rs` and verify confirmation input ordering explicitly with TUI tests.
+### Risk 4: Confirmation UX could conflict with existing chat input and dashboard-local input flows
+**Mitigation:** Keep confirmation precedence inside the game page rather than broadening the app-global modal path, and verify ordering explicitly with TUI tests.
 
 ### Risk 5: Bulk `SetCharacterOptions` may appear tempting mid-implementation
 **Mitigation:** Keep the pass explicitly scoped to `SetSingleCharacterOption` and note `0x01A1` as a follow-up only when we need spellbook filters, desired comps, or gameplay blob editing.
@@ -405,8 +406,8 @@ Notes:
 - [x] Phase 3: Add active confirmation client state.
 - [x] Phase 4: Add `/options` slash-command parsing and help text.
 - [x] Phase 4: Add curated option listing and toggle commands.
-- [ ] Phase 5: Add confirmation UI and input handling in the TUI.
-- [ ] Phase 5: Verify crafting confirmation flow end-to-end against ACE behavior.
+- [x] Phase 5: Add confirmation UI and input handling in the TUI.
+- [x] Phase 5: Verify the crafting confirmation lifecycle against ACE-derived protocol behavior in automated CLI tests.
 
 ### Decisions Log
 - Curated TUI option support is in scope; full retail options panel is deferred.
@@ -421,6 +422,7 @@ Notes:
 - Phase 2 world helpers stay at the low-level `CharacterOption`/bitflag layer; curated user-facing option naming remains deferred to the TUI/frontend layer.
 - Phase 3 confirmation replies use the currently active core-owned confirmation state rather than requiring frontends to pass confirmation type/context back into the command surface.
 - Phase 4 chose canonical TUI slash-command names like `craft-success-dialog`, `ignore-trade`, and `general-chat`, with a small alias set for obvious variants.
+- Phase 5 will present confirmations as a game-page-scoped overlay card with local input precedence, rather than reusing the app-global retry modal mechanism.
 
 ### Verification Log
 - 2026-03-20: Generated ACE fixture hex with `SyntheticProtocolTests.GenerateCharacterOptionAndConfirmationFixtures` in `ACE.Server.Tests`.
@@ -433,7 +435,8 @@ Notes:
 - 2026-03-20: `cargo fmt --all && cargo test -p holtburger-core` passed.
 - 2026-03-20: Added TUI curated option mapping, projected option storage, and `/options` slash-command support.
 - 2026-03-20: `cargo fmt --all && cargo test -p holtburger-cli` passed.
+- 2026-03-20: Added a game-page-scoped crafting confirmation overlay with local input precedence and render/input tests.
+- 2026-03-20: Re-verified phase 5 with `cargo fmt --all && cargo test -p holtburger-cli`.
 
 ### Open Questions
-- Whether the confirmation UI should use the existing modal component directly or a game-page-specific confirmation presentation layer built on top of it.
 - Whether any curated option toggles besides chat subscriptions should trigger immediate local UI side effects beyond optimistic state updates.

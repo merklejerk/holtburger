@@ -8,7 +8,7 @@ use super::super::classification::{classify_entity, get_entity_color};
 use super::tab::EquipTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
-use crate::utils::format_item_name;
+use crate::utils::{active_interaction_subject_guid, format_item_name};
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_core::client::types::TargetSlot;
 use holtburger_world::entity::Entity;
@@ -22,10 +22,10 @@ pub fn render_equip_tab(
     tab: &mut EquipTab,
     f: &mut Frame,
     data: &GameData,
-    _view: &ViewState,
+    view: &ViewState,
     area: Rect,
 ) {
-    let items = get_list_items(tab.selected_index, data);
+    let items = get_list_items(tab.selected_index, data, view);
     let content_len = items.len();
 
     let dashboard_list = List::new(items)
@@ -43,9 +43,14 @@ pub fn render_equip_tab(
     let _height = area.height as usize;
 }
 
-fn get_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<'static>> {
+fn get_list_items(
+    selected_index: usize,
+    data: &GameData,
+    view: &ViewState,
+) -> Vec<ListItem<'static>> {
     let lines = get_lines(data);
     let mut list_items = Vec::new();
+    let active_subject_guid = active_interaction_subject_guid(view.active_interaction);
 
     for (i, line) in lines.into_iter().enumerate() {
         let is_selected = i == selected_index;
@@ -75,14 +80,26 @@ fn get_list_items(selected_index: usize, data: &GameData) -> Vec<ListItem<'stati
                 }
 
                 let name = format_item_name(item, item.guid);
+                let decorated_name = if active_subject_guid == Some(item.guid) {
+                    format!(">> {} <<", name)
+                } else {
+                    name
+                };
 
-                spans.push(Span::styled(
-                    name,
-                    Style::default().fg({
-                        let class = classify_entity(item);
-                        get_entity_color(class)
-                    }),
-                ));
+                let mut name_style = Style::default().fg({
+                    let class = classify_entity(item);
+                    get_entity_color(class)
+                });
+
+                if is_equipped_here || is_equipped_elsewhere {
+                    name_style = name_style.add_modifier(Modifier::ITALIC);
+                }
+
+                if active_subject_guid == Some(item.guid) {
+                    name_style = name_style.add_modifier(Modifier::BOLD);
+                }
+
+                spans.push(Span::styled(decorated_name, name_style));
 
                 list_items.push(
                     ListItem::new(Line::from(spans)).style(theme::list_item_style(is_selected)),

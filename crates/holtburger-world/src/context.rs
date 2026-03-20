@@ -11,6 +11,28 @@ pub enum CombatTargetStatus {
     DeathMotionObserved,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct StorageUsage {
+    pub item_used: u32,
+    pub item_capacity: u32,
+    pub container_used: u32,
+    pub container_capacity: u32,
+}
+
+impl StorageUsage {
+    pub const fn total_used(self) -> u32 {
+        self.item_used + self.container_used
+    }
+
+    pub const fn item_space_left(self) -> u32 {
+        self.item_capacity.saturating_sub(self.item_used)
+    }
+
+    pub const fn container_space_left(self) -> u32 {
+        self.container_capacity.saturating_sub(self.container_used)
+    }
+}
+
 impl CombatTargetStatus {
     pub const fn is_available(self) -> bool {
         matches!(self, Self::Available)
@@ -170,25 +192,64 @@ pub trait WorldContextExt: WorldContext {
     }
 
     fn get_container_count(&self, container_id: Guid) -> u32 {
-        let mut count = 0;
-        for e in self.iter_entities() {
-            if let Some(cid) = e.container_id()
-                && cid == container_id
-            {
-                count += 1;
+        self.storage_usage(container_id)
+            .map(StorageUsage::total_used)
+            .unwrap_or(0)
+    }
+
+    fn storage_usage(&self, container_id: Guid) -> Option<StorageUsage> {
+        let entity = self.get_entity(container_id)?;
+        let is_player = Some(container_id) == self.get_player_guid();
+
+        let mut usage = StorageUsage {
+            item_capacity: entity.items_capacity().unwrap_or(0),
+            container_capacity: if is_player {
+                entity.containers_capacity().unwrap_or(0)
+            } else {
+                0
+            },
+            ..StorageUsage::default()
+        };
+
+        for child in self.iter_entities() {
+            if child.container_id() != Some(container_id) {
+                continue;
+            }
+
+            if is_player && child.uses_player_container_slot() {
+                usage.container_used += 1;
+            } else {
+                usage.item_used += 1;
             }
         }
-        count
+
+        Some(usage)
     }
 
     fn container_space_left(&self, container_id: Guid) -> u32 {
-        let Some(entity) = self.get_entity(container_id) else {
-            return 0;
+        self.storage_usage(container_id)
+            .map(StorageUsage::item_space_left)
+            .unwrap_or(0)
+    }
+
+    fn container_can_accept_item(&self, container_id: Guid, item_guid: Guid) -> bool {
+        let Some(item) = self.get_entity(item_guid) else {
+            return false;
         };
 
-        let capacity = entity.items_capacity().unwrap_or(0);
-        let current = self.get_container_count(container_id);
-        capacity.saturating_sub(current)
+        if Some(container_id) == self.get_player_guid() {
+            let Some(usage) = self.storage_usage(container_id) else {
+                return false;
+            };
+
+            if item.uses_player_container_slot() {
+                return usage.container_space_left() > 0;
+            }
+
+            return usage.item_space_left() > 0;
+        }
+
+        self.container_space_left(container_id) > 0
     }
 
     fn is_in_main_pack(&self, guid: Guid) -> bool {
@@ -322,33 +383,37 @@ pub trait WorldContextExt: WorldContext {
         entity.material_type().is_some() && entity.workmanship().is_some()
     }
 
-    /// Finds a non-full container in the player's possession.
+    /// Finds a non-full container in the player's possession that can accept the item.
     /// If preferred_container_id is given, it is checked first.
     /// Then the player itself (main pack), then all items in the inventory that are containers.
-    fn find_non_full_pack(&self, preferred_container_id: Option<Guid>) -> Option<Guid> {
+    fn find_non_full_pack(
+        &self,
+        item_guid: Guid,
+        preferred_container_id: Option<Guid>,
+    ) -> Option<Guid> {
         let player_guid = self.get_player_guid()?;
 
         // 1. Check preferred first
         if let Some(pref) = preferred_container_id
-            && self.container_space_left(pref) > 0
+            && self.container_can_accept_item(pref, item_guid)
         {
             return Some(pref);
         }
 
         // 2. Check player (main pack)
-        if self.container_space_left(player_guid) > 0 {
+        if self.container_can_accept_item(player_guid, item_guid) {
             return Some(player_guid);
         }
 
         // 3. Check all items in inventory
-        for item_guid in self.iter_inventory() {
+        for pack_guid in self.iter_inventory() {
             // Avoid double-checking player or preferred
-            if Some(item_guid) == preferred_container_id || item_guid == player_guid {
+            if Some(pack_guid) == preferred_container_id || pack_guid == player_guid {
                 continue;
             }
 
-            if self.container_space_left(item_guid) > 0 {
-                return Some(item_guid);
+            if self.container_can_accept_item(pack_guid, item_guid) {
+                return Some(pack_guid);
             }
         }
 
@@ -382,7 +447,7 @@ pub trait WorldContextExt: WorldContext {
         {
             return false;
         }
-        if self.container_space_left(container_id) == 0 {
+        if !self.container_can_accept_item(container_id, item_guid) {
             return false;
         }
         let item = match self.get_entity(item_guid) {
@@ -433,7 +498,9 @@ mod tests {
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::EquipMask;
-    use holtburger_common::properties::{ItemType, PropertyInstanceId, PropertyInt, Usable};
+    use holtburger_common::properties::{
+        ItemType, PropertyBool, PropertyInstanceId, PropertyInt, Usable,
+    };
     use holtburger_protocol::messages::combat::CombatMode;
     use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 
@@ -476,6 +543,14 @@ mod tests {
         Entity::new(guid, name.to_string(), WorldPosition::default())
     }
 
+    fn item_in_container(guid: Guid, container_id: Guid, name: &str) -> Entity {
+        let mut item = entity(guid, name);
+        item.properties
+            .iids
+            .insert(PropertyInstanceId::Container, container_id);
+        item
+    }
+
     #[test]
     fn suggested_combat_mode_uses_wield_location_over_item_type_noise() {
         let player_guid = Guid(0x5000_0001);
@@ -499,6 +574,115 @@ mod tests {
         world.entities.insert(sword_guid, sword);
 
         assert_eq!(world.get_suggested_combat_mode(), CombatMode::Melee);
+    }
+
+    #[test]
+    fn player_slot_counts_split_main_pack_items_from_container_slots() {
+        let player_guid = Guid(0x5000_0001);
+        let sword_guid = Guid(0x8000_0001);
+        let side_pack_guid = Guid(0x8000_0002);
+        let focus_guid = Guid(0x8000_0003);
+        let nested_item_guid = Guid(0x8000_0004);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            inventory: HashSet::from([sword_guid, side_pack_guid, focus_guid, nested_item_guid]),
+            ..Default::default()
+        };
+
+        let mut player = entity(player_guid, "Player");
+        player
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 10);
+        player
+            .properties
+            .ints
+            .insert(PropertyInt::ContainersCapacity, 3);
+        world.entities.insert(player_guid, player);
+
+        world.entities.insert(
+            sword_guid,
+            item_in_container(sword_guid, player_guid, "Sword"),
+        );
+
+        let mut side_pack = item_in_container(side_pack_guid, player_guid, "Side Pack");
+        side_pack
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 24);
+        world.entities.insert(side_pack_guid, side_pack);
+
+        let mut focus = item_in_container(focus_guid, player_guid, "Focus");
+        focus
+            .properties
+            .bools
+            .insert(PropertyBool::RequiresBackpackSlot, true);
+        world.entities.insert(focus_guid, focus);
+
+        world.entities.insert(
+            nested_item_guid,
+            item_in_container(nested_item_guid, side_pack_guid, "Apple"),
+        );
+
+        assert_eq!(world.get_container_count(player_guid), 3);
+        let usage = world
+            .storage_usage(player_guid)
+            .expect("player should have storage usage");
+        assert_eq!(usage.item_used, 1);
+        assert_eq!(usage.container_used, 2);
+        assert_eq!(usage.item_space_left(), 9);
+        assert_eq!(usage.container_space_left(), 1);
+    }
+
+    #[test]
+    fn find_non_full_pack_uses_player_slot_type_for_item() {
+        let player_guid = Guid(0x5000_0001);
+        let regular_item_guid = Guid(0x8000_0001);
+        let container_item_guid = Guid(0x8000_0002);
+        let side_pack_guid = Guid(0x8000_0003);
+
+        let mut world = TestWorld {
+            player_guid: Some(player_guid),
+            inventory: HashSet::from([regular_item_guid, container_item_guid, side_pack_guid]),
+            ..Default::default()
+        };
+
+        let mut player = entity(player_guid, "Player");
+        player.properties.ints.insert(PropertyInt::ItemsCapacity, 0);
+        player
+            .properties
+            .ints
+            .insert(PropertyInt::ContainersCapacity, 2);
+        world.entities.insert(player_guid, player);
+
+        world.entities.insert(
+            regular_item_guid,
+            item_in_container(regular_item_guid, Guid::NULL, "Sword"),
+        );
+
+        let mut container_item = item_in_container(container_item_guid, Guid::NULL, "Pack");
+        container_item
+            .properties
+            .bools
+            .insert(PropertyBool::RequiresBackpackSlot, true);
+        world.entities.insert(container_item_guid, container_item);
+
+        let mut side_pack = item_in_container(side_pack_guid, player_guid, "Side Pack");
+        side_pack
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 24);
+        world.entities.insert(side_pack_guid, side_pack);
+
+        assert_eq!(
+            world.find_non_full_pack(regular_item_guid, None),
+            Some(side_pack_guid)
+        );
+        assert_eq!(
+            world.find_non_full_pack(container_item_guid, None),
+            Some(player_guid)
+        );
     }
 
     #[test]

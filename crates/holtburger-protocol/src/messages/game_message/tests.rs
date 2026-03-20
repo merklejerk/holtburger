@@ -147,6 +147,12 @@ fn test_dispatch_action_identify() {
 }
 
 #[test]
+fn test_dispatch_action_query_health() {
+    let fixture = hex::decode("B1F7000009000000BF01000003000080").unwrap();
+    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::GameAction(_)));
+}
+
+#[test]
 fn test_dispatch_action_login_complete() {
     assert_dispatch_match(test_fixtures::ACTION_LOGIN_COMPLETE, |msg| {
         matches!(msg, GameMessage::GameAction(_))

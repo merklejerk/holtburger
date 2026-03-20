@@ -8,7 +8,7 @@ use super::super::classification::{classify_entity, get_entity_color};
 use super::tab::InventoryTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
-use crate::utils::format_item_name;
+use crate::utils::{active_interaction_subject_guid, format_item_name};
 use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, WorldObjectExt as _};
 use holtburger_world::context::WorldContextExt;
@@ -37,8 +37,9 @@ pub fn render_inventory_tab(
     if let Some(player_guid) = data.player_guid
         && let Some(player_entity) = data.entities.get(&player_guid)
         && let Some(capacity) = player_entity.items_capacity()
+        && let Some(storage_usage) = data.storage_usage(player_guid)
     {
-        let count = counts.get(&player_guid).cloned().unwrap_or(0);
+        let container_capacity = player_entity.containers_capacity().unwrap_or(0);
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -49,9 +50,20 @@ pub fn render_inventory_tab(
         bottom_area = chunks[1];
 
         let mut summary_spans = vec![Span::styled(
-            format!("Main Pack ({}/{})", count, capacity),
+            format!("Main Pack ({}/{})", storage_usage.item_used, capacity),
             Style::default().fg(theme::SUMMARY_FG),
         )];
+
+        if container_capacity > 0 {
+            summary_spans.push(Span::raw(" | "));
+            summary_spans.push(Span::styled(
+                format!(
+                    "Packs ({}/{})",
+                    storage_usage.container_used, container_capacity
+                ),
+                Style::default().fg(theme::SUMMARY_FG),
+            ));
+        }
 
         if let Some(burden) = data.get_burden() {
             summary_spans.push(Span::raw(" | "));
@@ -94,6 +106,7 @@ fn get_list_items(
     selected_index: usize,
 ) -> Vec<ListItem<'static>> {
     let mut list_items = Vec::new();
+    let active_subject_guid = active_interaction_subject_guid(view.active_interaction);
 
     let equipment = &data.equipment;
 
@@ -118,6 +131,7 @@ fn get_list_items(
             is_equipped,
             is_offered,
             is_salvaging,
+            active_subject_guid == Some(e.guid),
             container_count,
         ));
     }
@@ -133,6 +147,7 @@ fn render_inventory_item(
     is_equipped: bool,
     is_offered: bool,
     is_salvaging: bool,
+    is_active_subject: bool,
     container_count: Option<u32>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
@@ -141,6 +156,9 @@ fn render_inventory_item(
 
     let mut text_style = Style::default().fg(color);
     if is_equipped || is_offered {
+        text_style = text_style.add_modifier(Modifier::ITALIC);
+    }
+    if is_active_subject {
         text_style = text_style.add_modifier(Modifier::BOLD);
     }
 
@@ -156,6 +174,10 @@ fn render_inventory_item(
         display_name_with_status = format!("{} (OFFERED)", display_name_with_status);
     } else if is_salvaging {
         display_name_with_status = format!("{} (SALVAGING)", display_name_with_status);
+    }
+
+    if is_active_subject {
+        display_name_with_status = format!(">> {} <<", display_name_with_status);
     }
 
     if !class.is_creature() {

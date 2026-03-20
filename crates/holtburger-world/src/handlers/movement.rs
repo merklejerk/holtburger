@@ -52,13 +52,13 @@ pub(crate) fn handle_message(
         }
         GameMessage::UpdateMotion(data) => {
             let guid = data.guid;
+            let snapshot = EntityMotionSnapshot::from_movement_event(data);
 
-            update_entity_motion_snapshot(
-                state,
-                guid,
-                EntityMotionSnapshot::from_movement_event(data),
-                events,
-            );
+            update_entity_motion_snapshot(state, guid, snapshot, events);
+
+            if snapshot.is_some_and(EntityMotionSnapshot::indicates_death_motion) {
+                state.update_health_fraction(guid, 0.0, events);
+            }
 
             let mut target_info = None;
             if let MovementTypeData::TurnToObject(turn) = &data.data

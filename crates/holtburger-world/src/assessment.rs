@@ -235,7 +235,7 @@ pub struct TinkeringInfo {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ManaInfo {
     pub current: i32,
-    pub max: i32,
+    pub max: Option<i32>,
     pub seconds_left: Option<f64>,
 }
 
@@ -598,8 +598,8 @@ impl TinkeringInfo {
 
 impl ManaInfo {
     fn from_object(object: &InspectableObject<'_>) -> Option<Self> {
-        let max = object.get_int_prop(PropertyInt::ItemMaxMana)?;
-        let current = object.get_int_prop(PropertyInt::ItemCurMana).unwrap_or(0);
+        let current = object.get_int_prop(PropertyInt::ItemCurMana)?;
+        let max = object.get_int_prop(PropertyInt::ItemMaxMana);
         let seconds_left = object
             .get_float_prop(PropertyFloat::ManaRate)
             .and_then(|rate| calculate_mana_time_left(current, rate));

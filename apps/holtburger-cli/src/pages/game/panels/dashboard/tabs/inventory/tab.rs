@@ -239,7 +239,7 @@ impl TabController for InventoryTab {
     ) -> Vec<Verb> {
         let entities = self.visible_entities(data);
         let mut verbs = vec![
-                        Verb::new(
+            Verb::new(
                 AppAction::UiAction {
                     action: AppUiAction::BeginTabFilterInput {
                         tab: DashboardTab::Inventory,

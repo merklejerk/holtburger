@@ -105,6 +105,23 @@ impl TabController for SpellsTab {
         let mut verbs = Vec::new();
         let spell_id = self.get_selected_spell_id(data);
 
+        verbs.push(
+            Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Spells,
+                    },
+                },
+                'f',
+                "Filter",
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }),
+        );
+
         match interaction {
             Some(Interaction::Targeting { target_guid }) => {
                 if let Some(spell_id) = spell_id {
@@ -162,23 +179,6 @@ impl TabController for SpellsTab {
                 "Debug",
             ));
         }
-
-        verbs.push(
-            Verb::new(
-                AppAction::UiAction {
-                    action: AppUiAction::BeginTabFilterInput {
-                        tab: DashboardTab::Spells,
-                    },
-                },
-                'f',
-                "Filter",
-            )
-            .with_footer_visibility(if self.active_filter.is_some() {
-                FooterVerbVisibility::Hidden
-            } else {
-                FooterVerbVisibility::Visible
-            }),
-        );
 
         verbs
     }

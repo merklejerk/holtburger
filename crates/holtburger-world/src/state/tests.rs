@@ -7,6 +7,8 @@ use crate::state::liveness::EntityUpsertKind;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::properties::WorldObjectProperties;
+use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
+use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 
 #[test]
 fn test_player_mirror_invariant_on_set_position() {
@@ -256,6 +258,41 @@ fn test_stale_player_autonomous_sync_is_ignored() {
     );
     assert_eq!(state.player.teleport_sequence, 30);
     assert_eq!(state.player.force_position_sequence, 40);
+}
+
+#[test]
+fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
+    let mut state = WorldState::new(None, None);
+    let guid = Guid(0x60000001);
+    state.add_entity(Entity::new(
+        guid,
+        "Drudge".to_string(),
+        WorldPosition::default(),
+    ));
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: guid,
+        sequence: 1,
+        event: GameEvent::UpdateHealth(Box::new(UpdateHealthEventData {
+            target: guid,
+            health: 0.5,
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert_eq!(
+        state
+            .entities
+            .get(guid)
+            .and_then(|entity| entity.health_fraction),
+        Some(0.5)
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityReplaced(entity)
+            if entity.guid == guid && entity.health_fraction == Some(0.5)
+    )));
 }
 
 #[test]

@@ -210,14 +210,27 @@ impl TabController for NearbyTab {
         _view: &ViewState,
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
-        let mut verbs = Vec::new();
         let target_guid = self.get_selected_guid(data);
-        let player_guid = data.player_guid;
+        let mut verbs = vec![
+            Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Nearby,
+                    },
+                },
+                'f',
+                "Filter",
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }),
+        ];
 
         if let (Some(interaction), Some(guid)) = (interaction, target_guid) {
             let e = data.entities.get(&guid).unwrap();
             let class = classification::classify_entity(e);
-            let is_self = Some(e.guid) == player_guid;
 
             match *interaction {
                 Interaction::Moving { item_guid } => {
@@ -256,25 +269,6 @@ impl TabController for NearbyTab {
                             "Give to target",
                         ));
                         return verbs;
-                    }
-                    return verbs;
-                }
-                Interaction::Healing { item_guid } => {
-                    let is_healing_kit = e.guid == item_guid;
-                    if data.can_use_with(item_guid, e.guid) {
-                        let label = if is_self || is_healing_kit {
-                            "Heal yourself".to_string()
-                        } else {
-                            "Heal target".to_string()
-                        };
-                        verbs.push(Verb::new(
-                            vec![AppAction::UseWith {
-                                item: item_guid,
-                                target: e.guid,
-                            }],
-                            '\r',
-                            label,
-                        ));
                     }
                     return verbs;
                 }
@@ -405,23 +399,6 @@ impl TabController for NearbyTab {
                 }
             }
         }
-
-        verbs.push(
-            Verb::new(
-                AppAction::UiAction {
-                    action: AppUiAction::BeginTabFilterInput {
-                        tab: DashboardTab::Nearby,
-                    },
-                },
-                'f',
-                "Filter",
-            )
-            .with_footer_visibility(if self.active_filter.is_some() {
-                FooterVerbVisibility::Hidden
-            } else {
-                FooterVerbVisibility::Visible
-            }),
-        );
 
         verbs
     }

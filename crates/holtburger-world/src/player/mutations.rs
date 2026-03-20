@@ -561,32 +561,6 @@ impl PlayerState {
         });
     }
 
-    pub fn update_health_fraction(
-        &mut self,
-        target: Guid,
-        health: f32,
-        events: &mut Vec<WorldEvent>,
-    ) -> bool {
-        let target_guid = if target == Guid::NULL {
-            self.guid
-        } else {
-            target
-        };
-
-        if target_guid != self.guid || target_guid == Guid::NULL {
-            return false;
-        }
-
-        if let Some(vital_obj) = self.vitals.get_mut(&stats::VitalType::Health) {
-            let new_current = (health * vital_obj.buffed_max as f32) as u32;
-            vital_obj.current = new_current;
-            events.push(WorldEvent::VitalUpdated(vital_obj.clone()));
-            true
-        } else {
-            false
-        }
-    }
-
     fn emit_enchantments_updated(&mut self, events: &mut Vec<WorldEvent>) {
         events.push(WorldEvent::PlayerEnchantmentsUpdated {
             enchantments: self.enchantments.clone(),

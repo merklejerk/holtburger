@@ -241,7 +241,6 @@ pub enum Modal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interaction {
     Moving { item_guid: Guid },
-    Healing { item_guid: Guid },
     Targeting { target_guid: Guid },
     Approaching { target_guid: Guid },
     Combining { item_guid: Guid },

@@ -234,10 +234,10 @@ impl GameState {
                 result.merge(self.handle_navigation_event(event));
             }
             ClientViewEvent::ContainerOpened { guid } => {
-                self.data.open_containers.insert(guid);
+                self.data.track_container_opened(guid);
             }
             ClientViewEvent::ContainerClosed { guid } => {
-                self.data.open_containers.remove(&guid);
+                self.data.track_container_closed(guid);
             }
             _ => {}
         }
@@ -331,7 +331,7 @@ impl GameState {
                 });
             }
             AppAction::Unequip { guid } => {
-                if let Some(container) = self.data.find_non_full_pack(None) {
+                if let Some(container) = self.data.find_non_full_pack(guid, None) {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
                         container,
@@ -480,7 +480,6 @@ impl GameState {
                     }
                     EnterCombatModeResult::Success(res) => {
                         result.merge(res);
-                        // TODO: Always cast on self for ring spells and never cast on self for wall spells.
                         if let Some(target) = target {
                             result
                                 .commands
@@ -545,7 +544,9 @@ impl GameState {
                 item: guid,
                 container: preferred_container_id,
             } => {
-                if let Some(container_id) = self.data.find_non_full_pack(preferred_container_id) {
+                if let Some(container_id) =
+                    self.data.find_non_full_pack(guid, preferred_container_id)
+                {
                     result.commands.push(ClientCommand::MoveItem {
                         item: guid,
                         container: container_id,
@@ -803,6 +804,8 @@ impl GameState {
         let previous_interaction = self.view.active_interaction;
         self.view.active_interaction = next_interaction;
 
+        self.sync_target_health_query(previous_interaction, next_interaction, result);
+
         if self.should_cancel_active_approach(previous_interaction, next_interaction) {
             let update = self
                 .view
@@ -819,6 +822,36 @@ impl GameState {
 
         if self.should_resume_attack(previous_interaction, next_interaction) {
             self.queue_auto_attack_for_mode(self.data.combat_mode, result);
+        }
+    }
+
+    fn sync_target_health_query(
+        &self,
+        previous_interaction: Option<Interaction>,
+        next_interaction: Option<Interaction>,
+        result: &mut UpdateResult,
+    ) {
+        let previous_target = match previous_interaction {
+            Some(Interaction::Targeting { target_guid }) => Some(target_guid),
+            _ => None,
+        };
+        let next_target = match next_interaction {
+            Some(Interaction::Targeting { target_guid }) => Some(target_guid),
+            _ => None,
+        };
+
+        if previous_target == next_target {
+            return;
+        }
+
+        match next_target {
+            Some(target_guid) => result
+                .commands
+                .push(ClientCommand::QueryHealth(target_guid)),
+            None if previous_target.is_some() => {
+                result.commands.push(ClientCommand::QueryHealth(Guid::NULL))
+            }
+            None => {}
         }
     }
 
@@ -843,7 +876,6 @@ impl GameState {
                 Some(Interaction::Targeting { .. }),
                 None
                 | Some(Interaction::Moving { .. })
-                | Some(Interaction::Healing { .. })
                 | Some(Interaction::Approaching { .. })
                 | Some(Interaction::Combining { .. })
                 | Some(Interaction::Salvaging),
@@ -865,7 +897,6 @@ impl GameState {
             ),
             (
                 None | Some(Interaction::Moving { .. })
-                    | Some(Interaction::Healing { .. })
                     | Some(Interaction::Approaching { .. })
                     | Some(Interaction::Combining { .. })
                     | Some(Interaction::Salvaging)
@@ -1672,14 +1703,16 @@ mod tests {
 
         assert!(state.data.combat_runtime.attack_queued);
 
-        assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::TargetedMissileAttack {
-                target,
-                attack_height: AttackHeight::Medium,
-                accuracy_level,
-            }) if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
-        ));
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::TargetedMissileAttack {
+                    target,
+                    attack_height: AttackHeight::Medium,
+                    accuracy_level,
+                } if *target == target_guid && (*accuracy_level - 0.5).abs() < f32::EPSILON
+            )
+        }));
     }
 
     #[test]
@@ -1799,10 +1832,12 @@ mod tests {
         let result =
             state.handle_view_event(ClientViewEvent::EntityDespawned { guid: target_guid });
 
-        assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::CancelAttack)
-        ));
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| matches!(command, ClientCommand::CancelAttack))
+        );
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);
@@ -1820,10 +1855,12 @@ mod tests {
 
         let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(matches!(
-            result.commands.first(),
-            Some(ClientCommand::CancelAttack)
-        ));
+        assert!(
+            result
+                .commands
+                .iter()
+                .any(|command| matches!(command, ClientCommand::CancelAttack))
+        );
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_queued);
         assert!(!state.data.combat_runtime.attack_sequence_active);

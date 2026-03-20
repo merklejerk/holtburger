@@ -126,6 +126,7 @@ impl Client {
         Ok(Client {
             session,
             world: WorldState::new(portal_dat, cell_dat),
+            active_confirmation: None,
             state: ClientState::Connected,
             wire_event_tx,
             client_view_event_tx,

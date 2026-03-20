@@ -6,6 +6,7 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
 };
+use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use holtburger_protocol::messages::{
     GameMessage, InterpretedMotionState, MovementEventData, MovementInvalid, MovementStateFlags,
@@ -122,6 +123,36 @@ fn test_resistance_derivation_matches_ace_player_rules() {
     let resistance = player.get_resistance_current(PropertyFloat::ResistFire);
 
     assert!((resistance - 0.72).abs() < 0.0001);
+}
+
+#[test]
+fn test_character_option_helpers_read_and_update_both_masks() {
+    let mut player = PlayerState::new();
+
+    assert!(!player.character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog,));
+    assert!(!player.character_option_enabled(CharacterOption::ShowYourHelmOrHeadGear));
+
+    player.set_character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog, true);
+    player.set_character_option_enabled(CharacterOption::ShowYourHelmOrHeadGear, true);
+
+    assert!(player.character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog,));
+    assert!(player.character_option_enabled(CharacterOption::ShowYourHelmOrHeadGear));
+    assert!(
+        player
+            .options1
+            .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG)
+    );
+    assert!(player.options2.contains(CharacterOptions2::SHOW_HELM));
+
+    player.set_character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog, false);
+
+    assert!(!player.character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog,));
+    assert!(
+        !player
+            .options1
+            .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG)
+    );
+    assert!(player.options2.contains(CharacterOptions2::SHOW_HELM));
 }
 
 #[test]

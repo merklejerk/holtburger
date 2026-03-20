@@ -1,3 +1,5 @@
+mod commands;
+
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_core::ClientCommand;
 use holtburger_protocol::messages::combat::CombatMode;
@@ -8,6 +10,10 @@ use crate::types::{FocusedPane, SCROLL_STEP, UpdateResult};
 impl GameState {
     pub fn handle_mouse(&mut self, mouse: MouseEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
+
+        if self.view.active_confirmation.is_some() {
+            return result;
+        }
 
         // Grab chunks from layout cache
         let main_chunks = std::rc::Rc::clone(&self.view.layout_cache.main_chunks);
@@ -85,6 +91,11 @@ impl GameState {
     #[allow(clippy::too_many_arguments)]
     pub fn handle_input(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
         let mut result = UpdateResult::new();
+
+        if let Some(confirmation_result) = self.handle_confirmation_input(key) {
+            return confirmation_result;
+        }
+
         let main_chunks = std::rc::Rc::clone(&self.view.layout_cache.main_chunks);
 
         if self.dashboard.active_tab_footer_input().is_some() {
@@ -148,45 +159,13 @@ impl GameState {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if command == "/quit" || command == "/exit" {
-                        result.commands.push(ClientCommand::Quit);
-                        return result;
-                    }
-                    if command == "/clear" {
-                        self.chat.messages.clear();
-                        self.chat.wrapped_chat_cache.clear();
-                        self.chat_input.input.clear();
-                        return result.with_redraw(true);
-                    }
-                    if command == "/combat" {
-                        let mode = self.toggled_combat_mode();
-
-                        result
-                            .actions
-                            .push(crate::types::AppAction::SetCombatMode { mode });
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command == "/help" {
-                        use crate::types::ChatMessageKind;
-                        self.chat.log(
-                            ChatMessageKind::System,
-                            "Available commands: /quit, /exit, /clear, /help, /combat".to_string(),
-                        );
-                        self.chat.log(
-                            ChatMessageKind::System,
-                            "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)"
-                                .to_string(),
-                        );
-                        self.chat_input.input.clear();
-                        return result.with_redraw(true);
+                    if command.starts_with('/') {
+                        return self.handle_slash_command(&command);
                     }
                     self.chat_input.input_history.push(command.clone());
                     self.chat_input.history_index = None;
-                    result.commands.push(ClientCommand::Talk(command));
                     self.view.focused_pane = self.view.previous_focused_pane;
+                    result.commands.push(ClientCommand::Talk(command));
                     result.needs_redraw = true;
                 } else {
                     self.view.previous_focused_pane = self.view.focused_pane;
@@ -369,6 +348,27 @@ impl GameState {
         }
         result
     }
+
+    fn handle_confirmation_input(&mut self, key: KeyEvent) -> Option<UpdateResult> {
+        self.view.active_confirmation.as_ref()?;
+
+        let accepted = match key.code {
+            KeyCode::Enter => Some(true),
+            KeyCode::Esc => Some(false),
+            _ => None,
+        };
+
+        let mut result = UpdateResult::new();
+        if let Some(accepted) = accepted {
+            result
+                .commands
+                .push(ClientCommand::RespondToConfirmation { accepted });
+            self.view.active_confirmation = None;
+            result.needs_redraw = true;
+        }
+
+        Some(result)
+    }
 }
 
 #[cfg(test)]
@@ -377,7 +377,9 @@ mod tests {
     use crate::pages::game::GameState;
     use crate::types::{AppAction, FocusedPane, Interaction};
     use crossterm::event::KeyModifiers;
+    use holtburger_common::ConfirmationType;
     use holtburger_common::Guid;
+    use holtburger_core::ActiveCharacterConfirmation;
 
     #[test]
     fn combat_command_dispatches_set_combat_mode_action() {
@@ -488,5 +490,76 @@ mod tests {
         );
         assert_eq!(state.view.active_interaction, None);
         assert!(!state.data.combat_runtime.attack_sequence_active);
+    }
+
+    #[test]
+    fn enter_accepts_active_confirmation_and_clears_overlay_state() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input = "/options list".to_string();
+        state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::CraftInteraction,
+            context: 42,
+            text: "Proceed with crafting?".to_string(),
+        });
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 120);
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::RespondToConfirmation { accepted: true }
+            )
+        }));
+        assert!(result.actions.is_empty());
+        assert!(result.needs_redraw);
+        assert!(state.view.active_confirmation.is_none());
+        assert_eq!(state.chat_input.input, "/options list");
+    }
+
+    #[test]
+    fn decline_confirmation_blocks_underlying_input_handling() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Dashboard;
+        state.view.active_interaction = Some(Interaction::Targeting {
+            target_guid: Guid(0x60000001),
+        });
+        state.data.combat_mode = CombatMode::Melee;
+        state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::CraftInteraction,
+            context: 99,
+            text: "Proceed with crafting?".to_string(),
+        });
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 120);
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::RespondToConfirmation { accepted: false }
+            )
+        }));
+        assert!(state.view.active_interaction.is_some());
+        assert!(state.view.active_confirmation.is_none());
+    }
+
+    #[test]
+    fn unrelated_keys_are_swallowed_while_confirmation_is_active() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input = "hello".to_string();
+        state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::CraftInteraction,
+            context: 123,
+            text: "Proceed with crafting?".to_string(),
+        });
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), 120);
+
+        assert!(result.commands.is_empty());
+        assert!(result.actions.is_empty());
+        assert!(!result.needs_redraw);
+        assert_eq!(state.chat_input.input, "hello");
+        assert!(state.view.active_confirmation.is_some());
     }
 }

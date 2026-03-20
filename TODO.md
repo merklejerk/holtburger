@@ -26,6 +26,7 @@
 - [ ] Don't show Give verb on items that are attuned/sticky.
 - [ ] Replace context panel header with entity name.
 - [ ] mod.rs files are lame. Replace with `MODULE.rs` files with only routing logic within.
+- [ ] `/logopolis`
 
 ### Medium
 - [x] Noclip mode to disable collision during movement.
@@ -199,6 +200,7 @@
 - [x] Approach can overshoot target and oscillate. Ease out?
 - [x] Show health of creatures in nearby list and dynamic panel.
 - [x] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
+- [x] Crafting success chance + confirm popup.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.

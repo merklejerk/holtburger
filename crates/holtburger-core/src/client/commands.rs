@@ -1,5 +1,5 @@
 use crate::client::movement::{encode_contact_long_jump, raw_motion_state_with_motion_style};
-use crate::client::types::{ClientCommand, TargetSlot};
+use crate::client::types::{ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
@@ -78,7 +78,11 @@ impl Client {
             | ClientCommand::DeclineTrade
             | ClientCommand::ResetTrade
             | ClientCommand::AddToTrade { .. }
-            | ClientCommand::GiveObjectRequest { .. } => self.handle_interaction_command(cmd).await,
+            | ClientCommand::GiveObjectRequest { .. }
+            | ClientCommand::SetCharacterOption { .. }
+            | ClientCommand::RespondToConfirmation { .. } => {
+                self.handle_interaction_command(cmd).await
+            }
 
             ClientCommand::Drop(_)
             | ClientCommand::Get(_)
@@ -364,6 +368,45 @@ impl Client {
                     },
                 )))
                 .await
+            }
+            ClientCommand::SetCharacterOption { option, value } => {
+                log::info!(">>> Setting character option {:?} to {}", option, value);
+                self.send_game_action(GameAction::SetSingleCharacterOption(Box::new(
+                    SetSingleCharacterOptionActionData { option, value },
+                )))
+                .await?;
+                self.world
+                    .player
+                    .set_character_option_enabled(option, value);
+                self.emit_player_options_updated();
+                Ok(())
+            }
+            ClientCommand::RespondToConfirmation { accepted } => {
+                let Some(confirmation) = self.active_confirmation.clone() else {
+                    self.emit_wire_event(WireEvent::ClientError(
+                        "No active confirmation request to answer.".to_string(),
+                    ));
+                    return Ok(());
+                };
+
+                log::info!(
+                    ">>> Responding to confirmation {:?} (context 0x{:08X}) with {}",
+                    confirmation.confirmation_type,
+                    confirmation.context,
+                    accepted
+                );
+                self.send_game_action(GameAction::ConfirmationResponse(Box::new(
+                    ConfirmationResponseActionData {
+                        confirmation_type: confirmation.confirmation_type,
+                        context: confirmation.context,
+                        accepted,
+                    },
+                )))
+                .await?;
+
+                self.active_confirmation = None;
+                self.emit_active_character_confirmation_updated();
+                Ok(())
             }
             _ => unreachable!(),
         }
@@ -792,11 +835,34 @@ fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> E
 #[cfg(test)]
 mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
-    use holtburger_common::Guid;
+    use crate::client::types::{ActiveCharacterConfirmation, ClientCommand, ClientViewEvent};
+    use crate::client::{Client, ClientState, auth::AuthState, movement::MovementSystem};
+    use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
+    use holtburger_session::Session;
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use std::collections::HashMap;
     use std::sync::Arc;
+    use tokio::sync::broadcast;
+
+    fn build_test_client() -> Client {
+        let (wire_event_tx, _) = broadcast::channel(32);
+        let (client_view_event_tx, _) = broadcast::channel(32);
+
+        Client {
+            session: Session::new_test(),
+            world: WorldState::new(None, None),
+            active_confirmation: None,
+            state: ClientState::InWorld,
+            wire_event_tx,
+            client_view_event_tx,
+            command_rx: None,
+            message_dump_dir: None,
+            message_counter: 0,
+            movement: MovementSystem::new(),
+            auth: AuthState::new("test".to_string()),
+        }
+    }
 
     fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
         SpellInfo {
@@ -898,5 +964,77 @@ mod tests {
                 spell_id: 400,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn set_character_option_updates_world_state_and_projects_view_event() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::SetCharacterOption {
+                option: CharacterOption::UseCraftingChanceOfSuccessDialog,
+                value: true,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            client
+                .world
+                .player
+                .character_option_enabled(CharacterOption::UseCraftingChanceOfSuccessDialog)
+        );
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+
+        let mut saw_projection = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::PlayerOptionsUpdated { options }
+                    if options
+                        .options1
+                        .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG)
+            ) {
+                saw_projection = true;
+                break;
+            }
+        }
+
+        assert!(saw_projection);
+    }
+
+    #[tokio::test]
+    async fn respond_to_confirmation_uses_active_confirmation_state() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::CraftInteraction,
+            context: 0xDEADBEEF,
+            text: "Craft this item?".to_string(),
+        });
+
+        client
+            .handle_command(ClientCommand::RespondToConfirmation { accepted: true })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+        assert!(client.active_confirmation.is_none());
+
+        let mut saw_clear = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation: None }
+            ) {
+                saw_clear = true;
+                break;
+            }
+        }
+
+        assert!(saw_clear);
     }
 }

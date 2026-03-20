@@ -1,5 +1,6 @@
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
+use holtburger_common::CharacterOption;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RaiseAttributeActionData {
@@ -121,6 +122,39 @@ impl ProtocolPack for TrainSkillActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SetSingleCharacterOptionActionData {
+    pub option: CharacterOption,
+    pub value: bool,
+}
+
+impl ProtocolUnpack for SetSingleCharacterOptionActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 8 > data.len() {
+            return None;
+        }
+        let option_raw = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        *offset += 4;
+        let value = LittleEndian::read_u32(&data[*offset..*offset + 4]) != 0;
+        *offset += 4;
+        Some(Self {
+            option: CharacterOption::from_repr(option_raw)?,
+            value,
+        })
+    }
+}
+
+impl ProtocolPack for SetSingleCharacterOptionActionData {
+    fn pack(&self, writer: &mut Vec<u8>) {
+        writer
+            .write_u32::<LittleEndian>(self.option as u32)
+            .unwrap();
+        writer
+            .write_u32::<LittleEndian>(u32::from(self.value))
+            .unwrap();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,6 +162,7 @@ mod tests {
     use crate::test_fixtures as fixtures;
     use crate::test_helpers::assert_pack_unpack_parity;
     use byteorder::{LittleEndian, WriteBytesExt};
+    use holtburger_common::CharacterOption;
 
     #[test]
     fn test_raise_attribute_parity() {
@@ -187,5 +222,19 @@ mod tests {
         let mut offset = 0;
         let unpacked = GameActionMessage::unpack(&packed, &mut offset).unwrap();
         assert_eq!(unpacked, action);
+    }
+
+    #[test]
+    fn test_set_single_character_option_parity() {
+        let action = GameActionMessage {
+            sequence: 0x11223344,
+            action: GameAction::SetSingleCharacterOption(Box::new(
+                SetSingleCharacterOptionActionData {
+                    option: CharacterOption::UseCraftingChanceOfSuccessDialog,
+                    value: true,
+                },
+            )),
+        };
+        assert_pack_unpack_parity(fixtures::ACTION_SET_SINGLE_CHARACTER_OPTION, &action);
     }
 }

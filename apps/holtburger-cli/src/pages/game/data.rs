@@ -1,11 +1,12 @@
 use crate::pages::game::combat::CombatRuntimeState;
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PropertyInt, WorldObjectExt as _, WorldObjectPropertyAccessors,
 };
+use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2, Guid};
+use holtburger_core::PlayerCharacterOptions;
 use holtburger_protocol::messages::EquipMask;
 use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
 use holtburger_protocol::messages::magic::Enchantment;
@@ -18,6 +19,142 @@ use holtburger_world::stats::{
 use std::sync::Arc;
 
 const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CuratedCharacterOption {
+    CraftSuccessDialog,
+    AutoAcceptFellowshipRequests,
+    IgnoreFellowshipRequests,
+    IgnoreTradeRequests,
+    AllowItemGive,
+    AllegianceChat,
+    GeneralChat,
+    TradeChat,
+    LfgChat,
+    RoleplayChat,
+    SocietyChat,
+}
+
+impl CuratedCharacterOption {
+    pub const ALL: [Self; 11] = [
+        Self::CraftSuccessDialog,
+        Self::AutoAcceptFellowshipRequests,
+        Self::IgnoreFellowshipRequests,
+        Self::IgnoreTradeRequests,
+        Self::AllowItemGive,
+        Self::AllegianceChat,
+        Self::GeneralChat,
+        Self::TradeChat,
+        Self::LfgChat,
+        Self::RoleplayChat,
+        Self::SocietyChat,
+    ];
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "craft-success-dialog" | "craft-success" => Some(Self::CraftSuccessDialog),
+            "auto-accept-fellowship" | "auto-fellowship" => {
+                Some(Self::AutoAcceptFellowshipRequests)
+            }
+            "ignore-fellowship" | "ignore-fellowship-requests" => {
+                Some(Self::IgnoreFellowshipRequests)
+            }
+            "ignore-trade" | "ignore-trade-requests" => Some(Self::IgnoreTradeRequests),
+            "allow-item-give" | "allow-give" => Some(Self::AllowItemGive),
+            "allegiance-chat" => Some(Self::AllegianceChat),
+            "general-chat" => Some(Self::GeneralChat),
+            "trade-chat" => Some(Self::TradeChat),
+            "lfg-chat" => Some(Self::LfgChat),
+            "roleplay-chat" => Some(Self::RoleplayChat),
+            "society-chat" => Some(Self::SocietyChat),
+            _ => None,
+        }
+    }
+
+    pub fn canonical_name(self) -> &'static str {
+        match self {
+            Self::CraftSuccessDialog => "craft-success-dialog",
+            Self::AutoAcceptFellowshipRequests => "auto-accept-fellowship",
+            Self::IgnoreFellowshipRequests => "ignore-fellowship",
+            Self::IgnoreTradeRequests => "ignore-trade",
+            Self::AllowItemGive => "allow-item-give",
+            Self::AllegianceChat => "allegiance-chat",
+            Self::GeneralChat => "general-chat",
+            Self::TradeChat => "trade-chat",
+            Self::LfgChat => "lfg-chat",
+            Self::RoleplayChat => "roleplay-chat",
+            Self::SocietyChat => "society-chat",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::CraftSuccessDialog => "Show crafting success chance confirmations",
+            Self::AutoAcceptFellowshipRequests => "Automatically accept fellowship requests",
+            Self::IgnoreFellowshipRequests => "Ignore incoming fellowship requests",
+            Self::IgnoreTradeRequests => "Ignore incoming trade requests",
+            Self::AllowItemGive => "Let other players hand you items",
+            Self::AllegianceChat => "Listen to allegiance chat",
+            Self::GeneralChat => "Listen to general chat",
+            Self::TradeChat => "Listen to trade chat",
+            Self::LfgChat => "Listen to LFG chat",
+            Self::RoleplayChat => "Listen to roleplay chat",
+            Self::SocietyChat => "Listen to society chat",
+        }
+    }
+
+    pub fn character_option(self) -> CharacterOption {
+        match self {
+            Self::CraftSuccessDialog => CharacterOption::UseCraftingChanceOfSuccessDialog,
+            Self::AutoAcceptFellowshipRequests => {
+                CharacterOption::AutomaticallyAcceptFellowshipRequests
+            }
+            Self::IgnoreFellowshipRequests => CharacterOption::IgnoreFellowshipRequests,
+            Self::IgnoreTradeRequests => CharacterOption::IgnoreAllTradeRequests,
+            Self::AllowItemGive => CharacterOption::LetOtherPlayersGiveYouItems,
+            Self::AllegianceChat => CharacterOption::ListenToAllegianceChat,
+            Self::GeneralChat => CharacterOption::ListenToGeneralChat,
+            Self::TradeChat => CharacterOption::ListenToTradeChat,
+            Self::LfgChat => CharacterOption::ListenToLFGChat,
+            Self::RoleplayChat => CharacterOption::ListenToRoleplayChat,
+            Self::SocietyChat => CharacterOption::ListenToSocietyChat,
+        }
+    }
+
+    pub fn is_enabled(self, options: PlayerCharacterOptions) -> bool {
+        match self {
+            Self::CraftSuccessDialog => options
+                .options1
+                .contains(CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG),
+            Self::AutoAcceptFellowshipRequests => options
+                .options1
+                .contains(CharacterOptions1::AUTO_ACCEPT_FELLOW_REQUEST),
+            Self::IgnoreFellowshipRequests => options
+                .options1
+                .contains(CharacterOptions1::IGNORE_FELLOWSHIP_REQUESTS),
+            Self::IgnoreTradeRequests => options
+                .options1
+                .contains(CharacterOptions1::IGNORE_TRADE_REQUESTS),
+            Self::AllowItemGive => options.options1.contains(CharacterOptions1::ALLOW_GIVE),
+            Self::AllegianceChat => options
+                .options1
+                .contains(CharacterOptions1::HEAR_ALLEGIANCE_CHAT),
+            Self::GeneralChat => options
+                .options2
+                .contains(CharacterOptions2::HEAR_GENERAL_CHAT),
+            Self::TradeChat => options
+                .options2
+                .contains(CharacterOptions2::HEAR_TRADE_CHAT),
+            Self::LfgChat => options.options2.contains(CharacterOptions2::HEAR_LFG_CHAT),
+            Self::RoleplayChat => options
+                .options2
+                .contains(CharacterOptions2::HEAR_ROLEPLAY_CHAT),
+            Self::SocietyChat => options
+                .options2
+                .contains(CharacterOptions2::HEAR_SOCIETY_CHAT),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CombatProfileLevel {
@@ -102,6 +239,8 @@ pub struct GameData {
     pub player_enchantments: Vec<Enchantment>,
     /// List of learned spell IDs.
     pub player_spells: Vec<u32>,
+    /// Projected current player character option masks from the core client view.
+    pub player_options: Option<PlayerCharacterOptions>,
     /// Full spell catalog loaded from portal.dat.
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     /// Local cache of nearby entities.
@@ -145,6 +284,7 @@ impl Default for GameData {
             player_grounded: None,
             player_enchantments: Vec::new(),
             player_spells: Vec::new(),
+            player_options: None,
             spell_catalog: None,
             entities: HashMap::new(),
             world_name: "Dereth".to_string(), // Default
@@ -274,6 +414,11 @@ impl GameData {
             .unwrap_or_else(|| format!("Spell #{}", spell_id))
     }
 
+    pub fn curated_option_enabled(&self, option: CuratedCharacterOption) -> Option<bool> {
+        self.player_options
+            .map(|player_options| option.is_enabled(player_options))
+    }
+
     pub fn track_container_opened(&mut self, guid: Guid) {
         self.open_containers.insert(guid);
 
@@ -330,8 +475,10 @@ impl WorldContext for GameData {
 
 #[cfg(test)]
 mod tests {
-    use super::{GameData, OPENED_CONTAINER_HISTORY_LIMIT};
+    use super::{CuratedCharacterOption, GameData, OPENED_CONTAINER_HISTORY_LIMIT};
     use holtburger_common::Guid;
+    use holtburger_common::{CharacterOptions1, CharacterOptions2};
+    use holtburger_core::PlayerCharacterOptions;
 
     #[test]
     fn opened_container_history_is_bounded() {
@@ -362,5 +509,42 @@ mod tests {
 
         assert!(data.has_opened_container_before(first));
         assert!(!data.has_opened_container_before(Guid(2)));
+    }
+
+    #[test]
+    fn curated_character_option_parses_aliases() {
+        assert_eq!(
+            CuratedCharacterOption::parse("craft-success"),
+            Some(CuratedCharacterOption::CraftSuccessDialog)
+        );
+        assert_eq!(
+            CuratedCharacterOption::parse("ignore-trade-requests"),
+            Some(CuratedCharacterOption::IgnoreTradeRequests)
+        );
+        assert_eq!(CuratedCharacterOption::parse("wat"), None);
+    }
+
+    #[test]
+    fn curated_option_enabled_uses_projected_masks() {
+        let data = GameData {
+            player_options: Some(PlayerCharacterOptions {
+                options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+                options2: CharacterOptions2::HEAR_TRADE_CHAT,
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            data.curated_option_enabled(CuratedCharacterOption::CraftSuccessDialog),
+            Some(true)
+        );
+        assert_eq!(
+            data.curated_option_enabled(CuratedCharacterOption::TradeChat),
+            Some(true)
+        );
+        assert_eq!(
+            data.curated_option_enabled(CuratedCharacterOption::GeneralChat),
+            Some(false)
+        );
     }
 }

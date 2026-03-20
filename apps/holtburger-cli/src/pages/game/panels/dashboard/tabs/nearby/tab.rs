@@ -210,29 +210,27 @@ impl TabController for NearbyTab {
         _view: &ViewState,
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
-        let mut verbs = Vec::new();
         let target_guid = self.get_selected_guid(data);
+        let mut verbs = vec![
+            Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Nearby,
+                    },
+                },
+                'f',
+                "Filter",
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }),
+        ];
 
         if let (Some(interaction), Some(guid)) = (interaction, target_guid) {
             let e = data.entities.get(&guid).unwrap();
             let class = classification::classify_entity(e);
-
-            verbs.push(
-                Verb::new(
-                    AppAction::UiAction {
-                        action: AppUiAction::BeginTabFilterInput {
-                            tab: DashboardTab::Nearby,
-                        },
-                    },
-                    'f',
-                    "Filter",
-                )
-                .with_footer_visibility(if self.active_filter.is_some() {
-                    FooterVerbVisibility::Hidden
-                } else {
-                    FooterVerbVisibility::Visible
-                }),
-            );
 
             match *interaction {
                 Interaction::Moving { item_guid } => {

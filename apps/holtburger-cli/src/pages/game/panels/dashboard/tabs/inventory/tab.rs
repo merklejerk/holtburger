@@ -238,7 +238,22 @@ impl TabController for InventoryTab {
         interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let entities = self.visible_entities(data);
-        let mut verbs = Vec::new();
+        let mut verbs = vec![
+                        Verb::new(
+                AppAction::UiAction {
+                    action: AppUiAction::BeginTabFilterInput {
+                        tab: DashboardTab::Inventory,
+                    },
+                },
+                'f',
+                "Filter",
+            )
+            .with_footer_visibility(if self.active_filter.is_some() {
+                FooterVerbVisibility::Hidden
+            } else {
+                FooterVerbVisibility::Visible
+            }),
+        ];
 
         if let Some((cur_entity, _, _)) = entities.get(self.selected_index) {
             verbs.extend([
@@ -257,23 +272,6 @@ impl TabController for InventoryTab {
                     "Debug",
                 ),
             ]);
-
-            verbs.push(
-                Verb::new(
-                    AppAction::UiAction {
-                        action: AppUiAction::BeginTabFilterInput {
-                            tab: DashboardTab::Inventory,
-                        },
-                    },
-                    'f',
-                    "Filter",
-                )
-                .with_footer_visibility(if self.active_filter.is_some() {
-                    FooterVerbVisibility::Hidden
-                } else {
-                    FooterVerbVisibility::Visible
-                }),
-            );
 
             let class = classify_entity(cur_entity);
             let player_guid = data.player_guid;

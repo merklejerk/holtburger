@@ -74,7 +74,9 @@
 - [x] Resolve Spellbook entries in debug info.
 - [x] Additive resist buffs make the final derived resistance LOWER? ResistBludgeon goes from 1.0 to 0.67 when `Bludgeon Shield` (+0.67) is applied. Is the base resistance supposed to be 0?
 - [x] Search/filter on list tabs. (Plan: [docs/plans/dashboard-tab-filter-plan.md](docs/plans/dashboard-tab-filter-plan.md))
-- [ ] Approach verb is janky.
+- [x] Approach verb is janky.
+- [x] Preserve selected item + scroll offset when switching tabs, with sane fallback.
+- [x] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
@@ -83,8 +85,6 @@
 - [ ] Auto-follow.
 - [ ] Add a movable cursor to the chat input.
 - [ ] `/set [CHARACTER_OPTION] ...` command.
-- [ ] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
-- [ ] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
@@ -192,21 +192,22 @@
 - [x] Don't auto-attack targets too far away or marked for deletion.
 - [x] Need a way to cancel approach.
     - Should it just be an interaction?
+- [x] Use o[n] Self verb for mana charges, healing kits.
+- [x] Show charge of mana stones.
+- [x] Make target of current interaction bold in dashboard lists?
+- [x] Label containers that you have recently opened.
+- [x] Approach can overshoot target and oscillate. Ease out?
+- [x] Show health of creatures in nearby list and dynamic panel.
+- [x] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Should toggle combat off before switching weapons.
-- [ ] Volley/Ring/Wall spells can/should use CastUntargetedSpell (rings HAVE to)
 - [ ] Log in chat when items are bought and sold.
 - [ ] Core client lib should maintain "busy" state, waiting for UseDone (with timeout autoclear), but not enforce it.
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
-- [ ] Show health of creatures in nearby list and dynamic panel.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] Make target of current interaction bold in dashboard lists?
-- [ ] Label containers that you have recently opened.
-- [ ] Approach can overshoot target and oscillate. Ease out?
-- [ ] Use o[n] Self verb for mana charges, healing kits.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

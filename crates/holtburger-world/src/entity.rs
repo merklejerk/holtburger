@@ -76,6 +76,7 @@ pub struct Entity {
     pub physics_parent_id: Option<Guid>,
     pub autonomous_movement: bool,
     pub motion_snapshot: Option<EntityMotionSnapshot>,
+    pub health_fraction: Option<f32>,
 
     pub sequences: [u16; 9],
 
@@ -210,6 +211,7 @@ impl Entity {
             physics_parent_id: None,
             autonomous_movement: false,
             motion_snapshot: None,
+            health_fraction: None,
             sequences: [0; 9],
             properties,
             armor_profile: None,

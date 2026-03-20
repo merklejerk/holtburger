@@ -7,6 +7,7 @@ use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
 use holtburger_protocol::messages::magic::Enchantment;
+use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, Vital, VitalType};
@@ -41,12 +42,15 @@ pub fn get_debug_info(
             };
             let object = InspectableObject::from_vendor_item(v);
             lines.push(Line::from(format!("ITEM: {}", v.name())));
-            push_object_debug_info(&mut lines, &object, spell_lookup);
+            push_object_debug_info(data, &mut lines, &object, spell_lookup);
         }
         InspectTarget::Entity(guid) => {
             let Some(e) = data.entities.get(&guid) else {
                 return lines;
             };
+            let player_storage = (Some(guid) == data.player_guid)
+                .then(|| data.storage_usage(guid))
+                .flatten();
             lines.push(Line::from(format!("DEBUG INFO: {}", e.name())));
             lines.push(Line::from(format!("GUID:   {:08X}", e.guid)));
             let class = classification::classify_entity(e);
@@ -163,10 +167,28 @@ pub fn get_debug_info(
                     lines.push(Line::from(format!("  Plural:    {}", p)));
                 }
                 if let Some(v) = e.items_capacity() {
-                    lines.push(Line::from(format!("  ICapacity: {}", v)));
+                    if Some(e.guid) == data.player_guid {
+                        lines.push(Line::from(format!(
+                            "  ICapacity: {}/{}",
+                            player_storage.map(|usage| usage.item_used).unwrap_or(0),
+                            v
+                        )));
+                    } else {
+                        lines.push(Line::from(format!("  ICapacity: {}", v)));
+                    }
                 }
                 if let Some(v) = e.containers_capacity() {
-                    lines.push(Line::from(format!("  CCapacity: {}", v)));
+                    if Some(e.guid) == data.player_guid {
+                        lines.push(Line::from(format!(
+                            "  CCapacity: {}/{}",
+                            player_storage
+                                .map(|usage| usage.container_used)
+                                .unwrap_or(0),
+                            v
+                        )));
+                    } else {
+                        lines.push(Line::from(format!("  CCapacity: {}", v)));
+                    }
                 }
                 if let Some(v) = e.ammo_type() {
                     lines.push(Line::from(format!("  AmmoType:  {}", v)));
@@ -567,10 +589,15 @@ pub fn get_debug_info(
 }
 
 fn push_object_debug_info(
+    data: &GameData,
     lines: &mut Vec<Line<'static>>,
     object: &InspectableObject<'_>,
     spell_lookup: Option<&SpellCatalog>,
 ) {
+    let player_storage = (Some(object.guid) == data.player_guid)
+        .then(|| data.storage_usage(object.guid))
+        .flatten();
+
     lines.push(Line::from(format!("GUID:   {:08X}", object.guid)));
     lines.push(Line::from(format!("Value:  {}", object.item_value())));
     lines.push(Line::from(format!("WCID:   {:?}", object.wcid)));
@@ -596,10 +623,28 @@ fn push_object_debug_info(
             lines.push(Line::from(format!("  Plural:    {}", p)));
         }
         if let Some(v) = object.items_capacity() {
-            lines.push(Line::from(format!("  ICapacity: {}", v)));
+            if Some(object.guid) == data.player_guid {
+                lines.push(Line::from(format!(
+                    "  ICapacity: {}/{}",
+                    player_storage.map(|usage| usage.item_used).unwrap_or(0),
+                    v
+                )));
+            } else {
+                lines.push(Line::from(format!("  ICapacity: {}", v)));
+            }
         }
         if let Some(v) = object.containers_capacity() {
-            lines.push(Line::from(format!("  CCapacity: {}", v)));
+            if Some(object.guid) == data.player_guid {
+                lines.push(Line::from(format!(
+                    "  CCapacity: {}/{}",
+                    player_storage
+                        .map(|usage| usage.container_used)
+                        .unwrap_or(0),
+                    v
+                )));
+            } else {
+                lines.push(Line::from(format!("  CCapacity: {}", v)));
+            }
         }
         if let Some(v) = object.ammo_type() {
             lines.push(Line::from(format!("  AmmoType:  {}", v)));

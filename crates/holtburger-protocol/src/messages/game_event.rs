@@ -56,6 +56,8 @@ pub enum GameEvent {
     UseDone(Box<UseDoneEventData>),
     IdentifyObjectResponse(Box<IdentifyObjectResponseEventData>),
     InventoryServerSaveFailed(Box<InventoryServerSaveFailedEventData>),
+    CharacterConfirmationRequest(Box<CharacterConfirmationRequestEventData>),
+    CharacterConfirmationDone(Box<CharacterConfirmationDoneEventData>),
     CloseGroundContainer(Box<CloseGroundContainerEventData>),
     UpdateHealth(Box<UpdateHealthEventData>),
     RegisterTrade(Box<RegisterTradeEventData>),
@@ -214,6 +216,14 @@ impl ProtocolUnpack for GameEventMessage {
                 ),
                 GameEventOpcode::InventoryServerSaveFailed => GameEvent::InventoryServerSaveFailed(
                     Box::new(InventoryServerSaveFailedEventData::unpack(data, offset)?),
+                ),
+                GameEventOpcode::CharacterConfirmationRequest => {
+                    GameEvent::CharacterConfirmationRequest(Box::new(
+                        CharacterConfirmationRequestEventData::unpack(data, offset)?,
+                    ))
+                }
+                GameEventOpcode::CharacterConfirmationDone => GameEvent::CharacterConfirmationDone(
+                    Box::new(CharacterConfirmationDoneEventData::unpack(data, offset)?),
                 ),
                 GameEventOpcode::CloseGroundContainer => GameEvent::CloseGroundContainer(Box::new(
                     CloseGroundContainerEventData::unpack(data, offset)?,
@@ -448,6 +458,16 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::InventoryServerSaveFailed(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::InventoryServerSaveFailed as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::CharacterConfirmationRequest(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CharacterConfirmationRequest as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::CharacterConfirmationDone(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::CharacterConfirmationDone as u32)
                     .unwrap();
                 data.pack(buf);
             }

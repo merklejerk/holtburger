@@ -1,10 +1,22 @@
 use super::{Client, types::*};
 use anyhow::Result;
+use holtburger_common::ConfirmationType;
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::ProtocolUnpack;
 use holtburger_world::WorldEvent;
 use holtburger_world::entity::Entity;
+
+fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType) -> bool {
+    matches!(
+        confirmation_type,
+        ConfirmationType::AlterSkill
+            | ConfirmationType::AlterAttribute
+            | ConfirmationType::CraftInteraction
+            | ConfirmationType::Augmentation
+            | ConfirmationType::YesNo
+    )
+}
 
 impl Client {
     async fn handle_world_events(&mut self, initial_events: Vec<WorldEvent>) -> Result<()> {
@@ -169,6 +181,40 @@ impl Client {
                         message: data.message.clone(),
                         chat_type: ChatMessageType::System as u32,
                     });
+                    Ok(())
+                }
+                GameEvent::CharacterConfirmationRequest(data) => {
+                    self.active_confirmation = Some(ActiveCharacterConfirmation {
+                        confirmation_type: data.confirmation_type,
+                        context: data.context,
+                        text: data.text.clone(),
+                    });
+                    self.emit_active_character_confirmation_updated();
+                    Ok(())
+                }
+                GameEvent::CharacterConfirmationDone(data) => {
+                    if let Some(confirmation) =
+                        self.active_confirmation.clone().filter(|confirmation| {
+                            confirmation.confirmation_type == data.confirmation_type
+                                && confirmation.context == data.context
+                        })
+                    {
+                        if confirmation_done_requires_auto_response(confirmation.confirmation_type)
+                        {
+                            self.session
+                                .send_action(GameAction::ConfirmationResponse(Box::new(
+                                    ConfirmationResponseActionData {
+                                        confirmation_type: confirmation.confirmation_type,
+                                        context: confirmation.context,
+                                        accepted: false,
+                                    },
+                                )))
+                                .await?;
+                        }
+
+                        self.active_confirmation = None;
+                        self.emit_active_character_confirmation_updated();
+                    }
                     Ok(())
                 }
                 GameEvent::CommunicationTransientString(data) => {
@@ -421,6 +467,7 @@ mod tests {
     use super::*;
     use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
     use holtburger_common::position::WorldPosition;
+    use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType};
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_session::Session;
@@ -436,6 +483,7 @@ mod tests {
         Client {
             session: Session::new_test(),
             world: WorldState::new(None, None),
+            active_confirmation: None,
             state: ClientState::Connected,
             wire_event_tx,
             client_view_event_tx,
@@ -597,5 +645,162 @@ mod tests {
         }
 
         assert!(saw_spell_snapshot);
+    }
+
+    #[tokio::test]
+    async fn test_confirmation_request_projects_active_confirmation_state() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid::NULL,
+            sequence: 0x0E,
+            event: GameEvent::CharacterConfirmationRequest(Box::new(
+                CharacterConfirmationRequestEventData {
+                    confirmation_type: ConfirmationType::CraftInteraction,
+                    context: 0xDEADBEEF,
+                    text: "Craft this item? Success chance is 42%.".to_string(),
+                },
+            )),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert!(matches!(
+            client.active_confirmation,
+            Some(ActiveCharacterConfirmation {
+                confirmation_type: ConfirmationType::CraftInteraction,
+                context: 0xDEADBEEF,
+                ..
+            })
+        ));
+
+        let mut saw_projection = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::ActiveCharacterConfirmationUpdated {
+                    confirmation: Some(ActiveCharacterConfirmation {
+                        confirmation_type: ConfirmationType::CraftInteraction,
+                        context: 0xDEADBEEF,
+                        ..
+                    }),
+                }
+            ) {
+                saw_projection = true;
+                break;
+            }
+        }
+
+        assert!(saw_projection);
+    }
+
+    #[tokio::test]
+    async fn test_confirmation_done_clears_matching_active_confirmation_state() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::CraftInteraction,
+            context: 0xDEADBEEF,
+            text: "Craft this item?".to_string(),
+        });
+
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid::NULL,
+            sequence: 0x0F,
+            event: GameEvent::CharacterConfirmationDone(Box::new(
+                CharacterConfirmationDoneEventData {
+                    confirmation_type: ConfirmationType::CraftInteraction,
+                    context: 0xDEADBEEF,
+                },
+            )),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert!(client.active_confirmation.is_none());
+        assert_eq!(client.session.game_action_sequence, 1);
+
+        let mut saw_clear = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation: None }
+            ) {
+                saw_clear = true;
+                break;
+            }
+        }
+
+        assert!(saw_clear);
+    }
+
+    #[tokio::test]
+    async fn test_confirmation_done_does_not_auto_respond_for_fellowship() {
+        let mut client = build_test_client();
+        client.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::Fellowship,
+            context: 0xDEADBEEF,
+            text: "Join fellowship?".to_string(),
+        });
+
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid::NULL,
+            sequence: 0x10,
+            event: GameEvent::CharacterConfirmationDone(Box::new(
+                CharacterConfirmationDoneEventData {
+                    confirmation_type: ConfirmationType::Fellowship,
+                    context: 0xDEADBEEF,
+                },
+            )),
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert!(client.active_confirmation.is_none());
+        assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[tokio::test]
+    async fn test_player_info_world_event_projects_player_options() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.world.player.options1 = CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG;
+        client.world.player.options2 = CharacterOptions2::SHOW_HELM;
+
+        client.handle_world_event(&WorldEvent::PlayerInfo(Box::new(
+            holtburger_world::PlayerInfoData {
+                guid: holtburger_common::Guid(0x50000001),
+                name: "Test Player".to_string(),
+                pos: None,
+                player_entity: None,
+                attributes: Vec::new(),
+                vitals: Vec::new(),
+                skills: Vec::new(),
+                enchantments: Vec::new(),
+                spells: Vec::new(),
+                level_info: CharacterLevelInfo::default(),
+                resistances: holtburger_world::stats::Resistances::default(),
+                armor: 0,
+                vitae: 1.0,
+                inventory: Default::default(),
+                equipment: Default::default(),
+            },
+        )));
+
+        let mut saw_options_projection = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::PlayerOptionsUpdated { options }
+                    if options.options1 == CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG
+                        && options.options2 == CharacterOptions2::SHOW_HELM
+            ) {
+                saw_options_projection = true;
+                break;
+            }
+        }
+
+        assert!(saw_options_projection);
     }
 }

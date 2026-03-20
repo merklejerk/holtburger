@@ -1,6 +1,8 @@
 use crate::client::locomotion::{LocomotionRequest, MovementPacketMetadata};
-use holtburger_common::Guid;
 use holtburger_common::properties::DamageType;
+use holtburger_common::{
+    CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
+};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
@@ -145,6 +147,19 @@ pub enum CombatFeedback {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlayerCharacterOptions {
+    pub options1: CharacterOptions1,
+    pub options2: CharacterOptions2,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveCharacterConfirmation {
+    pub confirmation_type: ConfirmationType,
+    pub context: u32,
+    pub text: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
     StatusUpdate {
@@ -169,8 +184,14 @@ pub enum ClientViewEvent {
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
     },
+    PlayerOptionsUpdated {
+        options: PlayerCharacterOptions,
+    },
     PlayerEnchantmentsUpdated {
         enchantments: Vec<Enchantment>,
+    },
+    ActiveCharacterConfirmationUpdated {
+        confirmation: Option<ActiveCharacterConfirmation>,
     },
     ErrorRaised {
         source: ErrorSource,
@@ -377,6 +398,13 @@ pub enum ClientCommand {
         target: Guid,
         attack_height: AttackHeight,
         accuracy_level: f32,
+    },
+    SetCharacterOption {
+        option: CharacterOption,
+        value: bool,
+    },
+    RespondToConfirmation {
+        accepted: bool,
     },
     SetCombatMode(CombatMode),
     CancelAttack,

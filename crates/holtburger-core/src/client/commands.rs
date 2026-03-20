@@ -402,7 +402,11 @@ impl Client {
                         accepted,
                     },
                 )))
-                .await
+                .await?;
+
+                self.active_confirmation = None;
+                self.emit_active_character_confirmation_updated();
+                Ok(())
             }
             _ => unreachable!(),
         }
@@ -1004,6 +1008,7 @@ mod tests {
     #[tokio::test]
     async fn respond_to_confirmation_uses_active_confirmation_state() {
         let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
         client.active_confirmation = Some(ActiveCharacterConfirmation {
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 0xDEADBEEF,
@@ -1017,6 +1022,19 @@ mod tests {
 
         assert_eq!(client.session.game_action_sequence, 1);
         assert!(client.session.bytes_out > 0);
-        assert!(client.active_confirmation.is_some());
+        assert!(client.active_confirmation.is_none());
+
+        let mut saw_clear = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation: None }
+            ) {
+                saw_clear = true;
+                break;
+            }
+        }
+
+        assert!(saw_clear);
     }
 }

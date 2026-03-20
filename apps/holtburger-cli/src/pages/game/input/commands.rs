@@ -199,7 +199,13 @@ impl GameState {
                 result.with_redraw(true)
             }
             _ if command.starts_with("/options") => self.handle_options_command(command),
-            _ => result,
+            _ => {
+                self.finish_input_command_submission(command);
+                result
+                    .commands
+                    .push(ClientCommand::Talk(command.to_string()));
+                result.with_redraw(true)
+            }
         }
     }
 }
@@ -342,6 +348,33 @@ mod tests {
                 .messages
                 .iter()
                 .any(|message| message.text.contains("Unknown option 'bogus'"))
+        );
+    }
+
+    #[test]
+    fn unknown_slash_command_falls_back_to_talk_submission() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.view.previous_focused_pane = FocusedPane::Dashboard;
+        state.chat_input.input = "/wave hello".to_string();
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 120);
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Talk(text)) if text == "/wave hello"
+        ));
+        assert!(result.actions.is_empty());
+        assert!(result.needs_redraw);
+        assert_eq!(state.view.focused_pane, FocusedPane::Dashboard);
+        assert!(state.chat_input.input.is_empty());
+        assert!(
+            state
+                .chat_input
+                .input_history
+                .iter()
+                .any(|entry| entry == "/wave hello")
         );
     }
 }

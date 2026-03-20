@@ -526,11 +526,13 @@ mod tests {
 
     #[test]
     fn curated_option_enabled_uses_projected_masks() {
-        let mut data = GameData::default();
-        data.player_options = Some(PlayerCharacterOptions {
-            options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
-            options2: CharacterOptions2::HEAR_TRADE_CHAT,
-        });
+        let data = GameData {
+            player_options: Some(PlayerCharacterOptions {
+                options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+                options2: CharacterOptions2::HEAR_TRADE_CHAT,
+            }),
+            ..Default::default()
+        };
 
         assert_eq!(
             data.curated_option_enabled(CuratedCharacterOption::CraftSuccessDialog),

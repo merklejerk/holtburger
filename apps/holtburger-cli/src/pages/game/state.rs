@@ -103,6 +103,7 @@ impl GameState {
             | ClientViewEvent::PlayerLevelInfoUpdated { .. }
             | ClientViewEvent::PlayerVitalsUpdated { .. }
             | ClientViewEvent::PlayerSpellsUpdated { .. }
+            | ClientViewEvent::PlayerOptionsUpdated { .. }
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
                 self.sync_sticky_melee_pursuit(&mut result);
@@ -701,6 +702,9 @@ impl GameState {
             }
             ClientViewEvent::PlayerSpellsUpdated { spell_ids } => {
                 self.data.player_spells = spell_ids;
+            }
+            ClientViewEvent::PlayerOptionsUpdated { options } => {
+                self.data.player_options = Some(options);
             }
             ClientViewEvent::CombatModeUpdated { mode } => {
                 if mode != CombatMode::NonCombat {
@@ -2804,6 +2808,27 @@ mod tests {
             Some(target_guid)
         );
         assert!(state.view.navigation.sticky_is_pursuing());
+    }
+
+    #[test]
+    fn projected_player_options_update_game_data() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+
+        let result = state.handle_view_event(ClientViewEvent::PlayerOptionsUpdated {
+            options: holtburger_core::PlayerCharacterOptions {
+                options1: holtburger_common::CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+                options2: holtburger_common::CharacterOptions2::HEAR_GENERAL_CHAT,
+            },
+        });
+
+        assert!(result.needs_redraw);
+        assert!(matches!(
+            state.data.player_options,
+            Some(holtburger_core::PlayerCharacterOptions {
+                options1: holtburger_common::CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+                options2: holtburger_common::CharacterOptions2::HEAR_GENERAL_CHAT,
+            })
+        ));
     }
 
     #[test]

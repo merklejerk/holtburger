@@ -1,3 +1,5 @@
+mod commands;
+
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
 use holtburger_core::ClientCommand;
 use holtburger_protocol::messages::combat::CombatMode;
@@ -148,45 +150,13 @@ impl GameState {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
                     }
-                    if command == "/quit" || command == "/exit" {
-                        result.commands.push(ClientCommand::Quit);
-                        return result;
-                    }
-                    if command == "/clear" {
-                        self.chat.messages.clear();
-                        self.chat.wrapped_chat_cache.clear();
-                        self.chat_input.input.clear();
-                        return result.with_redraw(true);
-                    }
-                    if command == "/combat" {
-                        let mode = self.toggled_combat_mode();
-
-                        result
-                            .actions
-                            .push(crate::types::AppAction::SetCombatMode { mode });
-                        self.chat_input.input_history.push(command.clone());
-                        self.chat_input.history_index = None;
-                        self.view.focused_pane = self.view.previous_focused_pane;
-                        return result.with_redraw(true);
-                    }
-                    if command == "/help" {
-                        use crate::types::ChatMessageKind;
-                        self.chat.log(
-                            ChatMessageKind::System,
-                            "Available commands: /quit, /exit, /clear, /help, /combat".to_string(),
-                        );
-                        self.chat.log(
-                            ChatMessageKind::System,
-                            "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)"
-                                .to_string(),
-                        );
-                        self.chat_input.input.clear();
-                        return result.with_redraw(true);
+                    if command.starts_with('/') {
+                        return self.handle_slash_command(&command);
                     }
                     self.chat_input.input_history.push(command.clone());
                     self.chat_input.history_index = None;
-                    result.commands.push(ClientCommand::Talk(command));
                     self.view.focused_pane = self.view.previous_focused_pane;
+                    result.commands.push(ClientCommand::Talk(command));
                     result.needs_redraw = true;
                 } else {
                     self.view.previous_focused_pane = self.view.focused_pane;

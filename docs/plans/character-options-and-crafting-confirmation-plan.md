@@ -309,6 +309,8 @@ Notes:
 
 ## Phase 4: TUI Slash Commands for Curated Character Options (Complexity: Medium)
 
+**Status:** Completed on 2026-03-20.
+
 **Deliverables**
 - Extend slash-command parsing in chat input to support `/options` commands.
 - Add option-name parsing, friendly error messages, and help text.
@@ -328,6 +330,14 @@ Notes:
 - `/options get craft-success-dialog` or equivalent returns the correct retained value.
 - `/options set craft-success-dialog on` emits the correct client command.
 - Invalid option names and invalid values produce clear TUI feedback rather than silently failing.
+
+**Phase 4 Outcome**
+- Added a TUI-owned curated character option enum and alias mapping layer in `apps/holtburger-cli`.
+- Stored projected `PlayerCharacterOptions` in TUI `GameData` instead of reaching back into shared/world state.
+- Extended the existing chat-input slash-command path with `/options`, `/options list`, `/options get`, `/options set`, and `/options toggle`.
+- Added user-facing chat feedback for option listing, reads, mutation requests, invalid names, invalid values, and missing projected option state.
+- Updated `/help` to advertise the `/options` command surface.
+- Added CLI tests covering curated option parsing, projected-state storage, help text, and `/options` command behavior.
 
 ## Phase 5: TUI Confirmation UX for Crafting Flow (Complexity: Medium)
 
@@ -393,8 +403,8 @@ Notes:
 - [x] Phase 2: Add low-level typed `CharacterOption` helpers in `holtburger-world`.
 - [x] Phase 3: Add core client commands for confirmation response and single-option updates.
 - [x] Phase 3: Add active confirmation client state.
-- [ ] Phase 4: Add `/options` slash-command parsing and help text.
-- [ ] Phase 4: Add curated option listing and toggle commands.
+- [x] Phase 4: Add `/options` slash-command parsing and help text.
+- [x] Phase 4: Add curated option listing and toggle commands.
 - [ ] Phase 5: Add confirmation UI and input handling in the TUI.
 - [ ] Phase 5: Verify crafting confirmation flow end-to-end against ACE behavior.
 
@@ -410,6 +420,7 @@ Notes:
 - `PlayerDescriptionEventData` now exposes typed character option masks at the protocol boundary instead of raw `u32` values.
 - Phase 2 world helpers stay at the low-level `CharacterOption`/bitflag layer; curated user-facing option naming remains deferred to the TUI/frontend layer.
 - Phase 3 confirmation replies use the currently active core-owned confirmation state rather than requiring frontends to pass confirmation type/context back into the command surface.
+- Phase 4 chose canonical TUI slash-command names like `craft-success-dialog`, `ignore-trade`, and `general-chat`, with a small alias set for obvious variants.
 
 ### Verification Log
 - 2026-03-20: Generated ACE fixture hex with `SyntheticProtocolTests.GenerateCharacterOptionAndConfirmationFixtures` in `ACE.Server.Tests`.
@@ -420,8 +431,9 @@ Notes:
 - 2026-03-20: `cargo fmt --all && cargo test -p holtburger-world --lib` passed.
 - 2026-03-20: Added core client commands/projection for character options and confirmation lifecycle state.
 - 2026-03-20: `cargo fmt --all && cargo test -p holtburger-core` passed.
+- 2026-03-20: Added TUI curated option mapping, projected option storage, and `/options` slash-command support.
+- 2026-03-20: `cargo fmt --all && cargo test -p holtburger-cli` passed.
 
 ### Open Questions
-- Exact canonical slash-command names for curated options: whether to prefer terse names like `craft-success-dialog` or names closer to ACE nomenclature.
 - Whether the confirmation UI should use the existing modal component directly or a game-page-specific confirmation presentation layer built on top of it.
 - Whether any curated option toggles besides chat subscriptions should trigger immediate local UI side effects beyond optimistic state updates.

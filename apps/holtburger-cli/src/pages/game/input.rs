@@ -16,7 +16,7 @@ impl GameState {
         }
 
         // Grab chunks from layout cache
-        let main_chunks = std::rc::Rc::clone(&self.view.layout_cache.main_chunks);
+        let main_chunks = self.main_chunks();
 
         match mouse.kind {
             crossterm::event::MouseEventKind::ScrollUp => {
@@ -96,7 +96,7 @@ impl GameState {
             return confirmation_result;
         }
 
-        let main_chunks = std::rc::Rc::clone(&self.view.layout_cache.main_chunks);
+        let main_chunks = self.main_chunks();
 
         if self.dashboard.active_tab_footer_input().is_some() {
             let data = &self.data;
@@ -338,8 +338,7 @@ impl GameState {
                     result.needs_redraw = true;
                 }
                 FocusedPane::Context => {
-                    self.view.context_scroll_offset =
-                        self.view.context_buffer.len().saturating_sub(1);
+                    self.view.context_scroll_offset = self.context_buffer_len().saturating_sub(1);
                     result.needs_redraw = true;
                 }
                 _ => {}

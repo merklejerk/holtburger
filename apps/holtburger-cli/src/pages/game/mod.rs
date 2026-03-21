@@ -2,6 +2,7 @@ pub mod combat;
 pub mod input;
 pub mod panels;
 mod salvaging;
+mod weapon_swap;
 
 pub mod state;
 pub use self::state::GameState;

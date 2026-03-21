@@ -1,8 +1,41 @@
 use crate::pages::selection::SelectionState;
 use crate::state::AppState;
 use crate::types::{ChatMessageKind, Page, UpdateResult};
-use holtburger_core::{ClientState, ClientViewEvent, ErrorReason};
+use holtburger_core::{
+    BusyOperationKind, BusyOperationResult, ClientState, ClientViewEvent, ErrorReason,
+};
 use holtburger_protocol::errors::CharacterError;
+
+fn log_busy_operation_result(operation: BusyOperationKind, result: BusyOperationResult) {
+    let label = match operation {
+        BusyOperationKind::Use => "Use",
+        BusyOperationKind::UseWithTarget => "Use-with-target",
+        BusyOperationKind::Salvage => "Salvage",
+        BusyOperationKind::SpellCast => "Spell cast",
+        BusyOperationKind::Buy => "Buy",
+        BusyOperationKind::Sell => "Sell",
+    };
+
+    match result {
+        BusyOperationResult::Completed {
+            error: holtburger_protocol::errors::WeenieError::None,
+            ..
+        } => {
+            log::debug!("{} finished.", label);
+        }
+        BusyOperationResult::Completed { error, parameter } => match parameter {
+            Some(parameter) => {
+                log::warn!("{} finished with {:?} ({}).", label, error, parameter);
+            }
+            None => {
+                log::warn!("{} finished with {:?}.", label, error);
+            }
+        },
+        BusyOperationResult::TimedOut => {
+            log::warn!("{} timed out waiting for UseDone.", label);
+        }
+    }
+}
 
 impl AppState {
     fn handle_setup_event(&mut self, event: &ClientViewEvent) {
@@ -166,6 +199,19 @@ impl AppState {
             ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. } => {
                 result.merge(self.handle_client_status_event(&event));
                 result.merge(self.page.handle_view_event(event));
+            }
+            ClientViewEvent::BusyOperationFinished {
+                operation,
+                result: busy_result,
+            } => {
+                log_busy_operation_result(operation, busy_result.clone());
+                result.merge(
+                    self.page
+                        .handle_view_event(ClientViewEvent::BusyOperationFinished {
+                            operation,
+                            result: busy_result,
+                        }),
+                );
             }
             _ => {
                 // All other entity, player, trade, and combat events delegate completely!

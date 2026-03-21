@@ -296,6 +296,7 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::WeenieError(data) => {
+                    self.note_busy_error(data.error, None);
                     self.emit_wire_event(WireEvent::WeenieError {
                         error: data.error,
                         parameter: None,
@@ -303,6 +304,7 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::WeenieErrorWithString(data) => {
+                    self.note_busy_error(data.error, Some(data.parameter.clone()));
                     self.emit_wire_event(WireEvent::WeenieError {
                         error: data.error,
                         parameter: Some(data.parameter.clone()),
@@ -317,6 +319,7 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::UseDone(data) => {
+                    self.finish_busy_operation_from_use_done(data.error);
                     self.emit_wire_event(WireEvent::UseDone { error: data.error });
                     Ok(())
                 }
@@ -468,6 +471,7 @@ mod tests {
     use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType};
+    use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::traits::ProtocolPack;
     use holtburger_session::Session;
@@ -484,6 +488,7 @@ mod tests {
             session: Session::new_test(),
             world: WorldState::new(None, None),
             active_confirmation: None,
+            active_busy_operation: None,
             state: ClientState::Connected,
             wire_event_tx,
             client_view_event_tx,
@@ -802,5 +807,86 @@ mod tests {
         }
 
         assert!(saw_options_projection);
+    }
+
+    #[tokio::test]
+    async fn use_done_finishes_busy_operation_with_weenie_hint() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.arm_busy_operation(BusyOperationKind::Sell);
+
+        let encoded_error = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid::NULL,
+            sequence: 0x11,
+            event: GameEvent::WeenieError(Box::new(WeenieErrorEventData {
+                error: WeenieError::FullInventoryLocation,
+            })),
+        })));
+        client.handle_message(&encoded_error).await.unwrap();
+
+        let encoded_done = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid::NULL,
+            sequence: 0x12,
+            event: GameEvent::UseDone(Box::new(UseDoneEventData {
+                error: WeenieError::None,
+            })),
+        })));
+        client.handle_message(&encoded_done).await.unwrap();
+
+        assert!(client.active_busy_operation.is_none());
+
+        let mut saw_completion = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::BusyOperationFinished {
+                    operation: BusyOperationKind::Sell,
+                    result: BusyOperationResult::Completed {
+                        error: WeenieError::FullInventoryLocation,
+                        parameter: None,
+                    },
+                }
+            ) {
+                saw_completion = true;
+                break;
+            }
+        }
+
+        assert!(saw_completion);
+    }
+
+    #[tokio::test]
+    async fn use_done_with_explicit_error_finishes_busy_operation_directly() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+        client.arm_busy_operation(BusyOperationKind::Buy);
+
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid::NULL,
+            sequence: 0x13,
+            event: GameEvent::UseDone(Box::new(UseDoneEventData {
+                error: WeenieError::NoObject,
+            })),
+        })));
+        client.handle_message(&encoded).await.unwrap();
+
+        let mut saw_completion = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::BusyOperationFinished {
+                    operation: BusyOperationKind::Buy,
+                    result: BusyOperationResult::Completed {
+                        error: WeenieError::NoObject,
+                        parameter: None,
+                    },
+                }
+            ) {
+                saw_completion = true;
+                break;
+            }
+        }
+
+        assert!(saw_completion);
     }
 }

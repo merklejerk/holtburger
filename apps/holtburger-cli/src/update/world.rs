@@ -1,7 +1,9 @@
 use crate::pages::selection::SelectionState;
 use crate::state::AppState;
 use crate::types::{ChatMessageKind, Page, UpdateResult};
-use holtburger_core::{BusyOperationKind, BusyOperationResult, ClientState, ClientViewEvent, ErrorReason};
+use holtburger_core::{
+    BusyOperationKind, BusyOperationResult, ClientState, ClientViewEvent, ErrorReason,
+};
 use holtburger_protocol::errors::CharacterError;
 
 fn log_busy_operation_result(operation: BusyOperationKind, result: BusyOperationResult) {
@@ -198,7 +200,10 @@ impl AppState {
                 result.merge(self.handle_client_status_event(&event));
                 result.merge(self.page.handle_view_event(event));
             }
-            ClientViewEvent::BusyOperationFinished { operation, result: busy_result } => {
+            ClientViewEvent::BusyOperationFinished {
+                operation,
+                result: busy_result,
+            } => {
                 log_busy_operation_result(operation, busy_result.clone());
                 result.merge(
                     self.page

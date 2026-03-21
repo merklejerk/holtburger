@@ -208,13 +208,17 @@ impl Client {
             }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
-                self.arm_busy_operation(BusyOperationKind::Use);
+                if !self.arm_busy_operation(BusyOperationKind::Use) {
+                    return Ok(());
+                }
                 self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
                     .await
             }
             ClientCommand::UseWithTarget { item, target } => {
                 log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
-                self.arm_busy_operation(BusyOperationKind::UseWithTarget);
+                if !self.arm_busy_operation(BusyOperationKind::UseWithTarget) {
+                    return Ok(());
+                }
                 self.send_game_action(GameAction::UseWithTarget(Box::new(
                     UseWithTargetActionData {
                         item_guid: item,
@@ -225,7 +229,9 @@ impl Client {
             }
             ClientCommand::SalvageItemsWith { tool, items } => {
                 log::info!(">>> Salvaging {} item(s) with 0x{:08X}", items.len(), tool);
-                self.arm_busy_operation(BusyOperationKind::Salvage);
+                if !self.arm_busy_operation(BusyOperationKind::Salvage) {
+                    return Ok(());
+                }
                 self.send_game_action(GameAction::SalvageItemsWith(Box::new(
                     SalvageItemsWithActionData {
                         tool_guid: tool,
@@ -302,7 +308,9 @@ impl Client {
                 .await
             }
             ClientCommand::Buy { vendor, items } => {
-                self.arm_busy_operation(BusyOperationKind::Buy);
+                if !self.arm_busy_operation(BusyOperationKind::Buy) {
+                    return Ok(());
+                }
                 self.send_game_action(GameAction::Buy(Box::new(BuyActionData {
                     vendor_guid: vendor,
                     items,
@@ -310,7 +318,9 @@ impl Client {
                 .await
             }
             ClientCommand::Sell { vendor, items } => {
-                self.arm_busy_operation(BusyOperationKind::Sell);
+                if !self.arm_busy_operation(BusyOperationKind::Sell) {
+                    return Ok(());
+                }
                 self.send_game_action(GameAction::Sell(Box::new(SellActionData {
                     vendor_guid: vendor,
                     items,
@@ -709,7 +719,9 @@ impl Client {
                     spell_id,
                     target.0
                 );
-                self.arm_busy_operation(BusyOperationKind::SpellCast);
+                if !self.arm_busy_operation(BusyOperationKind::SpellCast) {
+                    return Ok(());
+                }
                 self.send_game_action(GameAction::CastTargetedSpell(Box::new(
                     CastTargetedSpellActionData { target, spell_id },
                 )))
@@ -717,7 +729,9 @@ impl Client {
             }
             NormalizedSpellCast::Untargeted { spell_id } => {
                 log::info!(">>> Casting untargeted spell {}", spell_id);
-                self.arm_busy_operation(BusyOperationKind::SpellCast);
+                if !self.arm_busy_operation(BusyOperationKind::SpellCast) {
+                    return Ok(());
+                }
                 self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
                     CastUntargetedSpellActionData { spell_id },
                 )))
@@ -1083,5 +1097,37 @@ mod tests {
         }
 
         assert!(saw_busy_projection);
+    }
+
+    #[tokio::test]
+    async fn overlapping_busy_command_is_not_sent_to_wire() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::Buy {
+                vendor: Guid(0x7000_0001),
+                items: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+
+        client
+            .handle_command(ClientCommand::Sell {
+                vendor: Guid(0x7000_0001),
+                items: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(matches!(
+            client.active_busy_operation,
+            Some(crate::client::PendingBusyOperation {
+                operation: BusyOperationKind::Buy,
+                ..
+            })
+        ));
     }
 }

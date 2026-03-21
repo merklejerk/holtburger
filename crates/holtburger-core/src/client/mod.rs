@@ -93,9 +93,14 @@ impl Client {
             .send(ClientViewEvent::BusyOperationFinished { operation, result });
     }
 
-    pub(super) fn arm_busy_operation(&mut self, operation: BusyOperationKind) {
-        if self.active_busy_operation.is_some() {
-            return;
+    pub(super) fn arm_busy_operation(&mut self, operation: BusyOperationKind) -> bool {
+        if let Some(active) = self.active_busy_operation.as_ref() {
+            log::warn!(
+                "Ignoring busy-tracked {:?} while {:?} is still pending.",
+                operation,
+                active.operation
+            );
+            return false;
         }
 
         self.active_busy_operation = Some(PendingBusyOperation {
@@ -104,6 +109,7 @@ impl Client {
             pending_error: None,
         });
         self.emit_busy_state_updated();
+        true
     }
 
     pub(super) fn note_busy_error(&mut self, error: WeenieError, parameter: Option<String>) {
@@ -695,7 +701,7 @@ mod tests {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
 
-        client.arm_busy_operation(BusyOperationKind::Buy);
+        assert!(client.arm_busy_operation(BusyOperationKind::Buy));
         client.poll_busy_timeout(Instant::now() + BUSY_OPERATION_TIMEOUT + Duration::from_secs(1));
 
         assert!(client.active_busy_operation.is_none());
@@ -715,5 +721,21 @@ mod tests {
 
         assert!(saw_busy_clear);
         assert!(saw_timeout);
+    }
+
+    #[test]
+    fn arm_busy_operation_rejects_overlap_and_preserves_original_pending_state() {
+        let mut client = build_test_client();
+
+        assert!(client.arm_busy_operation(BusyOperationKind::Buy));
+        assert!(!client.arm_busy_operation(BusyOperationKind::Sell));
+
+        assert!(matches!(
+            client.active_busy_operation,
+            Some(PendingBusyOperation {
+                operation: BusyOperationKind::Buy,
+                ..
+            })
+        ));
     }
 }

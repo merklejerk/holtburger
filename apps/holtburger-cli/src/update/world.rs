@@ -6,7 +6,7 @@ use holtburger_core::{
 };
 use holtburger_protocol::errors::CharacterError;
 
-fn log_busy_operation_result(operation: BusyOperationKind, result: BusyOperationResult) {
+fn log_busy_operation_result(operation: BusyOperationKind, result: &BusyOperationResult) {
     let label = match operation {
         BusyOperationKind::Use => "Use",
         BusyOperationKind::UseWithTarget => "Use-with-target",
@@ -204,7 +204,7 @@ impl AppState {
                 operation,
                 result: busy_result,
             } => {
-                log_busy_operation_result(operation, busy_result.clone());
+                log_busy_operation_result(operation, &busy_result);
                 result.merge(
                     self.page
                         .handle_view_event(ClientViewEvent::BusyOperationFinished {

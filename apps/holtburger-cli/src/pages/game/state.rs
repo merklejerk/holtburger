@@ -11,12 +11,15 @@ use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
 };
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::client::types::{ActiveCharacterConfirmation, CombatFeedback};
+use holtburger_core::client::types::{
+    ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
+};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::entity::Entity;
+use ratatui::layout::Rect;
 use ratatui::text::Line;
 use std::fs::File;
 use std::sync::Mutex;
@@ -29,6 +32,7 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
+use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
     Interaction, UpdateResult,
@@ -40,6 +44,8 @@ pub struct GameState {
     pub data: GameData,
     pub dashboard: DashboardState,
     pub view: ViewState,
+    runtime: GameRuntimeState,
+    render_state: GameRenderState,
     pub chat: ChatState,
     pub chat_input: ChatInputState,
 }
@@ -73,9 +79,28 @@ impl GameState {
             data: GameData::new(guid, name, world_name),
             dashboard: DashboardState::default(),
             view: ViewState::default(),
+            runtime: GameRuntimeState::default(),
+            render_state: GameRenderState::default(),
             chat: ChatState::new(chat_log),
             chat_input: ChatInputState::default(),
         }
+    }
+
+    pub(super) fn main_chunks(&self) -> std::rc::Rc<Vec<Rect>> {
+        std::rc::Rc::clone(&self.render_state.layout_cache.main_chunks)
+    }
+
+    pub(super) fn set_layout_cache(&mut self, main_chunks: Vec<Rect>, dynamic_chunk: Rect) {
+        self.render_state.layout_cache.main_chunks = std::rc::Rc::new(main_chunks);
+        self.render_state.layout_cache.dynamic_chunk = dynamic_chunk;
+    }
+
+    pub(super) fn context_buffer(&self) -> &[Line<'static>] {
+        &self.render_state.context_buffer
+    }
+
+    pub(super) fn context_buffer_len(&self) -> usize {
+        self.render_state.context_buffer.len()
     }
 
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
@@ -105,9 +130,14 @@ impl GameState {
             | ClientViewEvent::PlayerSpellsUpdated { .. }
             | ClientViewEvent::PlayerOptionsUpdated { .. }
             | ClientViewEvent::ActiveCharacterConfirmationUpdated { .. }
+            | ClientViewEvent::BusyStateUpdated { .. }
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 self.sync_sticky_melee_pursuit(&mut result);
+                result.needs_redraw = true;
+            }
+            ClientViewEvent::BusyOperationFinished { .. } => {
                 result.needs_redraw = true;
             }
             ClientViewEvent::SpellCatalogLoaded { .. } => {
@@ -125,6 +155,7 @@ impl GameState {
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
                 self.update_inventory_and_equipment(entity_ref);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
             }
             ClientViewEvent::EntityReplaced { entity } => {
                 let entity_ref = entity.as_ref();
@@ -132,6 +163,7 @@ impl GameState {
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
                 self.update_inventory_and_equipment(entity_ref);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
             }
             ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
                 let mut needs_update = false;
@@ -143,6 +175,7 @@ impl GameState {
                 }
                 if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
                     self.update_inventory_and_equipment(&entity);
+                    self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 }
             }
             ClientViewEvent::EntityMoved { guid, pos } => {
@@ -192,7 +225,7 @@ impl GameState {
                 self.view.vendor = vendor;
                 // If we just opened a vendor and we initiated it, switch to Trade tab.
                 if let Some(v_guid) = vendor_guid
-                    && let Some((last_time, target_guid)) = self.view.last_trade_initiation
+                    && let Some((last_time, target_guid)) = self.runtime.last_trade_initiation
                     && target_guid == v_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
@@ -217,7 +250,7 @@ impl GameState {
                 self.data.trade = trade;
                 // If we just opened a trade and we initiated it, switch to Trade tab.
                 if let Some(p_guid) = partner_guid
-                    && let Some((last_time, target_guid)) = self.view.last_trade_initiation
+                    && let Some((last_time, target_guid)) = self.runtime.last_trade_initiation
                     && target_guid == p_guid
                     && last_time.elapsed() < std::time::Duration::from_secs(5)
                 {
@@ -230,6 +263,7 @@ impl GameState {
                 let entity_ref = entity.as_ref();
                 self.update_inventory_and_equipment(entity_ref);
                 self.handle_entity_identified(entity_ref);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::NoClipUpdated { .. } => {
@@ -309,7 +343,7 @@ impl GameState {
             }
             AppAction::Approach { guid } => {
                 self.start_approach_target(guid, GENERIC_APPROACH_DISTANCE, &mut result);
-                if self.view.navigation.has_active_approach() {
+                if self.runtime.navigation.has_active_approach() {
                     self.set_active_interaction(
                         Some(Interaction::Approaching { target_guid: guid }),
                         &mut result,
@@ -321,16 +355,24 @@ impl GameState {
                 result.commands.push(ClientCommand::Drop(guid));
             }
             AppAction::Equip { guid } => {
-                result.commands.push(ClientCommand::GetAndWield {
-                    item: guid,
-                    slot: None,
-                });
+                if self.runtime.weapon_swap.is_active() {
+                    result.actions.push(AppAction::Log {
+                        kind: ChatMessageKind::Warning,
+                        message: "Already waiting on a weapon swap.".to_string(),
+                    });
+                } else {
+                    self.handle_equip_request(guid, None, &mut result);
+                }
             }
             AppAction::EquipInSlot { guid, slot } => {
-                result.commands.push(ClientCommand::GetAndWield {
-                    item: guid,
-                    slot: Some(slot),
-                });
+                if self.runtime.weapon_swap.is_active() {
+                    result.actions.push(AppAction::Log {
+                        kind: ChatMessageKind::Warning,
+                        message: "Already waiting on a weapon swap.".to_string(),
+                    });
+                } else {
+                    self.handle_equip_request(guid, Some(slot), &mut result);
+                }
             }
             AppAction::Unequip { guid } => {
                 if let Some(container) = self.data.find_non_full_pack(guid, None) {
@@ -362,7 +404,7 @@ impl GameState {
                     }
                     EnterCombatModeResult::Success(res) => {
                         result.merge(res);
-                        self.view.last_trade_initiation = Some((Instant::now(), guid));
+                        self.runtime.last_trade_initiation = Some((Instant::now(), guid));
                         result.commands.push(ClientCommand::OpenTrade(guid));
                     }
                 }
@@ -374,13 +416,12 @@ impl GameState {
             }
             AppAction::OpenShop { vendor } => {
                 if self.data.trade.is_some() {
-                    // If we're in a trade, do not initiate vendor sessions.
                     result.actions.push(AppAction::Log {
                         kind: ChatMessageKind::Warning,
                         message: "You are currently in a trade.".to_string(),
                     });
                 } else {
-                    self.view.last_trade_initiation = Some((Instant::now(), vendor));
+                    self.runtime.last_trade_initiation = Some((Instant::now(), vendor));
                     result.commands.push(ClientCommand::Use(vendor));
                 }
             }
@@ -444,7 +485,6 @@ impl GameState {
                 result
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
-                // If we were combining with this item, cancel the interaction after using it.
                 if let Some(Interaction::Combining {
                     item_guid: interact_guid,
                 }) = self.view.active_interaction
@@ -659,6 +699,7 @@ impl GameState {
         }
 
         self.refresh_stale_attack_sequence(Instant::now(), &mut result);
+        self.sync_weapon_swap_controller(Instant::now(), &mut result);
 
         self.sync_approach_target(Instant::now(), &mut result);
         self.sync_sticky_melee_pursuit(&mut result);
@@ -668,11 +709,11 @@ impl GameState {
 
     pub fn refresh_context_buffer(&mut self) {
         if self.view.context_view == crate::types::ContextView::Default {
-            self.view.context_buffer.clear();
+            self.render_state.context_buffer.clear();
             return;
         }
         let content = build_context_panel_content(&self.data, &self.view);
-        self.view.context_buffer = content;
+        self.render_state.context_buffer = content;
     }
 
     pub(crate) fn handle_player_event(&mut self, event: ClientViewEvent) {
@@ -710,6 +751,9 @@ impl GameState {
             ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
                 self.view.active_confirmation = confirmation;
             }
+            ClientViewEvent::BusyStateUpdated { busy } => {
+                self.view.active_busy_operation = busy;
+            }
             ClientViewEvent::CombatModeUpdated { mode } => {
                 if mode != CombatMode::NonCombat {
                     // Clear active p2p trade. Vendoring in combat is allowed!
@@ -721,7 +765,7 @@ impl GameState {
                     mode,
                     CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
                 ) {
-                    self.view.combat_automation = None;
+                    self.runtime.combat_automation = None;
                 }
             }
             _ => {}
@@ -816,7 +860,7 @@ impl GameState {
 
         if self.should_cancel_active_approach(previous_interaction, next_interaction) {
             let update = self
-                .view
+                .runtime
                 .navigation
                 .cancel_active_approach(self.current_movement_metadata());
             result.commands.extend(update.commands);
@@ -825,7 +869,7 @@ impl GameState {
         if self.should_cancel_attack(previous_interaction, next_interaction) {
             result.commands.push(ClientCommand::CancelAttack);
             self.data.combat_runtime.cancel_attack();
-            self.view.combat_automation = None;
+            self.runtime.combat_automation = None;
         }
 
         if self.should_resume_attack(previous_interaction, next_interaction) {
@@ -950,12 +994,12 @@ impl GameState {
         result: &mut UpdateResult,
     ) {
         let Some(input) = self.combat_automation_input(now, mode, force_attack) else {
-            self.view.combat_automation = None;
+            self.runtime.combat_automation = None;
             return;
         };
 
         let update = self
-            .view
+            .runtime
             .combat_automation
             .get_or_insert_with(CombatAutomationController::default)
             .handle(&input);
@@ -973,7 +1017,7 @@ impl GameState {
     ) -> Option<CombatAutomationInput> {
         let target_guid = self.current_target_guid()?;
         let attack_profile = self.desired_attack_profile(mode)?;
-        let target_position = self.view.navigation.automation_target_position(
+        let target_position = self.runtime.navigation.automation_target_position(
             self.data.player_pos,
             self.data
                 .entities
@@ -1053,7 +1097,7 @@ impl GameState {
         let target_position = target_guid
             .and_then(|guid| self.data.entities.get(&guid).map(|entity| entity.position));
         let update = self
-            .view
+            .runtime
             .navigation
             .sync_sticky_melee(StickyMeleeSyncInput {
                 now,
@@ -1082,7 +1126,7 @@ impl GameState {
         result: &mut UpdateResult,
     ) {
         let now = Instant::now();
-        let update = self.view.navigation.start_approach_target(
+        let update = self.runtime.navigation.start_approach_target(
             target,
             arrival_distance,
             ApproachSyncInput {
@@ -1104,13 +1148,13 @@ impl GameState {
     }
 
     fn sync_approach_target(&mut self, now: Instant, result: &mut UpdateResult) {
-        let Some(target_guid) = self.view.navigation.active_approach_target_guid() else {
+        let Some(target_guid) = self.runtime.navigation.active_approach_target_guid() else {
             self.clear_finished_approach_interaction(result);
             return;
         };
 
         let update = self
-            .view
+            .runtime
             .navigation
             .sync_approach_target(ApproachSyncInput {
                 now,
@@ -1128,14 +1172,14 @@ impl GameState {
             });
         result.commands.extend(update.commands);
 
-        if !self.view.navigation.has_active_approach() {
+        if !self.runtime.navigation.has_active_approach() {
             self.clear_finished_approach_interaction(result);
         }
     }
 
     fn handle_forced_reposition(&mut self, result: &mut UpdateResult) {
         let update = self
-            .view
+            .runtime
             .navigation
             .handle_forced_reposition(self.current_movement_metadata());
         result.commands.extend(update.commands);
@@ -1144,7 +1188,7 @@ impl GameState {
 
     fn handle_teleport_start(&mut self, result: &mut UpdateResult) {
         let update = self
-            .view
+            .runtime
             .navigation
             .handle_teleport_start(self.current_movement_metadata());
         result.commands.extend(update.commands);
@@ -1167,7 +1211,7 @@ impl GameState {
             ) {
                 result.commands.push(ClientCommand::CancelAttack);
                 self.data.combat_runtime.cancel_attack();
-                self.view.combat_automation = None;
+                self.runtime.combat_automation = None;
             }
             self.view.active_interaction = None;
             result.needs_redraw = true;
@@ -1197,7 +1241,7 @@ impl GameState {
         };
 
         if self
-            .view
+            .runtime
             .navigation
             .automation_target_position(self.data.player_pos, Some(entity.position))
             .is_none()
@@ -1244,6 +1288,63 @@ impl GameState {
                 if target_guid == guid
         ) {
             self.refresh_context_buffer();
+        }
+    }
+
+    fn handle_equip_request(
+        &mut self,
+        guid: Guid,
+        slot: Option<holtburger_core::client::types::TargetSlot>,
+        result: &mut UpdateResult,
+    ) {
+        self.drive_weapon_swap(
+            WeaponSwapInput::Start {
+                now: Instant::now(),
+                item_guid: guid,
+                slot,
+                current_mode: self.data.combat_mode,
+                item_mask: self
+                    .data
+                    .entities
+                    .get(&guid)
+                    .map(|entity| entity.valid_locations()),
+            },
+            result,
+        );
+    }
+
+    fn sync_weapon_swap_controller(&mut self, now: Instant, result: &mut UpdateResult) {
+        let Some(item_guid) = self.runtime.weapon_swap.tracked_item_guid() else {
+            return;
+        };
+
+        let equipped_mask = self
+            .data
+            .equipment
+            .get(&item_guid)
+            .copied()
+            .unwrap_or(holtburger_protocol::messages::EquipMask::NONE);
+        self.drive_weapon_swap(
+            WeaponSwapInput::Tick {
+                now,
+                combat_mode: self.data.combat_mode,
+                equipped_mask,
+                suggested_mode: self.data.get_suggested_combat_mode(),
+            },
+            result,
+        );
+    }
+
+    fn drive_weapon_swap(&mut self, input: WeaponSwapInput, result: &mut UpdateResult) {
+        let update = self.runtime.weapon_swap.handle(&input);
+        for effect in update.effects {
+            self.apply_weapon_swap_effect(effect, result);
+        }
+    }
+
+    fn apply_weapon_swap_effect(&mut self, effect: WeaponSwapEffect, result: &mut UpdateResult) {
+        match effect {
+            WeaponSwapEffect::Command(command) => result.commands.push(command),
         }
     }
 
@@ -1348,12 +1449,6 @@ pub struct ViewState {
     pub focused_pane: FocusedPane,
     /// Previous focus, used for returning from modals.
     pub previous_focused_pane: FocusedPane,
-    /// Used to detect context resizing.
-    pub context_total_lines: usize,
-    /// Cached total line count for context/debug view.
-    pub context_last_total_lines: usize,
-    /// Pre-wrapped lines of text for the right-hand panel.
-    pub context_buffer: Vec<Line<'static>>,
     /// Current vertical scroll position of the context panel.
     pub context_scroll_offset: usize,
     /// What information should be displayed in the context panel.
@@ -1364,22 +1459,30 @@ pub struct ViewState {
     pub active_interaction: Option<Interaction>,
     /// Current salvaging queue state when the player is in salvaging mode.
     pub salvaging: Option<SalvagingState>,
-    /// Last time we sent a command that could initiate a trade or vendor interaction, and the target's GUID.
-    pub last_trade_initiation: Option<(Instant, Guid)>,
-    /// Optional core-provided navigation helper state owned by this frontend.
-    pub navigation: NavigationAutomation,
-    /// Current reusable combat automation controller for desired attack maintenance.
-    pub combat_automation: Option<CombatAutomationController>,
     /// Current core-projected confirmation request being surfaced by the game page.
     pub active_confirmation: Option<ActiveCharacterConfirmation>,
-    /// Cache of the exact bounding boxes computed during update_layout.
-    pub layout_cache: LayoutCache,
+    /// Current core-projected busy operation for local action sequencing.
+    pub active_busy_operation: Option<BusyOperationKind>,
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct LayoutCache {
+struct GameRuntimeState {
+    last_trade_initiation: Option<(Instant, Guid)>,
+    navigation: NavigationAutomation,
+    combat_automation: Option<CombatAutomationController>,
+    weapon_swap: WeaponSwapController,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LayoutCache {
     pub main_chunks: std::rc::Rc<Vec<ratatui::layout::Rect>>,
     pub dynamic_chunk: ratatui::layout::Rect,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GameRenderState {
+    context_buffer: Vec<Line<'static>>,
+    layout_cache: LayoutCache,
 }
 
 impl Default for ViewState {
@@ -1387,19 +1490,13 @@ impl Default for ViewState {
         Self {
             focused_pane: FocusedPane::Dashboard,
             previous_focused_pane: FocusedPane::Dashboard,
-            context_total_lines: 0,
-            context_last_total_lines: 0,
-            context_buffer: Vec::new(),
             context_scroll_offset: 0,
             context_view: ContextView::Default,
             vendor: None,
             active_interaction: None,
             salvaging: None,
-            last_trade_initiation: None,
-            navigation: NavigationAutomation::default(),
-            combat_automation: None,
             active_confirmation: None,
-            layout_cache: LayoutCache::default(),
+            active_busy_operation: None,
         }
     }
 }
@@ -1421,6 +1518,38 @@ mod tests {
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
+
+    fn is_weapon_swap_active(state: &GameState) -> bool {
+        state.runtime.weapon_swap.is_active()
+    }
+
+    fn has_active_approach(state: &GameState) -> bool {
+        state.runtime.navigation.has_active_approach()
+    }
+
+    fn sticky_latched_target_guid(state: &GameState) -> Option<Guid> {
+        state.runtime.navigation.sticky_latched_target_guid()
+    }
+
+    fn sticky_is_pursuing(state: &GameState) -> bool {
+        state.runtime.navigation.sticky_is_pursuing()
+    }
+
+    fn seed_active_approach(
+        state: &mut GameState,
+        target: Guid,
+        arrival_distance: f32,
+        input: ApproachSyncInput,
+    ) {
+        let _ = state
+            .runtime
+            .navigation
+            .start_approach_target(target, arrival_distance, input);
+    }
+
+    fn seed_sticky_melee(state: &mut GameState, input: StickyMeleeSyncInput) {
+        let _ = state.runtime.navigation.sync_sticky_melee(input);
+    }
 
     #[test]
     fn test_entity_replaced_updates_cached_entity_state() {
@@ -1477,28 +1606,16 @@ mod tests {
         state.view.context_view = ContextView::Assess(InspectTarget::VendorItem(item_guid));
         state.refresh_context_buffer();
 
-        assert!(context_buffer_contains(
-            &state.view.context_buffer,
-            "OLD NAME"
-        ));
-        assert!(!context_buffer_contains(
-            &state.view.context_buffer,
-            "NEW NAME"
-        ));
+        assert!(context_buffer_contains(state.context_buffer(), "OLD NAME"));
+        assert!(!context_buffer_contains(state.context_buffer(), "NEW NAME"));
 
         let result = state.handle_view_event(ClientViewEvent::VendorItemIdentified(Box::new(
             vendor_item_named(item_guid, 1, "New Name"),
         )));
 
         assert!(result.needs_redraw);
-        assert!(context_buffer_contains(
-            &state.view.context_buffer,
-            "NEW NAME"
-        ));
-        assert!(!context_buffer_contains(
-            &state.view.context_buffer,
-            "OLD NAME"
-        ));
+        assert!(context_buffer_contains(state.context_buffer(), "NEW NAME"));
+        assert!(!context_buffer_contains(state.context_buffer(), "OLD NAME"));
     }
 
     fn vendor_item_named(guid: Guid, wcid: u32, name: &str) -> CoreVendorItem {
@@ -1570,6 +1687,56 @@ mod tests {
     }
 
     #[test]
+    fn equip_weapon_in_combat_exits_peace_then_reenters() {
+        let player_guid = Guid(0x50000001);
+        let weapon_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
+
+        let mut weapon = Entity::new(weapon_guid, "Sword".to_string(), WorldPosition::default());
+        weapon.set_int_prop(
+            PropertyInt::ValidLocations,
+            holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
+        );
+        state.data.entities.insert(weapon_guid, weapon.clone());
+
+        let start = state
+            .handle_action(AppAction::Equip { guid: weapon_guid })
+            .unwrap();
+        assert!(matches!(
+            start.commands.first(),
+            Some(ClientCommand::SetCombatMode(CombatMode::NonCombat))
+        ));
+        assert!(is_weapon_swap_active(&state));
+
+        let peace = state.handle_view_event(ClientViewEvent::CombatModeUpdated {
+            mode: CombatMode::NonCombat,
+        });
+        assert!(matches!(
+            peace.commands.first(),
+            Some(ClientCommand::GetAndWield { item, slot: None }) if *item == weapon_guid
+        ));
+
+        weapon.set_iid_prop(
+            holtburger_common::properties::PropertyInstanceId::Wielder,
+            player_guid,
+        );
+        weapon.set_int_prop(
+            PropertyInt::CurrentWieldedLocation,
+            holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
+        );
+        let finish = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(weapon),
+        });
+
+        assert!(matches!(
+            finish.commands.first(),
+            Some(ClientCommand::SetCombatMode(CombatMode::Melee))
+        ));
+        assert!(!is_weapon_swap_active(&state));
+    }
+
+    #[test]
     fn combat_mode_update_requests_redraw() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -1629,7 +1796,8 @@ mod tests {
             target_guid,
             creature_entity(target_guid, "Drudge", target_pos),
         );
-        let _ = state.view.navigation.start_approach_target(
+        seed_active_approach(
+            &mut state,
             target_guid,
             1.0,
             ApproachSyncInput {
@@ -1653,7 +1821,7 @@ mod tests {
 
         assert!(result.commands.is_empty());
         assert_eq!(state.data.player_pos, Some(moved_pos));
-        assert!(state.view.navigation.has_active_approach());
+        assert!(has_active_approach(&state));
     }
 
     #[test]
@@ -2256,11 +2424,8 @@ mod tests {
 
         let _result = state.handle_tick(0.016);
 
-        assert!(state.view.navigation.has_active_approach());
-        assert_eq!(
-            state.view.navigation.sticky_latched_target_guid(),
-            Some(target_guid)
-        );
+        assert!(has_active_approach(&state));
+        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
     }
 
     #[test]
@@ -2323,19 +2488,20 @@ mod tests {
             creature_entity(target_guid, "Drudge", target_position),
         );
 
-        let _ = state
-            .view
-            .navigation
-            .sync_sticky_melee(StickyMeleeSyncInput {
+        let player_position = state.data.player_pos;
+        seed_sticky_melee(
+            &mut state,
+            StickyMeleeSyncInput {
                 now: Instant::now() - Duration::from_millis(250),
                 combat_mode: CombatMode::Melee,
                 attack_sequence_active: true,
                 target_guid: Some(target_guid),
-                player_position: state.data.player_pos,
+                player_position,
                 target_position: Some(target_position),
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
-            });
+            },
+        );
 
         let result = state.handle_view_event(ClientViewEvent::CombatFeedback(
             CombatFeedback::AttackDone {
@@ -2349,11 +2515,8 @@ mod tests {
                 .iter()
                 .any(|command| matches!(command, ClientCommand::TurnTo { .. }))
         );
-        assert!(state.view.navigation.has_active_approach());
-        assert_eq!(
-            state.view.navigation.sticky_latched_target_guid(),
-            Some(target_guid)
-        );
+        assert!(has_active_approach(&state));
+        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
 
         state.data.player_pos = Some(WorldPosition {
             landblock_id: Guid(0x01000000),
@@ -2446,7 +2609,7 @@ mod tests {
                 )
             })
         );
-        assert!(state.view.navigation.has_active_approach());
+        assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Approaching { target_guid })
@@ -2473,7 +2636,7 @@ mod tests {
                 })
             )
         }));
-        assert!(!state.view.navigation.has_active_approach());
+        assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
 
@@ -2512,7 +2675,7 @@ mod tests {
                 )
             })
         );
-        assert!(state.view.navigation.has_active_approach());
+        assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
 
@@ -2527,7 +2690,7 @@ mod tests {
                 })
             )
         }));
-        assert!(!state.view.navigation.has_active_approach());
+        assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
 
@@ -2557,11 +2720,8 @@ mod tests {
         let mut initial = UpdateResult::new();
         state.sync_sticky_melee_pursuit(&mut initial);
 
-        assert!(state.view.navigation.sticky_is_pursuing());
-        assert_eq!(
-            state.view.navigation.sticky_latched_target_guid(),
-            Some(target_guid)
-        );
+        assert!(sticky_is_pursuing(&state));
+        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
 
@@ -2583,8 +2743,8 @@ mod tests {
                 .any(|command| { matches!(command, ClientCommand::CancelAttack) })
         );
         assert_eq!(state.view.active_interaction, None);
-        assert_eq!(state.view.navigation.sticky_latched_target_guid(), None);
-        assert!(!state.view.navigation.sticky_is_pursuing());
+        assert_eq!(sticky_latched_target_guid(&state), None);
+        assert!(!sticky_is_pursuing(&state));
         assert!(!state.data.combat_runtime.attack_sequence_active);
     }
 
@@ -2612,7 +2772,7 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
 
-        assert!(state.view.navigation.has_active_approach());
+        assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Approaching { target_guid })
@@ -2631,7 +2791,7 @@ mod tests {
                 })
             )
         }));
-        assert!(!state.view.navigation.has_active_approach());
+        assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
 
@@ -2670,7 +2830,7 @@ mod tests {
                 )
             })
         );
-        assert!(state.view.navigation.has_active_approach());
+        assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::EntityMoved {
             guid: target_guid,
@@ -2692,7 +2852,7 @@ mod tests {
                 })
             )
         }));
-        assert!(!state.view.navigation.has_active_approach());
+        assert!(!has_active_approach(&state));
     }
 
     #[test]
@@ -2756,15 +2916,15 @@ mod tests {
         let mut target = creature_entity(target_guid, "Drudge", target_position);
         state.data.entities.insert(target_guid, target.clone());
 
-        let _ = state
-            .view
-            .navigation
-            .sync_sticky_melee(StickyMeleeSyncInput {
+        let player_position = state.data.player_pos;
+        seed_sticky_melee(
+            &mut state,
+            StickyMeleeSyncInput {
                 now: Instant::now() - Duration::from_millis(250),
                 combat_mode: CombatMode::Melee,
                 attack_sequence_active: true,
                 target_guid: Some(target_guid),
-                player_position: state.data.player_pos,
+                player_position,
                 target_position: Some(WorldPosition {
                     landblock_id: Guid(0x01000000),
                     coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
@@ -2772,7 +2932,8 @@ mod tests {
                 }),
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
-            });
+            },
+        );
 
         let in_range = state.handle_tick(0.016);
 
@@ -2787,11 +2948,8 @@ mod tests {
                 })
             )
         }));
-        assert_eq!(
-            state.view.navigation.sticky_latched_target_guid(),
-            Some(target_guid)
-        );
-        assert!(!state.view.navigation.sticky_is_pursuing());
+        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
+        assert!(!sticky_is_pursuing(&state));
 
         target.position.coords = holtburger_common::Vector3::new(6.0, 0.0, 0.0);
         state.data.entities.insert(target_guid, target);
@@ -2810,11 +2968,8 @@ mod tests {
                 )
             })
         );
-        assert_eq!(
-            state.view.navigation.sticky_latched_target_guid(),
-            Some(target_guid)
-        );
-        assert!(state.view.navigation.sticky_is_pursuing());
+        assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
+        assert!(sticky_is_pursuing(&state));
     }
 
     #[test]
@@ -2901,7 +3056,7 @@ mod tests {
         state.start_approach_target(target_guid, 1.0, &mut second);
 
         assert!(second.commands.is_empty());
-        assert!(state.view.navigation.has_active_approach());
+        assert!(has_active_approach(&state));
     }
 
     #[test]

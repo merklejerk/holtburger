@@ -1,5 +1,5 @@
 use crate::client::movement::{encode_contact_long_jump, raw_motion_state_with_motion_style};
-use crate::client::types::{ClientCommand, TargetSlot, WireEvent};
+use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
@@ -208,11 +208,13 @@ impl Client {
             }
             ClientCommand::Use(guid) => {
                 log::info!(">>> Using: 0x{:08X}", guid);
+                self.arm_busy_operation(BusyOperationKind::Use);
                 self.send_game_action(GameAction::Use(Box::new(UseActionData { guid })))
                     .await
             }
             ClientCommand::UseWithTarget { item, target } => {
                 log::info!(">>> Using: 0x{:08X} on 0x{:08X}", item, target);
+                self.arm_busy_operation(BusyOperationKind::UseWithTarget);
                 self.send_game_action(GameAction::UseWithTarget(Box::new(
                     UseWithTargetActionData {
                         item_guid: item,
@@ -223,6 +225,7 @@ impl Client {
             }
             ClientCommand::SalvageItemsWith { tool, items } => {
                 log::info!(">>> Salvaging {} item(s) with 0x{:08X}", items.len(), tool);
+                self.arm_busy_operation(BusyOperationKind::Salvage);
                 self.send_game_action(GameAction::SalvageItemsWith(Box::new(
                     SalvageItemsWithActionData {
                         tool_guid: tool,
@@ -299,6 +302,7 @@ impl Client {
                 .await
             }
             ClientCommand::Buy { vendor, items } => {
+                self.arm_busy_operation(BusyOperationKind::Buy);
                 self.send_game_action(GameAction::Buy(Box::new(BuyActionData {
                     vendor_guid: vendor,
                     items,
@@ -306,6 +310,7 @@ impl Client {
                 .await
             }
             ClientCommand::Sell { vendor, items } => {
+                self.arm_busy_operation(BusyOperationKind::Sell);
                 self.send_game_action(GameAction::Sell(Box::new(SellActionData {
                     vendor_guid: vendor,
                     items,
@@ -704,6 +709,7 @@ impl Client {
                     spell_id,
                     target.0
                 );
+                self.arm_busy_operation(BusyOperationKind::SpellCast);
                 self.send_game_action(GameAction::CastTargetedSpell(Box::new(
                     CastTargetedSpellActionData { target, spell_id },
                 )))
@@ -711,6 +717,7 @@ impl Client {
             }
             NormalizedSpellCast::Untargeted { spell_id } => {
                 log::info!(">>> Casting untargeted spell {}", spell_id);
+                self.arm_busy_operation(BusyOperationKind::SpellCast);
                 self.send_game_action(GameAction::CastUntargetedSpell(Box::new(
                     CastUntargetedSpellActionData { spell_id },
                 )))
@@ -835,7 +842,9 @@ fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> E
 #[cfg(test)]
 mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
-    use crate::client::types::{ActiveCharacterConfirmation, ClientCommand, ClientViewEvent};
+    use crate::client::types::{
+        ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent,
+    };
     use crate::client::{Client, ClientState, auth::AuthState, movement::MovementSystem};
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_session::Session;
@@ -853,6 +862,7 @@ mod tests {
             session: Session::new_test(),
             world: WorldState::new(None, None),
             active_confirmation: None,
+            active_busy_operation: None,
             state: ClientState::InWorld,
             wire_event_tx,
             client_view_event_tx,
@@ -1036,5 +1046,42 @@ mod tests {
         }
 
         assert!(saw_clear);
+    }
+
+    #[tokio::test]
+    async fn buy_command_arms_busy_operation() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::Buy {
+                vendor: Guid(0x7000_0001),
+                items: Vec::new(),
+            })
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            client.active_busy_operation,
+            Some(crate::client::PendingBusyOperation {
+                operation: BusyOperationKind::Buy,
+                ..
+            })
+        ));
+
+        let mut saw_busy_projection = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::BusyStateUpdated {
+                    busy: Some(BusyOperationKind::Buy),
+                }
+            ) {
+                saw_busy_projection = true;
+                break;
+            }
+        }
+
+        assert!(saw_busy_projection);
     }
 }

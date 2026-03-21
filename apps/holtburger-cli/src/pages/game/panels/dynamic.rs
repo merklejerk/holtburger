@@ -58,6 +58,18 @@ pub fn render_dynamic_pane(
         );
     }
 
+    if view.active_busy_operation.is_some() {
+        block = block.title(
+            ratatui::widgets::block::Title::from(Span::styled(
+                busy_title(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
+            ))
+            .alignment(ratatui::layout::Alignment::Center),
+        );
+    }
+
     // Right title: Combat Mode
     block = block.title(
         ratatui::widgets::block::Title::from(Span::styled(
@@ -141,6 +153,10 @@ pub fn render_dynamic_pane(
     {
         f.render_widget(Paragraph::new(control_line).right_aligned(), chunks[1]);
     }
+}
+
+fn busy_title() -> &'static str {
+    " (BUSY...) "
 }
 
 fn format_target_line(name: &str, guid: Guid, health_fraction: Option<f32>) -> Line<'static> {
@@ -294,14 +310,15 @@ fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
 #[cfg(test)]
 mod tests {
     use super::{
-        TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, combat_controls_line, format_target_line,
-        health_bar_spans, render_dynamic_pane,
+        TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, busy_title, combat_controls_line,
+        format_target_line, health_bar_spans, render_dynamic_pane,
     };
     use crate::pages::game::combat::{AttackActivity, combat_mode_label};
     use crate::pages::game::{GameData, ViewState};
     use crate::types::Interaction;
     use holtburger_common::Guid;
     use holtburger_common::position::WorldPosition;
+    use holtburger_core::BusyOperationKind;
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
     use holtburger_world::entity::Entity;
     use ratatui::Terminal;
@@ -494,5 +511,40 @@ mod tests {
         let line = format_target_line("Drudge", Guid(0x60000001), Some(0.66));
 
         assert_eq!(line.to_string(), "  Drudge (0x60000001) [     66%    ]");
+    }
+
+    #[test]
+    fn busy_title_uses_centered_busy_banner() {
+        assert_eq!(busy_title(), " (BUSY...) ");
+    }
+
+    #[test]
+    fn active_busy_operation_renders_centered_busy_banner_in_title() {
+        let data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
+        let view = ViewState {
+            active_busy_operation: Some(BusyOperationKind::Sell),
+            ..ViewState::default()
+        };
+
+        let area = Rect::new(0, 0, 80, 3);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_dynamic_pane(frame, &data, &view, "acct", area))
+            .expect("dynamic pane should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("(BUSY...)"));
     }
 }

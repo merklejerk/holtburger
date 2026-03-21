@@ -21,11 +21,20 @@ use types::*;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
+const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingBusyOperation {
+    operation: BusyOperationKind,
+    deadline: Instant,
+    pending_error: Option<(WeenieError, Option<String>)>,
+}
 
 pub struct Client {
     pub session: Session,
     pub world: WorldState,
     active_confirmation: Option<ActiveCharacterConfirmation>,
+    active_busy_operation: Option<PendingBusyOperation>,
     state: ClientState,
     wire_event_tx: broadcast::Sender<WireEvent>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
@@ -58,6 +67,87 @@ impl Client {
                 .send(ClientViewEvent::ActiveCharacterConfirmationUpdated {
                     confirmation: self.active_confirmation.clone(),
                 });
+    }
+
+    fn active_busy_operation(&self) -> Option<BusyOperationKind> {
+        self.active_busy_operation
+            .as_ref()
+            .map(|pending| pending.operation)
+    }
+
+    fn emit_busy_state_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::BusyStateUpdated {
+                busy: self.active_busy_operation(),
+            });
+    }
+
+    fn emit_busy_operation_finished(
+        &self,
+        operation: BusyOperationKind,
+        result: BusyOperationResult,
+    ) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::BusyOperationFinished { operation, result });
+    }
+
+    pub(super) fn arm_busy_operation(&mut self, operation: BusyOperationKind) {
+        if self.active_busy_operation.is_some() {
+            return;
+        }
+
+        self.active_busy_operation = Some(PendingBusyOperation {
+            operation,
+            deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
+            pending_error: None,
+        });
+        self.emit_busy_state_updated();
+    }
+
+    pub(super) fn note_busy_error(&mut self, error: WeenieError, parameter: Option<String>) {
+        if let Some(pending) = &mut self.active_busy_operation {
+            pending.pending_error = Some((error, parameter));
+        }
+    }
+
+    pub(super) fn finish_busy_operation_from_use_done(&mut self, error: WeenieError) {
+        let Some(pending) = self.active_busy_operation.take() else {
+            return;
+        };
+
+        let (resolved_error, parameter) = if error == WeenieError::None {
+            pending.pending_error.unwrap_or((error, None))
+        } else {
+            (error, None)
+        };
+
+        self.emit_busy_state_updated();
+        self.emit_busy_operation_finished(
+            pending.operation,
+            BusyOperationResult::Completed {
+                error: resolved_error,
+                parameter,
+            },
+        );
+    }
+
+    fn poll_busy_timeout(&mut self, now: Instant) {
+        let Some(pending) = self.active_busy_operation.as_ref() else {
+            return;
+        };
+
+        if now < pending.deadline {
+            return;
+        }
+
+        let pending = self
+            .active_busy_operation
+            .take()
+            .expect("busy operation should still exist when timing out");
+        self.emit_busy_state_updated();
+        self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
     }
 
     fn emit_spell_catalog_loaded(&self) {
@@ -505,6 +595,8 @@ impl Client {
                         use holtburger_protocol::messages::misc::actions::PingRequestActionData;
                         self.session.send_action(holtburger_protocol::messages::GameAction::PingRequest(Box::new(PingRequestActionData))).await?;
                     }
+
+                    self.poll_busy_timeout(now);
                 }
                 res = self.session.recv_message() => {
                     use holtburger_session::SessionEvent;
@@ -568,5 +660,60 @@ impl Client {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
+    use holtburger_session::Session;
+    use tokio::sync::broadcast;
+
+    fn build_test_client() -> Client {
+        let (wire_event_tx, _) = broadcast::channel(32);
+        let (client_view_event_tx, _) = broadcast::channel(32);
+
+        Client {
+            session: Session::new_test(),
+            world: WorldState::new(None, None),
+            active_confirmation: None,
+            active_busy_operation: None,
+            state: ClientState::Connected,
+            wire_event_tx,
+            client_view_event_tx,
+            command_rx: None,
+            message_dump_dir: None,
+            message_counter: 0,
+            movement: MovementSystem::new(),
+            auth: AuthState::new("test".to_string()),
+        }
+    }
+
+    #[test]
+    fn busy_operation_timeout_clears_state_and_emits_completion() {
+        let mut client = build_test_client();
+        let mut events = client.subscribe_client_view_events();
+
+        client.arm_busy_operation(BusyOperationKind::Buy);
+        client.poll_busy_timeout(Instant::now() + BUSY_OPERATION_TIMEOUT + Duration::from_secs(1));
+
+        assert!(client.active_busy_operation.is_none());
+
+        let mut saw_busy_clear = false;
+        let mut saw_timeout = false;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ClientViewEvent::BusyStateUpdated { busy: None } => saw_busy_clear = true,
+                ClientViewEvent::BusyOperationFinished {
+                    operation: BusyOperationKind::Buy,
+                    result: BusyOperationResult::TimedOut,
+                } => saw_timeout = true,
+                _ => {}
+            }
+        }
+
+        assert!(saw_busy_clear);
+        assert!(saw_timeout);
     }
 }

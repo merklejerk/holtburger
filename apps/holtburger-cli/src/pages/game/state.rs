@@ -11,7 +11,7 @@ use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
 };
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::client::types::{ActiveCharacterConfirmation, CombatFeedback};
+use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -29,6 +29,7 @@ use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
 use crate::pages::game::panels::dashboard::DashboardState;
+use crate::pages::game::weapon_swap::{WeaponSwapController, WeaponSwapEffect, WeaponSwapInput};
 use crate::types::{
     AppAction, AppUiAction, ChatMessageKind, ContextView, DashboardTab, FocusedPane, InspectTarget,
     Interaction, UpdateResult,
@@ -105,9 +106,14 @@ impl GameState {
             | ClientViewEvent::PlayerSpellsUpdated { .. }
             | ClientViewEvent::PlayerOptionsUpdated { .. }
             | ClientViewEvent::ActiveCharacterConfirmationUpdated { .. }
+            | ClientViewEvent::BusyStateUpdated { .. }
             | ClientViewEvent::CombatModeUpdated { .. } => {
                 self.handle_player_event(event);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 self.sync_sticky_melee_pursuit(&mut result);
+                result.needs_redraw = true;
+            }
+            ClientViewEvent::BusyOperationFinished { .. } => {
                 result.needs_redraw = true;
             }
             ClientViewEvent::SpellCatalogLoaded { .. } => {
@@ -125,6 +131,7 @@ impl GameState {
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
                 self.update_inventory_and_equipment(entity_ref);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
             }
             ClientViewEvent::EntityReplaced { entity } => {
                 let entity_ref = entity.as_ref();
@@ -132,6 +139,7 @@ impl GameState {
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
                 self.update_inventory_and_equipment(entity_ref);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
             }
             ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
                 let mut needs_update = false;
@@ -143,6 +151,7 @@ impl GameState {
                 }
                 if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
                     self.update_inventory_and_equipment(&entity);
+                    self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 }
             }
             ClientViewEvent::EntityMoved { guid, pos } => {
@@ -230,6 +239,7 @@ impl GameState {
                 let entity_ref = entity.as_ref();
                 self.update_inventory_and_equipment(entity_ref);
                 self.handle_entity_identified(entity_ref);
+                self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::NoClipUpdated { .. } => {
@@ -321,16 +331,24 @@ impl GameState {
                 result.commands.push(ClientCommand::Drop(guid));
             }
             AppAction::Equip { guid } => {
-                result.commands.push(ClientCommand::GetAndWield {
-                    item: guid,
-                    slot: None,
-                });
+                if self.view.weapon_swap.is_active() {
+                    result.actions.push(AppAction::Log {
+                        kind: ChatMessageKind::Warning,
+                        message: "Already waiting on a weapon swap.".to_string(),
+                    });
+                } else {
+                    self.handle_equip_request(guid, None, &mut result);
+                }
             }
             AppAction::EquipInSlot { guid, slot } => {
-                result.commands.push(ClientCommand::GetAndWield {
-                    item: guid,
-                    slot: Some(slot),
-                });
+                if self.view.weapon_swap.is_active() {
+                    result.actions.push(AppAction::Log {
+                        kind: ChatMessageKind::Warning,
+                        message: "Already waiting on a weapon swap.".to_string(),
+                    });
+                } else {
+                    self.handle_equip_request(guid, Some(slot), &mut result);
+                }
             }
             AppAction::Unequip { guid } => {
                 if let Some(container) = self.data.find_non_full_pack(guid, None) {
@@ -374,7 +392,6 @@ impl GameState {
             }
             AppAction::OpenShop { vendor } => {
                 if self.data.trade.is_some() {
-                    // If we're in a trade, do not initiate vendor sessions.
                     result.actions.push(AppAction::Log {
                         kind: ChatMessageKind::Warning,
                         message: "You are currently in a trade.".to_string(),
@@ -444,7 +461,6 @@ impl GameState {
                 result
                     .commands
                     .push(ClientCommand::UseWithTarget { item, target });
-                // If we were combining with this item, cancel the interaction after using it.
                 if let Some(Interaction::Combining {
                     item_guid: interact_guid,
                 }) = self.view.active_interaction
@@ -516,24 +532,26 @@ impl GameState {
             AppAction::LevelUpStat {
                 stat,
                 amount: xp_spent,
-            } => match stat {
-                crate::types::StatType::Attribute(attribute) => {
-                    result.commands.push(ClientCommand::RaiseAttribute {
-                        attribute,
-                        xp_spent,
-                    });
+            } => {
+                match stat {
+                    crate::types::StatType::Attribute(attribute) => {
+                        result.commands.push(ClientCommand::RaiseAttribute {
+                            attribute,
+                            xp_spent,
+                        });
+                    }
+                    crate::types::StatType::Vital(vital) => {
+                        result
+                            .commands
+                            .push(ClientCommand::RaiseVital { vital, xp_spent });
+                    }
+                    crate::types::StatType::Skill(skill) => {
+                        result
+                            .commands
+                            .push(ClientCommand::RaiseSkill { skill, xp_spent });
+                    }
                 }
-                crate::types::StatType::Vital(vital) => {
-                    result
-                        .commands
-                        .push(ClientCommand::RaiseVital { vital, xp_spent });
-                }
-                crate::types::StatType::Skill(skill) => {
-                    result
-                        .commands
-                        .push(ClientCommand::RaiseSkill { skill, xp_spent });
-                }
-            },
+            }
             AppAction::TrainSkill {
                 skill,
                 amount: credits,
@@ -659,6 +677,7 @@ impl GameState {
         }
 
         self.refresh_stale_attack_sequence(Instant::now(), &mut result);
+        self.sync_weapon_swap_controller(Instant::now(), &mut result);
 
         self.sync_approach_target(Instant::now(), &mut result);
         self.sync_sticky_melee_pursuit(&mut result);
@@ -709,6 +728,9 @@ impl GameState {
             }
             ClientViewEvent::ActiveCharacterConfirmationUpdated { confirmation } => {
                 self.view.active_confirmation = confirmation;
+            }
+            ClientViewEvent::BusyStateUpdated { busy } => {
+                self.view.active_busy_operation = busy;
             }
             ClientViewEvent::CombatModeUpdated { mode } => {
                 if mode != CombatMode::NonCombat {
@@ -1247,6 +1269,63 @@ impl GameState {
         }
     }
 
+    fn handle_equip_request(
+        &mut self,
+        guid: Guid,
+        slot: Option<holtburger_core::client::types::TargetSlot>,
+        result: &mut UpdateResult,
+    ) {
+        self.drive_weapon_swap(
+            WeaponSwapInput::Start {
+                now: Instant::now(),
+                item_guid: guid,
+                slot,
+                current_mode: self.data.combat_mode,
+                item_mask: self.data.entities.get(&guid).map(|entity| entity.valid_locations()),
+            },
+            result,
+        );
+    }
+
+    fn sync_weapon_swap_controller(&mut self, now: Instant, result: &mut UpdateResult) {
+        let Some(item_guid) = self.view.weapon_swap.tracked_item_guid() else {
+            return;
+        };
+
+        let equipped_mask = self
+            .data
+            .equipment
+            .get(&item_guid)
+            .copied()
+            .unwrap_or(holtburger_protocol::messages::EquipMask::NONE);
+        self.drive_weapon_swap(
+            WeaponSwapInput::Tick {
+                now,
+                combat_mode: self.data.combat_mode,
+                equipped_mask,
+                suggested_mode: self.data.get_suggested_combat_mode(),
+            },
+            result,
+        );
+    }
+
+    fn drive_weapon_swap(&mut self, input: WeaponSwapInput, result: &mut UpdateResult) {
+        let update = self.view.weapon_swap.handle(&input);
+        for effect in update.effects {
+            self.apply_weapon_swap_effect(effect, result);
+        }
+    }
+
+    fn apply_weapon_swap_effect(
+        &mut self,
+        effect: WeaponSwapEffect,
+        result: &mut UpdateResult,
+    ) {
+        match effect {
+            WeaponSwapEffect::Command(command) => result.commands.push(command),
+        }
+    }
+
     fn update_inventory_and_equipment(&mut self, entity: &Entity) {
         let guid = entity.guid;
         let pguid = self.data.player_guid;
@@ -1372,6 +1451,10 @@ pub struct ViewState {
     pub combat_automation: Option<CombatAutomationController>,
     /// Current core-projected confirmation request being surfaced by the game page.
     pub active_confirmation: Option<ActiveCharacterConfirmation>,
+    /// Current core-projected busy operation for local action sequencing.
+    pub active_busy_operation: Option<BusyOperationKind>,
+    /// Frontend-owned controller for peace -> equip -> combat-mode re-entry sequencing.
+    pub(crate) weapon_swap: WeaponSwapController,
     /// Cache of the exact bounding boxes computed during update_layout.
     pub layout_cache: LayoutCache,
 }
@@ -1399,6 +1482,8 @@ impl Default for ViewState {
             navigation: NavigationAutomation::default(),
             combat_automation: None,
             active_confirmation: None,
+            active_busy_operation: None,
+            weapon_swap: WeaponSwapController::default(),
             layout_cache: LayoutCache::default(),
         }
     }
@@ -1567,6 +1652,51 @@ mod tests {
                 power_level,
             }) if *target == target_guid && (*power_level - 0.5).abs() < f32::EPSILON
         ));
+    }
+
+    #[test]
+    fn equip_weapon_in_combat_exits_peace_then_reenters() {
+            let player_guid = Guid(0x50000001);
+            let weapon_guid = Guid(0x60000001);
+            let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+            state.data.combat_mode = CombatMode::Melee;
+
+            let mut weapon = Entity::new(weapon_guid, "Sword".to_string(), WorldPosition::default());
+            weapon.set_int_prop(
+                PropertyInt::ValidLocations,
+                holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
+            );
+            state.data.entities.insert(weapon_guid, weapon.clone());
+
+            let start = state.handle_action(AppAction::Equip { guid: weapon_guid }).unwrap();
+            assert!(matches!(
+                start.commands.first(),
+                Some(ClientCommand::SetCombatMode(CombatMode::NonCombat))
+            ));
+            assert!(state.view.weapon_swap.is_active());
+
+            let peace = state.handle_view_event(ClientViewEvent::CombatModeUpdated {
+                mode: CombatMode::NonCombat,
+            });
+            assert!(matches!(
+                peace.commands.first(),
+                Some(ClientCommand::GetAndWield { item, slot: None }) if *item == weapon_guid
+            ));
+
+            weapon.set_iid_prop(holtburger_common::properties::PropertyInstanceId::Wielder, player_guid);
+            weapon.set_int_prop(
+                PropertyInt::CurrentWieldedLocation,
+                holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
+            );
+            let finish = state.handle_view_event(ClientViewEvent::EntityReplaced {
+                entity: Box::new(weapon),
+            });
+
+            assert!(matches!(
+                finish.commands.first(),
+                Some(ClientCommand::SetCombatMode(CombatMode::Melee))
+            ));
+            assert!(!state.view.weapon_swap.is_active());
     }
 
     #[test]

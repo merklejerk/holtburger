@@ -127,6 +127,7 @@ impl Client {
             session,
             world: WorldState::new(portal_dat, cell_dat),
             active_confirmation: None,
+            active_busy_operation: None,
             state: ClientState::Connected,
             wire_event_tx,
             client_view_event_tx,

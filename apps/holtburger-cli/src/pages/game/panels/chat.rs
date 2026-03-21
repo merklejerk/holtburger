@@ -94,8 +94,7 @@ impl ChatState {
                 self.log(ChatMessageKind::Emote, format!("{} {}", sender, text));
             }
             ClientViewEvent::CombatFeedback(feedback) => {
-                let (kind, text) = format_combat_feedback(&feedback);
-                self.log(kind, text);
+                self.log_combat_feedback(&feedback);
             }
             ClientViewEvent::PingResponse
             | ClientViewEvent::NetPulse { .. }
@@ -129,6 +128,87 @@ impl ChatState {
             }
         }
     }
+
+    fn log_combat_feedback(&mut self, feedback: &CombatFeedback) {
+        match feedback {
+            CombatFeedback::AttackDone { error } => {
+                if *error == WeenieError::None {
+                    self.log(ChatMessageKind::Debug, "Attack sequence finished.".to_string());
+                } else {
+                    self.log(
+                        ChatMessageKind::Warning,
+                        format!("Attack sequence finished with {:?}.", error),
+                    );
+                }
+            }
+            CombatFeedback::AttackCommenced => {
+                self.log(ChatMessageKind::Debug, "Attack sequence started.".to_string());
+            }
+            CombatFeedback::AttackerNotification {
+                defender_name,
+                damage_type,
+                health_percent,
+                damage,
+                critical_hit,
+                attack_conditions,
+            } => {
+                self.log(
+                    ChatMessageKind::Info,
+                    format!(
+                        "You hit {} for {} {} damage ({}).{}{}",
+                        defender_name,
+                        damage,
+                        format_damage_type(*damage_type),
+                        format_percent(*health_percent),
+                        if *critical_hit { " Critical hit." } else { "" },
+                        format_attack_conditions_suffix(*attack_conditions),
+                    ),
+                );
+            }
+            CombatFeedback::DefenderNotification {
+                attacker_name,
+                damage_type,
+                health_percent,
+                damage,
+                damage_location,
+                critical_hit,
+                attack_conditions,
+            } => {
+                self.log(
+                    ChatMessageKind::Warning,
+                    format!(
+                        "{} hit you for {} {} damage to your {} ({}).{}{}",
+                        attacker_name,
+                        damage,
+                        format_damage_type(*damage_type),
+                        format_damage_location(*damage_location),
+                        format_percent(*health_percent),
+                        if *critical_hit { " Critical hit." } else { "" },
+                        format_attack_conditions_suffix(*attack_conditions),
+                    ),
+                );
+            }
+            CombatFeedback::EvasionAttackerNotification { defender_name } => {
+                self.log(
+                    ChatMessageKind::Info,
+                    format!("{} evaded your attack.", defender_name),
+                );
+            }
+            CombatFeedback::EvasionDefenderNotification { attacker_name } => {
+                self.log(
+                    ChatMessageKind::Info,
+                    format!("You evaded {}'s attack.", attacker_name),
+                );
+            }
+            CombatFeedback::VictimNotification { death_message } => {
+                self.log(ChatMessageKind::Error, death_message.clone());
+            }
+            CombatFeedback::KillerNotification { death_message } => {
+                self.log(ChatMessageKind::Info, death_message.clone());
+            }
+        }
+    }
+
 
     pub fn update_layout(&mut self, area: Rect) {
         let width = area.width.saturating_sub(2) as usize;
@@ -220,82 +300,6 @@ impl ChatState {
             _ => {}
         }
         needs_redraw
-    }
-}
-
-fn format_combat_feedback(feedback: &CombatFeedback) -> (ChatMessageKind, String) {
-    match feedback {
-        CombatFeedback::AttackDone { error } => {
-            if *error == WeenieError::None {
-                (
-                    ChatMessageKind::Debug,
-                    "Attack sequence finished.".to_string(),
-                )
-            } else {
-                (
-                    ChatMessageKind::Warning,
-                    format!("Attack sequence finished with {:?}.", error),
-                )
-            }
-        }
-        CombatFeedback::AttackCommenced => (
-            ChatMessageKind::Debug,
-            "Attack sequence started.".to_string(),
-        ),
-        CombatFeedback::AttackerNotification {
-            defender_name,
-            damage_type,
-            health_percent,
-            damage,
-            critical_hit,
-            attack_conditions,
-        } => (
-            ChatMessageKind::Info,
-            format!(
-                "You hit {} for {} {} damage ({}).{}{}",
-                defender_name,
-                damage,
-                format_damage_type(*damage_type),
-                format_percent(*health_percent),
-                if *critical_hit { " Critical hit." } else { "" },
-                format_attack_conditions_suffix(*attack_conditions),
-            ),
-        ),
-        CombatFeedback::DefenderNotification {
-            attacker_name,
-            damage_type,
-            health_percent,
-            damage,
-            damage_location,
-            critical_hit,
-            attack_conditions,
-        } => (
-            ChatMessageKind::Warning,
-            format!(
-                "{} hit you for {} {} damage to your {} ({}).{}{}",
-                attacker_name,
-                damage,
-                format_damage_type(*damage_type),
-                format_damage_location(*damage_location),
-                format_percent(*health_percent),
-                if *critical_hit { " Critical hit." } else { "" },
-                format_attack_conditions_suffix(*attack_conditions),
-            ),
-        ),
-        CombatFeedback::EvasionAttackerNotification { defender_name } => (
-            ChatMessageKind::Info,
-            format!("{} evaded your attack.", defender_name),
-        ),
-        CombatFeedback::EvasionDefenderNotification { attacker_name } => (
-            ChatMessageKind::Info,
-            format!("You evaded {}'s attack.", attacker_name),
-        ),
-        CombatFeedback::VictimNotification { death_message } => {
-            (ChatMessageKind::Error, death_message.clone())
-        }
-        CombatFeedback::KillerNotification { death_message } => {
-            (ChatMessageKind::Info, death_message.clone())
-        }
     }
 }
 
@@ -406,26 +410,35 @@ mod tests {
 
     #[test]
     fn attacker_feedback_formats_damage_summary() {
-        let (kind, text) = format_combat_feedback(&CombatFeedback::AttackerNotification {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(holtburger_core::ClientViewEvent::CombatFeedback(
+            CombatFeedback::AttackerNotification {
             defender_name: "Drudge".to_string(),
             damage_type: DamageType::SLASH,
             health_percent: 0.25,
             damage: 37,
             critical_hit: true,
             attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
-        });
+            },
+        ));
 
-        assert_eq!(kind, ChatMessageKind::Info);
-        assert!(text.contains("You hit Drudge for 37 slashing damage"));
-        assert!(text.contains("25.0%"));
-        assert!(text.contains("Critical hit."));
-        assert!(text.contains("Recklessness"));
-        assert!(text.contains("Sneak Attack"));
+        let message = chat.messages.last().expect("combat feedback should log");
+
+        assert_eq!(message.kind, ChatMessageKind::Info);
+        assert!(message.text.contains("You hit Drudge for 37 slashing damage"));
+        assert!(message.text.contains("25.0%"));
+        assert!(message.text.contains("Critical hit."));
+        assert!(message.text.contains("Recklessness"));
+        assert!(message.text.contains("Sneak Attack"));
     }
 
     #[test]
     fn defender_feedback_formats_location_summary() {
-        let (kind, text) = format_combat_feedback(&CombatFeedback::DefenderNotification {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(holtburger_core::ClientViewEvent::CombatFeedback(
+            CombatFeedback::DefenderNotification {
             attacker_name: "Banderling".to_string(),
             damage_type: DamageType::FIRE,
             health_percent: 0.125,
@@ -433,11 +446,14 @@ mod tests {
             damage_location: DamageLocation::Chest,
             critical_hit: false,
             attack_conditions: AttackConditions::OVERPOWER,
-        });
+            },
+        ));
 
-        assert_eq!(kind, ChatMessageKind::Warning);
-        assert!(text.contains("Banderling hit you for 18 fire damage to your chest"));
-        assert!(text.contains("12.5%"));
-        assert!(text.contains("Overpower"));
+        let message = chat.messages.last().expect("combat feedback should log");
+
+        assert_eq!(message.kind, ChatMessageKind::Warning);
+        assert!(message.text.contains("Banderling hit you for 18 fire damage to your chest"));
+        assert!(message.text.contains("12.5%"));
+        assert!(message.text.contains("Overpower"));
     }
 }

@@ -160,6 +160,25 @@ pub struct ActiveCharacterConfirmation {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusyOperationKind {
+    Use,
+    UseWithTarget,
+    Salvage,
+    SpellCast,
+    Buy,
+    Sell,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BusyOperationResult {
+    Completed {
+        error: WeenieError,
+        parameter: Option<String>,
+    },
+    TimedOut,
+}
+
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
     StatusUpdate {
@@ -192,6 +211,13 @@ pub enum ClientViewEvent {
     },
     ActiveCharacterConfirmationUpdated {
         confirmation: Option<ActiveCharacterConfirmation>,
+    },
+    BusyStateUpdated {
+        busy: Option<BusyOperationKind>,
+    },
+    BusyOperationFinished {
+        operation: BusyOperationKind,
+        result: BusyOperationResult,
     },
     ErrorRaised {
         source: ErrorSource,

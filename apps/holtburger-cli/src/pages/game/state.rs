@@ -11,7 +11,9 @@ use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
 };
 use holtburger_core::client::types::ClientCommand;
-use holtburger_core::client::types::{ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback};
+use holtburger_core::client::types::{
+    ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
+};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -532,26 +534,24 @@ impl GameState {
             AppAction::LevelUpStat {
                 stat,
                 amount: xp_spent,
-            } => {
-                match stat {
-                    crate::types::StatType::Attribute(attribute) => {
-                        result.commands.push(ClientCommand::RaiseAttribute {
-                            attribute,
-                            xp_spent,
-                        });
-                    }
-                    crate::types::StatType::Vital(vital) => {
-                        result
-                            .commands
-                            .push(ClientCommand::RaiseVital { vital, xp_spent });
-                    }
-                    crate::types::StatType::Skill(skill) => {
-                        result
-                            .commands
-                            .push(ClientCommand::RaiseSkill { skill, xp_spent });
-                    }
+            } => match stat {
+                crate::types::StatType::Attribute(attribute) => {
+                    result.commands.push(ClientCommand::RaiseAttribute {
+                        attribute,
+                        xp_spent,
+                    });
                 }
-            }
+                crate::types::StatType::Vital(vital) => {
+                    result
+                        .commands
+                        .push(ClientCommand::RaiseVital { vital, xp_spent });
+                }
+                crate::types::StatType::Skill(skill) => {
+                    result
+                        .commands
+                        .push(ClientCommand::RaiseSkill { skill, xp_spent });
+                }
+            },
             AppAction::TrainSkill {
                 skill,
                 amount: credits,
@@ -1281,7 +1281,11 @@ impl GameState {
                 item_guid: guid,
                 slot,
                 current_mode: self.data.combat_mode,
-                item_mask: self.data.entities.get(&guid).map(|entity| entity.valid_locations()),
+                item_mask: self
+                    .data
+                    .entities
+                    .get(&guid)
+                    .map(|entity| entity.valid_locations()),
             },
             result,
         );
@@ -1316,11 +1320,7 @@ impl GameState {
         }
     }
 
-    fn apply_weapon_swap_effect(
-        &mut self,
-        effect: WeaponSwapEffect,
-        result: &mut UpdateResult,
-    ) {
+    fn apply_weapon_swap_effect(&mut self, effect: WeaponSwapEffect, result: &mut UpdateResult) {
         match effect {
             WeaponSwapEffect::Command(command) => result.commands.push(command),
         }
@@ -1656,47 +1656,52 @@ mod tests {
 
     #[test]
     fn equip_weapon_in_combat_exits_peace_then_reenters() {
-            let player_guid = Guid(0x50000001);
-            let weapon_guid = Guid(0x60000001);
-            let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-            state.data.combat_mode = CombatMode::Melee;
+        let player_guid = Guid(0x50000001);
+        let weapon_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.combat_mode = CombatMode::Melee;
 
-            let mut weapon = Entity::new(weapon_guid, "Sword".to_string(), WorldPosition::default());
-            weapon.set_int_prop(
-                PropertyInt::ValidLocations,
-                holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
-            );
-            state.data.entities.insert(weapon_guid, weapon.clone());
+        let mut weapon = Entity::new(weapon_guid, "Sword".to_string(), WorldPosition::default());
+        weapon.set_int_prop(
+            PropertyInt::ValidLocations,
+            holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
+        );
+        state.data.entities.insert(weapon_guid, weapon.clone());
 
-            let start = state.handle_action(AppAction::Equip { guid: weapon_guid }).unwrap();
-            assert!(matches!(
-                start.commands.first(),
-                Some(ClientCommand::SetCombatMode(CombatMode::NonCombat))
-            ));
-            assert!(state.view.weapon_swap.is_active());
+        let start = state
+            .handle_action(AppAction::Equip { guid: weapon_guid })
+            .unwrap();
+        assert!(matches!(
+            start.commands.first(),
+            Some(ClientCommand::SetCombatMode(CombatMode::NonCombat))
+        ));
+        assert!(state.view.weapon_swap.is_active());
 
-            let peace = state.handle_view_event(ClientViewEvent::CombatModeUpdated {
-                mode: CombatMode::NonCombat,
-            });
-            assert!(matches!(
-                peace.commands.first(),
-                Some(ClientCommand::GetAndWield { item, slot: None }) if *item == weapon_guid
-            ));
+        let peace = state.handle_view_event(ClientViewEvent::CombatModeUpdated {
+            mode: CombatMode::NonCombat,
+        });
+        assert!(matches!(
+            peace.commands.first(),
+            Some(ClientCommand::GetAndWield { item, slot: None }) if *item == weapon_guid
+        ));
 
-            weapon.set_iid_prop(holtburger_common::properties::PropertyInstanceId::Wielder, player_guid);
-            weapon.set_int_prop(
-                PropertyInt::CurrentWieldedLocation,
-                holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
-            );
-            let finish = state.handle_view_event(ClientViewEvent::EntityReplaced {
-                entity: Box::new(weapon),
-            });
+        weapon.set_iid_prop(
+            holtburger_common::properties::PropertyInstanceId::Wielder,
+            player_guid,
+        );
+        weapon.set_int_prop(
+            PropertyInt::CurrentWieldedLocation,
+            holtburger_protocol::messages::EquipMask::MELEE_WEAPON.bits() as i32,
+        );
+        let finish = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(weapon),
+        });
 
-            assert!(matches!(
-                finish.commands.first(),
-                Some(ClientCommand::SetCombatMode(CombatMode::Melee))
-            ));
-            assert!(!state.view.weapon_swap.is_active());
+        assert!(matches!(
+            finish.commands.first(),
+            Some(ClientCommand::SetCombatMode(CombatMode::Melee))
+        ));
+        assert!(!state.view.weapon_swap.is_active());
     }
 
     #[test]

@@ -133,7 +133,10 @@ impl ChatState {
         match feedback {
             CombatFeedback::AttackDone { error } => {
                 if *error == WeenieError::None {
-                    self.log(ChatMessageKind::Debug, "Attack sequence finished.".to_string());
+                    self.log(
+                        ChatMessageKind::Debug,
+                        "Attack sequence finished.".to_string(),
+                    );
                 } else {
                     self.log(
                         ChatMessageKind::Warning,
@@ -142,7 +145,10 @@ impl ChatState {
                 }
             }
             CombatFeedback::AttackCommenced => {
-                self.log(ChatMessageKind::Debug, "Attack sequence started.".to_string());
+                self.log(
+                    ChatMessageKind::Debug,
+                    "Attack sequence started.".to_string(),
+                );
             }
             CombatFeedback::AttackerNotification {
                 defender_name,
@@ -208,7 +214,6 @@ impl ChatState {
             }
         }
     }
-
 
     pub fn update_layout(&mut self, area: Rect) {
         let width = area.width.saturating_sub(2) as usize;
@@ -414,19 +419,23 @@ mod tests {
 
         chat.handle_event(holtburger_core::ClientViewEvent::CombatFeedback(
             CombatFeedback::AttackerNotification {
-            defender_name: "Drudge".to_string(),
-            damage_type: DamageType::SLASH,
-            health_percent: 0.25,
-            damage: 37,
-            critical_hit: true,
-            attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
+                defender_name: "Drudge".to_string(),
+                damage_type: DamageType::SLASH,
+                health_percent: 0.25,
+                damage: 37,
+                critical_hit: true,
+                attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
             },
         ));
 
         let message = chat.messages.last().expect("combat feedback should log");
 
         assert_eq!(message.kind, ChatMessageKind::Info);
-        assert!(message.text.contains("You hit Drudge for 37 slashing damage"));
+        assert!(
+            message
+                .text
+                .contains("You hit Drudge for 37 slashing damage")
+        );
         assert!(message.text.contains("25.0%"));
         assert!(message.text.contains("Critical hit."));
         assert!(message.text.contains("Recklessness"));
@@ -439,20 +448,24 @@ mod tests {
 
         chat.handle_event(holtburger_core::ClientViewEvent::CombatFeedback(
             CombatFeedback::DefenderNotification {
-            attacker_name: "Banderling".to_string(),
-            damage_type: DamageType::FIRE,
-            health_percent: 0.125,
-            damage: 18,
-            damage_location: DamageLocation::Chest,
-            critical_hit: false,
-            attack_conditions: AttackConditions::OVERPOWER,
+                attacker_name: "Banderling".to_string(),
+                damage_type: DamageType::FIRE,
+                health_percent: 0.125,
+                damage: 18,
+                damage_location: DamageLocation::Chest,
+                critical_hit: false,
+                attack_conditions: AttackConditions::OVERPOWER,
             },
         ));
 
         let message = chat.messages.last().expect("combat feedback should log");
 
         assert_eq!(message.kind, ChatMessageKind::Warning);
-        assert!(message.text.contains("Banderling hit you for 18 fire damage to your chest"));
+        assert!(
+            message
+                .text
+                .contains("Banderling hit you for 18 fire damage to your chest")
+        );
         assert!(message.text.contains("12.5%"));
         assert!(message.text.contains("Overpower"));
     }

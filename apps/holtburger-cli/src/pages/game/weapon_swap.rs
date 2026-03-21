@@ -59,7 +59,10 @@ impl WeaponSwapController {
         self.pending.map(|pending| pending.item_guid)
     }
 
-    fn resume_mode_after_timeout(fallback_mode: CombatMode, suggested_mode: CombatMode) -> CombatMode {
+    fn resume_mode_after_timeout(
+        fallback_mode: CombatMode,
+        suggested_mode: CombatMode,
+    ) -> CombatMode {
         if suggested_mode != CombatMode::NonCombat {
             suggested_mode
         } else {
@@ -120,21 +123,19 @@ impl Controller for WeaponSwapController {
                     });
 
                     return match stage {
-                        PendingWeaponSwapStage::AwaitPeace => {
-                            ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                                WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
-                                    CombatMode::NonCombat,
-                                )),
-                            )
-                        }
-                        PendingWeaponSwapStage::AwaitEquip => {
-                            ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                                WeaponSwapEffect::Command(ClientCommand::GetAndWield {
-                                    item: item_guid,
-                                    slot,
-                                }),
-                            )
-                        }
+                        PendingWeaponSwapStage::AwaitPeace => ControllerUpdate::new(
+                            ControllerStatus::Active,
+                        )
+                        .with_effect(WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
+                            CombatMode::NonCombat,
+                        ))),
+                        PendingWeaponSwapStage::AwaitEquip => ControllerUpdate::new(
+                            ControllerStatus::Active,
+                        )
+                        .with_effect(WeaponSwapEffect::Command(ClientCommand::GetAndWield {
+                            item: item_guid,
+                            slot,
+                        })),
                     };
                 }
 
@@ -176,11 +177,10 @@ impl Controller for WeaponSwapController {
                     self.pending = None;
 
                     let mut update = ControllerUpdate::new(ControllerStatus::Completed);
-                    let resume_mode = Self::resume_mode_after_timeout(
-                        pending.fallback_mode,
-                        suggested_mode,
-                    );
-                    if combat_mode == CombatMode::NonCombat && resume_mode != CombatMode::NonCombat {
+                    let resume_mode =
+                        Self::resume_mode_after_timeout(pending.fallback_mode, suggested_mode);
+                    if combat_mode == CombatMode::NonCombat && resume_mode != CombatMode::NonCombat
+                    {
                         update.push_effect(WeaponSwapEffect::Command(
                             ClientCommand::SetCombatMode(resume_mode),
                         ));
@@ -280,7 +280,9 @@ mod tests {
         assert!(controller.is_active());
         assert!(matches!(
             update.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(CombatMode::NonCombat))]
+            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
+                CombatMode::NonCombat
+            ))]
         ));
     }
 
@@ -323,7 +325,9 @@ mod tests {
         assert_eq!(resume.status, ControllerStatus::Completed);
         assert!(matches!(
             resume.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(CombatMode::Melee))]
+            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
+                CombatMode::Melee
+            ))]
         ));
         assert!(!controller.is_active());
     }
@@ -351,7 +355,9 @@ mod tests {
         assert_eq!(timeout.status, ControllerStatus::Completed);
         assert!(matches!(
             timeout.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(CombatMode::Missile))]
+            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
+                CombatMode::Missile
+            ))]
         ));
         assert!(!controller.is_active());
     }
@@ -379,7 +385,9 @@ mod tests {
         assert_eq!(timeout.status, ControllerStatus::Completed);
         assert!(matches!(
             timeout.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(CombatMode::Magic))]
+            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
+                CombatMode::Magic
+            ))]
         ));
         assert!(!controller.is_active());
     }
@@ -451,7 +459,9 @@ mod tests {
         assert_eq!(replacement.status, ControllerStatus::Active);
         assert!(matches!(
             replacement.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(CombatMode::NonCombat))]
+            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
+                CombatMode::NonCombat
+            ))]
         ));
 
         let equip = controller.handle(&WeaponSwapInput::Tick {
@@ -512,7 +522,9 @@ mod tests {
 
         assert!(matches!(
             finish.effects.as_slice(),
-            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(CombatMode::Magic))]
+            [WeaponSwapEffect::Command(ClientCommand::SetCombatMode(
+                CombatMode::Magic
+            ))]
         ));
         assert!(!controller.is_active());
     }

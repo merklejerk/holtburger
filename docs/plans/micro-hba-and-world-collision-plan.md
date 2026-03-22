@@ -334,7 +334,7 @@ Mitigation:
 - [x] Phase 1: Remove geometry-backed collision from shared world tick
 - [x] Phase 2: Introduce a real client builder and remove replay construction
 - [x] Phase 3: Add exact-ID manifest support and micro manifest
-- [ ] Phase 4: Make startup asset validation explicit and table-centric
+- [x] Phase 4: Make startup asset validation explicit and table-centric
 - [ ] Phase 5: Add CLI mode for micro bundle generation with a dedicated micro profile
 - [ ] Phase 6: Update docs and add portal-only verification coverage
 
@@ -353,11 +353,12 @@ Mitigation:
 - [x] Phase 1 keeps `WorldState::tick()` housekeeping-only; local movement changes now only come from explicit client movement commands or authoritative server updates.
 - [x] Phase 2 introduces a real `ClientBuilder`; production callers and core test helpers now construct clients through the builder rather than hand-assembling `Client` internals.
 - [x] Phase 3 adds exact-ID manifest support and an internal micro bundle mode while keeping the existing pruned/full CLI behavior unchanged until the dedicated Phase 5 CLI/profile work.
+- [x] Phase 4 keeps mounted dataset roles explicit in `ClientBuilder`, treats cell data as optional for the TUI path, and validates required portal tables by asset ID instead of by legacy `portal` plus `cell` file presence.
 
 ### Verification Log
 - [x] Confirm which existing `holtburger-world` tests cover the current collision path and need rewriting.
 - [x] Confirm all replay-based construction and debug-harness entry points are removed or migrated cleanly.
-- [ ] Confirm portal-only startup through a focused integration or client-construction test.
+- [x] Confirm portal-only startup through a focused integration or client-construction test.
 - [ ] Confirm micro-archive contents against expected file IDs and dedicated micro profile metadata.
 - [x] Identify all `holtburger-core` test helpers that need migration to the new builder construction path.
 - [ ] Confirm release packaging outputs include the micro bundle in both dist artifacts and Flatpak packaging.
@@ -370,6 +371,8 @@ Mitigation:
 - Migrated the remaining `holtburger-core` test helpers away from direct `Client`/`MovementSystem` struct assembly onto a shared builder-backed helper.
 - Phase 3 completed: `StripperManifest` can now combine broad type rules with exact file IDs, and the DAT tool has an internal `BundleMode::Micro` path that selects only the required portal table IDs.
 - Kept the external CLI/profile surface stable for now; dedicated public micro CLI/profile wiring remains intentionally deferred to Phase 5.
+- Phase 4 completed: startup validation is now expressed in terms of required portal assets, cell data is optional for the TUI path, and builder diagnostics name the missing required table instead of complaining generically about `portal` plus `cell` files.
+- Added a focused builder test that boots successfully from a portal-only HBA fixture containing the required micro-table IDs.
 
 ### Open Questions
 None at the moment. If a future non-TUI client needs client-side local physics or prediction, we should open a follow-up plan for that seam rather than re-expanding this one.

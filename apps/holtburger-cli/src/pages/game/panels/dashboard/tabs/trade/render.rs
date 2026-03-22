@@ -14,6 +14,10 @@ use holtburger_common::defaults::{DEFAULT_PRICE, PROMISSORY_NOTE_SELL_RATE, VEND
 use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectExt as _};
 use holtburger_world::context::WorldContextExt;
 
+fn clamp_selected_index(selected_index: usize, content_len: usize) -> usize {
+    selected_index.min(content_len.saturating_sub(1))
+}
+
 pub fn render_trade_tab(
     tab: &mut TradeTab,
     f: &mut Frame,
@@ -36,6 +40,15 @@ pub fn render_trade_tab(
 
         let self_visible_items = tab.visible_trade_items(data, TradeFocus::Local);
         let partner_visible_items = tab.visible_trade_items(data, TradeFocus::Partner);
+        let self_selected_index =
+            clamp_selected_index(tab.selected_index, self_visible_items.len());
+        let partner_selected_index =
+            clamp_selected_index(tab.selected_index, partner_visible_items.len());
+
+        tab.selected_index = match trade_focus {
+            TradeFocus::Local => self_selected_index,
+            TradeFocus::Partner => partner_selected_index,
+        };
 
         // Self side
         let self_items: Vec<ListItem> = self_visible_items
@@ -52,7 +65,7 @@ pub fn render_trade_tab(
                     emoji = class.emoji();
                     color = get_entity_color(class);
                 }
-                let is_selected = trade_focus == TradeFocus::Local && i == tab.selected_index;
+                let is_selected = trade_focus == TradeFocus::Local && i == self_selected_index;
 
                 let text = format!("[{}] {}", emoji, display_name);
                 ListItem::new(Line::styled(text, Style::default().fg(color)))
@@ -65,9 +78,8 @@ pub fn render_trade_tab(
         let _self_height = self_area.height as usize; // Both sides same height in 50/50 split
 
         let mut default_self_state = ListState::default();
-        let selected_index = tab.selected_index.min(self_items.len().saturating_sub(1));
         if trade_focus == TradeFocus::Local {
-            tab.list_state.select(Some(selected_index));
+            tab.list_state.select(Some(self_selected_index));
         } else {
             default_self_state.select(None);
         }
@@ -137,7 +149,7 @@ pub fn render_trade_tab(
                     emoji = class.emoji();
                     color = get_entity_color(class);
                 }
-                let is_selected = trade_focus == TradeFocus::Partner && i == selected_index;
+                let is_selected = trade_focus == TradeFocus::Partner && i == partner_selected_index;
 
                 let text = format!("[{}] {}", emoji, display_name);
                 ListItem::new(Line::styled(text, Style::default().fg(color)))
@@ -146,9 +158,6 @@ pub fn render_trade_tab(
             .collect();
 
         let mut default_partner_state = ListState::default();
-        let partner_selected_index = tab
-            .selected_index
-            .min(partner_items.len().saturating_sub(1));
         if trade_focus == TradeFocus::Partner {
             tab.list_state.select(Some(partner_selected_index));
         } else {
@@ -242,6 +251,8 @@ pub fn render_trade_tab(
         f.render_widget(summary, summary_area);
 
         let visible_item_indices = tab.visible_vendor_item_indices(view);
+        let selected_index = clamp_selected_index(tab.selected_index, visible_item_indices.len());
+        tab.selected_index = selected_index;
 
         let items: Vec<ListItem> = visible_item_indices
             .iter()
@@ -281,7 +292,7 @@ pub fn render_trade_tab(
                     .ceil()
                     .max(DEFAULT_PRICE as f32) as u32;
 
-                let is_selected = i == tab.selected_index;
+                let is_selected = i == selected_index;
 
                 let currency_suffix = if vendor.alternate_currency_wcid == 0 {
                     "p".to_string()
@@ -307,7 +318,6 @@ pub fn render_trade_tab(
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
 
-        let selected_index = tab.selected_index.min(content_len.saturating_sub(1));
         tab.list_state.select(Some(selected_index));
 
         f.render_stateful_widget(list, list_area, &mut tab.list_state);

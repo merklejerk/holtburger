@@ -66,17 +66,23 @@ pub(crate) fn handle_message(
                 } else {
                     Some(data.parent_guid)
                 };
-
-                if data.parent_guid != Guid::NULL && data.child_guid != state.player.guid {
-                    entity.position.landblock_id = Guid::NULL;
-                }
-
-                let _ = state.reconcile_entity_retention(data.child_guid);
-
-                true
             } else {
-                false
+                return false;
             }
+
+            if data.parent_guid != Guid::NULL
+                && data.child_guid != state.player.guid
+                && let Some(pos) = state.clear_entity_world_presence(data.child_guid)
+            {
+                events.push(WorldEvent::EntityMoved {
+                    guid: data.child_guid,
+                    pos,
+                });
+            }
+
+            let _ = state.reconcile_entity_retention(data.child_guid);
+
+            true
         }
         GameMessage::PickupEvent(data) => {
             let guid = data.guid;
@@ -85,7 +91,9 @@ pub(crate) fn handle_message(
                 return false;
             }
 
-            let _ = state.clear_entity_world_presence(guid);
+            if let Some(pos) = state.clear_entity_world_presence(guid) {
+                events.push(WorldEvent::EntityMoved { guid, pos });
+            }
             let snapshot = state.reconcile_entity_retention(guid);
             if snapshot.is_some_and(|retention| !retention.is_retained()) {
                 state.mark_entity_explicit_delete(guid);

@@ -1,4 +1,5 @@
 use crate::WorldEvent;
+use crate::context::{WorldContext, WorldContextExt};
 use crate::player::mutations::{SkillUpdateParams, VitalUpdateParams};
 use crate::state::WorldState;
 use holtburger_protocol::messages::*;
@@ -259,8 +260,8 @@ pub(crate) fn handle_event(
             state.update_health_fraction(data.target, data.health, events)
         }
         GameEvent::InventoryPutObjInContainer(data) => {
-            if data.container_guid == state.player.guid
-                || state.player.inventory.contains(&data.container_guid)
+            if state.get_player_guid() == Some(data.container_guid)
+                || state.is_in_player_inventory(data.container_guid)
             {
                 state.player.add_to_inventory(data.item_guid);
             }

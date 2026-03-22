@@ -9,6 +9,30 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BundleMode {
+    Pruned,
+    Full,
+    Micro,
+}
+
+impl BundleMode {
+    fn manifest(self) -> Option<StripperManifest> {
+        match self {
+            BundleMode::Pruned => Some(StripperManifest::logic_only()),
+            BundleMode::Micro => Some(StripperManifest::micro()),
+            BundleMode::Full => None,
+        }
+    }
+
+    fn default_profile(self) -> u32 {
+        match self {
+            BundleMode::Full => 4,
+            BundleMode::Pruned | BundleMode::Micro => 1,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -37,12 +61,27 @@ pub fn process_dat(
     full: bool,
     profile_override: Option<u32>,
 ) -> Result<()> {
+    let bundle_mode = if full {
+        BundleMode::Full
+    } else {
+        BundleMode::Pruned
+    };
+
+    process_dat_with_mode(input_path, output_path, bundle_mode, profile_override)
+}
+
+pub fn process_dat_with_mode(
+    input_path: &Path,
+    output_path: &Path,
+    bundle_mode: BundleMode,
+    profile_override: Option<u32>,
+) -> Result<()> {
     println!("Processing {:?} -> {:?}", input_path, output_path);
 
     let db = DatDatabase::new(input_path)
         .map_err(|e| ToolError::DatOpen(input_path.to_path_buf(), e.to_string()))?;
 
-    let manifest = StripperManifest::logic_only();
+    let manifest = bundle_mode.manifest();
 
     // Determine profile
     let profile = if let Some(p) = profile_override {
@@ -53,10 +92,8 @@ pub fn process_dat(
             )));
         }
         p
-    } else if full {
-        4 // Full
     } else {
-        1 // Logic/Physics Only
+        bundle_mode.default_profile()
     };
 
     let pb = ProgressBar::new(db.files.len() as u64);
@@ -77,7 +114,9 @@ pub fn process_dat(
         .par_iter()
         .filter_map(|&id| {
             let file_type = DatFileType::from_id(id);
-            let should_keep = (profile == 4) || manifest.should_keep(file_type);
+            let should_keep = manifest
+                .as_ref()
+                .is_none_or(|manifest| manifest.should_keep_file(id, file_type));
 
             if !should_keep {
                 pb.inc(1);
@@ -180,6 +219,43 @@ pub fn process_dat(
         .write(output_path)
         .map_err(|e| ToolError::HbaWrite(output_path.to_path_buf(), e.to_string()))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+
+    #[test]
+    fn bundle_mode_defaults_match_current_profiles() {
+        assert_eq!(BundleMode::Pruned.default_profile(), 1);
+        assert_eq!(BundleMode::Micro.default_profile(), 1);
+        assert_eq!(BundleMode::Full.default_profile(), 4);
+    }
+
+    #[test]
+    fn pruned_bundle_preserves_logic_only_type_filtering() {
+        let manifest = BundleMode::Pruned
+            .manifest()
+            .expect("pruned mode should have a manifest");
+
+        assert!(manifest.should_keep_file(0x01000001, DatFileType::Model));
+        assert!(manifest.should_keep_file(0x0E000099, DatFileType::Table));
+        assert!(!manifest.should_keep_file(0x0A000001, DatFileType::Audio));
+    }
+
+    #[test]
+    fn micro_bundle_keeps_only_required_table_ids() {
+        let manifest = BundleMode::Micro
+            .manifest()
+            .expect("micro mode should have a manifest");
+
+        assert!(manifest.should_keep_file(SkillTable::FILE_ID, DatFileType::Table));
+        assert!(manifest.should_keep_file(SpellTable::FILE_ID, DatFileType::Table));
+        assert!(manifest.should_keep_file(XpTable::FILE_ID, DatFileType::Table));
+        assert!(!manifest.should_keep_file(0x0E000099, DatFileType::Table));
+        assert!(!manifest.should_keep_file(0x01000001, DatFileType::Model));
+    }
 }
 
 pub fn run(args: Args) -> Result<()> {

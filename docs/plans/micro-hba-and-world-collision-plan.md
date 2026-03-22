@@ -333,7 +333,7 @@ Mitigation:
 ### Task Checklist
 - [x] Phase 1: Remove geometry-backed collision from shared world tick
 - [x] Phase 2: Introduce a real client builder and remove replay construction
-- [ ] Phase 3: Add exact-ID manifest support and micro manifest
+- [x] Phase 3: Add exact-ID manifest support and micro manifest
 - [ ] Phase 4: Make startup asset validation explicit and table-centric
 - [ ] Phase 5: Add CLI mode for micro bundle generation with a dedicated micro profile
 - [ ] Phase 6: Update docs and add portal-only verification coverage
@@ -352,6 +352,7 @@ Mitigation:
 - [x] Ship the TUI release artifact with the micro bundle instead of publishing a separate asset-bundle artifact.
 - [x] Phase 1 keeps `WorldState::tick()` housekeeping-only; local movement changes now only come from explicit client movement commands or authoritative server updates.
 - [x] Phase 2 introduces a real `ClientBuilder`; production callers and core test helpers now construct clients through the builder rather than hand-assembling `Client` internals.
+- [x] Phase 3 adds exact-ID manifest support and an internal micro bundle mode while keeping the existing pruned/full CLI behavior unchanged until the dedicated Phase 5 CLI/profile work.
 
 ### Verification Log
 - [x] Confirm which existing `holtburger-world` tests cover the current collision path and need rewriting.
@@ -367,6 +368,8 @@ Mitigation:
 - Added explicit regression coverage that tick neither integrates player velocity nor reads portal geometry.
 - Phase 2 completed: added a real `ClientBuilder`, routed live client construction through it, and removed replay-based construction from core/session/debug-harness surfaces.
 - Migrated the remaining `holtburger-core` test helpers away from direct `Client`/`MovementSystem` struct assembly onto a shared builder-backed helper.
+- Phase 3 completed: `StripperManifest` can now combine broad type rules with exact file IDs, and the DAT tool has an internal `BundleMode::Micro` path that selects only the required portal table IDs.
+- Kept the external CLI/profile surface stable for now; dedicated public micro CLI/profile wiring remains intentionally deferred to Phase 5.
 
 ### Open Questions
 None at the moment. If a future non-TUI client needs client-side local physics or prediction, we should open a follow-up plan for that seam rather than re-expanding this one.

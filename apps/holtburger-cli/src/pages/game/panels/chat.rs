@@ -242,7 +242,7 @@ impl ChatState {
                     ChatMessageKind::Tell => Color::Magenta,
                     ChatMessageKind::Emote => Color::Green,
                     ChatMessageKind::Info => Color::Cyan,
-                    ChatMessageKind::System => Color::Gray,
+                    ChatMessageKind::System => Color::LightBlue,
                     ChatMessageKind::Error => Color::Red,
                     ChatMessageKind::Warning => Color::Yellow,
                     ChatMessageKind::Debug => Color::Indexed(242), // Greyish

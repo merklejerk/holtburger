@@ -376,21 +376,22 @@ mod tests {
     fn filter_applies_to_vendor_items() {
         let mut tab = TradeTab::default();
         let data = GameData::default();
-        let mut view = ViewState::default();
-
-        view.vendor = Some(VendorState {
-            vendor_guid: Guid(0x100),
-            items: vec![
-                vendor_item_named(Guid(0x200), "Acid Dagger"),
-                vendor_item_named(Guid(0x201), "Frost Bow"),
-            ],
-            buy_multiplier: 1.0,
-            sell_multiplier: 1.0,
-            merchandise_item_types: 0,
-            alternate_currency_wcid: 0,
-            alternate_currency_amount: 0,
-            alternate_currency_name: String::new(),
-        });
+        let view = ViewState {
+            vendor: Some(VendorState {
+                vendor_guid: Guid(0x100),
+                items: vec![
+                    vendor_item_named(Guid(0x200), "Acid Dagger"),
+                    vendor_item_named(Guid(0x201), "Frost Bow"),
+                ],
+                buy_multiplier: 1.0,
+                sell_multiplier: 1.0,
+                merchandise_item_types: 0,
+                alternate_currency_wcid: 0,
+                alternate_currency_amount: 0,
+                alternate_currency_name: String::new(),
+            }),
+            ..ViewState::default()
+        };
 
         let result = tab.apply_filter_input("acid".to_string(), &data, &view);
         assert!(result.needs_redraw);

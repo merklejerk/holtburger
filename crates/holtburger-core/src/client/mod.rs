@@ -570,7 +570,6 @@ impl Client {
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
         let mut net_tick = tokio::time::interval(Duration::from_secs(1));
-        let mut last_physics_time = Instant::now();
 
         loop {
             if matches!(self.state, ClientState::Disconnected) {
@@ -652,12 +651,7 @@ impl Client {
                     self.handle_command(cmd).await?;
                 }
                 _ = physics_tick.tick() => {
-                    let now = Instant::now();
-                    let dt = now.duration_since(last_physics_time).as_secs_f32();
-                    last_physics_time = now;
-
-                    // TODO: Use actual player radius from DAT/Properties
-                    let physics_events = self.world.tick(dt, 0.35);
+                    let physics_events = self.world.tick();
                     for event in physics_events {
                         self.handle_world_event(&event);
                     }

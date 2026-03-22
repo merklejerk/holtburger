@@ -1,11 +1,9 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_dat::ResourceProvider;
-use holtburger_dat::file_type::gfx_obj::GfxObj;
 use holtburger_dat::landblock::LandblockInfo;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 
 /// The SpatialScene is responsible for managing the "where" of everything.
 /// It tracks entity positions by landblock and handles spatial queries.
@@ -13,16 +11,8 @@ pub struct SpatialScene {
     /// Entities indexed by LandblockID for fast local queries.
     pub landblock_map: HashMap<Guid, HashSet<Guid>>,
 
-    /// Cache of object-level geometry (GfxObj from portal.dat).
-    pub object_geometry: HashMap<u32, Arc<GeometryCacheEntry>>,
-
     /// Cache of landblock-level physical info (Stabs, buildings from cell.dat).
     pub landblock_info: HashMap<Guid, Arc<LandblockInfo>>,
-}
-
-pub struct GeometryCacheEntry {
-    pub gfx_obj: Arc<GfxObj>,
-    pub last_accessed: Instant,
 }
 
 impl Default for SpatialScene {
@@ -35,7 +25,6 @@ impl SpatialScene {
     pub fn new() -> Self {
         Self {
             landblock_map: HashMap::new(),
-            object_geometry: HashMap::new(),
             landblock_info: HashMap::new(),
         }
     }
@@ -56,37 +45,6 @@ impl SpatialScene {
             self.landblock_info.insert(lb_id, arc.clone());
             return Some(arc);
         }
-        None
-    }
-
-    /// Load or retrieve GfxObj geometry from the portal dat.
-    pub fn get_object_geometry(
-        &mut self,
-        dat: &dyn ResourceProvider,
-        gfx_id: u32,
-    ) -> Option<Arc<GfxObj>> {
-        if let Some(entry) = self.object_geometry.get_mut(&gfx_id) {
-            // This is annoying because of borrow checker if we try to update last_accessed
-            // but we'll worry about that if we actually add pruning.
-            return Some(entry.gfx_obj.clone());
-        }
-
-        // Try to load from DAT
-        if let Ok(data) = dat.get_file(gfx_id) {
-            let mut cursor = std::io::Cursor::new(data);
-            if let Ok(gfx) = GfxObj::unpack(&mut cursor) {
-                let gfx_arc = Arc::new(gfx);
-                self.object_geometry.insert(
-                    gfx_id,
-                    Arc::new(GeometryCacheEntry {
-                        gfx_obj: gfx_arc.clone(),
-                        last_accessed: Instant::now(),
-                    }),
-                );
-                return Some(gfx_arc);
-            }
-        }
-
         None
     }
 

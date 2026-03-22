@@ -175,6 +175,73 @@ fn test_load_deferred_tables_gracefully_handles_read_failure() {
 }
 
 #[test]
+fn test_tick_does_not_integrate_player_velocity() {
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000124);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(10.0, 20.0, 30.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+
+    let mut player_entity = Entity::new(player_guid, "Player".to_string(), player_pos);
+    player_entity.velocity = Vector3::new(3.0, 4.0, 0.0);
+    state.entities.insert(player_entity);
+
+    let events = state.tick();
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, player_pos);
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().position,
+        player_pos
+    );
+    assert_eq!(
+        state.entities.get(player_guid).unwrap().velocity,
+        Vector3::new(3.0, 4.0, 0.0)
+    );
+}
+
+#[test]
+fn test_tick_does_not_fetch_portal_geometry() {
+    struct PanicProvider;
+
+    impl holtburger_dat::ResourceProvider for PanicProvider {
+        fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
+            panic!("tick should not fetch portal resource 0x{id:08X}");
+        }
+
+        fn get_metadata(&self, _id: u32) -> Option<holtburger_dat::FileMetadata> {
+            panic!("tick should not query portal metadata");
+        }
+    }
+
+    let mut state = WorldState::new(None, None);
+    let player_guid = Guid(0x50000125);
+    let player_pos = WorldPosition {
+        landblock_id: Guid(0x12340000),
+        coords: Vector3::new(1.0, 2.0, 3.0),
+        rotation: holtburger_common::math::Quaternion::identity(),
+    };
+
+    state.portal_dat = Some(Arc::new(PanicProvider));
+    state.player.guid = player_guid;
+    state.player.position = player_pos;
+
+    let mut player_entity = Entity::new(player_guid, "Player".to_string(), player_pos);
+    player_entity.velocity = Vector3::new(1.0, 0.0, 0.0);
+    state.entities.insert(player_entity);
+
+    let events = state.tick();
+
+    assert!(events.is_empty());
+    assert_eq!(state.player.position, player_pos);
+}
+
+#[test]
 fn test_player_mirror_invariant_on_autonomous_sync() {
     let mut state = WorldState::new(None, None);
     let player_guid = Guid(0x50000123);
@@ -1070,7 +1137,7 @@ fn test_tick_sweeps_explicit_delete_without_movement() {
     ));
     state.mark_entity_explicit_delete(target_guid);
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(state.entities.get(target_guid).is_none());
     assert!(
@@ -1098,7 +1165,7 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
     state.entities.insert(target);
     state.set_entity_prune_deadline(target_guid, state.current_server_time() - 1.0);
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(state.entities.get(target_guid).is_none());
     assert!(
@@ -1126,7 +1193,7 @@ fn test_tick_does_not_sweep_unexpired_deadline() {
     state.entities.insert(target);
     state.set_entity_prune_deadline(target_guid, state.current_server_time() + 60.0);
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(state.entities.get(target_guid).is_some());
     assert!(events.is_empty());
@@ -1144,7 +1211,7 @@ fn test_tick_runs_sweep_without_player_guid() {
     ));
     state.mark_entity_explicit_delete(guid);
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(state.entities.get(guid).is_none());
     assert!(
@@ -1180,7 +1247,7 @@ fn test_stationary_tick_starts_visibility_prune_deadline() {
     let target_guid = Guid(0x60000130);
     state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
     let deadline = state
         .entity_lifecycle_state(target_guid)
         .and_then(|lifecycle| lifecycle.prune_deadline)
@@ -1217,7 +1284,7 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
     let target_guid = Guid(0x60000131);
     state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
 
-    let _ = state.tick(0.016, 0.35);
+    let _ = state.tick();
     let deadline = state
         .entity_lifecycle_state(target_guid)
         .and_then(|lifecycle| lifecycle.prune_deadline)
@@ -1228,7 +1295,7 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
         local_time: Instant::now(),
     });
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(state.entities.get(target_guid).is_none());
     assert!(
@@ -1264,7 +1331,7 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
     let target_guid = Guid(0x60000132);
     state.add_entity(Entity::new(target_guid, "Traveler".to_string(), far_pos));
 
-    let _ = state.tick(0.016, 0.35);
+    let _ = state.tick();
     assert!(
         state
             .entity_lifecycle_state(target_guid)
@@ -1279,7 +1346,7 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
 
     let mut events = Vec::new();
     let _ = state.move_entity_to_position(target_guid, player_pos, &mut events);
-    let tick_events = state.tick(0.016, 0.35);
+    let tick_events = state.tick();
 
     assert!(state.entities.get(target_guid).is_some());
     assert!(state.entity_lifecycle_state(target_guid).is_none());
@@ -1320,7 +1387,7 @@ fn test_indoor_player_keeps_nearby_outdoor_entity_visible_under_conservative_heu
         nearby_outdoor_pos,
     ));
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(events.is_empty());
     assert!(state.entities.get(target_guid).is_some());
@@ -1461,7 +1528,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick(0.016, 0.35);
+    let tick_events = state.tick();
     assert!(state.entities.get(preview_guid).is_none());
     assert!(
         tick_events.iter().any(
@@ -1569,7 +1636,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick(0.016, 0.35);
+    let tick_events = state.tick();
     assert!(state.entities.get(preview_guid).is_none());
     assert!(
         tick_events.iter().any(
@@ -1641,7 +1708,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick(0.016, 0.35);
+    let tick_events = state.tick();
     assert!(state.entities.get(preview_guid).is_none());
     assert!(
         tick_events.iter().any(
@@ -1786,7 +1853,7 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick(0.016, 0.35);
+    let tick_events = state.tick();
     assert!(state.entities.get(item_guid).is_none());
     assert!(
         tick_events
@@ -2083,7 +2150,7 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     state.open_containers.insert(container_guid);
     state.mark_container_preview(preview_guid);
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(events.is_empty());
     assert!(state.entities.get(inventory_guid).is_some());
@@ -2147,7 +2214,7 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
             .is_some()
     );
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(state.entities.get(item_guid).is_none());
     assert!(
@@ -2194,7 +2261,7 @@ fn test_remove_entity_marks_contained_dependents_for_prune() {
             .is_some()
     );
 
-    let events = state.tick(0.016, 0.35);
+    let events = state.tick();
 
     assert!(state.entities.get(item_guid).is_none());
     assert!(

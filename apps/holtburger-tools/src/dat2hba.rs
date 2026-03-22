@@ -7,18 +7,18 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BundleMode {
+pub enum ArchiveProfile {
     Pruned,
     Full,
     Micro,
 }
 
-impl BundleMode {
+impl ArchiveProfile {
     fn manifest(self) -> Option<StripperManifest> {
         match self {
-            BundleMode::Pruned => Some(StripperManifest::logic_only()),
-            BundleMode::Micro => Some(StripperManifest::micro()),
-            BundleMode::Full => None,
+            ArchiveProfile::Pruned => Some(StripperManifest::logic_only()),
+            ArchiveProfile::Micro => Some(StripperManifest::micro()),
+            ArchiveProfile::Full => None,
         }
     }
 }
@@ -27,25 +27,25 @@ impl BundleMode {
 pub struct Dat2HbaOptions {
     pub input: PathBuf,
     pub output: PathBuf,
-    pub bundle: BundleMode,
+    pub profile: ArchiveProfile,
 }
 
-pub fn process_dat(input_path: &Path, output_path: &Path, bundle_mode: BundleMode) -> Result<()> {
-    process_dat_with_mode(input_path, output_path, bundle_mode)
+pub fn process_dat(input_path: &Path, output_path: &Path, profile: ArchiveProfile) -> Result<()> {
+    process_dat_with_mode(input_path, output_path, profile)
 }
 
 pub fn process_dat_with_mode(
     input_path: &Path,
     output_path: &Path,
-    bundle_mode: BundleMode,
+    profile: ArchiveProfile,
 ) -> Result<()> {
     println!("Processing {:?} -> {:?}", input_path, output_path);
 
     let db = DatDatabase::new(input_path)
         .map_err(|e| ToolError::DatOpen(input_path.to_path_buf(), e.to_string()))?;
 
-    let manifest = bundle_mode.manifest();
-    let should_prune_records = !matches!(bundle_mode, BundleMode::Full);
+    let manifest = profile.manifest();
+    let should_prune_records = !matches!(profile, ArchiveProfile::Full);
 
     let pb = ProgressBar::new(db.files.len() as u64);
     pb.set_style(
@@ -137,11 +137,11 @@ pub fn process_dat_with_mode(
         .collect();
 
     pb.finish_with_message(format!(
-        "Done! Kept {}/{} files (Pruned {}, Bundle {:?})",
+        "Done! Kept {}/{} files (Pruned {}, Profile {:?})",
         kept_count.load(Ordering::SeqCst),
         db.files.len(),
         pruned_count.load(Ordering::SeqCst),
-        bundle_mode
+        profile
     ));
 
     println!("📦 Packing HBA archive...");
@@ -173,7 +173,7 @@ pub fn run(options: Dat2HbaOptions) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    process_dat(&options.input, &options.output, options.bundle)
+    process_dat(&options.input, &options.output, options.profile)
 }
 
 #[cfg(test)]
@@ -182,8 +182,8 @@ mod tests {
     use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 
     #[test]
-    fn pruned_bundle_preserves_logic_only_type_filtering() {
-        let manifest = BundleMode::Pruned
+    fn pruned_profile_preserves_logic_only_type_filtering() {
+        let manifest = ArchiveProfile::Pruned
             .manifest()
             .expect("pruned mode should have a manifest");
 
@@ -193,8 +193,8 @@ mod tests {
     }
 
     #[test]
-    fn micro_bundle_keeps_only_required_table_ids() {
-        let manifest = BundleMode::Micro
+    fn micro_profile_keeps_only_required_table_ids() {
+        let manifest = ArchiveProfile::Micro
             .manifest()
             .expect("micro mode should have a manifest");
 

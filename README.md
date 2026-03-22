@@ -107,7 +107,7 @@ The current TUI/runtime path hard-requires `portal` data and treats `cell` data 
 - `portal.hba` is sufficient for the current TUI when it contains the required skill, spell, and XP tables.
 - `cell.dat` or `cell.hba` can still be mounted, but the TUI no longer requires it for startup.
 - Binary release archives and Flatpak packaging now bundle the micro `portal.hba` automatically instead of requiring a separate asset-bundle download.
-- If you want to build your own micro archive from a retail `client_portal.dat`, run `dat2hba --bundle micro /path/to/client_portal.dat ./dats/portal.hba`.
+- If you want to build your own micro archive from a retail `client_portal.dat`, run `dat2hba --profile micro /path/to/client_portal.dat ./dats/portal.hba`.
 
 **Search Priority:**
 1.  `--dats <PATH>` command-line argument.

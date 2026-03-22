@@ -25,21 +25,6 @@ jobs:
           git tag -f nightly
           git push -f origin nightly
 
-  data-build:
-    name: Prepare HBA Data
-    needs: tag
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Fetch HBA files
-        run: |
-          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
-      - name: Upload HBA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hba-data
-          path: hba.zip
-
   dist-build:
     name: Build Binaries
     needs: tag
@@ -84,7 +69,7 @@ jobs:
           cp target/release/tui$EXT staging/holtburger-cli$EXT
           cp target/release/dat2hba$EXT staging/dat2hba$EXT
           cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
-          cp dats/*.hba staging/dats/
+          cp dats/portal.hba staging/dats/portal.hba
           ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             7z a "$ARCHIVE_NAME.zip" ./staging/*
@@ -138,7 +123,7 @@ jobs:
 
   publish:
     name: Publish Nightly Release
-    needs: [data-build, dist-build, flatpak-build]
+    needs: [dist-build, flatpak-build]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:

@@ -27,5 +27,7 @@ release-test/data/
 
 !README.md
 
+dist-manifest.json
+
 # Machine-local references and working notes
 /local/

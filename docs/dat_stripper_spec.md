@@ -1,6 +1,6 @@
 # Technical Specification: DAT File Stripper for TUI Client
 
-> Note: this document is partially historical. The current implementation supports `dat2hba --bundle {pruned,full,micro}`, and the smallest supported TUI bundle is a portal-only micro archive containing the skill, spell, and XP tables.
+> Note: this document is partially historical. The current implementation supports `dat2hba --profile {pruned,full,micro}`, and the smallest supported TUI bundle is a portal-only micro archive containing the skill, spell, and XP tables.
 
 ## 1. Executive Summary
 To enable a functional headless/TUI client for the project, we need access to game data (physics, logic tables, landblocks) without distributing the massive, copyrighted retail DAT files containing artwork and audio. This document proposes a CLI toolset, `holtburger-tools`, implemented in Rust, which processes retail DAT files to produce "Holtburger Archive" (`.hba`) files.

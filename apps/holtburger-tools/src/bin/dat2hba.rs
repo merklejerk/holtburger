@@ -1,5 +1,5 @@
 use clap::Parser;
-use holtburger_tools::{BundleMode, Dat2HbaOptions, run};
+use holtburger_tools::{ArchiveProfile, Dat2HbaOptions, run};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -14,9 +14,9 @@ struct Args {
     /// Path to the output HBA archive
     output: std::path::PathBuf,
 
-    /// Archive bundle style to emit: pruned, full, or micro.
-    #[arg(long, value_enum, default_value_t = BundleMode::Pruned)]
-    bundle: BundleMode,
+    /// Archive profile to emit: pruned, full, or micro.
+    #[arg(long, value_enum, default_value_t = ArchiveProfile::Pruned)]
+    profile: ArchiveProfile,
 }
 
 fn main() -> holtburger_tools::error::Result<()> {
@@ -27,7 +27,7 @@ fn main() -> holtburger_tools::error::Result<()> {
     run(Dat2HbaOptions {
         input: args.input,
         output: args.output,
-        bundle: args.bundle,
+        profile: args.profile,
     })?;
     println!("✨ Glow-up complete!");
 
@@ -40,34 +40,33 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn args_default_bundle_mode_is_pruned() {
+    fn args_default_profile_is_pruned() {
         let args = Args::try_parse_from(["dat2hba", "portal.dat", "portal.hba"])
             .expect("default args should parse");
 
-        assert_eq!(args.bundle, BundleMode::Pruned);
+        assert_eq!(args.profile, ArchiveProfile::Pruned);
     }
 
     #[test]
-    fn args_parse_explicit_micro_bundle() {
+    fn args_parse_explicit_micro_profile() {
         let args = Args::try_parse_from([
             "dat2hba",
             "portal.dat",
             "portal-micro.hba",
-            "--bundle",
+            "--profile",
             "micro",
         ])
-        .expect("micro bundle args should parse");
+        .expect("micro profile args should parse");
 
-        assert_eq!(args.bundle, BundleMode::Micro);
+        assert_eq!(args.profile, ArchiveProfile::Micro);
     }
 
     #[test]
-    fn cli_help_lists_bundle_styles() {
+    fn cli_help_lists_profile_styles() {
         let help = Args::command().render_long_help().to_string();
 
-        assert!(help.contains("--bundle <BUNDLE>"));
+        assert!(help.contains("--profile <PROFILE>"));
         assert!(help.contains("[possible values: pruned, full, micro]"));
-        assert!(!help.contains("--profile"));
         assert!(!help.contains("--full"));
     }
 }

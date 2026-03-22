@@ -373,7 +373,7 @@ Mitigation:
 - Kept the external CLI/profile surface stable for now; dedicated public micro CLI/profile wiring remains intentionally deferred to Phase 5.
 - Phase 4 completed: startup validation is now expressed in terms of required portal assets, cell data is optional for the TUI path, and builder diagnostics name the missing required table instead of complaining generically about `portal` plus `cell` files.
 - Added a focused builder test that boots successfully from a portal-only HBA fixture containing the required micro-table IDs.
-- Phase 5 completed: `dat2hba` now exposes `--bundle {pruned,full,micro}` as its only archive-shaping input, and tool tests cover both CLI parsing and the expected content-selection behavior.
+- Phase 5 completed: `dat2hba` now exposes `--profile {pruned,full,micro}` as its archive-shaping input, and tool tests cover both CLI parsing and the expected content-selection behavior.
 - Phase 6 completed: user-facing docs now describe `portal` as required and `cell` as optional for the TUI, release packaging only stages `portal.hba`, and world-level runtime coverage proves a portal-only micro archive is enough for level info, spell lookup/details, and skill-cost derivation.
 
 ### Open Questions

@@ -11,7 +11,7 @@ use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
-use holtburger_core::{Client, ClientCommand, ClientState, RetryState};
+use holtburger_core::{ClientBuilder, ClientCommand, ClientState, RetryState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
@@ -246,7 +246,12 @@ async fn main() -> Result<()> {
     }
 
     println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
-    let mut client = match Client::new(&host, port, &args.account, dats_path.clone()).await {
+    let mut client = match ClientBuilder::new(args.account.clone())
+        .server(host.clone(), port)
+        .dats_path(dats_path.clone())
+        .connect()
+        .await
+    {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Failed to initialize client: {}", e);

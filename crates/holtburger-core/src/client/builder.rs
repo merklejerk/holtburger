@@ -1,123 +1,144 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use holtburger_dat::ResourceProvider;
 use holtburger_session::Session;
 use holtburger_world::WorldState;
-use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use super::{Client, ClientState, auth::AuthState, movement::MovementSystem};
 
-impl Client {
-    pub async fn new(
-        server_host: &str,
-        server_port: u16,
-        account_name: &str,
-        dats_path: std::path::PathBuf,
-    ) -> Result<Self> {
-        let target = tokio::net::lookup_host(format!("{}:{}", server_host, server_port))
+type Provider = Arc<dyn ResourceProvider>;
+
+#[derive(Clone)]
+struct ServerEndpoint {
+    host: String,
+    port: u16,
+}
+
+#[derive(Clone)]
+pub struct ClientBuilder {
+    account_name: String,
+    dats_path: Option<PathBuf>,
+    server_endpoint: Option<ServerEndpoint>,
+    portal_dat: Option<Provider>,
+    cell_dat: Option<Provider>,
+}
+
+impl ClientBuilder {
+    pub fn new(account_name: impl Into<String>) -> Self {
+        Self {
+            account_name: account_name.into(),
+            dats_path: None,
+            server_endpoint: None,
+            portal_dat: None,
+            cell_dat: None,
+        }
+    }
+
+    pub fn server(mut self, host: impl Into<String>, port: u16) -> Self {
+        self.server_endpoint = Some(ServerEndpoint {
+            host: host.into(),
+            port,
+        });
+        self
+    }
+
+    pub fn dats_path(mut self, dats_path: PathBuf) -> Self {
+        self.dats_path = Some(dats_path);
+        self
+    }
+
+    pub fn portal_dat(mut self, portal_dat: Provider) -> Self {
+        self.portal_dat = Some(portal_dat);
+        self
+    }
+
+    pub fn cell_dat(mut self, cell_dat: Provider) -> Self {
+        self.cell_dat = Some(cell_dat);
+        self
+    }
+
+    pub async fn connect(self) -> Result<Client> {
+        let endpoint = self
+            .server_endpoint
+            .clone()
+            .ok_or_else(|| anyhow!("ClientBuilder requires a server endpoint before connect()"))?;
+
+        let target = tokio::net::lookup_host(format!("{}:{}", endpoint.host, endpoint.port))
             .await?
             .next()
             .ok_or_else(|| {
-                anyhow::anyhow!(
+                anyhow!(
                     "Could not resolve server address: {}:{}",
-                    server_host,
-                    server_port
+                    endpoint.host,
+                    endpoint.port
                 )
             })?;
 
         let session_future = Session::new(target);
-        let dats_path_clone = dats_path.clone();
-
-        let dat_future = tokio::task::spawn_blocking(move || {
-            let mut portal_dat = None;
-            let mut cell_dat = None;
-
-            match holtburger_dat::open_provider(dats_path_clone.join("portal")) {
-                Ok(p) => {
-                    log::info!(
-                        "Loaded portal data from {}",
-                        dats_path_clone.join("portal").display()
-                    );
-                    portal_dat = Some(p);
-                }
-                Err(e) => {
-                    log::warn!("Could not load portal data: {}", e);
-                }
-            }
-
-            match holtburger_dat::open_provider(dats_path_clone.join("cell")) {
-                Ok(p) => {
-                    log::info!(
-                        "Loaded cell data from {}",
-                        dats_path_clone.join("cell").display()
-                    );
-                    cell_dat = Some(p);
-                }
-                Err(e) => {
-                    log::warn!("Could not load cell data: {}", e);
-                }
-            }
-
-            (portal_dat, cell_dat)
-        });
+        let dat_builder = self.clone();
+        let dat_future = tokio::task::spawn_blocking(move || dat_builder.load_configured_dats());
 
         let (session_res, dat_res) = tokio::join!(session_future, dat_future);
         let session = session_res?;
         let (portal_dat, cell_dat) = dat_res?;
 
-        Self::create_with_session_and_dats(session, account_name, dats_path, portal_dat, cell_dat)
+        self.finish(session, portal_dat, cell_dat)
     }
 
-    pub fn new_replay(
-        replay_path: &str,
-        account_name: &str,
-        dats_path: std::path::PathBuf,
-    ) -> Result<Self> {
-        // Replay doesn't strictly need a target addr, but we can use a dummy one
-        // Use 9001 for World server traffic (player spawns!)
-        let target = "127.0.0.1:9001".parse::<SocketAddr>()?;
-        let session = Session::new_replay(replay_path, target)?;
+    #[cfg(test)]
+    pub(crate) fn build_with_session(self, session: Session) -> Result<Client> {
+        let (portal_dat, cell_dat) = self.load_configured_dats();
+        self.finish(session, portal_dat, cell_dat)
+    }
 
-        let mut portal_dat = None;
-        let mut cell_dat = None;
+    fn load_configured_dats(&self) -> (Option<Provider>, Option<Provider>) {
+        let mut portal_dat = self.portal_dat.clone();
+        let mut cell_dat = self.cell_dat.clone();
 
-        match holtburger_dat::open_provider(dats_path.join("portal")) {
-            Ok(p) => {
-                log::info!(
-                    "Loaded portal data from {}",
-                    dats_path.join("portal").display()
-                );
-                portal_dat = Some(p);
-            }
-            Err(e) => {
-                log::warn!("Could not load portal data: {}", e);
+        let Some(dats_path) = self.dats_path.as_ref() else {
+            return (portal_dat, cell_dat);
+        };
+
+        if portal_dat.is_none() {
+            match holtburger_dat::open_provider(dats_path.join("portal")) {
+                Ok(provider) => {
+                    log::info!(
+                        "Loaded portal data from {}",
+                        dats_path.join("portal").display()
+                    );
+                    portal_dat = Some(provider);
+                }
+                Err(error) => {
+                    log::warn!("Could not load portal data: {}", error);
+                }
             }
         }
 
-        match holtburger_dat::open_provider(dats_path.join("cell")) {
-            Ok(p) => {
-                log::info!("Loaded cell data from {}", dats_path.join("cell").display());
-                cell_dat = Some(p);
-            }
-            Err(e) => {
-                log::warn!("Could not load cell data: {}", e);
+        if cell_dat.is_none() {
+            match holtburger_dat::open_provider(dats_path.join("cell")) {
+                Ok(provider) => {
+                    log::info!("Loaded cell data from {}", dats_path.join("cell").display());
+                    cell_dat = Some(provider);
+                }
+                Err(error) => {
+                    log::warn!("Could not load cell data: {}", error);
+                }
             }
         }
 
-        Self::create_with_session_and_dats(session, account_name, dats_path, portal_dat, cell_dat)
+        (portal_dat, cell_dat)
     }
 
-    fn create_with_session_and_dats(
+    fn finish(
+        self,
         session: Session,
-        account_name: &str,
-        dats_path: std::path::PathBuf,
-        portal_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>>,
-        cell_dat: Option<std::sync::Arc<dyn holtburger_dat::ResourceProvider>>,
-    ) -> Result<Self> {
-        if portal_dat.is_none() || cell_dat.is_none() {
-            return Err(anyhow::anyhow!(
-                "Failed to load required DAT files from {}. Ensure portal.dat/hba and cell.dat/hba exist.",
-                dats_path.display()
-            ));
+        portal_dat: Option<Provider>,
+        cell_dat: Option<Provider>,
+    ) -> Result<Client> {
+        if self.requires_mounted_dats() && (portal_dat.is_none() || cell_dat.is_none()) {
+            return Err(missing_dat_error(self.dats_path.as_deref()));
         }
 
         let (wire_event_tx, _) = broadcast::channel(1024);
@@ -135,7 +156,32 @@ impl Client {
             message_dump_dir: None,
             message_counter: 0,
             movement: MovementSystem::new(),
-            auth: AuthState::new(account_name.to_string()),
+            auth: AuthState::new(self.account_name),
         })
     }
+
+    fn requires_mounted_dats(&self) -> bool {
+        self.dats_path.is_some() || self.portal_dat.is_some() || self.cell_dat.is_some()
+    }
+}
+
+fn missing_dat_error(dats_path: Option<&Path>) -> anyhow::Error {
+    match dats_path {
+        Some(path) => anyhow!(
+            "Failed to load required DAT files from {}. Ensure portal.dat/hba and cell.dat/hba exist.",
+            path.display()
+        ),
+        None => anyhow!(
+            "Failed to load required DAT providers. Ensure both portal and cell providers are configured."
+        ),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
+    let mut client = ClientBuilder::new("test")
+        .build_with_session(Session::new_test())
+        .expect("test client should build");
+    client.state = initial_state;
+    client
 }

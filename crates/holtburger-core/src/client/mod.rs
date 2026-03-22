@@ -16,6 +16,7 @@ mod movement;
 pub mod navigation;
 pub mod types;
 use auth::AuthState;
+pub use builder::ClientBuilder;
 use movement::MovementSystem;
 use types::*;
 
@@ -666,33 +667,10 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
-    use holtburger_session::Session;
-    use tokio::sync::broadcast;
-
-    fn build_test_client() -> Client {
-        let (wire_event_tx, _) = broadcast::channel(32);
-        let (client_view_event_tx, _) = broadcast::channel(32);
-
-        Client {
-            session: Session::new_test(),
-            world: WorldState::new(None, None),
-            active_confirmation: None,
-            active_busy_operation: None,
-            state: ClientState::Connected,
-            wire_event_tx,
-            client_view_event_tx,
-            command_rx: None,
-            message_dump_dir: None,
-            message_counter: 0,
-            movement: MovementSystem::new(),
-            auth: AuthState::new("test".to_string()),
-        }
-    }
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {
-        let mut client = build_test_client();
+        let mut client = builder::build_test_client(ClientState::Connected);
         let mut events = client.subscribe_client_view_events();
 
         assert!(client.arm_busy_operation(BusyOperationKind::Buy));
@@ -719,7 +697,7 @@ mod tests {
 
     #[test]
     fn arm_busy_operation_rejects_overlap_and_preserves_original_pending_state() {
-        let mut client = build_test_client();
+        let mut client = builder::build_test_client(ClientState::Connected);
 
         assert!(client.arm_busy_operation(BusyOperationKind::Buy));
         assert!(!client.arm_busy_operation(BusyOperationKind::Sell));

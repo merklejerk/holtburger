@@ -856,36 +856,19 @@ fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> E
 #[cfg(test)]
 mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
+    use crate::client::builder;
     use crate::client::types::{
         ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent,
     };
-    use crate::client::{Client, ClientState, auth::AuthState, movement::MovementSystem};
+    use crate::client::{Client, ClientState};
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
-    use holtburger_session::Session;
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tokio::sync::broadcast;
 
     fn build_test_client() -> Client {
-        let (wire_event_tx, _) = broadcast::channel(32);
-        let (client_view_event_tx, _) = broadcast::channel(32);
-
-        Client {
-            session: Session::new_test(),
-            world: WorldState::new(None, None),
-            active_confirmation: None,
-            active_busy_operation: None,
-            state: ClientState::InWorld,
-            wire_event_tx,
-            client_view_event_tx,
-            command_rx: None,
-            message_dump_dir: None,
-            message_counter: 0,
-            movement: MovementSystem::new(),
-            auth: AuthState::new("test".to_string()),
-        }
+        builder::build_test_client(ClientState::InWorld)
     }
 
     fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {

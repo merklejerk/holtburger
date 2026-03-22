@@ -208,12 +208,12 @@
 - [x] Log in chat when items are bought and sold.
     - [x] Maybe just log any time something new is added to your inventory.
 - [x] Picked up items appear as wielded in nearby tab until you assess or debug them.
+- [x] Filter verb to vendor tab.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`
-- [ ] Filter verb to vendor tab.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

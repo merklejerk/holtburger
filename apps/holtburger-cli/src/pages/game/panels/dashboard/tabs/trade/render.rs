@@ -34,10 +34,11 @@ pub fn render_trade_tab(
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(area);
 
+        let self_visible_items = tab.visible_trade_items(data, TradeFocus::Local);
+        let partner_visible_items = tab.visible_trade_items(data, TradeFocus::Partner);
+
         // Self side
-        let self_items: Vec<ListItem> = trade
-            .self_side
-            .items
+        let self_items: Vec<ListItem> = self_visible_items
             .iter()
             .enumerate()
             .map(|(i, guid)| {
@@ -64,6 +65,13 @@ pub fn render_trade_tab(
         let _self_height = self_area.height as usize; // Both sides same height in 50/50 split
 
         let mut default_self_state = ListState::default();
+        let selected_index = tab.selected_index.min(self_items.len().saturating_sub(1));
+        if trade_focus == TradeFocus::Local {
+            tab.list_state.select(Some(selected_index));
+        } else {
+            default_self_state.select(None);
+        }
+
         let (self_title, self_state) = match trade_focus {
             TradeFocus::Local => (
                 Line::from(vec![
@@ -91,6 +99,7 @@ pub fn render_trade_tab(
         };
 
         let self_content_len = self_items.len();
+
         let mut self_list = List::new(self_items).block(
             Block::default()
                 .borders(Borders::ALL)
@@ -112,13 +121,9 @@ pub fn render_trade_tab(
         let offset = self_state.offset();
         crate::components::scroll::render_scrollbar(f, self_area, self_content_len, offset);
 
-        let selected_index = tab.selected_index;
-
         // Partner side
         let partner_area = chunks[1];
-        let partner_items: Vec<ListItem> = trade
-            .partner_side
-            .items
+        let partner_items: Vec<ListItem> = partner_visible_items
             .iter()
             .enumerate()
             .map(|(i, guid)| {
@@ -141,6 +146,15 @@ pub fn render_trade_tab(
             .collect();
 
         let mut default_partner_state = ListState::default();
+        let partner_selected_index = tab
+            .selected_index
+            .min(partner_items.len().saturating_sub(1));
+        if trade_focus == TradeFocus::Partner {
+            tab.list_state.select(Some(partner_selected_index));
+        } else {
+            default_partner_state.select(None);
+        }
+
         let (partner_title, partner_state) = match trade_focus {
             TradeFocus::Partner => (
                 Line::from(vec![
@@ -227,11 +241,13 @@ pub fn render_trade_tab(
         ]));
         f.render_widget(summary, summary_area);
 
-        let items: Vec<ListItem> = vendor
-            .items
+        let visible_item_indices = tab.visible_vendor_item_indices(view);
+
+        let items: Vec<ListItem> = visible_item_indices
             .iter()
             .enumerate()
-            .map(|(i, m)| {
+            .filter_map(|(i, item_index)| {
+                let m = vendor.items.get(*item_index)?;
                 let display_name = format_item_name(m, m.guid);
 
                 let class = classify_vendor_item(m);
@@ -273,14 +289,16 @@ pub fn render_trade_tab(
                     format!(" {}", vendor.alternate_currency_name)
                 };
 
-                ListItem::new(Line::from(vec![
-                    Span::styled(format!("{:<30}", full_name), Style::default().fg(color)),
-                    Span::styled(
-                        format!("{:>10}{}", price, currency_suffix),
-                        Style::default().fg(theme::MONEY_FG),
-                    ),
-                ]))
-                .style(theme::list_item_style(is_selected))
+                Some(
+                    ListItem::new(Line::from(vec![
+                        Span::styled(format!("{:<30}", full_name), Style::default().fg(color)),
+                        Span::styled(
+                            format!("{:>10}{}", price, currency_suffix),
+                            Style::default().fg(theme::MONEY_FG),
+                        ),
+                    ]))
+                    .style(theme::list_item_style(is_selected)),
+                )
             })
             .collect();
 
@@ -289,7 +307,7 @@ pub fn render_trade_tab(
             .highlight_style(theme::selection_style())
             .highlight_symbol(theme::SELECTION_SYMBOL);
 
-        let selected_index = tab.selected_index;
+        let selected_index = tab.selected_index.min(content_len.saturating_sub(1));
         tab.list_state.select(Some(selected_index));
 
         f.render_stateful_widget(list, list_area, &mut tab.list_state);

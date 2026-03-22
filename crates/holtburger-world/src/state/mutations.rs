@@ -1,4 +1,5 @@
 use super::*;
+use crate::context::WorldContextExt;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
@@ -35,7 +36,7 @@ impl WorldState {
         };
 
         let held_by_player = container_id.is_some_and(|owner_guid| {
-            owner_guid == self.player.guid || self.player.inventory.contains(&owner_guid)
+            owner_guid == self.player.guid || self.is_in_player_inventory(owner_guid)
         });
         let wielded_by_player = wielder_id == Some(self.player.guid);
 

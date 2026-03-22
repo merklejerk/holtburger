@@ -4,6 +4,7 @@ use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt as _;
 
 use crate::WorldEvent;
+use crate::context::WorldContextExt;
 use crate::entity::Entity;
 use crate::state::WorldState;
 
@@ -183,8 +184,8 @@ impl WorldState {
 
         Some(EntityRetentionSnapshot {
             in_world: entity.position.landblock_id != Guid::NULL,
-            held_by_player: self.player.inventory.contains(&guid),
-            equipped_by_player: self.player.equipment.contains_key(&guid),
+            held_by_player: self.is_in_player_inventory(guid),
+            equipped_by_player: self.is_equipped_item(guid),
             inside_open_container: open_container,
             has_container_owner: container_id.is_some() && (!container_preview || open_container),
             has_wielder_owner: entity.wielder_id().is_some(),

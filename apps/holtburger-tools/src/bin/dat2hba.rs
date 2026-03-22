@@ -1,4 +1,4 @@
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use holtburger_tools::{BundleMode, Dat2HbaOptions, run};
 
 #[derive(Parser, Debug)]
@@ -37,6 +37,7 @@ fn main() -> holtburger_tools::error::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
 
     #[test]
     fn args_default_bundle_mode_is_pruned() {

@@ -468,36 +468,17 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
+    use crate::client::{ClientState, builder};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType};
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::traits::ProtocolPack;
-    use holtburger_session::Session;
     use holtburger_world::WorldEvent;
-    use holtburger_world::WorldState;
     use holtburger_world::stats::CharacterLevelInfo;
-    use tokio::sync::broadcast;
 
     fn build_test_client() -> Client {
-        let (wire_event_tx, _) = broadcast::channel(32);
-        let (client_view_event_tx, _) = broadcast::channel(32);
-
-        Client {
-            session: Session::new_test(),
-            world: WorldState::new(None, None),
-            active_confirmation: None,
-            active_busy_operation: None,
-            state: ClientState::Connected,
-            wire_event_tx,
-            client_view_event_tx,
-            command_rx: None,
-            message_dump_dir: None,
-            message_counter: 0,
-            movement: MovementSystem::new(),
-            auth: AuthState::new("test".to_string()),
-        }
+        builder::build_test_client(ClientState::Connected)
     }
 
     fn encode_message(message: &GameMessage) -> Vec<u8> {

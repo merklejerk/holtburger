@@ -332,7 +332,7 @@ Mitigation:
 
 ### Task Checklist
 - [x] Phase 1: Remove geometry-backed collision from shared world tick
-- [ ] Phase 2: Introduce a real client builder and remove replay construction
+- [x] Phase 2: Introduce a real client builder and remove replay construction
 - [ ] Phase 3: Add exact-ID manifest support and micro manifest
 - [ ] Phase 4: Make startup asset validation explicit and table-centric
 - [ ] Phase 5: Add CLI mode for micro bundle generation with a dedicated micro profile
@@ -351,19 +351,22 @@ Mitigation:
 - [x] Remove replay-based client construction paths.
 - [x] Ship the TUI release artifact with the micro bundle instead of publishing a separate asset-bundle artifact.
 - [x] Phase 1 keeps `WorldState::tick()` housekeeping-only; local movement changes now only come from explicit client movement commands or authoritative server updates.
+- [x] Phase 2 introduces a real `ClientBuilder`; production callers and core test helpers now construct clients through the builder rather than hand-assembling `Client` internals.
 
 ### Verification Log
 - [x] Confirm which existing `holtburger-world` tests cover the current collision path and need rewriting.
-- [ ] Confirm all replay-based construction and debug-harness entry points are removed or migrated cleanly.
+- [x] Confirm all replay-based construction and debug-harness entry points are removed or migrated cleanly.
 - [ ] Confirm portal-only startup through a focused integration or client-construction test.
 - [ ] Confirm micro-archive contents against expected file IDs and dedicated micro profile metadata.
-- [ ] Identify all `holtburger-core` test helpers that need migration to the new builder construction path.
+- [x] Identify all `holtburger-core` test helpers that need migration to the new builder construction path.
 - [ ] Confirm release packaging outputs include the micro bundle in both dist artifacts and Flatpak packaging.
 
 ### Progress Notes
 - Phase 1 completed: `WorldState::tick()` now only performs eviction and visibility-retention housekeeping.
 - Removed the portal geometry cache path that only existed for automatic collision, so shared world no longer reaches into portal BSP data during tick.
 - Added explicit regression coverage that tick neither integrates player velocity nor reads portal geometry.
+- Phase 2 completed: added a real `ClientBuilder`, routed live client construction through it, and removed replay-based construction from core/session/debug-harness surfaces.
+- Migrated the remaining `holtburger-core` test helpers away from direct `Client`/`MovementSystem` struct assembly onto a shared builder-backed helper.
 
 ### Open Questions
 None at the moment. If a future non-TUI client needs client-side local physics or prediction, we should open a follow-up plan for that seam rather than re-expanding this one.

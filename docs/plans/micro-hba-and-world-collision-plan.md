@@ -335,7 +335,7 @@ Mitigation:
 - [x] Phase 3: Add exact-ID manifest support and micro manifest
 - [x] Phase 4: Make startup asset validation explicit and table-centric
 - [x] Phase 5: Add CLI mode for micro bundle generation
-- [ ] Phase 6: Update docs and add portal-only verification coverage
+- [x] Phase 6: Update docs and add portal-only verification coverage
 
 ### Decisions Log
 - [x] Treat `micro` as reduced capability, not just stronger pruning.
@@ -361,7 +361,7 @@ Mitigation:
 - [x] Confirm portal-only startup through a focused integration or client-construction test.
 - [x] Confirm micro-archive contents against expected file IDs without relying on profile metadata.
 - [x] Identify all `holtburger-core` test helpers that need migration to the new builder construction path.
-- [ ] Confirm release packaging outputs include the micro bundle in both dist artifacts and Flatpak packaging.
+- [x] Confirm release packaging outputs include the micro bundle in both dist artifacts and Flatpak packaging.
 
 ### Progress Notes
 - Phase 1 completed: `WorldState::tick()` now only performs eviction and visibility-retention housekeeping.
@@ -374,6 +374,7 @@ Mitigation:
 - Phase 4 completed: startup validation is now expressed in terms of required portal assets, cell data is optional for the TUI path, and builder diagnostics name the missing required table instead of complaining generically about `portal` plus `cell` files.
 - Added a focused builder test that boots successfully from a portal-only HBA fixture containing the required micro-table IDs.
 - Phase 5 completed: `dat2hba` now exposes `--bundle {pruned,full,micro}` as its only archive-shaping input, and tool tests cover both CLI parsing and the expected content-selection behavior.
+- Phase 6 completed: user-facing docs now describe `portal` as required and `cell` as optional for the TUI, release packaging only stages `portal.hba`, and world-level runtime coverage proves a portal-only micro archive is enough for level info, spell lookup/details, and skill-cost derivation.
 
 ### Open Questions
 None at the moment. If a future non-TUI client needs client-side local physics or prediction, we should open a follow-up plan for that seam rather than re-expanding this one.

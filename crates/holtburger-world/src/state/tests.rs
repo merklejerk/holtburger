@@ -1,15 +1,46 @@
 use super::*;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
 use crate::state::liveness::EntityUpsertKind;
 
 use holtburger_common::position::WorldPosition;
-use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_common::properties::WorldObjectProperties;
+use holtburger_common::properties::{
+    PropertyInt, PropertyInt64, WorldObjectExt as _, WorldObjectProperties,
+    WorldObjectPropertyAccessorsMut,
+};
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
+use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::{DatFileType, HbaReader, HbaWriter, ResourceProvider};
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
+use tempfile::tempdir;
+
+fn repo_portal_hba_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/portal.hba")
+}
+
+fn write_micro_portal_hba(path: &Path) {
+    let source_path = repo_portal_hba_path();
+    let source = HbaReader::open(&source_path).expect("repo portal.hba should open for tests");
+
+    let mut writer = HbaWriter::new();
+    writer.set_compression(false);
+
+    for id in [SkillTable::FILE_ID, SpellTable::FILE_ID, XpTable::FILE_ID] {
+        let data = source
+            .get_file(id)
+            .unwrap_or_else(|_| panic!("repo portal.hba should contain 0x{id:08X}"));
+        writer
+            .add(id, DatFileType::from_id(id) as u32, data)
+            .expect("micro table should be added to test HBA");
+    }
+
+    writer
+        .write(path)
+        .expect("micro portal.hba should be written");
+}
 
 #[test]
 fn test_player_mirror_invariant_on_set_position() {
@@ -172,6 +203,122 @@ fn test_load_deferred_tables_gracefully_handles_read_failure() {
 
     assert!(state.xp_table.is_none());
     assert!(state.spell_catalog.is_none());
+}
+
+#[test]
+fn test_micro_portal_bundle_supports_runtime_table_lookups() {
+    let dir = tempdir().expect("tempdir should be created");
+    let portal_path = dir.path().join("portal.hba");
+    write_micro_portal_hba(&portal_path);
+
+    let provider = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"))
+        as Arc<dyn ResourceProvider>;
+
+    let mut state = WorldState::new(Some(provider), None);
+    assert!(state.skill_table.is_some());
+
+    state.load_deferred_tables();
+
+    assert!(state.xp_table.is_some());
+    assert!(state.spell_catalog.is_some());
+
+    state.player.set_int_prop(PropertyInt::Level, 1);
+    state
+        .player
+        .set_int64_prop(PropertyInt64::TotalExperience, 0);
+    state
+        .player
+        .set_int64_prop(PropertyInt64::AvailableExperience, 1234);
+    state
+        .player
+        .set_int_prop(PropertyInt::AvailableSkillCredits, 5);
+    state
+        .player
+        .set_int64_prop(PropertyInt64::AvailableLuminance, 42);
+
+    let level_info = state
+        .get_level_info()
+        .expect("xp table should support level info");
+    assert_eq!(level_info.level, 1);
+    assert_eq!(level_info.current_xp, 0);
+    assert_eq!(level_info.unspent_xp, 1234);
+    assert_eq!(level_info.unspent_skill_points, 5);
+    assert_eq!(level_info.available_luminance, 42);
+    assert!(level_info.xp_for_next_level > 0);
+
+    let (spell_id, expected_name) = state
+        .spell_catalog
+        .as_ref()
+        .expect("spell catalog should load")
+        .spells
+        .iter()
+        .find(|(_, info)| {
+            !info.name.is_empty()
+                && (!info.description.is_empty() || info.base_mana > 0 || info.power > 0)
+        })
+        .map(|(id, info)| (*id, info.name.clone()))
+        .expect("micro spell catalog should expose at least one detailed spell");
+
+    let resolved_name = state
+        .resolve_spell_name(spell_id)
+        .expect("spell name should resolve from the micro bundle");
+    let resolved_info = state
+        .resolve_spell_info(spell_id)
+        .expect("spell details should resolve from the micro bundle");
+
+    assert_eq!(resolved_name, expected_name);
+    assert_eq!(resolved_info.name, expected_name);
+    assert!(
+        !resolved_info.description.is_empty()
+            || resolved_info.base_mana > 0
+            || resolved_info.power > 0
+    );
+
+    let (skill_id, expected_costs) = state
+        .skill_table
+        .as_ref()
+        .expect("skill table should load")
+        .skill_base_hash
+        .iter()
+        .find_map(|(id, base)| {
+            crate::stats::SkillType::from_repr(*id)
+                .filter(|_| base.trained_cost > 0 || base.specialized_cost > 0)
+                .map(|skill| {
+                    (
+                        skill as u32,
+                        (base.trained_cost as u32, base.specialized_cost as u32),
+                    )
+                })
+        })
+        .expect("micro skill table should expose a trainable skill");
+
+    let mut events = Vec::new();
+    state.player.update_skill(
+        crate::player::mutations::SkillUpdateParams {
+            skill_id,
+            ranks: 0,
+            status: 2,
+            init: 10,
+            xp: 0,
+            xp_table: state.xp_table.as_ref(),
+            skill_table: state.skill_table.as_deref(),
+        },
+        &mut events,
+    );
+
+    let updated_skill = events
+        .into_iter()
+        .find_map(|event| match event {
+            WorldEvent::SkillUpdated(skill) if skill.skill_type as u32 == skill_id => Some(skill),
+            _ => None,
+        })
+        .expect("skill update should emit a SkillUpdated event");
+
+    assert_eq!(
+        (updated_skill.trained_cost, updated_skill.specialized_cost),
+        expected_costs
+    );
+    assert!(updated_skill.trained_cost > 0 || updated_skill.specialized_cost > 0);
 }
 
 #[test]

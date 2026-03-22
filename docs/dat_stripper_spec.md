@@ -1,5 +1,7 @@
 # Technical Specification: DAT File Stripper for TUI Client
 
+> Note: this document is partially historical. The current implementation supports `dat2hba --bundle {pruned,full,micro}`, and the smallest supported TUI bundle is a portal-only micro archive containing the skill, spell, and XP tables.
+
 ## 1. Executive Summary
 To enable a functional headless/TUI client for the project, we need access to game data (physics, logic tables, landblocks) without distributing the massive, copyrighted retail DAT files containing artwork and audio. This document proposes a CLI toolset, `holtburger-tools`, implemented in Rust, which processes retail DAT files to produce "Holtburger Archive" (`.hba`) files.
 
@@ -13,7 +15,7 @@ These `.hba` files provide a modern, simplified alternative to the complex AC DA
 *   **Size:** Retail `client_portal.dat` and `client_cell.dat` are several gigabytes in size.
 *   **Legal:** Distributing retail DATs violates copyright.
 *   **Complexity:** The original AC DAT format is an ancient block-based file system with complex B-Tree indexing, making it difficult to write efficiently and maintain.
-*   **Requirement:** The TUI client needs a fast, reliable way to access game logic and physics data without the overhead of a legacy file system.
+*   **Requirement:** The TUI client needs a fast, reliable way to access its required gameplay tables without the overhead of a legacy file system.
 
 ## 3. The Holtburger Architecture: VFS & Resource Providers
 To support both the current TUI client and a future high-fidelity 3D client, we will implement a **Virtual File System (VFS)** abstraction. The client will not interact with DAT/HBA files directly, but rather through a `ResourceProvider` trait.
@@ -38,8 +40,8 @@ The `.hba` format is a flat binary archive optimized for the VFS. It is content-
 | **Blobs** | Data | Contiguous file data (supports Zstd compression). |
 | **Index** | Array | Fixed-size list of File Entries. |
 
-#### Content Profiles (Header)
-The **Profile** in the header acts as a high-level "Collection Type" (e.g., `0x01: LogicOnly`). This allows the VFS to skip searching an entire archive index if the client knows it needs a category of data (like high-res textures) that the archive doesn't provide.
+#### Header Metadata
+The header still contains a `Profile` field for forward compatibility, but the current Holtburger runtime does not use it as the bundle contract. Systems should infer support from actual mounted assets.
 
 #### Index Entry (28 bytes)
 Each entry is the source of truth for its specific file.
@@ -68,7 +70,7 @@ The `holtburger-tools` binary crate in `apps/holtburger-tools` will act as a "Co
     *   Iterate through selected files.
     *   (Optional) Compress data using Zstd.
     *   Append blobs and build index entries.
-4.  **Output:** `portal.hba`, `cell.hba`, etc.
+4.  **Output:** `portal.hba`, optional `cell.hba`, etc.
 
 ### 4.2. Handling Physics and Dependencies
 *   **Total Decoupling:** The `.hba` format remains generic. It stores the same blobs found in the DATs, just in a simpler container.

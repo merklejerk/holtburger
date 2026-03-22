@@ -50,7 +50,7 @@ Holtburger is **highly experimental**. APIs are unstable and subject to frequent
 ## Installation
 
 ### Binary Releases (Recommended)
-Pre-compiled binaries for the nightly builds are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives include the necessary pruned HBA data files.
+Pre-compiled binaries for the nightly builds are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives include the bundled `portal.hba` micro data that the current TUI/runtime path needs.
 
 1.  Download the archive for your platform (Windows, macOS, or Linux).
 2.  Extract the contents.
@@ -102,7 +102,12 @@ cargo run --bin tui -- [ARGS]
 ```
 
 ### Data File Configuration
-The TUI client requires game data (`portal` and `cell`) to function. It is compatible with both official DAT files and our optimized HBA format, which is >90% smaller. The repo and source distribution does not check these files in so you will have to provide them separately. You can either provide your own DAT files or download the latest `hba.zip` from our [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into a `./dats` folder in the root of the project.
+The current TUI/runtime path hard-requires `portal` data and treats `cell` data as optional. It is compatible with both official DAT files and our optimized HBA format.
+
+- `portal.hba` is sufficient for the current TUI when it contains the required skill, spell, and XP tables.
+- `cell.dat` or `cell.hba` can still be mounted, but the TUI no longer requires it for startup.
+- Binary release archives and Flatpak packaging now bundle the micro `portal.hba` automatically instead of requiring a separate asset-bundle download.
+- If you want to build your own micro archive from a retail `client_portal.dat`, run `dat2hba --bundle micro /path/to/client_portal.dat ./dats/portal.hba`.
 
 **Search Priority:**
 1.  `--dats <PATH>` command-line argument.
@@ -113,7 +118,7 @@ The TUI client requires game data (`portal` and `cell`) to function. It is compa
     *   **macOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
     *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
 
-> **Note:** Official DAT files (`client_portal.dat` and `client_cell_1.dat`) must be renamed to `portal.dat` and `cell.dat` respectively.
+> **Note:** Official DAT files (`client_portal.dat` and `client_cell_1.dat`) must be renamed to `portal.dat` and `cell.dat` respectively if you want the loader to discover them automatically.
 
 ## License
 

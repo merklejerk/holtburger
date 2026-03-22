@@ -207,6 +207,7 @@
 - [x] Should toggle combat off before switching weapons.
 - [x] Log in chat when items are bought and sold.
     - [x] Maybe just log any time something new is added to your inventory.
+- [x] Picked up items appear as wielded in nearby tab until you assess or debug them.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!

@@ -205,10 +205,12 @@
     - E.g., Sell/Buy action puts client in "busy" state, waiting for UseDone to clear it and we can raise an event that a Sell/Buy completed + error code.
     - But sometimes UseDone comes with no error code even if the interaction fails, so lib can also look for WeenieErrors that DNShappen right before the UseDone and pass that along.
 - [x] Should toggle combat off before switching weapons.
+- [x] Log in chat when items are bought and sold.
+    - [x] Maybe just log any time something new is added to your inventory.
+- [x] Picked up items appear as wielded in nearby tab until you assess or debug them.
+- [x] Filter verb to vendor tab.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
-- [ ] Log in chat when items are bought and sold.
-    - Maybe just log any time something new is added to your inventory.
 - [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`

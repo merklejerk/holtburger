@@ -693,6 +693,7 @@ dependencies = [
  "serde",
  "strum",
  "strum_macros",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
 ]

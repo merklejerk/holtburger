@@ -192,7 +192,7 @@ pub(crate) fn handle_message(
             let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
             let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
             if let Some(prop) = prop {
-                state.apply_instance_id_side_effect(target_guid, prop, data.value);
+                state.apply_instance_id_side_effect(target_guid, prop, data.value, events);
             }
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,
@@ -205,7 +205,7 @@ pub(crate) fn handle_message(
             let update = PropertyUpdate::try_from_raw_iid(data.property, data.value);
             let target_guid = state.apply_property_update_to_target(data.guid, &update, true);
             if let Some(prop) = prop {
-                state.apply_instance_id_side_effect(target_guid, prop, data.value);
+                state.apply_instance_id_side_effect(target_guid, prop, data.value, events);
             }
             events.push(WorldEvent::PropertiesUpdated {
                 guid: target_guid,

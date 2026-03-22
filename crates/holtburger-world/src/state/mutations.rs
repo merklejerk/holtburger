@@ -253,15 +253,64 @@ impl WorldState {
         }
     }
 
-    pub(crate) fn clear_entity_world_presence(&mut self, guid: Guid) -> bool {
+    pub(crate) fn clear_entity_world_presence(&mut self, guid: Guid) -> Option<WorldPosition> {
         if let Some(entity) = self.entities.get_mut(guid) {
             let old_lb = entity.position.landblock_id;
+            if old_lb == Guid::NULL {
+                return None;
+            }
+
             entity.position.landblock_id = Guid::NULL;
+            let position = entity.position;
             self.scene.remove_entity(guid, old_lb);
-            true
+            Some(position)
         } else {
-            false
+            None
         }
+    }
+
+    fn emit_entity_world_presence_cleared(&mut self, guid: Guid, events: &mut Vec<WorldEvent>) {
+        if let Some(pos) = self.clear_entity_world_presence(guid) {
+            events.push(WorldEvent::EntityMoved { guid, pos });
+        }
+    }
+
+    fn set_entity_inventory_location(
+        &mut self,
+        guid: Guid,
+        container_guid: Guid,
+        wielder_guid: Guid,
+        equip_mask: EquipMask,
+    ) -> bool {
+        let Some(entity) = self.entities.get_mut(guid) else {
+            return false;
+        };
+
+        entity.set_iid_prop(PropertyInstanceId::Container, container_guid);
+        entity.set_iid_prop(PropertyInstanceId::Wielder, wielder_guid);
+        entity.set_int_prop(
+            PropertyInt::CurrentWieldedLocation,
+            equip_mask.bits() as i32,
+        );
+
+        true
+    }
+
+    fn finalize_entity_inventory_location_update(
+        &mut self,
+        guid: Guid,
+        clear_world_presence: bool,
+        updates: Vec<PropertyUpdate>,
+        events: &mut Vec<WorldEvent>,
+    ) {
+        if clear_world_presence {
+            self.emit_entity_world_presence_cleared(guid, events);
+        }
+
+        self.sync_player_ownership_for_entity(guid);
+        let _ = self.reconcile_entity_retention(guid);
+
+        events.push(WorldEvent::PropertiesUpdated { guid, updates });
     }
 
     pub(crate) fn move_entity_into_container(
@@ -270,24 +319,19 @@ impl WorldState {
         container_guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        if let Some(entity) = self.entities.get_mut(item_guid) {
-            entity.set_iid_prop(PropertyInstanceId::Container, container_guid);
-            entity.set_iid_prop(PropertyInstanceId::Wielder, Guid::NULL);
-            entity.set_int_prop(
-                PropertyInt::CurrentWieldedLocation,
-                EquipMask::NONE.bits() as i32,
-            );
-        } else {
+        if !self.set_entity_inventory_location(
+            item_guid,
+            container_guid,
+            Guid::NULL,
+            EquipMask::NONE,
+        ) {
             return false;
         }
 
-        let _ = self.clear_entity_world_presence(item_guid);
-        self.sync_player_ownership_for_entity(item_guid);
-        let _ = self.reconcile_entity_retention(item_guid);
-
-        events.push(WorldEvent::PropertiesUpdated {
-            guid: item_guid,
-            updates: vec![
+        self.finalize_entity_inventory_location_update(
+            item_guid,
+            true,
+            vec![
                 PropertyUpdate::InstanceId(PropertyInstanceId::Container, container_guid),
                 PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
                 PropertyUpdate::Int(
@@ -295,7 +339,8 @@ impl WorldState {
                     EquipMask::NONE.bits() as i32,
                 ),
             ],
-        });
+            events,
+        );
 
         true
     }
@@ -305,22 +350,14 @@ impl WorldState {
         guid: Guid,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        if let Some(entity) = self.entities.get_mut(guid) {
-            entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
-            entity.set_iid_prop(PropertyInstanceId::Wielder, Guid::NULL);
-            entity.set_int_prop(
-                PropertyInt::CurrentWieldedLocation,
-                EquipMask::NONE.bits() as i32,
-            );
-        } else {
+        if !self.set_entity_inventory_location(guid, Guid::NULL, Guid::NULL, EquipMask::NONE) {
             return false;
         }
-        self.sync_player_ownership_for_entity(guid);
-        let _ = self.reconcile_entity_retention(guid);
 
-        events.push(WorldEvent::PropertiesUpdated {
+        self.finalize_entity_inventory_location_update(
             guid,
-            updates: vec![
+            false,
+            vec![
                 PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
                 PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, Guid::NULL),
                 PropertyUpdate::Int(
@@ -328,7 +365,8 @@ impl WorldState {
                     EquipMask::NONE.bits() as i32,
                 ),
             ],
-        });
+            events,
+        );
 
         true
     }
@@ -340,24 +378,14 @@ impl WorldState {
         equip_mask: EquipMask,
         events: &mut Vec<WorldEvent>,
     ) -> bool {
-        if let Some(entity) = self.entities.get_mut(object_guid) {
-            entity.set_iid_prop(PropertyInstanceId::Wielder, wielder_guid);
-            entity.set_iid_prop(PropertyInstanceId::Container, Guid::NULL);
-            entity.set_int_prop(
-                PropertyInt::CurrentWieldedLocation,
-                equip_mask.bits() as i32,
-            );
-        } else {
+        if !self.set_entity_inventory_location(object_guid, Guid::NULL, wielder_guid, equip_mask) {
             return false;
         }
 
-        let _ = self.clear_entity_world_presence(object_guid);
-        self.sync_player_ownership_for_entity(object_guid);
-        let _ = self.reconcile_entity_retention(object_guid);
-
-        events.push(WorldEvent::PropertiesUpdated {
-            guid: object_guid,
-            updates: vec![
+        self.finalize_entity_inventory_location_update(
+            object_guid,
+            true,
+            vec![
                 PropertyUpdate::InstanceId(PropertyInstanceId::Wielder, wielder_guid),
                 PropertyUpdate::InstanceId(PropertyInstanceId::Container, Guid::NULL),
                 PropertyUpdate::Int(
@@ -365,7 +393,8 @@ impl WorldState {
                     equip_mask.bits() as i32,
                 ),
             ],
-        });
+            events,
+        );
 
         true
     }
@@ -409,6 +438,7 @@ impl WorldState {
         target_guid: Guid,
         property: PropertyInstanceId,
         value: Guid,
+        events: &mut Vec<WorldEvent>,
     ) {
         let mut clear_world_presence = false;
 
@@ -433,7 +463,7 @@ impl WorldState {
         }
 
         if clear_world_presence {
-            let _ = self.clear_entity_world_presence(target_guid);
+            self.emit_entity_world_presence_cleared(target_guid, events);
         }
 
         match property {

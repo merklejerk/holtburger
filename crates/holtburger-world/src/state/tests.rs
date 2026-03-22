@@ -524,6 +524,49 @@ fn test_inventory_put_object_in_3d() {
 }
 
 #[test]
+fn test_inventory_put_obj_in_container_emits_entity_moved_when_item_leaves_world() {
+    let mut state = WorldState::new(None, None);
+    let container_guid = Guid(0x2);
+    let item_guid = Guid(0x3);
+
+    let mut item = Entity::new(
+        item_guid,
+        "Item".to_string(),
+        WorldPosition {
+            landblock_id: Guid(0x1234),
+            ..WorldPosition::default()
+        },
+    );
+    item.set_wielder_id(Some(Guid(0x9)));
+    state.entities.insert(item);
+
+    let data = InventoryPutObjInContainerEventData {
+        item_guid,
+        container_guid,
+        slot: 0,
+        container_type: 0,
+    };
+    let event = GameEvent::InventoryPutObjInContainer(Box::new(data));
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 0,
+        event,
+    }));
+
+    let events = state.handle_message(&msg);
+
+    let entity = state.entities.get(item_guid).unwrap();
+    assert_eq!(entity.position.landblock_id, Guid::NULL);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved {
+            guid,
+            pos,
+        } if *guid == item_guid && pos.landblock_id == Guid::NULL
+    )));
+}
+
+#[test]
 fn test_wield_object() {
     let mut state = WorldState::new(None, None);
     let obj_guid = Guid(0x1);
@@ -532,7 +575,10 @@ fn test_wield_object() {
     state.entities.insert(Entity::new(
         obj_guid,
         "Weapon".to_string(),
-        WorldPosition::default(),
+        WorldPosition {
+            landblock_id: Guid(0x1234),
+            ..WorldPosition::default()
+        },
     ));
 
     let data = WieldObjectEventData {
@@ -562,6 +608,13 @@ fn test_wield_object() {
             false
         }
     }));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved {
+            guid,
+            pos,
+        } if *guid == obj_guid && pos.landblock_id == Guid::NULL
+    )));
 }
 
 #[test]
@@ -880,7 +933,10 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
     state.entities.insert(Entity::new(
         guid,
         "GroundLoot".to_string(),
-        WorldPosition::default(),
+        WorldPosition {
+            landblock_id: Guid(0x1234),
+            ..WorldPosition::default()
+        },
     ));
 
     let msg = GameMessage::PickupEvent(Box::new(PickupEventData {
@@ -900,7 +956,13 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
             .entity_lifecycle_state(guid)
             .is_some_and(|state| state.explicit_delete_requested)
     );
-    assert!(events.is_empty());
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMoved {
+            guid: event_guid,
+            pos,
+        } if *event_guid == guid && pos.landblock_id == Guid::NULL
+    )));
 }
 
 #[test]

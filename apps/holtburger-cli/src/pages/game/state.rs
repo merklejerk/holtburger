@@ -23,9 +23,7 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use std::fs::File;
 use std::sync::Mutex;
-#[cfg(test)]
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::pages::game::GameData;
 use crate::pages::game::panels::chat::ChatState;
@@ -52,6 +50,37 @@ pub struct GameState {
 
 const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
 const DEFAULT_APPROACH_RUN_RATE: f32 = 4.5;
+const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum InventoryNotificationState {
+    #[default]
+    Uninitialized,
+    QuietUntil(Instant),
+    Armed,
+}
+
+impl InventoryNotificationState {
+    fn is_armed(self) -> bool {
+        matches!(self, Self::Armed)
+    }
+
+    fn begin_quiet_period(&mut self, now: Instant) {
+        *self = Self::QuietUntil(now + INVENTORY_NOTIFICATION_ARM_DELAY);
+    }
+
+    fn extend_quiet_period(&mut self, now: Instant) {
+        if !self.is_armed() {
+            *self = Self::QuietUntil(now + INVENTORY_NOTIFICATION_ARM_DELAY);
+        }
+    }
+
+    fn sync(&mut self, now: Instant) {
+        if matches!(self, Self::QuietUntil(arm_at) if now >= *arm_at) {
+            *self = Self::Armed;
+        }
+    }
+}
 
 enum EnterCombatModeResult {
     Success(UpdateResult),
@@ -154,7 +183,9 @@ impl GameState {
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
-                self.update_inventory_and_equipment(entity_ref);
+                if self.update_inventory_and_equipment(entity_ref) {
+                    result.needs_redraw = true;
+                }
                 self.sync_weapon_swap_controller(Instant::now(), &mut result);
             }
             ClientViewEvent::EntityReplaced { entity } => {
@@ -162,7 +193,9 @@ impl GameState {
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
-                self.update_inventory_and_equipment(entity_ref);
+                if self.update_inventory_and_equipment(entity_ref) {
+                    result.needs_redraw = true;
+                }
                 self.sync_weapon_swap_controller(Instant::now(), &mut result);
             }
             ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
@@ -174,7 +207,9 @@ impl GameState {
                     needs_update = true;
                 }
                 if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
-                    self.update_inventory_and_equipment(&entity);
+                    if self.update_inventory_and_equipment(&entity) {
+                        result.needs_redraw = true;
+                    }
                     self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 }
             }
@@ -261,7 +296,9 @@ impl GameState {
             }
             ClientViewEvent::EntityIdentified { entity } => {
                 let entity_ref = entity.as_ref();
-                self.update_inventory_and_equipment(entity_ref);
+                if self.update_inventory_and_equipment(entity_ref) {
+                    result.needs_redraw = true;
+                }
                 self.handle_entity_identified(entity_ref);
                 self.sync_weapon_swap_controller(Instant::now(), &mut result);
                 result.needs_redraw = true;
@@ -677,6 +714,7 @@ impl GameState {
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
         let mut result = UpdateResult::new();
+        self.sync_inventory_notification_arming(Instant::now());
 
         // Proactive enchantment purge
         let old_count = self.data.player_enchantments.len();
@@ -766,6 +804,13 @@ impl GameState {
                     CombatMode::Undef | CombatMode::NonCombat | CombatMode::Magic
                 ) {
                     self.runtime.combat_automation = None;
+                }
+            }
+            ClientViewEvent::StatusUpdate { state } => {
+                if matches!(state, holtburger_core::client::types::ClientState::InWorld) {
+                    self.runtime
+                        .inventory_notifications
+                        .begin_quiet_period(Instant::now());
                 }
             }
             _ => {}
@@ -1348,35 +1393,44 @@ impl GameState {
         }
     }
 
-    fn update_inventory_and_equipment(&mut self, entity: &Entity) {
+    fn update_inventory_and_equipment(&mut self, entity: &Entity) -> bool {
         let guid = entity.guid;
-        let pguid = self.data.player_guid;
+        let was_owned = self.data.is_owned_by_player(guid);
+        let should_be_owned = self.should_track_entity_as_owned_by_player(entity);
+        let mut logged_inventory_change = false;
 
         // Handle player position if it's the player entity
-        if Some(guid) == pguid {
+        if Some(guid) == self.data.player_guid {
             self.data.player_pos = Some(entity.position);
         }
 
+        if should_be_owned {
+            self.delay_inventory_notification_arming();
+        }
+
         // Update inventory tracking
-        if let Some(pguid) = pguid {
-            if let Some(cid) = entity.container_id()
-                && (cid == pguid || self.data.inventory.contains(&cid))
-            {
-                self.data.inventory.insert(guid);
-            } else if let Some(wid) = entity.wielder_id()
-                && wid == pguid
-            {
-                self.data.inventory.insert(guid);
-            } else {
-                // If it's no longer in our inventory/wielded, remove it
-                self.data.inventory.remove(&guid);
+        if should_be_owned != was_owned {
+            self.data.update_inventory_recursive(guid, should_be_owned);
+        } else if should_be_owned {
+            self.data.inventory.insert(guid);
+        }
+
+        if should_be_owned {
+            if self.runtime.inventory_notifications.is_armed() && !was_owned {
+                self.log_inventory_addition(entity);
+                logged_inventory_change = true;
             }
+        } else {
+            if self.runtime.inventory_notifications.is_armed() && was_owned {
+                self.log_inventory_removal(entity);
+                logged_inventory_change = true;
+            }
+            // If it's no longer in our inventory/wielded, remove it
+            self.data.inventory.remove(&guid);
         }
 
         // Update equipment tracking
-        if let Some(pguid) = pguid
-            && entity.wielder_id() == Some(pguid)
-        {
+        if self.should_track_entity_as_equipped_by_player(entity) {
             let mask = entity.wield_location();
             if mask.is_empty() {
                 self.data.equipment.remove(&guid);
@@ -1388,10 +1442,68 @@ impl GameState {
         }
 
         self.data.entities.insert(entity.guid, entity.clone());
+        logged_inventory_change
+    }
+
+    fn should_track_entity_as_owned_by_player(&self, entity: &Entity) -> bool {
+        let Some(player_guid) = self.data.player_guid else {
+            return false;
+        };
+
+        entity.container_id().is_some_and(|container_guid| {
+            container_guid == player_guid || self.data.is_in_player_inventory(container_guid)
+        }) || self.should_track_entity_as_equipped_by_player(entity)
+    }
+
+    fn should_track_entity_as_equipped_by_player(&self, entity: &Entity) -> bool {
+        self.data
+            .player_guid
+            .is_some_and(|player_guid| entity.wielder_id() == Some(player_guid))
+    }
+
+    fn log_inventory_addition(&mut self, entity: &Entity) {
+        self.log_inventory_change(entity, "Added to inventory");
+    }
+
+    fn log_inventory_removal(&mut self, entity: &Entity) {
+        self.log_inventory_change(entity, "Removed from inventory");
+    }
+
+    fn log_inventory_change(&mut self, entity: &Entity, action: &str) {
+        let mut label = if entity.name().is_empty() {
+            format!("0x{:08X}", entity.guid.0)
+        } else {
+            entity.name().to_string()
+        };
+        let stack_size = entity.stack_size();
+        if stack_size > 1 {
+            label = format!("{} ({}x)", label, stack_size);
+        }
+        self.chat
+            .log(ChatMessageKind::System, format!("{}: {}", action, label));
+    }
+
+    fn delay_inventory_notification_arming(&mut self) {
+        self.runtime
+            .inventory_notifications
+            .extend_quiet_period(Instant::now());
+    }
+
+    fn sync_inventory_notification_arming(&mut self, now: Instant) {
+        self.runtime.inventory_notifications.sync(now);
     }
 
     fn handle_entity_removed(&mut self, guid: Guid) -> UpdateResult {
         let mut result = UpdateResult::new();
+        let removed_entity = self.data.entities.get(&guid).cloned();
+        let was_owned = self.data.is_owned_by_player(guid);
+        if self.runtime.inventory_notifications.is_armed()
+            && was_owned
+            && let Some(entity) = removed_entity.as_ref()
+        {
+            self.log_inventory_removal(entity);
+            result.needs_redraw = true;
+        }
         self.data.update_inventory_recursive(guid, false);
         self.data.entities.remove(&guid);
         self.data.equipment.remove(&guid);
@@ -1471,6 +1583,7 @@ struct GameRuntimeState {
     navigation: NavigationAutomation,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
+    inventory_notifications: InventoryNotificationState,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1512,13 +1625,12 @@ mod tests {
     use super::*;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
-        ItemType, PropertyBool, PropertyInt, PropertyString, WorldObjectProperties,
-        WorldObjectPropertyAccessorsMut,
+        ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
+        WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
-
     fn is_weapon_swap_active(state: &GameState) -> bool {
         state.runtime.weapon_swap.is_active()
     }
@@ -1648,6 +1760,266 @@ mod tests {
             buffs: None,
         });
         entity
+    }
+
+    fn inventory_item_entity(guid: Guid, name: &str, container_id: Guid) -> Entity {
+        let mut entity = Entity::new(guid, name.to_string(), WorldPosition::default());
+        entity.set_iid_prop(PropertyInstanceId::Container, container_id);
+        entity
+    }
+
+    fn stacked_inventory_item_entity(
+        guid: Guid,
+        name: &str,
+        container_id: Guid,
+        stack_size: u32,
+    ) -> Entity {
+        let mut entity = inventory_item_entity(guid, name, container_id);
+        entity.set_int_prop(PropertyInt::StackSize, stack_size as i32);
+        entity
+    }
+
+    #[test]
+    fn entering_world_quiet_period_suppresses_initial_owned_spawns() {
+        let player_guid = Guid(0x50000001);
+        let item_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let status = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+
+        let result = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(item_guid, "Pyreal", player_guid)),
+        });
+
+        assert!(!status.needs_redraw);
+        assert!(!result.needs_redraw);
+        assert!(state.chat.messages.is_empty());
+        assert!(matches!(
+            state.runtime.inventory_notifications,
+            InventoryNotificationState::QuietUntil(_)
+        ));
+    }
+
+    #[test]
+    fn newly_owned_item_logs_to_chat() {
+        let player_guid = Guid(0x50000001);
+        let item_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let _ = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+
+        state.runtime.inventory_notifications =
+            InventoryNotificationState::QuietUntil(Instant::now() - Duration::from_millis(1));
+        let _ = state.handle_tick(0.0);
+
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(Entity::new(
+                item_guid,
+                "Pyreal".to_string(),
+                WorldPosition::default(),
+            )),
+        });
+
+        let result = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(inventory_item_entity(item_guid, "Pyreal", player_guid)),
+        });
+
+        assert!(result.needs_redraw);
+        assert_eq!(state.chat.messages.len(), 1);
+        assert_eq!(state.chat.messages[0].text, "Added to inventory: Pyreal");
+    }
+
+    #[test]
+    fn newly_owned_stacked_item_logs_stack_size() {
+        let player_guid = Guid(0x50000001);
+        let item_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let _ = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+
+        state.runtime.inventory_notifications =
+            InventoryNotificationState::QuietUntil(Instant::now() - Duration::from_millis(1));
+        let _ = state.handle_tick(0.0);
+
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(Entity::new(
+                item_guid,
+                "Pyreal".to_string(),
+                WorldPosition::default(),
+            )),
+        });
+
+        let result = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(stacked_inventory_item_entity(
+                item_guid,
+                "Pyreal",
+                player_guid,
+                7,
+            )),
+        });
+
+        assert!(result.needs_redraw);
+        assert_eq!(state.chat.messages.len(), 1);
+        assert_eq!(
+            state.chat.messages[0].text,
+            "Added to inventory: Pyreal (7x)"
+        );
+    }
+
+    #[test]
+    fn newly_unowned_item_logs_to_chat() {
+        let player_guid = Guid(0x50000001);
+        let item_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let _ = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(item_guid, "Pyreal", player_guid)),
+        });
+
+        state.chat.messages.clear();
+        state.runtime.inventory_notifications =
+            InventoryNotificationState::QuietUntil(Instant::now() - Duration::from_millis(1));
+        let _ = state.handle_tick(0.0);
+
+        let result = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(Entity::new(
+                item_guid,
+                "Pyreal".to_string(),
+                WorldPosition::default(),
+            )),
+        });
+
+        assert!(result.needs_redraw);
+        assert_eq!(state.chat.messages.len(), 1);
+        assert_eq!(
+            state.chat.messages[0].text,
+            "Removed from inventory: Pyreal"
+        );
+    }
+
+    #[test]
+    fn moving_item_within_inventory_does_not_log_addition() {
+        let player_guid = Guid(0x50000001);
+        let pack_guid = Guid(0x60000001);
+        let item_guid = Guid(0x60000002);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let _ = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(pack_guid, "Pack", player_guid)),
+        });
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(item_guid, "Pyreal", player_guid)),
+        });
+
+        let result = state.handle_view_event(ClientViewEvent::EntityReplaced {
+            entity: Box::new(inventory_item_entity(item_guid, "Pyreal", pack_guid)),
+        });
+
+        assert!(!result.needs_redraw);
+        assert!(state.chat.messages.is_empty());
+    }
+
+    #[test]
+    fn entering_world_quiet_period_suppresses_initial_side_pack_contents() {
+        let player_guid = Guid(0x50000001);
+        let pack_guid = Guid(0x60000001);
+        let initial_item_guid = Guid(0x60000002);
+        let later_item_guid = Guid(0x60000003);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let _ = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(pack_guid, "Pack", player_guid)),
+        });
+        let initial = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(initial_item_guid, "Apple", pack_guid)),
+        });
+
+        assert!(!initial.needs_redraw);
+        assert!(state.chat.messages.is_empty());
+
+        state.runtime.inventory_notifications =
+            InventoryNotificationState::QuietUntil(Instant::now() - Duration::from_millis(1));
+        let _ = state.handle_tick(0.0);
+        assert!(state.runtime.inventory_notifications.is_armed());
+
+        let later = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(later_item_guid, "Pear", pack_guid)),
+        });
+
+        assert!(later.needs_redraw);
+        assert_eq!(state.chat.messages.len(), 1);
+        assert_eq!(state.chat.messages[0].text, "Added to inventory: Pear");
+    }
+
+    #[test]
+    fn despawning_owned_item_logs_removal_to_chat() {
+        let player_guid = Guid(0x50000001);
+        let item_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let _ = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(item_guid, "Pyreal", player_guid)),
+        });
+
+        state.chat.messages.clear();
+        state.runtime.inventory_notifications =
+            InventoryNotificationState::QuietUntil(Instant::now() - Duration::from_millis(1));
+        let _ = state.handle_tick(0.0);
+
+        let result = state.handle_view_event(ClientViewEvent::EntityDespawned { guid: item_guid });
+
+        assert!(result.needs_redraw);
+        assert_eq!(state.chat.messages.len(), 1);
+        assert_eq!(
+            state.chat.messages[0].text,
+            "Removed from inventory: Pyreal"
+        );
+    }
+
+    #[test]
+    fn acquiring_pack_recursively_tracks_known_contents() {
+        let player_guid = Guid(0x50000001);
+        let pack_guid = Guid(0x60000001);
+        let item_guid = Guid(0x60000002);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        let _ = state.handle_view_event(ClientViewEvent::StatusUpdate {
+            state: holtburger_core::client::types::ClientState::InWorld,
+        });
+
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(item_guid, "Apple", pack_guid)),
+        });
+
+        assert!(!state.data.is_in_player_inventory(item_guid));
+
+        let _ = state.handle_view_event(ClientViewEvent::EntitySpawned {
+            entity: Box::new(inventory_item_entity(pack_guid, "Pack", player_guid)),
+        });
+
+        assert!(state.data.is_in_player_inventory(pack_guid));
+        assert!(state.data.is_in_player_inventory(item_guid));
     }
 
     #[test]

@@ -38,15 +38,11 @@ pub struct InventoryTab {
 
 pub fn get_entities(data: &GameData) -> Vec<(&Entity, f32, usize)> {
     let entities = &data.entities;
-    let inventory = &data.inventory;
-    let equipment = &data.equipment;
     let player_pos = data.player_pos.as_ref();
 
     let candidates: Vec<_> = entities
         .values()
-        .filter(|e| {
-            (inventory.contains(&e.guid) || equipment.contains_key(&e.guid)) && !e.name().is_empty()
-        })
+        .filter(|e| data.is_owned_by_player(e.guid) && !e.name().is_empty())
         .collect();
 
     if candidates.is_empty() {

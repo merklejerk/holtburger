@@ -1,4 +1,5 @@
 use crate::entity::Entity;
+use crate::state::WorldState;
 use crate::vendor::VendorState;
 use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, ItemType, Usable, WorldObjectExt};
@@ -49,6 +50,32 @@ pub trait WorldContext {
     fn is_open_container(&self, guid: Guid) -> bool;
 }
 
+impl WorldContext for WorldState {
+    fn get_player_guid(&self) -> Option<Guid> {
+        (self.player.guid != Guid::NULL).then_some(self.player.guid)
+    }
+
+    fn get_entity(&self, guid: Guid) -> Option<&Entity> {
+        self.entities.get(guid)
+    }
+
+    fn iter_inventory(&self) -> impl Iterator<Item = Guid> + '_ {
+        self.player.inventory.iter().copied()
+    }
+
+    fn iter_equipment(&self) -> impl Iterator<Item = Guid> + '_ {
+        self.player.equipment.keys().copied()
+    }
+
+    fn iter_entities(&self) -> impl Iterator<Item = &Entity> + '_ {
+        self.entities.iter()
+    }
+
+    fn is_open_container(&self, guid: Guid) -> bool {
+        self.open_containers.contains(&guid)
+    }
+}
+
 /// Common game logic shared across all clients.
 pub trait WorldContextExt: WorldContext {
     fn combat_target_status(&self, guid: Guid) -> CombatTargetStatus {
@@ -82,6 +109,10 @@ pub trait WorldContextExt: WorldContext {
         self.iter_equipment().any(|candidate| candidate == guid)
     }
 
+    fn is_owned_by_player(&self, guid: Guid) -> bool {
+        self.is_equipped_item(guid) || self.is_in_player_inventory(guid)
+    }
+
     fn current_usable_location_flags(&self, guid: Guid, source_guid: Option<Guid>) -> Usable {
         let Some(entity) = self.get_entity(guid) else {
             return Usable::empty();
@@ -89,7 +120,7 @@ pub trait WorldContextExt: WorldContext {
 
         let mut available = Usable::empty();
         let is_equipped = self.is_equipped_item(guid);
-        let is_owned = is_equipped || self.is_in_player_inventory(guid);
+        let is_owned = self.is_owned_by_player(guid);
 
         if is_owned {
             available |= Usable::CONTAINED;
@@ -911,5 +942,24 @@ mod tests {
 
         world.open_containers.clear();
         assert!(!world.can_use_with(source_guid, target_guid));
+    }
+
+    #[test]
+    fn player_owned_helper_includes_inventory_and_equipment() {
+        let player_guid = Guid(0x5000_0001);
+        let inventory_guid = Guid(0x8000_0001);
+        let equipped_guid = Guid(0x8000_0002);
+        let other_guid = Guid(0x8000_0003);
+
+        let world = TestWorld {
+            player_guid: Some(player_guid),
+            inventory: HashSet::from([inventory_guid]),
+            equipment: HashSet::from([equipped_guid]),
+            ..Default::default()
+        };
+
+        assert!(world.is_owned_by_player(inventory_guid));
+        assert!(world.is_owned_by_player(equipped_guid));
+        assert!(!world.is_owned_by_player(other_guid));
     }
 }

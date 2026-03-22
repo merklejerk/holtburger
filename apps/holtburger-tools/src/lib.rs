@@ -9,7 +9,7 @@ use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(clap::ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BundleMode {
     Pruned,
     Full,
@@ -22,13 +22,6 @@ impl BundleMode {
             BundleMode::Pruned => Some(StripperManifest::logic_only()),
             BundleMode::Micro => Some(StripperManifest::micro()),
             BundleMode::Full => None,
-        }
-    }
-
-    fn default_profile(self) -> u32 {
-        match self {
-            BundleMode::Full => 4,
-            BundleMode::Pruned | BundleMode::Micro => 1,
         }
     }
 }
@@ -46,35 +39,19 @@ pub struct Args {
     /// Path to the output HBA archive
     pub output: PathBuf,
 
-    /// Override the profile ID (1: Logic, 2: Visuals, 3: Audio, 4: Full)
-    #[arg(short, long)]
-    pub profile: Option<u32>,
-
-    /// Do not strip visual data (Automatically sets profile to 4)
-    #[arg(short, long)]
-    pub full: bool,
+    /// Archive bundle style to emit: pruned, full, or micro.
+    #[arg(long, value_enum, default_value_t = BundleMode::Pruned)]
+    pub bundle: BundleMode,
 }
 
-pub fn process_dat(
-    input_path: &Path,
-    output_path: &Path,
-    full: bool,
-    profile_override: Option<u32>,
-) -> Result<()> {
-    let bundle_mode = if full {
-        BundleMode::Full
-    } else {
-        BundleMode::Pruned
-    };
-
-    process_dat_with_mode(input_path, output_path, bundle_mode, profile_override)
+pub fn process_dat(input_path: &Path, output_path: &Path, bundle_mode: BundleMode) -> Result<()> {
+    process_dat_with_mode(input_path, output_path, bundle_mode)
 }
 
 pub fn process_dat_with_mode(
     input_path: &Path,
     output_path: &Path,
     bundle_mode: BundleMode,
-    profile_override: Option<u32>,
 ) -> Result<()> {
     println!("Processing {:?} -> {:?}", input_path, output_path);
 
@@ -82,19 +59,7 @@ pub fn process_dat_with_mode(
         .map_err(|e| ToolError::DatOpen(input_path.to_path_buf(), e.to_string()))?;
 
     let manifest = bundle_mode.manifest();
-
-    // Determine profile
-    let profile = if let Some(p) = profile_override {
-        if p == 0 || p > 4 {
-            return Err(ToolError::Validation(format!(
-                "Invalid profile ID: {}. Must be 1-4 (1: Logic, 2: Visuals, 3: Audio, 4: Full)",
-                p
-            )));
-        }
-        p
-    } else {
-        bundle_mode.default_profile()
-    };
+    let should_prune_records = !matches!(bundle_mode, BundleMode::Full);
 
     let pb = ProgressBar::new(db.files.len() as u64);
     pb.set_style(
@@ -135,7 +100,7 @@ pub fn process_dat_with_mode(
             let mut is_pruned = false;
 
             // Internal record pruning
-            if profile != 4 {
+            if should_prune_records {
                 match file_type {
                     DatFileType::Model => {
                         let mut cursor = std::io::Cursor::new(&data);
@@ -191,17 +156,16 @@ pub fn process_dat_with_mode(
         .collect();
 
     pb.finish_with_message(format!(
-        "Done! Kept {}/{} files (Pruned {}, Profile {})",
+        "Done! Kept {}/{} files (Pruned {}, Bundle {:?})",
         kept_count.load(Ordering::SeqCst),
         db.files.len(),
         pruned_count.load(Ordering::SeqCst),
-        profile
+        bundle_mode
     ));
 
     println!("📦 Packing HBA archive...");
     let mut writer = HbaWriter::new();
     writer.set_compression(true);
-    writer.set_profile(profile);
 
     for (id, type_id, data, is_pruned) in processed_entries {
         if is_pruned {
@@ -224,13 +188,15 @@ pub fn process_dat_with_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
     use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
 
     #[test]
-    fn bundle_mode_defaults_match_current_profiles() {
-        assert_eq!(BundleMode::Pruned.default_profile(), 1);
-        assert_eq!(BundleMode::Micro.default_profile(), 1);
-        assert_eq!(BundleMode::Full.default_profile(), 4);
+    fn args_default_bundle_mode_is_pruned() {
+        let args = Args::try_parse_from(["dat2hba", "portal.dat", "portal.hba"])
+            .expect("default args should parse");
+
+        assert_eq!(args.bundle, BundleMode::Pruned);
     }
 
     #[test]
@@ -256,6 +222,30 @@ mod tests {
         assert!(!manifest.should_keep_file(0x0E000099, DatFileType::Table));
         assert!(!manifest.should_keep_file(0x01000001, DatFileType::Model));
     }
+
+    #[test]
+    fn args_parse_explicit_micro_bundle() {
+        let args = Args::try_parse_from([
+            "dat2hba",
+            "portal.dat",
+            "portal-micro.hba",
+            "--bundle",
+            "micro",
+        ])
+        .expect("micro bundle args should parse");
+
+        assert_eq!(args.bundle, BundleMode::Micro);
+    }
+
+    #[test]
+    fn cli_help_lists_bundle_styles() {
+        let help = Args::command().render_long_help().to_string();
+
+        assert!(help.contains("--bundle <BUNDLE>"));
+        assert!(help.contains("[possible values: pruned, full, micro]"));
+        assert!(!help.contains("--profile"));
+        assert!(!help.contains("--full"));
+    }
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -265,7 +255,7 @@ pub fn run(args: Args) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    process_dat(&args.input, &args.output, args.full, args.profile)?;
+    process_dat(&args.input, &args.output, args.bundle)?;
 
     Ok(())
 }

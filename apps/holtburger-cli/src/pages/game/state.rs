@@ -4,9 +4,9 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
-#[cfg(test)]
-use holtburger_core::client::locomotion::LocomotionRequest;
-use holtburger_core::client::locomotion::MovementPacketMetadata;
+use holtburger_core::client::movement_types::{
+    MovementPacketMetadata, MovementPrimitive, MovementRequest,
+};
 use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
 };
@@ -1102,10 +1102,10 @@ impl GameState {
             CombatAutomationEffect::TurnTo { heading } => {
                 self.data.combat_runtime.queue_attack();
                 result.needs_redraw = true;
-                result.commands.push(ClientCommand::TurnTo {
-                    heading,
-                    metadata: self.current_movement_metadata(),
-                });
+                result.commands.push(ClientCommand::ExecuteMovement(
+                    MovementRequest::new(MovementPrimitive::SnapFacing { heading })
+                        .with_metadata(self.current_movement_metadata()),
+                ));
             }
             CombatAutomationEffect::Attack(request) => {
                 self.data.combat_runtime.queue_attack();
@@ -1139,8 +1139,9 @@ impl GameState {
         let target_guid = self
             .current_target_guid()
             .filter(|guid| self.is_valid_combat_target(*guid));
-        let target_position = target_guid
-            .and_then(|guid| self.data.entities.get(&guid).map(|entity| entity.position));
+        let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
+        let target_position = target_entity.map(|entity| entity.position);
+        let target_use_radius = target_entity.and_then(|entity| entity.use_radius());
         let update = self
             .runtime
             .navigation
@@ -1155,6 +1156,7 @@ impl GameState {
                 target_guid,
                 player_position: self.data.player_pos,
                 target_position,
+                target_use_radius: target_use_radius.map(|radius| radius as f32),
                 move_speed: self
                     .data
                     .get_run_rate()
@@ -1171,17 +1173,17 @@ impl GameState {
         result: &mut UpdateResult,
     ) {
         let now = Instant::now();
+        let target_entity = self.data.entities.get(&target);
         let update = self.runtime.navigation.start_approach_target(
             target,
             arrival_distance,
             ApproachSyncInput {
                 now,
                 player_position: self.data.player_pos,
-                target_position: self
-                    .data
-                    .entities
-                    .get(&target)
-                    .map(|entity| entity.position),
+                target_position: target_entity.map(|entity| entity.position),
+                target_use_radius: target_entity
+                    .and_then(|entity| entity.use_radius())
+                    .map(|radius| radius as f32),
                 move_speed: self
                     .data
                     .get_run_rate()
@@ -1209,6 +1211,12 @@ impl GameState {
                     .entities
                     .get(&target_guid)
                     .map(|entity| entity.position),
+                target_use_radius: self
+                    .data
+                    .entities
+                    .get(&target_guid)
+                    .and_then(|entity| entity.use_radius())
+                    .map(|radius| radius as f32),
                 move_speed: self
                     .data
                     .get_run_rate()
@@ -2176,6 +2184,7 @@ mod tests {
                 now: Instant::now(),
                 player_position: Some(start_pos),
                 target_position: Some(target_pos),
+                target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -2830,7 +2839,10 @@ mod tests {
                 command,
                 ClientCommand::TargetedMeleeAttack { .. }
                     | ClientCommand::TargetedMissileAttack { .. }
-                    | ClientCommand::TurnTo { .. }
+                    | ClientCommand::ExecuteMovement(MovementRequest {
+                        primitive: MovementPrimitive::SnapFacing { .. },
+                        ..
+                    })
             )
         }));
         assert!(!state.data.combat_runtime.attack_queued);
@@ -2870,6 +2882,7 @@ mod tests {
                 target_guid: Some(target_guid),
                 player_position,
                 target_position: Some(target_position),
+                target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -2881,12 +2894,13 @@ mod tests {
             },
         ));
 
-        assert!(
-            result
-                .commands
-                .iter()
-                .any(|command| matches!(command, ClientCommand::TurnTo { .. }))
-        );
+        assert!(result.commands.iter().any(|command| matches!(
+            command,
+            ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::SnapFacing { .. },
+                ..
+            })
+        )));
         assert!(has_active_approach(&state));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
 
@@ -2936,9 +2950,9 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::TargetedMeleeAttack { .. }
-                    | ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    | ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
             )
@@ -2973,9 +2987,9 @@ mod tests {
             started.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3000,10 +3014,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3039,9 +3051,9 @@ mod tests {
             started.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3054,10 +3066,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3100,10 +3110,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3155,10 +3163,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3194,9 +3200,9 @@ mod tests {
             started.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3216,10 +3222,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3254,11 +3258,13 @@ mod tests {
         let mut turn = UpdateResult::new();
         state.sync_combat_automation(now, CombatMode::Missile, true, &mut turn);
 
-        assert!(
-            turn.commands
-                .iter()
-                .any(|command| matches!(command, ClientCommand::TurnTo { .. }))
-        );
+        assert!(turn.commands.iter().any(|command| matches!(
+            command,
+            ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::SnapFacing { .. },
+                ..
+            })
+        )));
         assert!(
             !turn
                 .commands
@@ -3302,6 +3308,7 @@ mod tests {
                     coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
                     ..WorldPosition::default()
                 }),
+                target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -3312,10 +3319,8 @@ mod tests {
         assert!(in_range.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3332,9 +3337,9 @@ mod tests {
             slipped_again.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3414,11 +3419,8 @@ mod tests {
         assert!(first.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Drive {
-                        refresh_server: true,
-                        ..
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                     ..
                 })
             )

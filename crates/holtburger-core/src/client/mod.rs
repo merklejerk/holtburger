@@ -10,9 +10,9 @@ mod auth;
 mod builder;
 mod commands;
 pub mod controllers;
-pub mod locomotion;
 mod messages;
 mod movement;
+pub mod movement_types;
 pub mod navigation;
 pub mod types;
 use auth::AuthState;
@@ -22,6 +22,7 @@ use types::*;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
+const MOVEMENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +156,23 @@ impl Client {
             .expect("busy operation should still exist when timing out");
         self.emit_busy_state_updated();
         self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
+    }
+
+    async fn send_autonomous_movement_heartbeat_if_moving(&mut self) -> Result<bool> {
+        let Client {
+            movement,
+            world,
+            session,
+            ..
+        } = self;
+
+        movement
+            .send_autonomous_position_heartbeat(
+                world,
+                session,
+                movement_types::MovementPacketMetadata::default(),
+            )
+            .await
     }
 
     fn emit_spell_catalog_loaded(&self) {
@@ -572,7 +590,8 @@ impl Client {
         self.send_status_event();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
-        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
+        let mut net_tick = tokio::time::interval(MOVEMENT_HEARTBEAT_INTERVAL);
+        let mut last_physics_time = Instant::now();
 
         loop {
             if matches!(self.state, ClientState::Disconnected) {
@@ -582,6 +601,10 @@ impl Client {
             tokio::select! {
                 _ = net_tick.tick() => {
                     let now = Instant::now();
+
+                    if matches!(self.state, ClientState::InWorld) {
+                        self.send_autonomous_movement_heartbeat_if_moving().await?;
+                    }
 
                     // 1. Broadcast NetPulse
                     let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
@@ -654,8 +677,19 @@ impl Client {
                     self.handle_command(cmd).await?;
                 }
                 _ = physics_tick.tick() => {
+                    let now = Instant::now();
+                    let dt = now.duration_since(last_physics_time).as_secs_f32();
+                    last_physics_time = now;
+
                     let physics_events = self.world.tick();
                     for event in physics_events {
+                        self.handle_world_event(&event);
+                    }
+
+                    let predicted_events = self
+                        .movement
+                        .advance_local_motion_prediction(dt, &mut self.world);
+                    for event in predicted_events {
                         self.handle_world_event(&event);
                     }
                 }
@@ -669,6 +703,8 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::{Guid, Vector3};
+    use holtburger_world::entity::Entity;
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {
@@ -695,6 +731,46 @@ mod tests {
 
         assert!(saw_busy_clear);
         assert!(saw_timeout);
+    }
+
+    #[tokio::test]
+    async fn movement_heartbeat_sends_autonomous_position_when_local_velocity_is_nonzero() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        let mut entity = Entity::new(guid, "Player".to_string(), client.world.player.position);
+        entity.velocity = Vector3::new(1.0, 0.0, 0.0);
+        client.world.entities.insert(entity);
+
+        let sent = client
+            .send_autonomous_movement_heartbeat_if_moving()
+            .await
+            .expect("movement heartbeat should succeed");
+
+        assert!(sent);
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn movement_heartbeat_skips_stationary_players() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        let entity = Entity::new(guid, "Player".to_string(), client.world.player.position);
+        client.world.entities.insert(entity);
+
+        let sent = client
+            .send_autonomous_movement_heartbeat_if_moving()
+            .await
+            .expect("stationary heartbeat check should succeed");
+
+        assert!(!sent);
+        assert_eq!(client.session.game_action_sequence, 0);
     }
 
     #[test]

@@ -1,11 +1,14 @@
+use anyhow::{Context, Result};
 use binrw::BinRead;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, EquipMask, PropertyFloat, PropertyInt, WorldObjectExt as _,
     WorldObjectPropertyAccessors, WorldObjectPropertyAccessorsMut,
 };
-use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::{
+    MountedResourceProvider, ResourceProvider, ResourceScope, ScopedResourceResolver,
+};
 use holtburger_protocol::messages::GameMessage;
 use std::sync::Arc;
 
@@ -41,11 +44,10 @@ pub struct WorldState {
     pub entities: EntityManager,
     pub player: PlayerState,
     pub server_time: Option<ServerTimeSync>,
-    pub portal_dat: Option<Arc<dyn ResourceProvider>>,
-    pub cell_dat: Option<Arc<dyn ResourceProvider>>,
-    pub xp_table: Option<XpTable>,
-    pub skill_table: Option<Arc<SkillTable>>,
-    pub spell_catalog: Option<Arc<SpellCatalog>>,
+    pub resources: Option<Arc<ScopedResourceResolver>>,
+    pub xp_table: XpTable,
+    pub skill_table: Arc<SkillTable>,
+    pub spell_catalog: Arc<SpellCatalog>,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
     pub trade: Option<TradeState>,
@@ -76,8 +78,8 @@ impl WorldState {
         vec![WorldEvent::ServerTimeUpdate(server_time)]
     }
 
-    pub fn get_level_info(&self) -> Option<stats::CharacterLevelInfo> {
-        let table = self.xp_table.as_ref()?;
+    pub fn get_level_info(&self) -> stats::CharacterLevelInfo {
+        let table = &self.xp_table;
         let level = self.player.level();
         let total_xp = self.player.total_experience();
         let unspent_xp = self.player.available_experience();
@@ -88,7 +90,7 @@ impl WorldState {
         if next_level_idx >= table.character_level_xp_list.len() {
             // Already max level
             let level_xp = *table.character_level_xp_list.get(level_idx).unwrap_or(&0);
-            return Some(stats::CharacterLevelInfo {
+            return stats::CharacterLevelInfo {
                 level,
                 current_xp: total_xp,
                 unspent_xp,
@@ -97,13 +99,13 @@ impl WorldState {
                 next_level_xp: level_xp,
                 xp_into_level: total_xp.saturating_sub(level_xp),
                 xp_for_next_level: 0,
-            });
+            };
         }
 
         let level_xp = table.character_level_xp_list[level_idx];
         let next_level_xp = table.character_level_xp_list[next_level_idx];
 
-        Some(stats::CharacterLevelInfo {
+        stats::CharacterLevelInfo {
             level,
             current_xp: total_xp,
             unspent_xp,
@@ -112,18 +114,17 @@ impl WorldState {
             next_level_xp,
             xp_into_level: total_xp.saturating_sub(level_xp),
             xp_for_next_level: next_level_xp.saturating_sub(level_xp),
-        })
+        }
     }
 
     pub fn resolve_spell_name(&self, spell_id: u32) -> Option<String> {
         self.spell_catalog
-            .as_ref()?
             .resolve_name(spell_id)
             .map(str::to_string)
     }
 
     pub fn resolve_spell_info(&self, spell_id: u32) -> Option<SpellInfo> {
-        self.spell_catalog.as_ref()?.get(spell_id).cloned()
+        self.spell_catalog.get(spell_id).cloned()
     }
 
     pub fn get_player_enchanted_int(&self, key: PropertyInt) -> i32 {
@@ -175,30 +176,51 @@ impl WorldState {
         crate::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
     }
 
-    pub fn new(
-        portal_dat: Option<Arc<dyn ResourceProvider>>,
-        cell_dat: Option<Arc<dyn ResourceProvider>>,
-    ) -> Self {
-        let mut skill_table = None;
-        if let Some(db) = &portal_dat {
-            // Skill Table
-            if let Ok(data) = db.get_file(SkillTable::FILE_ID) {
-                let mut cursor = std::io::Cursor::new(data);
-                if let Ok(table) = SkillTable::read(&mut cursor) {
-                    skill_table = Some(Arc::new(table));
-                }
-            }
-        }
+    pub fn new(resources: Arc<ScopedResourceResolver>) -> Result<Self> {
+        let skill_table_data = resources
+            .get_file_for::<SkillTable>()
+            .context("missing required skill table from mounted resources")?;
+        let skill_table = SkillTable::read(&mut std::io::Cursor::new(skill_table_data))
+            .context("failed to parse required skill table")?;
 
+        let xp_table_data = resources
+            .get_file_for::<XpTable>()
+            .context("missing required XP table from mounted resources")?;
+        let xp_table = XpTable::read(&mut std::io::Cursor::new(xp_table_data))
+            .context("failed to parse required XP table")?;
+
+        let spell_table_data = resources
+            .get_file_for::<SpellTable>()
+            .context("missing required spell table from mounted resources")?;
+        let spell_table = SpellTable::read(&mut std::io::Cursor::new(spell_table_data))
+            .context("failed to parse required spell table")?;
+
+        Ok(Self {
+            entities: EntityManager::new(),
+            player: PlayerState::new(),
+            server_time: None,
+            resources: Some(resources),
+            xp_table,
+            skill_table: Arc::new(skill_table),
+            spell_catalog: Arc::new(spell_table.into()),
+            scene: SpatialScene::new(),
+            vendor: None,
+            trade: None,
+            open_containers: std::collections::HashSet::new(),
+            entity_lifecycle: EntityLifecycleStore::default(),
+        })
+    }
+
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn synthetic() -> Self {
         Self {
             entities: EntityManager::new(),
             player: PlayerState::new(),
             server_time: None,
-            portal_dat,
-            cell_dat,
-            xp_table: None,
-            skill_table,
-            spell_catalog: None,
+            resources: None,
+            xp_table: XpTable::default(),
+            skill_table: Arc::new(SkillTable::default()),
+            spell_catalog: Arc::new(SpellCatalog::default()),
             scene: SpatialScene::new(),
             vendor: None,
             trade: None,
@@ -207,21 +229,13 @@ impl WorldState {
         }
     }
 
-    pub fn load_deferred_tables(&mut self) {
-        if let Some(db) = &self.portal_dat {
-            if self.xp_table.is_none()
-                && let Ok(data) = db.get_file(XpTable::FILE_ID)
-                && let Ok(table) = XpTable::read(&mut std::io::Cursor::new(data))
-            {
-                self.xp_table = Some(table);
-            }
-            if self.spell_catalog.is_none()
-                && let Ok(data) = db.get_file(SpellTable::FILE_ID)
-                && let Ok(table) = SpellTable::read(&mut std::io::Cursor::new(data))
-            {
-                self.spell_catalog = Some(Arc::new(table.into()));
-            }
-        }
+    pub fn with_provider(
+        scope: ResourceScope,
+        provider: Arc<dyn ResourceProvider>,
+    ) -> Result<Self> {
+        Self::new(Arc::new(ScopedResourceResolver::from_mounted([
+            MountedResourceProvider::new(scope, provider),
+        ])))
     }
 
     pub fn current_server_time(&self) -> f64 {

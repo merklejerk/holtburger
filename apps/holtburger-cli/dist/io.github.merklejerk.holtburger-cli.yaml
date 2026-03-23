@@ -9,16 +9,15 @@ modules:
     build-commands:
       # We build the binary outside the sandbox to avoid internet issues
       - install -D holtburger-cli /app/bin/holtburger-cli
-      - mkdir -p /app/share/holtburger/dats
-      - cp *.hba /app/share/holtburger/dats/
+      - install -D portal.hba /app/share/holtburger/dats/portal.hba
       - install -D io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
       - install -D io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
       - install -D io.github.merklejerk.holtburger-cli.svg /app/share/icons/hicolor/scalable/apps/io.github.merklejerk.holtburger-cli.svg
     sources:
       - type: file
         path: ../../../target/release/holtburger-cli
-      - type: dir
-        path: ../../../dats
+      - type: file
+        path: ../../../dats/portal.hba
       - type: file
         path: io.github.merklejerk.holtburger-cli.desktop
       - type: file

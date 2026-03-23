@@ -104,32 +104,6 @@ impl Session {
         })
     }
 
-    pub fn new_replay(path: &str, server_addr: SocketAddr) -> Result<Self> {
-        let reader = capture::CaptureReader::open(path)?;
-        let transport = capture::ReplayTransport {
-            reader: std::sync::Arc::new(std::sync::Mutex::new(reader)),
-        };
-        Ok(Self {
-            transport: Box::new(transport),
-            server_addr,
-            isaac_c2s: None,
-            isaac_s2c: None,
-            packet_sequence: 0,
-            fragment_sequence: 1,
-            fragment_id: 1,
-            client_id: 0,
-            last_server_seq: 0,
-            has_server_seq: false,
-            fragment_reassembler: HashMap::new(),
-            capture: None,
-            game_action_sequence: 0,
-            bytes_in: 0,
-            bytes_out: 0,
-            last_recv_time: Instant::now(),
-            last_send_time: Instant::now(),
-        })
-    }
-
     pub fn set_capture(&mut self, path: &str) -> Result<()> {
         self.capture = Some(CaptureWriter::create(path)?);
         Ok(())

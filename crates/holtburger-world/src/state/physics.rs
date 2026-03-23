@@ -94,79 +94,11 @@ impl WorldState {
             .filter_map(|guid| self.entities.get(guid).cloned())
             .collect()
     }
-    pub fn is_colliding(&mut self, pos: &Vector3, lb: Guid, radius: f32) -> bool {
-        let nearby = self.scene.get_nearby_entities(lb);
-        for guid in nearby {
-            if guid == self.player.guid {
-                continue;
-            }
-
-            if !self.is_entity_world_participant(guid) {
-                continue;
-            }
-
-            if let Some(entity) = self.entities.get(guid)
-                && let Some(gfx_id) = entity.gfx_id
-            {
-                let mut gfx = self
-                    .scene
-                    .object_geometry
-                    .get(&gfx_id)
-                    .map(|e| e.gfx_obj.clone());
-
-                if gfx.is_none()
-                    && let Some(dat) = &self.portal_dat
-                {
-                    gfx = self.scene.get_object_geometry(dat.as_ref(), gfx_id);
-                }
-
-                if let Some(gfx_obj) = gfx
-                    && let Some(bsp) = &gfx_obj.physics_bsp
-                {
-                    let local_pos = *pos - entity.position.coords;
-                    if bsp.intersects_solid(&local_pos, radius) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
-    }
-    pub fn tick(&mut self, dt: f32, radius: f32) -> Vec<WorldEvent> {
+    pub fn tick(&mut self) -> Vec<WorldEvent> {
         let mut events = Vec::new();
         let now = self.current_server_time();
         self.sweep_eviction_queue(now, &mut events);
         self.maintain_visibility_prune_deadlines(now);
-
-        if self.player.guid == Guid::NULL {
-            return events;
-        }
-
-        let (vel, coords, lb) = if let Some(player) = self.entities.get(self.player.guid) {
-            (
-                player.velocity,
-                player.position.coords,
-                player.position.landblock_id,
-            )
-        } else {
-            return events;
-        };
-
-        if vel.length_squared() < 0.0001 {
-            return events;
-        }
-
-        let step = vel * dt;
-        let next_coords = coords + step;
-
-        if self.player.noclip || !self.is_colliding(&next_coords, lb, radius) {
-            let mut next_pos = self.player.position;
-            next_pos.coords = next_coords;
-            events.extend(self.set_player_position(next_pos));
-        } else {
-            events.extend(self.set_player_velocity(Vector3::zero()));
-        }
 
         events
     }

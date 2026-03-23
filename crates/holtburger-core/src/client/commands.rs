@@ -1,11 +1,10 @@
-use crate::client::movement::{encode_contact_long_jump, raw_motion_state_with_motion_style};
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
+use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
-use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
-use holtburger_protocol::messages::game_message::{GameMessage, RawMotionState};
+use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::spell::MagicSchool;
@@ -23,11 +22,7 @@ fn normalize_spell_cast(
 ) -> NormalizedSpellCast {
     let player_guid = world.player.guid;
 
-    if let Some(spell) = world
-        .spell_catalog
-        .as_ref()
-        .and_then(|catalog| catalog.get(spell_id))
-    {
+    if let Some(spell) = world.spell_catalog.get(spell_id) {
         if spell.is_untargeted() {
             return NormalizedSpellCast::Untargeted { spell_id };
         }
@@ -92,9 +87,7 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::TurnTo { .. } | ClientCommand::ExecuteLocomotion(_) => {
-                self.handle_movement_command(cmd).await
-            }
+            ClientCommand::ExecuteMovement(_) => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -104,6 +97,7 @@ impl Client {
             ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
+            | ClientCommand::RequestInitialViewState
             | ClientCommand::QueryEntityDebugInfo(_)
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
@@ -141,7 +135,6 @@ impl Client {
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
-                self.world.load_deferred_tables();
                 self.state = ClientState::EnteringWorld;
                 self.send_status_event();
                 self.auth.select_character(id, &mut self.session).await
@@ -152,8 +145,6 @@ impl Client {
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
-                    self.world.load_deferred_tables();
-                    self.emit_spell_catalog_loaded();
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
                     self.auth.select_character(char_id, &mut self.session).await
@@ -594,47 +585,11 @@ impl Client {
 
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::TurnTo { heading, metadata } => {
-                log::info!(">>> Turning to heading: {}", heading);
-
-                // Prediction: update local state immediately so UI feels snappy
-                let mut next_pos = self.world.player.position;
-                next_pos.rotation = Quaternion::from_heading(heading);
-                let world_events = self.world.set_player_position(next_pos);
-                for event in world_events {
-                    self.handle_world_event(&event);
-                }
-
-                let obj_inst = self.world.player.instance_sequence;
-                let srv_seq = self.world.player.server_control_sequence;
-                let tele_seq = self.world.player.teleport_sequence;
-                let force_seq = self.world.player.force_position_sequence;
-
-                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: raw_motion_state_with_motion_style(
-                        &self.world,
-                        RawMotionState::default(),
-                        metadata.motion_style,
-                    ),
-                    position: self.world.player.position,
-                    instance_sequence: obj_inst,
-                    server_control_sequence: srv_seq,
-                    teleport_sequence: tele_seq,
-                    force_position_sequence: force_seq,
-                    contact_long_jump: encode_contact_long_jump(metadata),
-                })))
-                .await
-            }
-            ClientCommand::ExecuteLocomotion(request) => {
-                if request.primitive.refresh_server() {
-                    log::info!(
-                        ">>> Executing locomotion primitive: {:?}",
-                        request.primitive
-                    );
-                }
+            ClientCommand::ExecuteMovement(request) => {
+                log::info!(">>> Executing movement primitive: {:?}", request.primitive);
                 let world_events = self
                     .movement
-                    .execute_locomotion_request(request, &mut self.world, &mut self.session)
+                    .execute_movement_request(request, &mut self.world, &mut self.session)
                     .await?;
                 for event in world_events {
                     self.handle_world_event(&event);
@@ -651,6 +606,11 @@ impl Client {
                 log::info!(">>> Sending Ping");
                 self.send_game_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
                     .await
+            }
+            ClientCommand::RequestInitialViewState => {
+                log::info!(">>> Client requested initial view state snapshot");
+                self.emit_initial_reference_data();
+                Ok(())
             }
             ClientCommand::SetCombatMode(mode) => {
                 log::info!(">>> Changing combat mode to: {:?}", mode);
@@ -856,36 +816,19 @@ fn get_equip_unequip_mask(item_mask: EquipMask, target: Option<TargetSlot>) -> E
 #[cfg(test)]
 mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
+    use crate::client::builder;
     use crate::client::types::{
         ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent,
     };
-    use crate::client::{Client, ClientState, auth::AuthState, movement::MovementSystem};
+    use crate::client::{Client, ClientState};
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
-    use holtburger_session::Session;
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use std::collections::HashMap;
     use std::sync::Arc;
-    use tokio::sync::broadcast;
 
     fn build_test_client() -> Client {
-        let (wire_event_tx, _) = broadcast::channel(32);
-        let (client_view_event_tx, _) = broadcast::channel(32);
-
-        Client {
-            session: Session::new_test(),
-            world: WorldState::new(None, None),
-            active_confirmation: None,
-            active_busy_operation: None,
-            state: ClientState::InWorld,
-            wire_event_tx,
-            client_view_event_tx,
-            command_rx: None,
-            message_dump_dir: None,
-            message_counter: 0,
-            movement: MovementSystem::new(),
-            auth: AuthState::new("test".to_string()),
-        }
+        builder::build_test_client(ClientState::InWorld)
     }
 
     fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
@@ -919,12 +862,12 @@ mod tests {
     }
 
     fn world_with_spell(player_guid: Guid, spell_id: u32, spell: SpellInfo) -> WorldState {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         world.player.guid = player_guid;
-        world.spell_catalog = Some(Arc::new(SpellCatalog {
+        world.spell_catalog = Arc::new(SpellCatalog {
             spells: HashMap::from([(spell_id, spell)]),
             ..Default::default()
-        }));
+        });
         world
     }
 
@@ -1027,6 +970,28 @@ mod tests {
         }
 
         assert!(saw_projection);
+    }
+
+    #[tokio::test]
+    async fn request_initial_view_state_projects_cached_spell_catalog() {
+        let mut client = build_test_client();
+        client.world.spell_catalog = Arc::new(SpellCatalog::default());
+        let mut events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::RequestInitialViewState)
+            .await
+            .unwrap();
+
+        let mut saw_catalog = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::SpellCatalogLoaded { .. }) {
+                saw_catalog = true;
+                break;
+            }
+        }
+
+        assert!(saw_catalog);
     }
 
     #[tokio::test]

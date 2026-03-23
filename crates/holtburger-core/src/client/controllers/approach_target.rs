@@ -1,18 +1,17 @@
 //! Reusable controller for approaching a target until an arrival distance is met.
 //!
 //! Frontends can own this controller directly, feed it world-derived inputs, and
-//! apply the resulting [`LocomotionPrimitive`] values using their preferred
+//! apply the resulting [`MovementPrimitive`] values using their preferred
 //! orchestration model.
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use crate::client::locomotion::LocomotionPrimitive;
+use crate::client::movement_types::{
+    DriveIntent, MovementPrediction, MovementPrimitive, RUN_ANIM_SPEED,
+};
 use holtburger_common::Guid;
+use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
-use std::time::{Duration, Instant};
-
-const MOVE_SYNC_INTERVAL: Duration = Duration::from_secs(1);
-const NO_PROGRESS_CHECK_INTERVAL: Duration = Duration::from_millis(500);
-const NO_PROGRESS_DISTANCE_THRESHOLD: f32 = 0.1;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetInput {
@@ -20,6 +19,7 @@ pub enum ApproachTargetInput {
         now: Instant,
         player_position: WorldPosition,
         target_position: Option<WorldPosition>,
+        target_use_radius: Option<f32>,
         move_speed: f32,
     },
     Cancel,
@@ -31,7 +31,6 @@ pub enum ApproachTargetInput {
 pub enum ApproachTargetFinishReason {
     Arrived,
     TargetUnavailable,
-    NoProgress,
     Cancelled,
     ForcedReposition,
     TeleportStarted,
@@ -39,7 +38,7 @@ pub enum ApproachTargetFinishReason {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetEffect {
-    Locomotion(LocomotionPrimitive),
+    Movement(MovementPrimitive),
     Finished(ApproachTargetFinishReason),
 }
 
@@ -47,24 +46,18 @@ pub enum ApproachTargetEffect {
 pub struct ApproachTargetController {
     target_guid: Guid,
     arrival_distance: f32,
-    last_move_sync: Instant,
-    last_move_pos: WorldPosition,
-    last_move_pos_time: Instant,
 }
 
 impl ApproachTargetController {
     pub fn new(
         target_guid: Guid,
         arrival_distance: f32,
-        player_position: WorldPosition,
-        now: Instant,
+        _player_position: WorldPosition,
+        _now: Instant,
     ) -> Self {
         Self {
             target_guid,
             arrival_distance,
-            last_move_sync: now.checked_sub(MOVE_SYNC_INTERVAL).unwrap_or(now),
-            last_move_pos: player_position,
-            last_move_pos_time: now,
         }
     }
 
@@ -75,6 +68,19 @@ impl ApproachTargetController {
     pub fn arrival_distance(&self) -> f32 {
         self.arrival_distance
     }
+
+    fn predicted_velocity_toward(
+        player_position: WorldPosition,
+        target_position: WorldPosition,
+        move_speed: f32,
+    ) -> Option<Vector3> {
+        let delta = target_position.global_coords() - player_position.global_coords();
+        if delta.length_squared() <= 1e-6 {
+            return None;
+        }
+
+        Some(delta.normalize() * (move_speed.max(0.0) * RUN_ANIM_SPEED))
+    }
 }
 
 impl Controller for ApproachTargetController {
@@ -84,100 +90,64 @@ impl Controller for ApproachTargetController {
     fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
         match *input {
             ApproachTargetInput::Cancel => ControllerUpdate::new(ControllerStatus::Completed)
-                .with_effect(ApproachTargetEffect::Locomotion(
-                    LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
-                ))
+                .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
                 .with_effect(ApproachTargetEffect::Finished(
                     ApproachTargetFinishReason::Cancelled,
                 )),
             ApproachTargetInput::ForcedReposition => {
                 ControllerUpdate::new(ControllerStatus::Completed)
-                    .with_effect(ApproachTargetEffect::Locomotion(
-                        LocomotionPrimitive::Stop {
-                            refresh_server: false,
-                        },
-                    ))
+                    .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
                     .with_effect(ApproachTargetEffect::Finished(
                         ApproachTargetFinishReason::ForcedReposition,
                     ))
             }
             ApproachTargetInput::TeleportStarted => {
                 ControllerUpdate::new(ControllerStatus::Completed)
-                    .with_effect(ApproachTargetEffect::Locomotion(
-                        LocomotionPrimitive::Stop {
-                            refresh_server: false,
-                        },
-                    ))
+                    .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
                     .with_effect(ApproachTargetEffect::Finished(
                         ApproachTargetFinishReason::TeleportStarted,
                     ))
             }
             ApproachTargetInput::Tick {
-                now,
+                now: _,
                 player_position,
                 target_position,
+                target_use_radius,
                 move_speed,
             } => {
                 let Some(target_position) = target_position else {
                     return ControllerUpdate::new(ControllerStatus::Completed)
-                        .with_effect(ApproachTargetEffect::Locomotion(
-                            LocomotionPrimitive::Stop {
-                                refresh_server: true,
-                            },
-                        ))
+                        .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
                         .with_effect(ApproachTargetEffect::Finished(
                             ApproachTargetFinishReason::TargetUnavailable,
                         ));
                 };
 
                 let distance_to_target = player_position.distance_to(&target_position);
+                let effective_arrival_distance = self
+                    .arrival_distance
+                    .max(target_use_radius.unwrap_or(0.0).max(0.0));
 
-                if distance_to_target <= self.arrival_distance {
+                if distance_to_target <= effective_arrival_distance {
                     return ControllerUpdate::new(ControllerStatus::Completed)
-                        .with_effect(ApproachTargetEffect::Locomotion(
-                            LocomotionPrimitive::Stop {
-                                refresh_server: true,
-                            },
-                        ))
+                        .with_effect(ApproachTargetEffect::Movement(MovementPrimitive::Stop))
                         .with_effect(ApproachTargetEffect::Finished(
                             ApproachTargetFinishReason::Arrived,
                         ));
                 }
 
-                if now.duration_since(self.last_move_pos_time) > NO_PROGRESS_CHECK_INTERVAL {
-                    if player_position.distance_to(&self.last_move_pos)
-                        < NO_PROGRESS_DISTANCE_THRESHOLD
-                    {
-                        return ControllerUpdate::new(ControllerStatus::Completed)
-                            .with_effect(ApproachTargetEffect::Locomotion(
-                                LocomotionPrimitive::Stop {
-                                    refresh_server: true,
-                                },
-                            ))
-                            .with_effect(ApproachTargetEffect::Finished(
-                                ApproachTargetFinishReason::NoProgress,
-                            ));
-                    }
-
-                    self.last_move_pos = player_position;
-                    self.last_move_pos_time = now;
-                }
-
-                let refresh_server =
-                    if now.duration_since(self.last_move_sync) >= MOVE_SYNC_INTERVAL {
-                        self.last_move_sync = now;
-                        true
-                    } else {
-                        false
-                    };
+                let prediction =
+                    Self::predicted_velocity_toward(player_position, target_position, move_speed)
+                        .map(MovementPrediction::WorldVelocity)
+                        .unwrap_or(MovementPrediction::FromHeading);
 
                 ControllerUpdate::new(ControllerStatus::Active).with_effect(
-                    ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
-                        heading: player_position.heading_to(&target_position),
-                        speed: move_speed.max(0.0),
-                        refresh_server,
+                    ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                        intent: DriveIntent {
+                            heading: player_position.heading_to(&target_position),
+                            speed: move_speed.max(0.0),
+                        },
+                        prediction,
                     }),
                 )
             }
@@ -206,6 +176,7 @@ mod tests {
             now,
             player_position: position(0.0),
             target_position: Some(position(0.5)),
+            target_use_radius: None,
             move_speed: 4.5,
         });
 
@@ -213,35 +184,43 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: true,
-                }),
+                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );
     }
 
     #[test]
-    fn completes_when_no_progress_detection_triggers() {
+    fn remains_active_when_local_position_does_not_change() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
 
-        let update = controller.handle(&ApproachTargetInput::Tick {
-            now: now + NO_PROGRESS_CHECK_INTERVAL + Duration::from_millis(1),
-            player_position: position(0.05),
+        let _ = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position: position(0.0),
             target_position: Some(position(10.0)),
+            target_use_radius: None,
             move_speed: 4.5,
         });
 
-        assert_eq!(update.status, ControllerStatus::Completed);
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now: now + std::time::Duration::from_millis(600),
+            player_position: position(0.0),
+            target_position: Some(position(10.0)),
+            target_use_radius: None,
+            move_speed: 4.5,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![
-                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: true,
-                }),
-                ApproachTargetEffect::Finished(ApproachTargetFinishReason::NoProgress),
-            ]
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
     }
 
@@ -264,19 +243,20 @@ mod tests {
             now,
             player_position,
             target_position: Some(target_position),
+            target_use_radius: None,
             move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Locomotion(
-                LocomotionPrimitive::Drive {
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
                     heading: std::f32::consts::PI,
                     speed: 4.5,
-                    refresh_server: true,
-                }
-            )]
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
     }
 
@@ -291,9 +271,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: false,
-                }),
+                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::ForcedReposition),
             ]
         );
@@ -310,9 +288,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: false,
-                }),
+                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::TeleportStarted),
             ]
         );
@@ -329,16 +305,14 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: true,
-                }),
+                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Cancelled),
             ]
         );
     }
 
     #[test]
-    fn first_tick_requests_immediate_server_refresh() {
+    fn first_tick_emits_drive_intent() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
 
@@ -346,24 +320,25 @@ mod tests {
             now,
             player_position: position(0.0),
             target_position: Some(position(10.0)),
+            target_use_radius: None,
             move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Locomotion(
-                LocomotionPrimitive::Drive {
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
                     heading: std::f32::consts::PI,
                     speed: 4.5,
-                    refresh_server: true,
-                }
-            )]
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
     }
 
     #[test]
-    fn steady_state_ticks_throttle_server_refreshes() {
+    fn steady_state_ticks_keep_emitting_drive_intent() {
         let now = Instant::now();
         let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
 
@@ -371,27 +346,61 @@ mod tests {
             now,
             player_position: position(0.0),
             target_position: Some(position(10.0)),
+            target_use_radius: None,
             move_speed: 4.5,
         });
 
         let update = controller.handle(&ApproachTargetInput::Tick {
-            now: now + Duration::from_millis(100),
+            now: now + std::time::Duration::from_millis(600),
             player_position: position(0.45),
             target_position: Some(position(10.0)),
+            target_use_radius: None,
             move_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Locomotion(
-                LocomotionPrimitive::Drive {
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
                     heading: std::f32::consts::PI,
                     speed: 4.5,
-                    refresh_server: false,
-                }
-            )]
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
+    }
+
+    #[test]
+    fn drive_intent_includes_vertical_prediction_when_target_height_differs() {
+        let now = Instant::now();
+        let player_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Default::default(),
+        };
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: Vector3::new(0.0, 10.0, 10.0),
+            rotation: Default::default(),
+        };
+        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, player_position, now);
+
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position,
+            target_position: Some(target_position),
+            target_use_radius: None,
+            move_speed: 4.5,
+        });
+
+        assert!(matches!(
+            update.effects.as_slice(),
+            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                prediction: MovementPrediction::WorldVelocity(predicted_velocity),
+                ..
+            })] if predicted_velocity.z > 0.0
+        ));
     }
 
     #[test]
@@ -403,6 +412,7 @@ mod tests {
             now,
             player_position: position(0.0),
             target_position: None,
+            target_use_radius: None,
             move_speed: 4.5,
         });
 
@@ -410,10 +420,31 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![
-                ApproachTargetEffect::Locomotion(LocomotionPrimitive::Stop {
-                    refresh_server: true,
-                }),
+                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::TargetUnavailable),
+            ]
+        );
+    }
+
+    #[test]
+    fn target_use_radius_counts_toward_arrival_completion() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(Guid(0x1234), 0.6, position(0.0), now);
+
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position: position(0.0),
+            target_position: Some(position(2.5)),
+            target_use_radius: Some(3.0),
+            move_speed: 4.5,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Completed);
+        assert_eq!(
+            update.effects,
+            vec![
+                ApproachTargetEffect::Movement(MovementPrimitive::Stop),
+                ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );
     }

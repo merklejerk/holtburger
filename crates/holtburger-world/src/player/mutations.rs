@@ -14,8 +14,8 @@ pub struct SkillUpdateParams<'a> {
     pub status: u32,
     pub init: u32,
     pub xp: u32,
-    pub xp_table: Option<&'a holtburger_dat::file_type::XpTable>,
-    pub skill_table: Option<&'a holtburger_dat::file_type::SkillTable>,
+    pub xp_table: &'a holtburger_dat::file_type::XpTable,
+    pub skill_table: &'a holtburger_dat::file_type::SkillTable,
 }
 
 pub struct VitalUpdateParams<'a> {
@@ -24,7 +24,7 @@ pub struct VitalUpdateParams<'a> {
     pub start: u32,
     pub current: u32,
     pub xp: u32,
-    pub xp_table: Option<&'a holtburger_dat::file_type::XpTable>,
+    pub xp_table: &'a holtburger_dat::file_type::XpTable,
 }
 
 impl PlayerState {
@@ -41,7 +41,7 @@ impl PlayerState {
         ranks: u32,
         start: u32,
         xp: u32,
-        xp_table: Option<&holtburger_dat::file_type::XpTable>,
+        xp_table: &holtburger_dat::file_type::XpTable,
         events: &mut Vec<WorldEvent>,
     ) {
         if let Some(attr_type) = stats::AttributeType::from_repr(attr_id) {
@@ -55,7 +55,7 @@ impl PlayerState {
                 ranks,
                 start,
                 spent_xp: xp,
-                next_rank_xp: xp_table.and_then(|t| t.get_next_attribute_rank_xp(ranks)),
+                next_rank_xp: xp_table.get_next_attribute_rank_xp(ranks),
                 base,
                 current,
             };
@@ -93,7 +93,8 @@ impl PlayerState {
             let current_val = self.derive_skill_value(skill_type, ranks, init, true);
 
             let (trained_cost, specialized_cost) = skill_table
-                .and_then(|t| t.skill_base_hash.get(&(skill_type as u32)))
+                .skill_base_hash
+                .get(&(skill_type as u32))
                 .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
                 .unwrap_or((0, 0));
 
@@ -102,9 +103,8 @@ impl PlayerState {
                 ranks,
                 init,
                 spent_xp: xp,
-                next_rank_xp: xp_table.and_then(|t| {
-                    t.get_next_skill_rank_xp(ranks, training == stats::TrainingLevel::Specialized)
-                }),
+                next_rank_xp: xp_table
+                    .get_next_skill_rank_xp(ranks, training == stats::TrainingLevel::Specialized),
                 base: base_val,
                 current: current_val,
                 training,
@@ -142,7 +142,7 @@ impl PlayerState {
                 ranks,
                 start,
                 spent_xp: xp,
-                next_rank_xp: xp_table.and_then(|t| t.get_next_vital_rank_xp(ranks)),
+                next_rank_xp: xp_table.get_next_vital_rank_xp(ranks),
                 base: final_base,
                 buffed_max,
                 current,
@@ -304,8 +304,8 @@ impl PlayerState {
     pub fn hydrate_from_player_description(
         &mut self,
         data: &PlayerDescriptionEventData,
-        xp_table: Option<&holtburger_dat::file_type::XpTable>,
-        skill_table: Option<&holtburger_dat::file_type::SkillTable>,
+        xp_table: &holtburger_dat::file_type::XpTable,
+        skill_table: &holtburger_dat::file_type::SkillTable,
         events: &mut Vec<WorldEvent>,
     ) {
         self.guid = data.guid;
@@ -342,7 +342,7 @@ impl PlayerState {
                         ranks,
                         start,
                         spent_xp: attr.xp,
-                        next_rank_xp: xp_table.and_then(|t| t.get_next_attribute_rank_xp(ranks)),
+                        next_rank_xp: xp_table.get_next_attribute_rank_xp(ranks),
                         base,
                         current: base,
                     };
@@ -368,7 +368,7 @@ impl PlayerState {
                     ranks,
                     start,
                     spent_xp: attr.xp,
-                    next_rank_xp: xp_table.and_then(|t| t.get_next_vital_rank_xp(ranks)),
+                    next_rank_xp: xp_table.get_next_vital_rank_xp(ranks),
                     base: final_base,
                     buffed_max: final_base,
                     current,
@@ -395,7 +395,8 @@ impl PlayerState {
                 let base_val = self.derive_skill_value(skill_type, skill.ranks, skill.init, false);
 
                 let (trained_cost, specialized_cost) = skill_table
-                    .and_then(|t| t.skill_base_hash.get(&(skill_type as u32)))
+                    .skill_base_hash
+                    .get(&(skill_type as u32))
                     .map(|b| (b.trained_cost as u32, b.specialized_cost as u32))
                     .unwrap_or((0, 0));
 
@@ -404,12 +405,10 @@ impl PlayerState {
                     ranks: skill.ranks,
                     init: skill.init,
                     spent_xp: skill.xp,
-                    next_rank_xp: xp_table.and_then(|t| {
-                        t.get_next_skill_rank_xp(
-                            skill.ranks,
-                            training == stats::TrainingLevel::Specialized,
-                        )
-                    }),
+                    next_rank_xp: xp_table.get_next_skill_rank_xp(
+                        skill.ranks,
+                        training == stats::TrainingLevel::Specialized,
+                    ),
                     base: base_val,
                     current: base_val,
                     training,

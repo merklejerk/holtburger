@@ -4,8 +4,7 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
-#[cfg(test)]
-use holtburger_core::client::locomotion::LocomotionRequest;
+use holtburger_core::client::locomotion::{MovementPrimitive, MovementRequest};
 use holtburger_core::client::locomotion::MovementPacketMetadata;
 use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
@@ -1102,10 +1101,10 @@ impl GameState {
             CombatAutomationEffect::TurnTo { heading } => {
                 self.data.combat_runtime.queue_attack();
                 result.needs_redraw = true;
-                result.commands.push(ClientCommand::TurnTo {
-                    heading,
-                    metadata: self.current_movement_metadata(),
-                });
+                result.commands.push(ClientCommand::ExecuteMovement(
+                    MovementRequest::new(MovementPrimitive::SnapFacing { heading })
+                        .with_metadata(self.current_movement_metadata()),
+                ));
             }
             CombatAutomationEffect::Attack(request) => {
                 self.data.combat_runtime.queue_attack();
@@ -2839,7 +2838,10 @@ mod tests {
                 command,
                 ClientCommand::TargetedMeleeAttack { .. }
                     | ClientCommand::TargetedMissileAttack { .. }
-                    | ClientCommand::TurnTo { .. }
+                    | ClientCommand::ExecuteMovement(MovementRequest {
+                        primitive: MovementPrimitive::SnapFacing { .. },
+                        ..
+                    })
             )
         }));
         assert!(!state.data.combat_runtime.attack_queued);
@@ -2895,7 +2897,10 @@ mod tests {
             result
                 .commands
                 .iter()
-                .any(|command| matches!(command, ClientCommand::TurnTo { .. }))
+                .any(|command| matches!(command, ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::SnapFacing { .. },
+                    ..
+                })))
         );
         assert!(has_active_approach(&state));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
@@ -2946,9 +2951,9 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::TargetedMeleeAttack { .. }
-                    | ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    | ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
                         ..
                     })
             )
@@ -2983,9 +2988,9 @@ mod tests {
             started.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3010,10 +3015,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3049,9 +3052,9 @@ mod tests {
             started.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3064,10 +3067,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3110,10 +3111,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3165,10 +3164,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3204,9 +3201,9 @@ mod tests {
             started.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3226,10 +3223,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3267,7 +3262,10 @@ mod tests {
         assert!(
             turn.commands
                 .iter()
-                .any(|command| matches!(command, ClientCommand::TurnTo { .. }))
+                .any(|command| matches!(command, ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::SnapFacing { .. },
+                    ..
+                })))
         );
         assert!(
             !turn
@@ -3323,10 +3321,8 @@ mod tests {
         assert!(in_range.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3343,9 +3339,9 @@ mod tests {
             slipped_again.commands.iter().any(|command| {
                 matches!(
                     command,
-                    ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::LocomotionPrimitive::Drive { .. },
+                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3425,11 +3421,8 @@ mod tests {
         assert!(first.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: holtburger_core::client::locomotion::LocomotionPrimitive::Drive {
-                        refresh_server: true,
-                        ..
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
                     ..
                 })
             )

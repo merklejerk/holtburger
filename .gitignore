@@ -26,3 +26,5 @@ release-test/data/
 .github/skills
 
 !README.md
+
+dist-manifest.json

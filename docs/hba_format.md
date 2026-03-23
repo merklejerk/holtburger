@@ -8,8 +8,8 @@ Unlike the original block-based AC DAT format, HBA uses a flat structure with a 
 ## 2. Global Design Goals
 - **Simplicity**: Easy to parse in any language.
 - **Performance**: Support for fast random access and Zstd compression.
-- **Extensibility**: Support for "Layered" data (e.g., separate archives for physics, visuals, and audio).
-- **Forward Compatibility**: Metadata support for content profiles.
+- **Extensibility**: Support for multiple archives and archive-local metadata without tying runtime behavior to filenames.
+- **Forward Compatibility**: Header metadata can carry descriptive tags, but capability checks should still be based on the assets actually present.
 
 ## 3. Binary Layout
 
@@ -28,15 +28,18 @@ Unlike the original block-based AC DAT format, HBA uses a flat structure with a 
 | Entry Count | `u32le` | 4 | Number of entries in the index. |
 | Index Offset | `u64le` | 8 | Absolute byte offset to the start of the index. |
 | Metadata Size | `u32le` | 4 | Size of the metadata block following the header. |
-| Profile | `u32le` | 4 | **Content Profile** (see below). |
+| Profile | `u32le` | 4 | Archive profile identifier. See profile values below. Runtime capability checks should still be based on the assets actually present. |
 
-#### Content Profiles
-The `Profile` field indicates the intended use of the archive. This allows a client (e.g., 3D vs TUI) to decide how to prioritize this archive in a `CompositeProvider`.
-- `0x00`: **Generic** (Contains mixed data).
-- `0x01`: **Logic/Physics Only** (Stripped of visuals/audio for TUI).
-- `0x02`: **Visuals Only** (Textures, models, palettes).
-- `0x03`: **Audio Only** (Wave files).
-- `0x04`: **Full** (Equivalent to a retail DAT).
+#### Header Metadata
+The `Profile` field records the archive mode emitted by tooling, but the runtime still does not treat it as the sole contract for what an archive can satisfy. Systems should continue probing for the specific assets they require.
+
+#### Profile Values
+| Value | Name | Meaning |
+| :--- | :--- | :--- |
+| `0` | `Unspecified` | No profile was recorded. Reserved for legacy or manually authored archives. |
+| `1` | `Full` | Full archive mode with no manifest filtering and no forced record pruning. |
+| `2` | `Pruned` | Logic/physics-oriented archive mode that keeps broader essential file classes and may contain pruned records. |
+| `3` | `Micro` | Minimal portal-table archive mode for the current TUI/runtime path. Contains only the explicitly selected required table IDs and may contain pruned records if applicable. |
 
 ### 3.2. File Entry (HbaEntry - 28 bytes)
 Each entry in the index describes a single asset.
@@ -58,18 +61,19 @@ Each entry in the index describes a single asset.
 - `0x04` (**Pruned**): Data is a "Lite" version of the original record (e.g., visual data removed from a physics object).
 
 ## 4. Quality-Aware Prioritization
-The `Pruned` flag is used by the `CompositeProvider` (VFS) to ensure the best possible data is served to the client:
-- If multiple providers offer the same `File ID`, the VFS prefers any entry where `Pruned` is **not** set.
-- If all available entries are marked as `Pruned`, the first match in the provider list is used.
-- This allows Lite HBA archives to serve as space-saving fallbacks or overrides without breaking high-fidelity visuals if the user has full retail DAT files mounted.
+The `Pruned` flag is used by the scoped resource resolver to ensure the best possible data is served to the client within a mounted dataset scope:
+- If multiple mounted providers in the same scope offer the same `File ID`, runtime lookup prefers any entry where `Pruned` is **not** set.
+- If all available entries in that scope are marked as `Pruned`, the first matching provider in that scope is used.
+- This allows Lite HBA archives to serve as space-saving fallbacks or overrides without breaking higher-fidelity assets that may also be mounted in the same scope.
 
-## 5. Layered Content Strategy (VFS)
-The VFS (`CompositeProvider`) is designed to handle multiple HBA files simultaneously. This enables a modular distribution:
-1.  `base.hba` (Profile 0x01): Essential physics/logic for all clients.
-2.  `graphics.hba` (Profile 0x02): Textures/Visuals for 3D clients.
-3.  `audio.hba` (Profile 0x03): Sound effects and music.
+## 5. Current Bundle Strategy (VFS)
+The current runtime uses a scoped resource resolver that keeps mounted providers partitioned by dataset role while still allowing quality-aware fallback within each scope:
 
-If a 3D client requests a `GfxObj`, it will find the **Pruned** version in `base.hba` and the **Full** version in `graphics.hba`. The `CompositeProvider` should be configured to prioritize the "Visuals" profile when a graphical client is running.
+1. `portal.hba` may be a full, pruned, or micro bundle depending on what the user ships.
+2. `cell.hba` is optional for the current TUI/runtime path.
+3. Runtime capabilities are determined by probing for required scoped assets, not by trusting archive profile tags or filenames alone.
+
+For the current terminal client, the smallest supported bundle is a portal-only micro archive containing the skill, spell, and XP tables.
 
 ## 6. Implementation Notes (Rust)
 HBA files are generated by `holtburger-tools` and consumed via the `HbaProvider` implementation of `ResourceProvider` in the `holtburger-dat` crate.

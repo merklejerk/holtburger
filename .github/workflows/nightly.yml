@@ -25,21 +25,6 @@ jobs:
           git tag -f nightly
           git push -f origin nightly
 
-  data-build:
-    name: Prepare HBA Data
-    needs: tag
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - name: Fetch HBA files
-        run: |
-          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
-      - name: Upload HBA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hba-data
-          path: hba.zip
-
   dist-build:
     name: Build Binaries
     needs: tag
@@ -67,13 +52,11 @@ jobs:
         shell: bash
         run: cargo build --release --workspace
 
-      - name: Fetch HBA files
+      - name: Fetch Micro HBA
         shell: bash
         run: |
-          mkdir -p dats
-          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
-          unzip hba.zip -d dats
-          rm hba.zip
+          HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
+            bash .github/scripts/fetch_micro_hba.sh
 
       - name: Prepare Release Bundle
         shell: bash
@@ -84,7 +67,7 @@ jobs:
           cp target/release/tui$EXT staging/holtburger-cli$EXT
           cp target/release/dat2hba$EXT staging/dat2hba$EXT
           cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
-          cp dats/*.hba staging/dats/
+          cp dats/portal.hba staging/dats/portal.hba
           ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             7z a "$ARCHIVE_NAME.zip" ./staging/*
@@ -119,12 +102,11 @@ jobs:
         run: |
           cargo build --release --package holtburger-cli
           mv target/release/tui target/release/holtburger-cli
-      - name: Fetch HBA files
+      - name: Fetch Micro HBA
+        shell: bash
         run: |
-          mkdir -p dats
-          curl -L ${{ vars.HBA_LATEST_URL }} -o hba.zip
-          unzip hba.zip -d dats
-          rm hba.zip
+          HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
+            bash .github/scripts/fetch_micro_hba.sh
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: holtburger-cli.flatpak
@@ -136,9 +118,30 @@ jobs:
           name: flatpak-bundle
           path: holtburger-cli.flatpak
 
+  micro-hba-assets:
+    name: Publish Micro HBA Assets
+    needs: tag
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Micro HBA Bundle
+        shell: bash
+        run: |
+          HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
+          HBA_MICRO_KEEP_ARCHIVE=1 \
+            bash .github/scripts/fetch_micro_hba.sh
+      - name: Upload Micro HBA Release Assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: micro-hba-assets
+          path: |
+            micro-hba.zip
+            dats/portal.hba
+
   publish:
     name: Publish Nightly Release
-    needs: [data-build, dist-build, flatpak-build]
+    needs: [dist-build, flatpak-build, micro-hba-assets]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:

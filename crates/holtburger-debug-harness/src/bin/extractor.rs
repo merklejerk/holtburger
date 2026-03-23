@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use holtburger_core::{Client, ClientCommand, WireEvent};
+use holtburger_core::{ClientBuilder, ClientCommand, WireEvent};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -18,8 +18,6 @@ struct Args {
     password: String,
     #[arg(short, long)]
     character: Option<String>,
-    #[arg(long)]
-    replay: Option<String>,
     #[arg(short, long, default_value_t = 30)]
     timeout: u64,
     #[arg(short, long, default_value = "extracted_messages")]
@@ -59,11 +57,11 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
 
-    let mut client = if let Some(replay_path) = &args.replay {
-        Client::new_replay(replay_path, &args.account, dats_path)?
-    } else {
-        Client::new(&args.server, args.port, &args.account, dats_path).await?
-    };
+    let mut client = ClientBuilder::new(args.account.clone())
+        .server(args.server.clone(), args.port)
+        .dats_path(dats_path)
+        .connect()
+        .await?;
 
     client.message_dump_dir = Some(out_dir);
     let mut wire_rx = client.subscribe_wire_events();

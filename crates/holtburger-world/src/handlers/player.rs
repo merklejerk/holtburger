@@ -71,14 +71,9 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
-            state.player.update_attribute(
-                *attribute,
-                *ranks,
-                *start,
-                *xp,
-                state.xp_table.as_ref(),
-                events,
-            );
+            state
+                .player
+                .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
             true
         }
         GameMessage::PublicUpdateAttribute(data) => {
@@ -89,14 +84,9 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
-            state.player.update_attribute(
-                *attribute,
-                *ranks,
-                *start,
-                *xp,
-                state.xp_table.as_ref(),
-                events,
-            );
+            state
+                .player
+                .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
             true
         }
         GameMessage::PrivateUpdateSkill(data) => {
@@ -115,8 +105,8 @@ pub(crate) fn handle_message(
                     status: *status,
                     init: *init,
                     xp: *xp,
-                    xp_table: state.xp_table.as_ref(),
-                    skill_table: state.skill_table.as_deref(),
+                    xp_table: &state.xp_table,
+                    skill_table: &state.skill_table,
                 },
                 events,
             );
@@ -138,8 +128,8 @@ pub(crate) fn handle_message(
                     status: *status,
                     init: *init,
                     xp: *xp,
-                    xp_table: state.xp_table.as_ref(),
-                    skill_table: state.skill_table.as_deref(),
+                    xp_table: &state.xp_table,
+                    skill_table: &state.skill_table,
                 },
                 events,
             );
@@ -161,7 +151,7 @@ pub(crate) fn handle_message(
                     start: *start,
                     current: *current,
                     xp: *xp,
-                    xp_table: state.xp_table.as_ref(),
+                    xp_table: &state.xp_table,
                 },
                 events,
             );
@@ -183,7 +173,7 @@ pub(crate) fn handle_message(
                     start: *start,
                     current: *current,
                     xp: *xp,
-                    xp_table: state.xp_table.as_ref(),
+                    xp_table: &state.xp_table,
                 },
                 events,
             );
@@ -212,8 +202,8 @@ pub(crate) fn handle_event(
         GameEvent::PlayerDescription(data) => {
             state.player.hydrate_from_player_description(
                 data,
-                state.xp_table.as_ref(),
-                state.skill_table.as_deref(),
+                &state.xp_table,
+                &state.skill_table,
                 events,
             );
             false

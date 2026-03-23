@@ -268,8 +268,8 @@ mod tests {
             return false;
         }
 
-        let source = HbaReader::open(source_path)
-            .expect("repo portal.hba should open for builder tests");
+        let source =
+            HbaReader::open(source_path).expect("repo portal.hba should open for builder tests");
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
 

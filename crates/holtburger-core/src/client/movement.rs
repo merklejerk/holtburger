@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn drive_raw_motion_state_adds_right_turn_when_heading_increases() {
-        let world = WorldState::new(None, None);
+        let world = WorldState::synthetic();
 
         let raw_motion_state = build_drive_raw_motion_state(
             &world,
@@ -913,7 +913,7 @@ mod tests {
 
     #[test]
     fn drive_raw_motion_state_adds_left_turn_when_heading_decreases() {
-        let world = WorldState::new(None, None);
+        let world = WorldState::synthetic();
 
         let raw_motion_state = build_drive_raw_motion_state(
             &world,
@@ -936,7 +936,7 @@ mod tests {
 
     #[test]
     fn drive_raw_motion_state_omits_turn_when_heading_is_aligned() {
-        let world = WorldState::new(None, None);
+        let world = WorldState::synthetic();
 
         let raw_motion_state = build_drive_raw_motion_state(
             &world,
@@ -956,7 +956,7 @@ mod tests {
 
     #[test]
     fn local_motion_prediction_advances_player_position_from_velocity() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         world.player.guid = player_guid;
         world.player.position = WorldPosition {
@@ -992,7 +992,7 @@ mod tests {
 
     #[test]
     fn local_motion_prediction_ignores_missing_drive_intent() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         let position = WorldPosition {
             landblock_id: Guid(0x12340000),
@@ -1013,7 +1013,7 @@ mod tests {
 
     #[test]
     fn local_motion_prediction_turns_toward_desired_heading_without_snapping() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         let position = WorldPosition {
             landblock_id: Guid(0x12340000),
@@ -1054,7 +1054,7 @@ mod tests {
 
     #[test]
     fn local_motion_prediction_uses_world_space_predicted_velocity_when_provided() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         world.player.guid = player_guid;
         world.player.position = WorldPosition {
@@ -1092,7 +1092,7 @@ mod tests {
 
     #[test]
     fn apply_drive_preserves_vertical_prediction_in_entity_velocity() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         world.player.guid = player_guid;
         world.player.position = WorldPosition {
@@ -1174,7 +1174,7 @@ mod tests {
 
     #[test]
     fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
@@ -1206,7 +1206,7 @@ mod tests {
 
     #[test]
     fn autonomous_position_heartbeat_uses_server_grounded_when_contact_unspecified() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
@@ -1230,7 +1230,7 @@ mod tests {
 
     #[test]
     fn autonomous_position_sync_can_be_built_for_stationary_player() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
@@ -1260,7 +1260,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
@@ -1308,7 +1308,7 @@ mod tests {
 
     #[tokio::test]
     async fn stop_without_active_drive_does_not_send_final_position_sync() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
@@ -1345,7 +1345,7 @@ mod tests {
 
     #[tokio::test]
     async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),
@@ -1379,7 +1379,7 @@ mod tests {
 
     #[test]
     fn autonomous_position_heartbeat_skips_stationary_players() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
             landblock_id: Guid(0x1000_0001),

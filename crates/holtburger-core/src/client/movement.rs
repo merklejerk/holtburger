@@ -61,7 +61,7 @@ fn normalize_heading(heading: f32) -> f32 {
     heading.rem_euclid(TAU)
 }
 
-pub(super) fn raw_motion_state_with_motion_style(
+fn raw_motion_state_with_motion_style(
     world: &WorldState,
     mut raw_motion_state: RawMotionState,
     motion_style: MotionStyle,
@@ -87,18 +87,19 @@ pub(super) fn raw_motion_state_with_motion_style(
 fn resolve_contact(world: &WorldState, metadata: MovementPacketMetadata) -> bool {
     metadata
         .contact
-        .unwrap_or(world.player.server_grounded.unwrap_or(false))
+        .or(world.player.server_grounded)
+        .unwrap_or(true)
 }
 
-pub(super) fn encode_contact_long_jump(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
+fn encode_contact_long_jump(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
     u8::from(resolve_contact(world, metadata))
 }
 
-pub(super) fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
+fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
     u8::from(resolve_contact(world, metadata))
 }
 
-pub(super) fn build_autonomous_position_heartbeat(
+fn build_autonomous_position_heartbeat(
     world: &WorldState,
     metadata: MovementPacketMetadata,
 ) -> Option<AutonomousPositionActionData> {
@@ -154,14 +155,14 @@ fn build_drive_raw_motion_state(
 }
 
 #[derive(Debug, Default)]
-pub(super) struct MovementSequenceDiagnostics {
+struct MovementSequenceDiagnostics {
     last_force_position_sequence: Option<u16>,
     last_teleport_sequence: Option<u16>,
     last_server_control_sequence: Option<u16>,
 }
 
 impl MovementSequenceDiagnostics {
-    pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
+    fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
         if let Some(old_seq) = self.last_force_position_sequence {
             if is_newer_u16(force_position_sequence, old_seq) {
                 log::warn!(
@@ -181,7 +182,7 @@ impl MovementSequenceDiagnostics {
         self.last_force_position_sequence = Some(force_position_sequence);
     }
 
-    pub(super) fn record_autonomous_position_sequences(
+    fn record_autonomous_position_sequences(
         &mut self,
         teleport_sequence: u16,
         force_position_sequence: u16,
@@ -222,7 +223,7 @@ impl MovementSequenceDiagnostics {
         self.last_server_control_sequence = Some(server_control_sequence);
     }
 
-    pub(super) fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
+    fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
         match self.last_server_control_sequence {
             Some(old_seq) if is_newer_u16(server_control_sequence, old_seq) => {
                 log::debug!(
@@ -252,7 +253,7 @@ impl MovementSequenceDiagnostics {
 }
 
 pub(super) struct MovementSystem {
-    pub(super) sequence_diagnostics: MovementSequenceDiagnostics,
+    sequence_diagnostics: MovementSequenceDiagnostics,
     local_motion: Option<LocalMotionIntent>,
     server_motion_active: bool,
     last_server_drive_intent: Option<ServerDriveIntent>,
@@ -292,6 +293,30 @@ impl MovementSystem {
             server_motion_active: false,
             last_server_drive_intent: None,
         }
+    }
+
+    pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
+        self.sequence_diagnostics
+            .record_force_position_sequence(force_position_sequence);
+    }
+
+    pub(super) fn record_autonomous_position_sequences(
+        &mut self,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        server_control_sequence: u16,
+    ) {
+        self.sequence_diagnostics
+            .record_autonomous_position_sequences(
+                teleport_sequence,
+                force_position_sequence,
+                server_control_sequence,
+            );
+    }
+
+    pub(super) fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
+        self.sequence_diagnostics
+            .record_server_control_sequence(server_control_sequence);
     }
 
     fn should_send_drive_pulse(
@@ -383,7 +408,7 @@ impl MovementSystem {
         Ok(state_events)
     }
 
-    pub(super) async fn execute_snap_facing(
+    async fn execute_snap_facing(
         &mut self,
         desired_heading: f32,
         world: &mut WorldState,
@@ -411,7 +436,7 @@ impl MovementSystem {
         Ok(world_events)
     }
 
-    pub(super) fn apply_movement_primitive(
+    fn apply_movement_primitive(
         &mut self,
         primitive: MovementPrimitive,
         world: &mut WorldState,
@@ -1148,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn autonomous_position_heartbeat_uses_latest_predicted_position_when_moving() {
+    fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
         let mut world = WorldState::new(None, None);
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
@@ -1176,7 +1201,7 @@ mod tests {
         assert_eq!(heartbeat.server_control_sequence, 22);
         assert_eq!(heartbeat.teleport_sequence, 33);
         assert_eq!(heartbeat.force_position_sequence, 44);
-        assert_eq!(heartbeat.last_contact, 0);
+        assert_eq!(heartbeat.last_contact, 1);
     }
 
     #[test]

@@ -531,15 +531,19 @@ mod tests {
     async fn test_current_server_controlled_update_motion_sends_heartbeat() {
         let mut client = build_test_client();
         let player_guid = holtburger_common::Guid(0x50000001);
+        let position = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x01000000),
+            ..WorldPosition::default()
+        };
         client.world.player.guid = player_guid;
         client.world.player.server_control_sequence = 9;
-        client.world.player.position = WorldPosition::default();
+        client.world.player.position = position;
         client
             .world
             .add_entity(holtburger_world::entity::Entity::new(
                 player_guid,
                 "Player".to_string(),
-                WorldPosition::default(),
+                position,
             ));
 
         let encoded = encode_message(&server_controlled_motion(player_guid, 10, 20));

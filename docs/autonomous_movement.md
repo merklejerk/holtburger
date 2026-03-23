@@ -53,6 +53,8 @@ ACE parses that payload in [GameActionMoveToState.cs](../ACE/Source/ACE.Server/N
 
 It does **not** call `BroadcastMovement()`. That means it does not produce the observer-facing motion update stream that other clients use to animate your character.
 
+It **does** carry full position, including rotation. Because `UpdatePlayerPosition()` applies the supplied rotation and `UpdatePosition` rebroadcasts a full `PositionPack`, `AutonomousPosition` can also be used as an explicit observer-visible facing snap when the client wants to reorient immediately rather than express a turn-through-motion-state sequence.
+
 ## 2. The End-to-End ACE Flow
 
 For an autonomous client, the most important thing to internalize is that ACE has two parallel outputs:
@@ -78,6 +80,8 @@ That `broadcast = false` detail matters. A `MoveToState` updates the player's re
 The `AutonomousPosition` handler in [GameActionAutonomousPosition.cs](../ACE/Source/ACE.Server/Network/GameAction/Actions/GameActionAutonomousPosition.cs) sets the requested location with the default `broadcast = true`.
 
 That means each accepted breadcrumb can trigger an immediate `UpdatePosition` broadcast path in [Player_Tick.cs](../ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs).
+
+Because the requested `Position` includes rotation, this path can also immediately rebroadcast a snapped heading through `UpdatePosition`. That is useful for an explicit `SnapFacing`-style primitive, but it should be treated as a position-stream orientation sync, not as a substitute for ordinary movement-state start/change/stop packets.
 
 ### Requested location is consumed in the physics tick
 
@@ -283,6 +287,8 @@ While local motion continues, send periodic `AutonomousPosition` updates carryin
 
 This keeps ACE's requested location fresh without pretending that every prediction sample is a new control intent.
 
+If your client uses an explicit snap-facing primitive, this is also the correct channel for that immediate facing update: send an `AutonomousPosition` carrying the new rotation, then continue with ordinary `MoveToState` locomotion if movement is beginning.
+
 Do not send `AutonomousPosition` on a fixed idle heartbeat just for simplicity.
 
 ACE's own handler comment in [GameActionAutonomousPosition.cs](../ACE/Source/ACE.Server/Network/GameAction/Actions/GameActionAutonomousPosition.cs) describes it as being sent every `~1 second` when a player is moving. More importantly, `AutonomousPosition` calls `SetRequestedLocation(position)` with broadcast enabled, and [Player_Tick.cs](../ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs) will then send `UpdatePosition` whenever `RequestedLocationBroadcast` is true, even if the requested position is effectively unchanged.
@@ -439,6 +445,18 @@ Why:
 
 So the stop packet is not optional protocol hygiene. It is the clean termination signal for observer motion, including lingering turn or forward commands.
 
+In practice, a clean locally driven stop often wants **both** bookends:
+
+1. a final `AutonomousPosition` carrying the last locally accepted resting position
+2. a stop `MoveToState` that clears the observer-facing motion state
+
+Those packets solve different problems:
+
+- the final `AutonomousPosition` immediately rebroadcasts the final accepted position and rotation through the authoritative position path
+- the stop `MoveToState` tells observers to stop simulating the previous forward / sidestep / turn intent
+
+If you only send the stop pulse, observers can stop animating but still appear to stop slightly short until a later position update corrects them.
+
 ## 10. Failure Modes to Watch For
 
 ### Sliding on other clients
@@ -469,7 +487,7 @@ Use this as the minimum bar for an autonomous movement implementation.
 - Mirror server movement epochs back in client-authored movement packets; do not locally invent sequence increments.
 - Maintain a local locomotion controller that produces heading/speed intent, not raw packet spam.
 - Send `MoveToState` on start, stop, and meaningful intent changes.
-- Send `AutonomousPosition` only while actually moving; do not keep an idle 1-second heartbeat.
+- Send `AutonomousPosition` only while actually moving, for explicit snap-facing updates, and as the final end-of-sequence position bookend before clearing motion; do not keep an idle 1-second heartbeat.
 - Explicitly clear sticky motion commands with a stop or changed `MoveToState`; do not assume they decay on their own.
 - Include grounded/contact metadata truthfully.
 - Preserve or explicitly choose the correct ACE motion style in outbound `MoveToState` packets.

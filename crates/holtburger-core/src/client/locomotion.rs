@@ -44,13 +44,13 @@ impl MovementPacketMetadata {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LocomotionRequest {
-    pub primitive: LocomotionPrimitive,
+pub struct MovementRequest {
+    pub primitive: MovementPrimitive,
     pub metadata: MovementPacketMetadata,
 }
 
-impl LocomotionRequest {
-    pub const fn new(primitive: LocomotionPrimitive) -> Self {
+impl MovementRequest {
+    pub const fn new(primitive: MovementPrimitive) -> Self {
         Self {
             primitive,
             metadata: MovementPacketMetadata {
@@ -65,35 +65,54 @@ impl LocomotionRequest {
     }
 }
 
-impl From<LocomotionPrimitive> for LocomotionRequest {
-    fn from(primitive: LocomotionPrimitive) -> Self {
+impl From<MovementPrimitive> for MovementRequest {
+    fn from(primitive: MovementPrimitive) -> Self {
         Self::new(primitive)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LocomotionPrimitive {
-    Drive {
-        heading: f32,
-        speed: f32,
-        refresh_server: bool,
-    },
-    Stop {
-        refresh_server: bool,
-    },
+pub struct DriveIntent {
+    pub heading: f32,
+    pub speed: f32,
 }
 
-impl LocomotionPrimitive {
-    pub fn desired_velocity(&self) -> Option<Vector3> {
-        match *self {
-            Self::Drive { heading, speed, .. } => Some(world_velocity_for_heading(heading, speed)),
-            Self::Stop { .. } => Some(Vector3::zero()),
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum MovementPrediction {
+    #[default]
+    FromHeading,
+    WorldVelocity(Vector3),
+}
+
+impl MovementPrediction {
+    pub fn resolve_velocity(self, heading: f32, speed: f32) -> Vector3 {
+        match self {
+            Self::FromHeading => world_velocity_for_heading(heading, speed),
+            Self::WorldVelocity(velocity) => velocity,
         }
     }
+}
 
-    pub fn refresh_server(&self) -> bool {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MovementPrimitive {
+    Drive {
+        intent: DriveIntent,
+        prediction: MovementPrediction,
+    },
+    SnapFacing {
+        heading: f32,
+    },
+    Stop,
+}
+
+impl MovementPrimitive {
+    pub fn desired_velocity(&self) -> Option<Vector3> {
         match *self {
-            Self::Drive { refresh_server, .. } | Self::Stop { refresh_server } => refresh_server,
+            Self::Drive { intent, prediction } => {
+                Some(prediction.resolve_velocity(intent.heading, intent.speed))
+            }
+            Self::SnapFacing { .. } => Some(Vector3::zero()),
+            Self::Stop => Some(Vector3::zero()),
         }
     }
 }
@@ -104,15 +123,19 @@ mod tests {
 
     #[test]
     fn drive_velocity_matches_ac_heading_convention() {
-        let west = LocomotionPrimitive::Drive {
-            heading: 0.0,
-            speed: 2.0,
-            refresh_server: false,
+        let west = MovementPrimitive::Drive {
+            intent: DriveIntent {
+                heading: 0.0,
+                speed: 2.0,
+            },
+            prediction: MovementPrediction::FromHeading,
         };
-        let north = LocomotionPrimitive::Drive {
-            heading: 90.0f32.to_radians(),
-            speed: 2.0,
-            refresh_server: false,
+        let north = MovementPrimitive::Drive {
+            intent: DriveIntent {
+                heading: 90.0f32.to_radians(),
+                speed: 2.0,
+            },
+            prediction: MovementPrediction::FromHeading,
         };
 
         assert_eq!(west.desired_velocity(), Some(Vector3::new(-8.0, 0.0, 0.0)));
@@ -124,19 +147,21 @@ mod tests {
 
     #[test]
     fn stop_maps_to_zero_velocity() {
-        let primitive = LocomotionPrimitive::Stop {
-            refresh_server: true,
-        };
+        let primitive = MovementPrimitive::Stop;
 
         assert_eq!(primitive.desired_velocity(), Some(Vector3::zero()));
-        assert!(primitive.refresh_server());
     }
 
     #[test]
-    fn locomotion_request_defaults_to_fallback_metadata() {
-        let request = LocomotionRequest::new(LocomotionPrimitive::Stop {
-            refresh_server: false,
-        });
+    fn snap_facing_maps_to_zero_velocity() {
+        let primitive = MovementPrimitive::SnapFacing { heading: 1.0 };
+
+        assert_eq!(primitive.desired_velocity(), Some(Vector3::zero()));
+    }
+
+    #[test]
+    fn movement_request_defaults_to_fallback_metadata() {
+        let request = MovementRequest::new(MovementPrimitive::Stop);
 
         assert_eq!(request.metadata.contact, None);
         assert_eq!(request.metadata.motion_style, MotionStyle::PreserveServer);
@@ -151,6 +176,22 @@ mod tests {
         assert_eq!(
             metadata.motion_style,
             MotionStyle::Explicit(MotionStance::Magic)
+        );
+    }
+
+    #[test]
+    fn drive_velocity_prefers_predicted_velocity_override() {
+        let primitive = MovementPrimitive::Drive {
+            intent: DriveIntent {
+                heading: 0.0,
+                speed: 2.0,
+            },
+            prediction: MovementPrediction::WorldVelocity(Vector3::new(1.0, 2.0, 3.0)),
+        };
+
+        assert_eq!(
+            primitive.desired_velocity(),
+            Some(Vector3::new(1.0, 2.0, 3.0))
         );
     }
 }

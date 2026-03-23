@@ -46,13 +46,11 @@ jobs:
       - name: Fetch HBA files
         shell: bash
         run: |
-          if [ -n "${{ vars.HBA_LATEST_URL }}" ]; then
-            mkdir -p dats
-            curl -L "${{ vars.HBA_LATEST_URL }}" -o hba.zip
-            unzip hba.zip -d dats
-            rm hba.zip
+          if [ -n "${{ vars.HBA_MICRO_LATEST_URL }}" ]; then
+            HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
+              bash .github/scripts/fetch_micro_hba.sh
           else
-            echo "HBA_LATEST_URL not set, skipping HBA fetch"
+            echo "HBA_MICRO_LATEST_URL not set, skipping HBA fetch"
           fi
         continue-on-error: true
       - name: Run Tests

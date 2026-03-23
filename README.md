@@ -50,7 +50,7 @@ Holtburger is **highly experimental**. APIs are unstable and subject to frequent
 ## Installation
 
 ### Binary Releases (Recommended)
-Pre-compiled binaries for the nightly builds are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives include the bundled `portal.hba` micro data that the current TUI/runtime path needs.
+Pre-compiled binaries for the nightly builds are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives include the bundled micro `portal.hba` required for the current TUI/runtime path.
 
 1.  Download the archive for your platform (Windows, macOS, or Linux).
 2.  Extract the contents.
@@ -102,12 +102,13 @@ cargo run --bin tui -- [ARGS]
 ```
 
 ### Data File Configuration
-The current TUI/runtime path hard-requires `portal` data and treats `cell` data as optional. It is compatible with both official DAT files and our optimized HBA format.
+The TUI client requires game data (`portal` and `cell`) to function. It is compatible with both official DAT files and our optimized HBA format, which is >90% smaller. The repo and source distribution does not check these files in so you will have to provide them separately. You can either provide your own DAT files or download the latest `hba.zip` from our [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into a `./dats` folder in the root of the project.
 
-- `portal.hba` is sufficient for the current TUI when it contains the required skill, spell, and XP tables.
-- `cell.dat` or `cell.hba` can still be mounted, but the TUI no longer requires it for startup.
-- Binary release archives and Flatpak packaging now bundle the micro `portal.hba` automatically instead of requiring a separate asset-bundle download.
-- If you want to build your own micro archive from a retail `client_portal.dat`, run `dat2hba --profile micro /path/to/client_portal.dat ./dats/portal.hba`.
+### Release Maintenance
+The GitHub Actions workflows currently fetch release HBA assets from repository variables instead of committed archive files:
+
+- `HBA_MICRO_LATEST_URL`: used by CI, nightly release packaging, and Flatpak packaging to fetch the micro `portal.hba` bundle that ships with current releases.
+- `HBA_PRUNED_LATEST_URL`: reserved for workflows that need the larger pruned archive set. The current release workflows do not consume it.
 
 **Search Priority:**
 1.  `--dats <PATH>` command-line argument.
@@ -118,7 +119,7 @@ The current TUI/runtime path hard-requires `portal` data and treats `cell` data 
     *   **macOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
     *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
 
-> **Note:** Official DAT files (`client_portal.dat` and `client_cell_1.dat`) must be renamed to `portal.dat` and `cell.dat` respectively if you want the loader to discover them automatically.
+> **Note:** Official DAT files (`client_portal.dat` and `client_cell_1.dat`) must be renamed to `portal.dat` and `cell.dat` respectively.
 
 ## License
 

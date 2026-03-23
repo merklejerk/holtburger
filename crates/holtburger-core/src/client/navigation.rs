@@ -7,7 +7,7 @@
 //!
 //! A full 3D client with local collision, physics simulation, obstacle
 //! avoidance, or pathfinding will likely want to replace these helpers with its
-//! own navigation policy while still reusing lower-level locomotion and packet
+//! own navigation policy while still reusing lower-level movement and packet
 //! machinery from core.
 
 use crate::client::controllers::{
@@ -15,7 +15,7 @@ use crate::client::controllers::{
     ApproachTargetInput, Controller, MaintainRangeConfig, MaintainRangeController,
     MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput,
 };
-use crate::client::locomotion::{LocomotionPrimitive, LocomotionRequest, MovementPacketMetadata};
+use crate::client::movement_types::{MovementPacketMetadata, MovementPrimitive, MovementRequest};
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
@@ -33,6 +33,7 @@ pub struct ApproachSyncInput {
     pub now: Instant,
     pub player_position: Option<WorldPosition>,
     pub target_position: Option<WorldPosition>,
+    pub target_use_radius: Option<f32>,
     pub move_speed: f32,
     pub metadata: MovementPacketMetadata,
 }
@@ -45,6 +46,7 @@ pub struct StickyMeleeSyncInput {
     pub target_guid: Option<Guid>,
     pub player_position: Option<WorldPosition>,
     pub target_position: Option<WorldPosition>,
+    pub target_use_radius: Option<f32>,
     pub move_speed: f32,
     pub metadata: MovementPacketMetadata,
 }
@@ -178,7 +180,32 @@ impl NavigationAutomation {
         input.target_position =
             self.automation_target_position(input.player_position, input.target_position);
 
-        self.sync_approach_target(input)
+        let mut result = self.sync_approach_target(input);
+
+        if let (Some(player_position), Some(target_position)) =
+            (input.player_position, input.target_position)
+            && result.commands.iter().any(|command| {
+                matches!(
+                    command,
+                    ClientCommand::ExecuteMovement(MovementRequest {
+                        primitive: MovementPrimitive::Drive { .. },
+                        ..
+                    })
+                )
+            })
+        {
+            result.commands.insert(
+                0,
+                Self::movement_command(
+                    MovementPrimitive::SnapFacing {
+                        heading: player_position.heading_to(&target_position),
+                    },
+                    input.metadata,
+                ),
+            );
+        }
+
+        result
     }
 
     pub fn sync_approach_target(&mut self, mut input: ApproachSyncInput) -> NavigationUpdate {
@@ -198,6 +225,7 @@ impl NavigationAutomation {
             now: input.now,
             player_position,
             target_position: input.target_position,
+            target_use_radius: input.target_use_radius,
             move_speed: input.move_speed,
         });
 
@@ -342,12 +370,7 @@ impl NavigationAutomation {
                 MaintainRangeEffect::Stop => {
                     log::info!("sticky melee: pausing pursuit");
                     self.approach_target = None;
-                    result.push_command(Self::locomotion_command(
-                        LocomotionPrimitive::Stop {
-                            refresh_server: true,
-                        },
-                        metadata,
-                    ));
+                    result.push_command(Self::movement_command(MovementPrimitive::Stop, metadata));
                 }
                 MaintainRangeEffect::Finished(MaintainRangeFinishReason::Suspended) => {}
                 MaintainRangeEffect::Finished(reason) => {
@@ -375,12 +398,7 @@ impl NavigationAutomation {
                 MaintainRangeEffect::Stop => {
                     log::warn!("sticky melee: pausing pursuit after forced reposition");
                     self.approach_target = None;
-                    result.push_command(Self::locomotion_command(
-                        LocomotionPrimitive::Stop {
-                            refresh_server: false,
-                        },
-                        metadata,
-                    ));
+                    result.push_command(Self::movement_command(MovementPrimitive::Stop, metadata));
                 }
                 MaintainRangeEffect::Finished(MaintainRangeFinishReason::Suspended) => {}
                 MaintainRangeEffect::Finished(reason) => {
@@ -407,12 +425,7 @@ impl NavigationAutomation {
                 MaintainRangeEffect::Stop => {
                     log::info!("sticky melee: clearing pursuit after teleport start");
                     self.approach_target = None;
-                    result.push_command(Self::locomotion_command(
-                        LocomotionPrimitive::Stop {
-                            refresh_server: false,
-                        },
-                        metadata,
-                    ));
+                    result.push_command(Self::movement_command(MovementPrimitive::Stop, metadata));
                 }
                 MaintainRangeEffect::Finished(MaintainRangeFinishReason::Suspended) => {}
                 MaintainRangeEffect::Finished(reason) => {
@@ -446,6 +459,7 @@ impl NavigationAutomation {
                         now: input.now,
                         player_position: input.player_position,
                         target_position: input.target_position,
+                        target_use_radius: input.target_use_radius,
                         move_speed: input.move_speed,
                         metadata: input.metadata,
                     },
@@ -454,10 +468,8 @@ impl NavigationAutomation {
             MaintainRangeEffect::Stop => {
                 log::info!("sticky melee: pausing pursuit");
                 self.approach_target = None;
-                result.push_command(Self::locomotion_command(
-                    LocomotionPrimitive::Stop {
-                        refresh_server: true,
-                    },
+                result.push_command(Self::movement_command(
+                    MovementPrimitive::Stop,
                     input.metadata,
                 ));
             }
@@ -475,8 +487,8 @@ impl NavigationAutomation {
         result: &mut NavigationUpdate,
     ) {
         match effect {
-            ApproachTargetEffect::Locomotion(primitive) => {
-                result.push_command(Self::locomotion_command(primitive, metadata));
+            ApproachTargetEffect::Movement(primitive) => {
+                result.push_command(Self::movement_command(primitive, metadata));
             }
             ApproachTargetEffect::Finished(reason) => match reason {
                 ApproachTargetFinishReason::Arrived => {
@@ -488,9 +500,6 @@ impl NavigationAutomation {
                 }
                 ApproachTargetFinishReason::TargetUnavailable => {
                     log::warn!("approach: target became unavailable");
-                }
-                ApproachTargetFinishReason::NoProgress => {
-                    log::warn!("approach: controller aborted because the player made no progress");
                 }
                 ApproachTargetFinishReason::Cancelled => {
                     log::info!("approach: controller cancelled by user");
@@ -505,11 +514,11 @@ impl NavigationAutomation {
         }
     }
 
-    fn locomotion_command(
-        primitive: LocomotionPrimitive,
+    fn movement_command(
+        primitive: MovementPrimitive,
         metadata: MovementPacketMetadata,
     ) -> ClientCommand {
-        ClientCommand::ExecuteLocomotion(LocomotionRequest::new(primitive).with_metadata(metadata))
+        ClientCommand::ExecuteMovement(MovementRequest::new(primitive).with_metadata(metadata))
     }
 
     fn log_sticky_melee_finish(&self, reason: MaintainRangeFinishReason) {
@@ -552,19 +561,24 @@ mod tests {
                 now,
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
+                target_use_radius: None,
                 move_speed: 4.5,
                 metadata: MovementPacketMetadata::default(),
             },
         );
 
+        assert!(matches!(
+            first.commands.first(),
+            Some(ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::SnapFacing { .. },
+                ..
+            }))
+        ));
         assert!(first.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: LocomotionPrimitive::Drive {
-                        refresh_server: true,
-                        ..
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Drive { .. },
                     ..
                 })
             )
@@ -577,12 +591,59 @@ mod tests {
                 now,
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
+                target_use_radius: None,
                 move_speed: 4.5,
                 metadata: MovementPacketMetadata::default(),
             },
         );
 
         assert!(second.commands.is_empty());
+        assert!(automation.has_active_approach());
+    }
+
+    #[test]
+    fn unchanged_local_position_does_not_abort_active_approach() {
+        let now = Instant::now();
+        let mut automation = NavigationAutomation::default();
+
+        let _ = automation.start_approach_target(
+            Guid(0x1234),
+            1.0,
+            ApproachSyncInput {
+                now,
+                player_position: Some(position(0.0)),
+                target_position: Some(position(5.0)),
+                target_use_radius: None,
+                move_speed: 4.5,
+                metadata: MovementPacketMetadata::default(),
+            },
+        );
+
+        let next = automation.sync_approach_target(ApproachSyncInput {
+            now: now + Duration::from_millis(600),
+            player_position: Some(position(0.0)),
+            target_position: Some(position(5.0)),
+            target_use_radius: None,
+            move_speed: 4.5,
+            metadata: MovementPacketMetadata::default(),
+        });
+
+        assert!(next.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Drive { .. },
+                    ..
+                })
+            )
+        }));
+        assert!(!next.commands.iter().any(|command| matches!(
+            command,
+            ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::SnapFacing { .. },
+                ..
+            })
+        )));
         assert!(automation.has_active_approach());
     }
 
@@ -597,6 +658,7 @@ mod tests {
                 now,
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
+                target_use_radius: None,
                 move_speed: 4.5,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -608,10 +670,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -632,6 +692,7 @@ mod tests {
             target_guid: Some(target_guid),
             player_position: Some(position(0.0)),
             target_position: Some(position(1.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });
@@ -645,10 +706,8 @@ mod tests {
         assert!(paused.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -663,6 +722,7 @@ mod tests {
             target_guid: Some(target_guid),
             player_position: Some(position(10.0)),
             target_position: Some(position(11.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });
@@ -670,8 +730,8 @@ mod tests {
         assert!(resumed.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: LocomotionPrimitive::Drive { .. },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Drive { .. },
                     ..
                 })
             )
@@ -693,6 +753,7 @@ mod tests {
             target_guid: Some(target_guid),
             player_position: Some(position(0.0)),
             target_position: Some(position(1.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });
@@ -702,10 +763,8 @@ mod tests {
         assert!(cleared.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: LocomotionPrimitive::Stop {
-                        refresh_server: false,
-                    },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -727,6 +786,7 @@ mod tests {
             target_guid: Some(Guid(0x1234)),
             player_position: Some(position(0.0)),
             target_position: Some(position(1.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });
@@ -734,8 +794,8 @@ mod tests {
         assert!(result.commands.iter().any(|command| {
             matches!(
                 command,
-                ClientCommand::ExecuteLocomotion(LocomotionRequest {
-                    primitive: LocomotionPrimitive::Drive { .. },
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: MovementPrimitive::Drive { .. },
                     ..
                 })
             )

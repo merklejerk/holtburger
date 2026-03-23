@@ -195,10 +195,14 @@ impl GameState {
                     pos.rotation = holtburger_common::Quaternion::from_heading(new_heading);
 
                     self.data.player_pos = Some(pos);
-                    result.commands.push(ClientCommand::TurnTo {
-                        heading: new_heading,
-                        metadata: self.current_movement_metadata(),
-                    });
+                    result.commands.push(ClientCommand::ExecuteMovement(
+                        holtburger_core::client::movement_types::MovementRequest::new(
+                            holtburger_core::client::movement_types::MovementPrimitive::SnapFacing {
+                                heading: new_heading,
+                            },
+                        )
+                        .with_metadata(self.current_movement_metadata()),
+                    ));
                     result.needs_redraw = true;
                 }
             }
@@ -414,6 +418,31 @@ mod tests {
             Some(AppAction::SetCombatMode {
                 mode: CombatMode::NonCombat
             })
+        ));
+    }
+
+    #[test]
+    fn arrow_key_rotation_uses_snap_facing_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Dashboard;
+        state.data.player_pos = Some(holtburger_common::position::WorldPosition {
+            rotation: holtburger_common::Quaternion::from_heading(0.0),
+            ..Default::default()
+        });
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 120);
+
+        assert!(result.needs_redraw);
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::ExecuteMovement(
+                holtburger_core::client::movement_types::MovementRequest {
+                    primitive:
+                        holtburger_core::client::movement_types::MovementPrimitive::SnapFacing { .. },
+                    ..
+                }
+            ))
         ));
     }
 

@@ -426,7 +426,7 @@ fn test_vector_update_routing() {
     use holtburger_protocol::messages::GameMessage;
     use holtburger_protocol::messages::VectorUpdateData;
 
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
     state.entities.insert(Entity::new(
         state.player.guid,
@@ -469,7 +469,7 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
         GameEvent, GameEventMessage, GameMessage, MagicPurgeBadEnchantmentsEventData,
     };
 
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
 
     // Beneficial buff: should remain after bad-enchantment purge.
@@ -538,7 +538,7 @@ fn test_magic_purge_bad_enchantments_preserves_vitae() {
 
 #[test]
 fn test_update_motion_caches_last_non_zero_server_style() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
 
     let first = GameMessage::UpdateMotion(Box::new(MovementEventData {
@@ -598,7 +598,7 @@ fn test_update_motion_caches_last_non_zero_server_style() {
 
 #[test]
 fn test_stale_non_autonomous_update_motion_is_ignored_for_self() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
     state.player.instance_sequence = 10;
     state.player.movement_sequence = 20;
@@ -631,7 +631,7 @@ fn test_stale_non_autonomous_update_motion_is_ignored_for_self() {
 
 #[test]
 fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
     let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
@@ -695,7 +695,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
 
 #[test]
 fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
     let mut entity = Entity::new(guid, "Drudge".to_string(), WorldPosition::default());
@@ -743,7 +743,7 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
         MagicUpdateEnchantmentEventData,
     };
 
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
 
     // Existing buff should be removed by full purge.
@@ -934,7 +934,7 @@ fn test_heal_command_updates() {
         GameMessage, PrivateUpdateVitalCurrentData, PrivateUpdateVitalData,
     };
 
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     state.player.guid = Guid(0x50000001);
 
     // 1. Initial login: PrivateUpdateVital for Health (ID 1), Stamina (ID 3), Mana (ID 5)

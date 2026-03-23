@@ -1,4 +1,5 @@
 use crate::utils::{align_boundary, read_pstring};
+use crate::{ResourceScope, ScopedResource};
 use binrw::{BinRead, BinResult};
 use std::collections::HashMap;
 use std::io::{Read, Seek};
@@ -14,6 +15,20 @@ pub struct SkillTable {
 
 impl SkillTable {
     pub const FILE_ID: u32 = 0x0E000004;
+}
+
+impl Default for SkillTable {
+    fn default() -> Self {
+        Self {
+            id: Self::FILE_ID,
+            skill_base_hash: HashMap::new(),
+        }
+    }
+}
+
+impl ScopedResource for SkillTable {
+    const FILE_ID: u32 = Self::FILE_ID;
+    const RESOURCE_SCOPE: ResourceScope = ResourceScope::Portal;
 }
 
 #[derive(BinRead, Debug, Clone)]

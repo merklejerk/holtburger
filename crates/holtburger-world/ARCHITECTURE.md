@@ -83,9 +83,13 @@ These modules own movement-facing invariants:
 
 - nearby-entity queries
 - player/entity movement synchronization
-- collision-aware movement helpers
+- retention/visibility housekeeping for the world graph
 - conservative visibility tracking for prune deadlines
 - player mirror helpers such as `set_player_position()` and `set_player_vector()`
+
+Shared world no longer performs automatic local collision or local velocity integration during
+`tick()`. Those semantics are intentionally deferred until a future client can define a real
+client-side physics or prediction model.
 
 ### Lifecycle / retention helpers
 Files: [src/state/liveness.rs](src/state/liveness.rs), [src/state/mutations.rs](src/state/mutations.rs)

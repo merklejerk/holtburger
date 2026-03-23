@@ -1,5 +1,5 @@
 use crate::client::WireEvent;
-use crate::client::locomotion::{
+use crate::client::movement_types::{
     DriveIntent, MotionStyle, MovementPacketMetadata, MovementPrediction, MovementPrimitive,
     MovementRequest,
 };

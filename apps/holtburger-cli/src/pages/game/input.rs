@@ -196,8 +196,8 @@ impl GameState {
 
                     self.data.player_pos = Some(pos);
                     result.commands.push(ClientCommand::ExecuteMovement(
-                        holtburger_core::client::locomotion::MovementRequest::new(
-                            holtburger_core::client::locomotion::MovementPrimitive::SnapFacing {
+                        holtburger_core::client::movement_types::MovementRequest::new(
+                            holtburger_core::client::movement_types::MovementPrimitive::SnapFacing {
                                 heading: new_heading,
                             },
                         )
@@ -437,9 +437,9 @@ mod tests {
         assert!(matches!(
             result.commands.first(),
             Some(ClientCommand::ExecuteMovement(
-                holtburger_core::client::locomotion::MovementRequest {
+                holtburger_core::client::movement_types::MovementRequest {
                     primitive:
-                        holtburger_core::client::locomotion::MovementPrimitive::SnapFacing { .. },
+                        holtburger_core::client::movement_types::MovementPrimitive::SnapFacing { .. },
                     ..
                 }
             ))

@@ -15,7 +15,7 @@ use crate::client::controllers::{
     ApproachTargetInput, Controller, MaintainRangeConfig, MaintainRangeController,
     MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput,
 };
-use crate::client::locomotion::{MovementPacketMetadata, MovementPrimitive, MovementRequest};
+use crate::client::movement_types::{MovementPacketMetadata, MovementPrimitive, MovementRequest};
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;

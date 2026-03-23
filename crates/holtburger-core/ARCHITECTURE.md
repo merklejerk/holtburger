@@ -37,7 +37,7 @@ The core crate exposes two layers of client-facing behavior:
 
 Applications are free to use these controllers, ignore them, or layer their own policies above the primitive command surface. The core crate should not force every client into one control model, but it may provide shared controllers when the behavior is likely to be useful across a TUI, a 3D client, tools, or automated harnesses.
 
-The current primitive movement surface lives in [src/client/locomotion.rs](src/client/locomotion.rs). It defines controller-facing movement intent such as drive, snap-facing, and stop, while [src/client/movement.rs](src/client/movement.rs) remains the executor that applies those intents to local prediction and protocol traffic.
+The current primitive movement surface lives in [src/client/movement_types.rs](src/client/movement_types.rs). It defines controller-facing movement intent such as drive, snap-facing, and stop, while [src/client/movement.rs](src/client/movement.rs) remains the executor that applies those intents to local prediction and protocol traffic.
 
 `MovementPrimitive::Drive` now separates wire-facing intent from optional local prediction detail:
 

@@ -10,9 +10,9 @@ mod auth;
 mod builder;
 mod commands;
 pub mod controllers;
-pub mod locomotion;
 mod messages;
 mod movement;
+pub mod movement_types;
 pub mod navigation;
 pub mod types;
 use auth::AuthState;
@@ -170,7 +170,7 @@ impl Client {
             .send_autonomous_position_heartbeat(
                 world,
                 session,
-                locomotion::MovementPacketMetadata::default(),
+                movement_types::MovementPacketMetadata::default(),
             )
             .await
     }

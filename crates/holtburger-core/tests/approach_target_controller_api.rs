@@ -4,7 +4,7 @@ use holtburger_core::client::controllers::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetInput, Controller,
     ControllerStatus,
 };
-use holtburger_core::client::locomotion::{DriveIntent, MovementPrimitive};
+use holtburger_core::client::movement_types::{DriveIntent, MovementPrimitive};
 
 fn position(x: f32) -> WorldPosition {
     WorldPosition {

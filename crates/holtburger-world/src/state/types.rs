@@ -118,7 +118,9 @@ impl WorldState {
     }
 
     pub fn resolve_spell_name(&self, spell_id: u32) -> Option<String> {
-        self.spell_catalog.resolve_name(spell_id).map(str::to_string)
+        self.spell_catalog
+            .resolve_name(spell_id)
+            .map(str::to_string)
     }
 
     pub fn resolve_spell_info(&self, spell_id: u32) -> Option<SpellInfo> {
@@ -227,7 +229,10 @@ impl WorldState {
         }
     }
 
-    pub fn with_provider(scope: ResourceScope, provider: Arc<dyn ResourceProvider>) -> Result<Self> {
+    pub fn with_provider(
+        scope: ResourceScope,
+        provider: Arc<dyn ResourceProvider>,
+    ) -> Result<Self> {
         Self::new(Arc::new(ScopedResourceResolver::from_mounted([
             MountedResourceProvider::new(scope, provider),
         ])))

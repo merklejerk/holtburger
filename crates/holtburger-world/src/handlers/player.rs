@@ -71,14 +71,9 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
-            state.player.update_attribute(
-                *attribute,
-                *ranks,
-                *start,
-                *xp,
-                &state.xp_table,
-                events,
-            );
+            state
+                .player
+                .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
             true
         }
         GameMessage::PublicUpdateAttribute(data) => {
@@ -89,14 +84,9 @@ pub(crate) fn handle_message(
                 xp,
                 ..
             } = &**data;
-            state.player.update_attribute(
-                *attribute,
-                *ranks,
-                *start,
-                *xp,
-                &state.xp_table,
-                events,
-            );
+            state
+                .player
+                .update_attribute(*attribute, *ranks, *start, *xp, &state.xp_table, events);
             true
         }
         GameMessage::PrivateUpdateSkill(data) => {

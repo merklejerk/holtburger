@@ -32,7 +32,6 @@ impl Client {
                 match event {
                     WorldEvent::SelfServerControlledMotion(data) => {
                         self.movement
-                            .sequence_diagnostics
                             .record_server_control_sequence(data.server_control_sequence);
                         let (wire_events, world_events) = {
                             let Client {
@@ -55,7 +54,6 @@ impl Client {
                         ..
                     } => {
                         self.movement
-                            .sequence_diagnostics
                             .record_force_position_sequence(force_position_sequence);
                     }
                     WorldEvent::SelfAutonomousPosition {
@@ -63,13 +61,11 @@ impl Client {
                         force_position_sequence,
                         server_control_sequence,
                     } => {
-                        self.movement
-                            .sequence_diagnostics
-                            .record_autonomous_position_sequences(
-                                teleport_sequence,
-                                force_position_sequence,
-                                server_control_sequence,
-                            );
+                        self.movement.record_autonomous_position_sequences(
+                            teleport_sequence,
+                            force_position_sequence,
+                            server_control_sequence,
+                        );
                     }
                     _ => {}
                 }

@@ -24,8 +24,16 @@ fn repo_portal_hba_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/portal.hba")
 }
 
-fn write_micro_portal_hba(path: &Path) {
+fn write_micro_portal_hba(path: &Path) -> bool {
     let source_path = repo_portal_hba_path();
+    if !source_path.is_file() {
+        eprintln!(
+            "skipping portal fixture test; missing repo-local {}",
+            source_path.display()
+        );
+        return false;
+    }
+
     let source = HbaReader::open(&source_path).expect("repo portal.hba should open for tests");
 
     let mut writer = HbaWriter::new();
@@ -43,6 +51,8 @@ fn write_micro_portal_hba(path: &Path) {
     writer
         .write(path)
         .expect("micro portal.hba should be written");
+
+    true
 }
 
 #[test]
@@ -205,7 +215,9 @@ fn test_constructor_fails_when_required_tables_cannot_be_loaded() {
 fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     let dir = tempdir().expect("tempdir should be created");
     let portal_path = dir.path().join("portal.hba");
-    write_micro_portal_hba(&portal_path);
+    if !write_micro_portal_hba(&portal_path) {
+        return;
+    }
 
     let provider = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"))
         as Arc<dyn ResourceProvider>;

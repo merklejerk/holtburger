@@ -4,8 +4,9 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
-use holtburger_core::client::locomotion::{MovementPrimitive, MovementRequest};
-use holtburger_core::client::locomotion::MovementPacketMetadata;
+use holtburger_core::client::movement_types::{
+    MovementPacketMetadata, MovementPrimitive, MovementRequest,
+};
 use holtburger_core::client::navigation::{
     ApproachSyncInput, NavigationAutomation, StickyMeleeSyncInput,
 };
@@ -2953,7 +2954,7 @@ mod tests {
                 ClientCommand::TargetedMeleeAttack { .. }
                     | ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
             )
@@ -2990,7 +2991,7 @@ mod tests {
                     command,
                     ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3016,7 +3017,7 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3054,7 +3055,7 @@ mod tests {
                     command,
                     ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3068,7 +3069,7 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3112,7 +3113,7 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3165,7 +3166,7 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3203,7 +3204,7 @@ mod tests {
                     command,
                     ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3224,7 +3225,7 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3322,7 +3323,7 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Stop,
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
                     ..
                 })
             )
@@ -3341,7 +3342,7 @@ mod tests {
                     command,
                     ClientCommand::ExecuteMovement(MovementRequest {
                         primitive:
-                            holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
+                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                         ..
                     })
                 )
@@ -3422,7 +3423,7 @@ mod tests {
             matches!(
                 command,
                 ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::locomotion::MovementPrimitive::Drive { .. },
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
                     ..
                 })
             )

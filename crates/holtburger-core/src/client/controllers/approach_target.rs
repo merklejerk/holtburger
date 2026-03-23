@@ -5,7 +5,9 @@
 //! orchestration model.
 
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
-use crate::client::locomotion::{DriveIntent, MovementPrediction, MovementPrimitive, RUN_ANIM_SPEED};
+use crate::client::movement_types::{
+    DriveIntent, MovementPrediction, MovementPrimitive, RUN_ANIM_SPEED,
+};
 use holtburger_common::Guid;
 use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;

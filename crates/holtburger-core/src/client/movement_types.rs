@@ -3,7 +3,7 @@ use holtburger_protocol::messages::movement::MotionStance;
 
 pub(crate) const RUN_ANIM_SPEED: f32 = 4.0;
 
-pub(crate) fn world_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
+pub(crate) fn planar_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
     let world_speed = speed * RUN_ANIM_SPEED;
 
     Vector3::new(
@@ -87,7 +87,7 @@ pub enum MovementPrediction {
 impl MovementPrediction {
     pub fn resolve_velocity(self, heading: f32, speed: f32) -> Vector3 {
         match self {
-            Self::FromHeading => world_velocity_for_heading(heading, speed),
+            Self::FromHeading => planar_velocity_for_heading(heading, speed),
             Self::WorldVelocity(velocity) => velocity,
         }
     }

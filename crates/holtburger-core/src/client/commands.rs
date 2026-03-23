@@ -23,11 +23,7 @@ fn normalize_spell_cast(
 ) -> NormalizedSpellCast {
     let player_guid = world.player.guid;
 
-    if let Some(spell) = world
-        .spell_catalog
-        .as_ref()
-        .and_then(|catalog| catalog.get(spell_id))
-    {
+    if let Some(spell) = world.spell_catalog.get(spell_id) {
         if spell.is_untargeted() {
             return NormalizedSpellCast::Untargeted { spell_id };
         }
@@ -141,7 +137,6 @@ impl Client {
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
-                self.world.load_deferred_tables();
                 self.state = ClientState::EnteringWorld;
                 self.send_status_event();
                 self.auth.select_character(id, &mut self.session).await
@@ -152,8 +147,6 @@ impl Client {
                         "Attempting to enter world with character: 0x{:08X}",
                         char_id
                     );
-                    self.world.load_deferred_tables();
-                    self.emit_spell_catalog_loaded();
                     self.state = ClientState::EnteringWorld;
                     self.send_status_event();
                     self.auth.select_character(char_id, &mut self.session).await
@@ -902,12 +895,12 @@ mod tests {
     }
 
     fn world_with_spell(player_guid: Guid, spell_id: u32, spell: SpellInfo) -> WorldState {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         world.player.guid = player_guid;
-        world.spell_catalog = Some(Arc::new(SpellCatalog {
+        world.spell_catalog = Arc::new(SpellCatalog {
             spells: HashMap::from([(spell_id, spell)]),
             ..Default::default()
-        }));
+        });
         world
     }
 

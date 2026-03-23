@@ -5,6 +5,9 @@ authors.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+test-support = []
+
 [dependencies]
 holtburger-common = { workspace = true }
 holtburger-protocol = { workspace = true }

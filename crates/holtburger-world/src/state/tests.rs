@@ -12,7 +12,10 @@ use holtburger_common::properties::{
 };
 use holtburger_common::{CharacterOption, CharacterOptions1, CharacterOptions2};
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
-use holtburger_dat::{DatFileType, HbaReader, HbaWriter, ResourceProvider};
+use holtburger_dat::{
+    DatFileType, HbaReader, HbaWriter, MountedResourceProvider, ResourceProvider, ResourceScope,
+    ScopedResourceResolver,
+};
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 use tempfile::tempdir;
@@ -44,7 +47,7 @@ fn write_micro_portal_hba(path: &Path) {
 
 #[test]
 fn test_player_mirror_invariant_on_set_position() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
@@ -72,7 +75,7 @@ fn test_player_mirror_invariant_on_set_position() {
 
 #[test]
 fn test_player_mirror_invariant_on_set_velocity() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
@@ -88,7 +91,7 @@ fn test_player_mirror_invariant_on_set_velocity() {
 
 #[test]
 fn test_set_player_position_sanitizes_nan_rotation() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
@@ -129,7 +132,7 @@ fn test_set_player_position_sanitizes_nan_rotation() {
 fn test_spell_name_resolution() {
     use crate::spell::{SpellCatalog, SpellInfo};
 
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let mut spells = std::collections::HashMap::new();
     spells.insert(
         1337,
@@ -162,30 +165,25 @@ fn test_spell_name_resolution() {
         },
     );
 
-    state.spell_catalog = Some(Arc::new(SpellCatalog {
+    state.spell_catalog = Arc::new(SpellCatalog {
         spells,
         ..Default::default()
-    }));
+    });
 
     assert_eq!(state.resolve_spell_name(1337).unwrap(), "L33t Spell");
     assert!(state.resolve_spell_name(999).is_none());
 }
 
 #[test]
-fn test_load_deferred_tables_noop_without_portal_dat() {
-    let mut state = WorldState::new(None, None);
-    assert!(state.xp_table.is_none());
-    assert!(state.spell_catalog.is_none());
-
-    // Calling load_deferred_tables with no provider should be a clean no-op
-    state.load_deferred_tables();
-
-    assert!(state.xp_table.is_none());
-    assert!(state.spell_catalog.is_none());
+fn test_empty_world_uses_synthetic_reference_data() {
+    let state = WorldState::synthetic();
+    assert_eq!(state.xp_table.character_level_xp_list, vec![0]);
+    assert!(state.skill_table.skill_base_hash.is_empty());
+    assert!(state.spell_catalog.spells.is_empty());
 }
 
 #[test]
-fn test_load_deferred_tables_gracefully_handles_read_failure() {
+fn test_constructor_fails_when_required_tables_cannot_be_loaded() {
     struct MockFailedProvider;
     impl holtburger_dat::ResourceProvider for MockFailedProvider {
         fn get_file(&self, id: u32) -> Result<Vec<u8>, holtburger_dat::error::DatError> {
@@ -196,13 +194,11 @@ fn test_load_deferred_tables_gracefully_handles_read_failure() {
         }
     }
 
-    let mut state = WorldState::new(Some(Arc::new(MockFailedProvider)), None);
+    let error = WorldState::with_provider(ResourceScope::Portal, Arc::new(MockFailedProvider))
+        .err()
+        .expect("strict constructor should fail when required tables are unavailable");
 
-    // This shouldn't panic or error out the whole thing if reading fails
-    state.load_deferred_tables();
-
-    assert!(state.xp_table.is_none());
-    assert!(state.spell_catalog.is_none());
+    assert!(error.to_string().contains("skill table"));
 }
 
 #[test]
@@ -214,13 +210,12 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
     let provider = Arc::new(HbaReader::open(&portal_path).expect("micro portal.hba should open"))
         as Arc<dyn ResourceProvider>;
 
-    let mut state = WorldState::new(Some(provider), None);
-    assert!(state.skill_table.is_some());
+    let mut state = WorldState::with_provider(ResourceScope::Portal, provider)
+        .expect("provider-backed world should load required tables");
 
-    state.load_deferred_tables();
-
-    assert!(state.xp_table.is_some());
-    assert!(state.spell_catalog.is_some());
+    assert!(!state.skill_table.skill_base_hash.is_empty());
+    assert!(!state.xp_table.character_level_xp_list.is_empty());
+    assert!(!state.spell_catalog.spells.is_empty());
 
     state.player.set_int_prop(PropertyInt::Level, 1);
     state
@@ -236,9 +231,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
         .player
         .set_int64_prop(PropertyInt64::AvailableLuminance, 42);
 
-    let level_info = state
-        .get_level_info()
-        .expect("xp table should support level info");
+    let level_info = state.get_level_info();
     assert_eq!(level_info.level, 1);
     assert_eq!(level_info.current_xp, 0);
     assert_eq!(level_info.unspent_xp, 1234);
@@ -248,8 +241,6 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 
     let (spell_id, expected_name) = state
         .spell_catalog
-        .as_ref()
-        .expect("spell catalog should load")
         .spells
         .iter()
         .find(|(_, info)| {
@@ -276,8 +267,6 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 
     let (skill_id, expected_costs) = state
         .skill_table
-        .as_ref()
-        .expect("skill table should load")
         .skill_base_hash
         .iter()
         .find_map(|(id, base)| {
@@ -300,8 +289,8 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
             status: 2,
             init: 10,
             xp: 0,
-            xp_table: state.xp_table.as_ref(),
-            skill_table: state.skill_table.as_deref(),
+            xp_table: &state.xp_table,
+            skill_table: &state.skill_table,
         },
         &mut events,
     );
@@ -323,7 +312,7 @@ fn test_micro_portal_bundle_supports_runtime_table_lookups() {
 
 #[test]
 fn test_tick_does_not_integrate_player_velocity() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000124);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x12340000),
@@ -366,7 +355,10 @@ fn test_tick_does_not_fetch_portal_geometry() {
         }
     }
 
-    let mut state = WorldState::new(None, None);
+    let resources = Arc::new(ScopedResourceResolver::from_mounted([
+        MountedResourceProvider::new(ResourceScope::Portal, Arc::new(PanicProvider)),
+    ]));
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000125);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x12340000),
@@ -374,7 +366,7 @@ fn test_tick_does_not_fetch_portal_geometry() {
         rotation: holtburger_common::math::Quaternion::identity(),
     };
 
-    state.portal_dat = Some(Arc::new(PanicProvider));
+    state.resources = Some(resources);
     state.player.guid = player_guid;
     state.player.position = player_pos;
 
@@ -390,7 +382,7 @@ fn test_tick_does_not_fetch_portal_geometry() {
 
 #[test]
 fn test_player_mirror_invariant_on_autonomous_sync() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
@@ -434,7 +426,7 @@ fn test_player_mirror_invariant_on_autonomous_sync() {
 
 #[test]
 fn test_stale_player_autonomous_sync_is_ignored() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
     state.player.teleport_sequence = 30;
@@ -477,7 +469,7 @@ fn test_stale_player_autonomous_sync_is_ignored() {
 
 #[test]
 fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
     state.add_entity(Entity::new(
         guid,
@@ -512,7 +504,7 @@ fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
 
 #[test]
 fn test_private_update_position_non_location_is_stored_without_moving_player() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
@@ -558,7 +550,7 @@ fn test_private_update_position_non_location_is_stored_without_moving_player() {
 
 #[test]
 fn test_public_update_position_non_location_for_player_is_stored_without_moving_player() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     state.player.guid = player_guid;
 
@@ -603,7 +595,7 @@ fn test_public_update_position_non_location_for_player_is_stored_without_moving_
 
 #[test]
 fn test_public_update_position_non_location_for_other_entity_does_not_move_it() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let other_guid = Guid(0x50000999);
     state.player.guid = player_guid;
@@ -653,7 +645,7 @@ fn test_public_update_position_non_location_for_other_entity_does_not_move_it() 
 
 #[test]
 fn test_inventory_put_obj_in_container() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let item_guid = Guid(0x1);
     let container_guid = Guid(0x2);
 
@@ -698,7 +690,7 @@ fn test_inventory_put_obj_in_container() {
 
 #[test]
 fn test_inventory_put_object_in_3d() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let obj_guid = Guid(0x1);
 
     let mut item = Entity::new(obj_guid, "Item".to_string(), WorldPosition::default());
@@ -739,7 +731,7 @@ fn test_inventory_put_object_in_3d() {
 
 #[test]
 fn test_inventory_put_obj_in_container_emits_entity_moved_when_item_leaves_world() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x2);
     let item_guid = Guid(0x3);
 
@@ -782,7 +774,7 @@ fn test_inventory_put_obj_in_container_emits_entity_moved_when_item_leaves_world
 
 #[test]
 fn test_wield_object() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let obj_guid = Guid(0x1);
     let wielder_guid = Guid(0x50000001);
 
@@ -833,7 +825,7 @@ fn test_wield_object() {
 
 #[test]
 fn test_inventory_remove_object() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let obj_guid = Guid(0x1);
 
     state.entities.insert(Entity::new(
@@ -864,7 +856,7 @@ fn test_inventory_remove_object() {
 
 #[test]
 fn test_player_description_initialization() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
     let player_name = "TestingPlayer".to_string();
     let options1 =
@@ -935,7 +927,7 @@ fn test_player_description_initialization() {
 
 #[test]
 fn test_parent_event_does_not_null_player_landblock() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
     let initial_pos = WorldPosition {
         landblock_id: Guid(0xDA55001C),
@@ -974,7 +966,7 @@ fn test_parent_event_does_not_null_player_landblock() {
 
 #[test]
 fn test_player_wielder_iid_update_keeps_position() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
     let initial_pos = WorldPosition {
         landblock_id: Guid(0xDA55001C),
@@ -1015,7 +1007,7 @@ fn test_player_wielder_iid_update_keeps_position() {
 
 #[test]
 fn test_object_create_reuses_upsert_path_and_clears_explicit_delete() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x90000001);
 
     state.entities.insert(Entity::new(
@@ -1040,7 +1032,7 @@ fn test_object_create_reuses_upsert_path_and_clears_explicit_delete() {
 
 #[test]
 fn test_self_object_create_bootstraps_player_position() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000042);
 
     let initial_pos = WorldPosition {
@@ -1078,7 +1070,7 @@ fn test_self_object_create_bootstraps_player_position() {
 
 #[test]
 fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x90000002);
 
     state.entities.insert(Entity::new(
@@ -1106,7 +1098,7 @@ fn test_object_delete_marks_explicit_delete_without_inline_despawn() {
 
 #[test]
 fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000001);
     let guid = Guid(0x90000003);
 
@@ -1141,7 +1133,7 @@ fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
 
 #[test]
 fn test_pickup_event_marks_unretained_entity_for_sweep() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x90000004);
 
     state.entities.insert(Entity::new(
@@ -1181,7 +1173,7 @@ fn test_pickup_event_marks_unretained_entity_for_sweep() {
 
 #[test]
 fn test_explicit_delete_hides_entity_from_filtered_access() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0xABC);
 
     state.entities.insert(Entity::new(
@@ -1199,7 +1191,7 @@ fn test_explicit_delete_hides_entity_from_filtered_access() {
 
 #[test]
 fn test_retention_snapshot_reflects_lifecycle_metadata() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0xDEF);
     let mut entity = Entity::new(guid, "Preview".to_string(), WorldPosition::default());
     entity.position.landblock_id = Guid::NULL;
@@ -1220,7 +1212,7 @@ fn test_retention_snapshot_reflects_lifecycle_metadata() {
 
 #[test]
 fn test_remove_entity_clears_lifecycle_metadata() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x1234);
 
     state.entities.insert(Entity::new(
@@ -1237,7 +1229,7 @@ fn test_remove_entity_clears_lifecycle_metadata() {
 
 #[test]
 fn test_upsert_entity_from_create_replaces_in_place() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x4321);
     let mut events = Vec::new();
 
@@ -1267,7 +1259,7 @@ fn test_upsert_entity_from_create_replaces_in_place() {
 
 #[test]
 fn test_tick_sweeps_explicit_delete_without_movement() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let target_guid = Guid(0x60000123);
 
@@ -1296,7 +1288,7 @@ fn test_tick_sweeps_explicit_delete_without_movement() {
 
 #[test]
 fn test_tick_sweeps_expired_deadline_without_movement() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let target_guid = Guid(0x60000124);
 
@@ -1324,7 +1316,7 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
 
 #[test]
 fn test_tick_does_not_sweep_unexpired_deadline() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000123);
     let target_guid = Guid(0x60000125);
 
@@ -1348,7 +1340,7 @@ fn test_tick_does_not_sweep_unexpired_deadline() {
 
 #[test]
 fn test_tick_runs_sweep_without_player_guid() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let guid = Guid(0x70000123);
 
     state.entities.insert(Entity::new(
@@ -1370,7 +1362,7 @@ fn test_tick_runs_sweep_without_player_guid() {
 
 #[test]
 fn test_stationary_tick_starts_visibility_prune_deadline() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000130);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x0A0AFFFF),
@@ -1407,7 +1399,7 @@ fn test_stationary_tick_starts_visibility_prune_deadline() {
 
 #[test]
 fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000131);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x0A0AFFFF),
@@ -1454,7 +1446,7 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
 
 #[test]
 fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000132);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x0A0AFFFF),
@@ -1506,7 +1498,7 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
 
 #[test]
 fn test_indoor_player_keeps_nearby_outdoor_entity_visible_under_conservative_heuristic() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000132);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x0A0A0100),
@@ -1547,7 +1539,7 @@ fn test_indoor_player_keeps_nearby_outdoor_entity_visible_under_conservative_heu
 
 #[test]
 fn test_nearby_entities_omit_explicit_delete_and_null_landblock() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000133);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x0A0AFFFF),
@@ -1584,7 +1576,7 @@ fn test_nearby_entities_omit_explicit_delete_and_null_landblock() {
 
 #[test]
 fn test_add_to_trade_marks_preview_only_for_non_authoritative_entities() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000140);
     let preview_guid = Guid(0x60000140);
     let owned_guid = Guid(0x60000141);
@@ -1624,7 +1616,7 @@ fn test_add_to_trade_marks_preview_only_for_non_authoritative_entities() {
 
 #[test]
 fn test_reset_trade_sweeps_preview_only_entities() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000141);
     let preview_guid = Guid(0x60000142);
 
@@ -1686,7 +1678,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
 
 #[test]
 fn test_clear_trade_acceptance_does_not_sweep_preview_entities() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000142);
     let preview_guid = Guid(0x60000143);
 
@@ -1732,7 +1724,7 @@ fn test_clear_trade_acceptance_does_not_sweep_preview_entities() {
 
 #[test]
 fn test_close_trade_sweeps_preview_only_entities() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000152);
     let preview_guid = Guid(0x60000152);
 
@@ -1794,7 +1786,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
 
 #[test]
 fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_entity() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000143);
     let preview_guid = Guid(0x60000144);
     let owned_guid = Guid(0x60000145);
@@ -1866,7 +1858,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
 
 #[test]
 fn test_view_contents_ignores_unknown_guid_without_synthesizing_entity() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x70000150);
     let item_guid = Guid(0x60000150);
 
@@ -1897,7 +1889,7 @@ fn test_view_contents_ignores_unknown_guid_without_synthesizing_entity() {
 
 #[test]
 fn test_view_contents_marks_existing_entity_as_container_preview() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x70000157);
     let item_guid = Guid(0x60000157);
 
@@ -1941,7 +1933,7 @@ fn test_view_contents_marks_existing_entity_as_container_preview() {
 
 #[test]
 fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x70000151);
     let item_guid = Guid(0x60000151);
 
@@ -2011,7 +2003,7 @@ fn test_close_ground_container_marks_preview_only_entity_for_deferred_prune() {
 
 #[test]
 fn test_reopening_container_does_not_reactivate_stale_preview_contents() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x70000158);
     let old_item_guid = Guid(0x60000159);
     let new_item_guid = Guid(0x6000015A);
@@ -2098,7 +2090,7 @@ fn test_reopening_container_does_not_reactivate_stale_preview_contents() {
 
 #[test]
 fn test_late_container_item_arrival_is_marked_preview_and_pruned_on_close() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x7000015B);
     let item_guid = Guid(0x6000015B);
 
@@ -2157,7 +2149,7 @@ fn test_late_container_item_arrival_is_marked_preview_and_pruned_on_close() {
 
 #[test]
 fn test_closed_container_update_preserves_preview_provenance_and_prune_deadline() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x7000015C);
     let item_guid = Guid(0x6000015C);
 
@@ -2202,7 +2194,7 @@ fn test_closed_container_update_preserves_preview_provenance_and_prune_deadline(
 
 #[test]
 fn test_close_ground_container_preserves_entity_with_other_retention() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000153);
     let container_guid = Guid(0x70000153);
     let item_guid = Guid(0x60000153);
@@ -2244,7 +2236,7 @@ fn test_close_ground_container_preserves_entity_with_other_retention() {
 #[test]
 fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_container_retention()
  {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000154);
     let player_pos = WorldPosition {
         landblock_id: Guid(0x0A0AFFFF),
@@ -2322,7 +2314,7 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
 
 #[test]
 fn test_remove_entity_marks_wielded_dependents_for_prune() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let wielder_guid = Guid(0x60000157);
     let item_guid = Guid(0x60000158);
 
@@ -2373,7 +2365,7 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
 
 #[test]
 fn test_remove_entity_marks_contained_dependents_for_prune() {
-    let mut state = WorldState::new(None, None);
+    let mut state = WorldState::synthetic();
     let container_guid = Guid(0x60000159);
     let item_guid = Guid(0x6000015A);
 

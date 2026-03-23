@@ -23,6 +23,27 @@ use std::path::Path;
 pub const HBA_MAGIC: [u8; 4] = *b"HBA\0";
 pub const HBA_VERSION: u32 = 1;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum HbaProfile {
+    Unspecified = 0,
+    Full = 1,
+    Pruned = 2,
+    Micro = 3,
+}
+
+impl HbaProfile {
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Unspecified),
+            1 => Some(Self::Full),
+            2 => Some(Self::Pruned),
+            3 => Some(Self::Micro),
+            _ => None,
+        }
+    }
+}
+
 #[derive(BinRead, BinWrite, Debug)]
 #[br(little)]
 #[bw(little)]
@@ -275,8 +296,8 @@ impl HbaWriter {
         self.compress = compress;
     }
 
-    pub fn set_profile(&mut self, profile: u32) {
-        self.profile = profile;
+    pub fn set_profile(&mut self, profile: HbaProfile) {
+        self.profile = profile as u32;
     }
 
     pub fn add(&mut self, id: u32, type_id: u32, data: Vec<u8>) -> Result<()> {
@@ -427,6 +448,26 @@ mod tests {
         assert!(entry.is_compressed());
         assert!(entry.comp_size < entry.size);
         assert_eq!(reader.get_file(0x9999)?, data);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hba_profile_roundtrip() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("profile.hba");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer.set_profile(HbaProfile::Micro);
+        writer.add(0x1234, 0x0E, vec![1, 2, 3])?;
+        writer.write(&path)?;
+
+        let reader = HbaReader::open(&path)?;
+        assert_eq!(
+            HbaProfile::from_u32(reader.header.profile),
+            Some(HbaProfile::Micro)
+        );
 
         Ok(())
     }

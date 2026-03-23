@@ -1,6 +1,6 @@
 use crate::error::{Result, ToolError};
 use holtburger_dat::file_type::{EnvCell, GfxObj, SetupModel};
-use holtburger_dat::{DatDatabase, DatFileType, HbaWriter, StripperManifest};
+use holtburger_dat::{DatDatabase, DatFileType, HbaProfile, HbaWriter, StripperManifest};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -19,6 +19,14 @@ impl ArchiveProfile {
             ArchiveProfile::Pruned => Some(StripperManifest::logic_only()),
             ArchiveProfile::Micro => Some(StripperManifest::micro()),
             ArchiveProfile::Full => None,
+        }
+    }
+
+    fn hba_profile(self) -> HbaProfile {
+        match self {
+            ArchiveProfile::Full => HbaProfile::Full,
+            ArchiveProfile::Pruned => HbaProfile::Pruned,
+            ArchiveProfile::Micro => HbaProfile::Micro,
         }
     }
 }
@@ -147,6 +155,7 @@ pub fn process_dat_with_mode(
     println!("📦 Packing HBA archive...");
     let mut writer = HbaWriter::new();
     writer.set_compression(true);
+    writer.set_profile(profile.hba_profile());
 
     for (id, type_id, data, is_pruned) in processed_entries {
         if is_pruned {

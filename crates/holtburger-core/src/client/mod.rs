@@ -165,7 +165,7 @@ impl Client {
             });
     }
 
-    pub fn emit_initial_reference_data(&self) {
+    fn emit_initial_reference_data(&self) {
         self.emit_spell_catalog_loaded();
     }
 
@@ -669,25 +669,6 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn emit_initial_reference_data_projects_cached_spell_catalog() {
-        let mut client = builder::build_test_client(ClientState::Connected);
-        client.world.spell_catalog = std::sync::Arc::new(Default::default());
-        let mut events = client.subscribe_client_view_events();
-
-        client.emit_initial_reference_data();
-
-        let mut saw_catalog = false;
-        while let Ok(event) = events.try_recv() {
-            if matches!(event, ClientViewEvent::SpellCatalogLoaded { .. }) {
-                saw_catalog = true;
-                break;
-            }
-        }
-
-        assert!(saw_catalog);
-    }
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {

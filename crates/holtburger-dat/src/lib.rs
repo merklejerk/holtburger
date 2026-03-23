@@ -9,7 +9,7 @@ pub mod utils;
 pub mod weenie;
 
 use crate::utils::FileExtPolyfill;
-pub use archive::{HbaProfile, HbaReader, HbaWriter};
+pub use archive::{HbaProfile, HbaReader, HbaStreamWriter, HbaWriter};
 use binrw::{BinRead, io::Cursor};
 pub use error::{DatError, Result};
 pub use file_type::DatFileType;

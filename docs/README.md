@@ -2,6 +2,9 @@
 
 This document provides a breakdown of the network protocol used by Asheron's Call, as derived from the ACE emulator.
 
+Additional deep dives:
+- [Guide: Implementing Autonomous Client-Side Movement](autonomous_movement.md)
+
 ## Networking Stack Overview
 
 The protocol is structured in layers, operating over **UDP**:

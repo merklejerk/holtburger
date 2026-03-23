@@ -9,7 +9,7 @@ pub mod utils;
 pub mod weenie;
 
 use crate::utils::FileExtPolyfill;
-pub use archive::{HbaReader, HbaWriter};
+pub use archive::{HbaProfile, HbaReader, HbaStreamWriter, HbaWriter};
 use binrw::{BinRead, io::Cursor};
 pub use error::{DatError, Result};
 pub use file_type::DatFileType;
@@ -39,6 +39,29 @@ pub trait ResourceProvider: Send + Sync {
     /// Returns true if the file exists in this provider.
     fn exists(&self, id: u32) -> bool {
         self.get_metadata(id).is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResourceScope {
+    Portal,
+    Cell,
+}
+
+pub trait ScopedResource {
+    const FILE_ID: u32;
+    const RESOURCE_SCOPE: ResourceScope;
+}
+
+#[derive(Clone)]
+pub struct MountedResourceProvider {
+    pub scope: ResourceScope,
+    pub provider: std::sync::Arc<dyn ResourceProvider>,
+}
+
+impl MountedResourceProvider {
+    pub fn new(scope: ResourceScope, provider: std::sync::Arc<dyn ResourceProvider>) -> Self {
+        Self { scope, provider }
     }
 }
 
@@ -261,47 +284,65 @@ pub fn open_provider<P: AsRef<Path>>(path: P) -> Result<std::sync::Arc<dyn Resou
     })
 }
 
-pub struct CompositeProvider {
-    providers: Vec<Box<dyn ResourceProvider>>,
+#[derive(Default, Clone)]
+pub struct ScopedResourceResolver {
+    providers: Vec<MountedResourceProvider>,
 }
 
-impl Default for CompositeProvider {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CompositeProvider {
+impl ScopedResourceResolver {
     pub fn new() -> Self {
         Self {
             providers: Vec::new(),
         }
     }
 
-    pub fn add(&mut self, provider: impl ResourceProvider + 'static) {
-        self.providers.push(Box::new(provider));
+    pub fn from_mounted<I>(providers: I) -> Self
+    where
+        I: IntoIterator<Item = MountedResourceProvider>,
+    {
+        Self {
+            providers: providers.into_iter().collect(),
+        }
     }
-}
 
-impl ResourceProvider for CompositeProvider {
-    fn get_file(&self, id: u32) -> Result<Vec<u8>> {
+    pub fn add_provider(
+        &mut self,
+        scope: ResourceScope,
+        provider: std::sync::Arc<dyn ResourceProvider>,
+    ) {
+        self.providers
+            .push(MountedResourceProvider::new(scope, provider));
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.providers.is_empty()
+    }
+
+    pub fn has_scope(&self, scope: ResourceScope) -> bool {
+        self.providers
+            .iter()
+            .any(|provider| provider.scope == scope)
+    }
+
+    pub fn get_file(&self, scope: ResourceScope, id: u32) -> Result<Vec<u8>> {
         let mut first_pruned_provider = None;
 
-        for provider in &self.providers {
-            if let Some(meta) = provider.get_metadata(id) {
+        for mounted in self
+            .providers
+            .iter()
+            .filter(|provider| provider.scope == scope)
+        {
+            if let Some(meta) = mounted.provider.get_metadata(id) {
                 if !meta.is_pruned {
-                    // Gold standard found! Return immediately.
-                    return provider.get_file(id);
+                    return mounted.provider.get_file(id);
                 }
 
-                // Keep track of the first provider that has even a pruned version
                 if first_pruned_provider.is_none() {
-                    first_pruned_provider = Some(provider);
+                    first_pruned_provider = Some(&mounted.provider);
                 }
             }
         }
 
-        // Fallback to the first pruned version if no full one found
         if let Some(provider) = first_pruned_provider {
             return provider.get_file(id);
         }
@@ -309,11 +350,19 @@ impl ResourceProvider for CompositeProvider {
         Err(DatError::NotFound(id))
     }
 
-    fn get_metadata(&self, id: u32) -> Option<FileMetadata> {
+    pub fn get_file_for<T: ScopedResource>(&self) -> Result<Vec<u8>> {
+        self.get_file(T::RESOURCE_SCOPE, T::FILE_ID)
+    }
+
+    pub fn get_metadata(&self, scope: ResourceScope, id: u32) -> Option<FileMetadata> {
         let mut first_pruned = None;
 
-        for provider in &self.providers {
-            if let Some(meta) = provider.get_metadata(id) {
+        for mounted in self
+            .providers
+            .iter()
+            .filter(|provider| provider.scope == scope)
+        {
+            if let Some(meta) = mounted.provider.get_metadata(id) {
                 if !meta.is_pruned {
                     return Some(meta);
                 }
@@ -322,13 +371,27 @@ impl ResourceProvider for CompositeProvider {
                 }
             }
         }
+
         first_pruned
+    }
+
+    pub fn get_metadata_for<T: ScopedResource>(&self) -> Option<FileMetadata> {
+        self.get_metadata(T::RESOURCE_SCOPE, T::FILE_ID)
+    }
+
+    pub fn exists(&self, scope: ResourceScope, id: u32) -> bool {
+        self.get_metadata(scope, id).is_some()
+    }
+
+    pub fn exists_for<T: ScopedResource>(&self) -> bool {
+        self.exists(T::RESOURCE_SCOPE, T::FILE_ID)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     struct MockProvider {
         files: HashMap<u32, Vec<u8>>,
@@ -350,75 +413,81 @@ mod tests {
     }
 
     #[test]
-    fn test_composite_quality_prioritization() {
-        // Provider 1 has a PRUNED version of 0x1111
-        let mut p1 = MockProvider {
-            files: HashMap::new(),
-            pruned_ids: vec![0x1111],
-        };
-        p1.files.insert(0x1111, vec![0xDE, 0xAD]); // Pruned data
-
-        // Provider 2 has a FULL version of 0x1111
-        let mut p2 = MockProvider {
+    fn test_scoped_resource_resolver_keeps_portal_and_cell_separate() {
+        let mut portal = MockProvider {
             files: HashMap::new(),
             pruned_ids: vec![],
         };
-        p2.files.insert(0x1111, vec![0xBE, 0xEF]); // Full data
+        portal.files.insert(0x1234, vec![0xAA]);
 
-        let mut composite = CompositeProvider::new();
-        // Add p1 (pruned) first. In a "dumb" VFS, this would always win.
-        composite.add(p1);
-        composite.add(p2);
+        let mut cell = MockProvider {
+            files: HashMap::new(),
+            pruned_ids: vec![],
+        };
+        cell.files.insert(0x1234, vec![0xBB]);
 
-        // Should find the FULL version from p2 even though it was added second!
-        let data = composite.get_file(0x1111).unwrap();
-        assert_eq!(data, vec![0xBE, 0xEF]);
+        let resolver = ScopedResourceResolver::from_mounted([
+            MountedResourceProvider::new(ResourceScope::Portal, Arc::new(portal)),
+            MountedResourceProvider::new(ResourceScope::Cell, Arc::new(cell)),
+        ]);
 
-        // Metadata should also reflect the non-pruned status
-        let meta = composite.get_metadata(0x1111).unwrap();
-        assert!(!meta.is_pruned);
+        assert_eq!(
+            resolver.get_file(ResourceScope::Portal, 0x1234).unwrap(),
+            vec![0xAA]
+        );
+        assert_eq!(
+            resolver.get_file(ResourceScope::Cell, 0x1234).unwrap(),
+            vec![0xBB]
+        );
     }
 
     #[test]
-    fn test_composite_pruned_fallback() {
-        // If only pruned versions exist, we should still get one
-        let mut p1 = MockProvider {
+    fn test_scoped_resource_resolver_prefers_unpruned_within_scope() {
+        let mut pruned = MockProvider {
+            files: HashMap::new(),
+            pruned_ids: vec![0x4321],
+        };
+        pruned.files.insert(0x4321, vec![0x01]);
+
+        let mut full = MockProvider {
+            files: HashMap::new(),
+            pruned_ids: vec![],
+        };
+        full.files.insert(0x4321, vec![0x02]);
+
+        let resolver = ScopedResourceResolver::from_mounted([
+            MountedResourceProvider::new(ResourceScope::Portal, Arc::new(pruned)),
+            MountedResourceProvider::new(ResourceScope::Portal, Arc::new(full)),
+        ]);
+
+        assert_eq!(
+            resolver.get_file(ResourceScope::Portal, 0x4321).unwrap(),
+            vec![0x02]
+        );
+    }
+
+    #[test]
+    fn test_scoped_resource_resolver_falls_back_to_pruned_within_scope() {
+        let mut pruned = MockProvider {
             files: HashMap::new(),
             pruned_ids: vec![0x2222],
         };
-        p1.files.insert(0x2222, vec![1, 2, 3]);
+        pruned.files.insert(0x2222, vec![1, 2, 3]);
 
-        let mut composite = CompositeProvider::new();
-        composite.add(p1);
+        let resolver = ScopedResourceResolver::from_mounted([MountedResourceProvider::new(
+            ResourceScope::Portal,
+            Arc::new(pruned),
+        )]);
 
-        let data = composite.get_file(0x2222).unwrap();
-        assert_eq!(data, vec![1, 2, 3]);
-        assert!(composite.get_metadata(0x2222).unwrap().is_pruned);
-    }
-
-    #[test]
-    fn test_composite_provider() {
-        let mut p1 = MockProvider {
-            files: HashMap::new(),
-            pruned_ids: vec![],
-        };
-        p1.files.insert(0x1234, vec![1, 2, 3]);
-
-        let mut p2 = MockProvider {
-            files: HashMap::new(),
-            pruned_ids: vec![],
-        };
-        p2.files.insert(0x5678, vec![4, 5, 6]);
-
-        let mut composite = CompositeProvider::new();
-        composite.add(p1);
-        composite.add(p2);
-
-        assert!(composite.exists(0x1234));
-        assert!(composite.exists(0x5678));
-        assert!(!composite.exists(0x9999));
-
-        assert_eq!(composite.get_file(0x1234).unwrap(), vec![1, 2, 3]);
-        assert_eq!(composite.get_file(0x5678).unwrap(), vec![4, 5, 6]);
+        assert_eq!(
+            resolver.get_file(ResourceScope::Portal, 0x2222).unwrap(),
+            vec![1, 2, 3]
+        );
+        assert!(
+            resolver
+                .get_metadata(ResourceScope::Portal, 0x2222)
+                .unwrap()
+                .is_pruned
+        );
     }
 }

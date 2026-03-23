@@ -10,17 +10,19 @@ mod auth;
 mod builder;
 mod commands;
 pub mod controllers;
-pub mod locomotion;
 mod messages;
 mod movement;
+pub mod movement_types;
 pub mod navigation;
 pub mod types;
 use auth::AuthState;
+pub use builder::ClientBuilder;
 use movement::MovementSystem;
 use types::*;
 
 /// Physics tick interval in milliseconds.
 const PHYSICS_TICK_MS: u64 = 30;
+const MOVEMENT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const BUSY_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,14 +158,33 @@ impl Client {
         self.emit_busy_operation_finished(pending.operation, BusyOperationResult::TimedOut);
     }
 
+    async fn send_autonomous_movement_heartbeat_if_moving(&mut self) -> Result<bool> {
+        let Client {
+            movement,
+            world,
+            session,
+            ..
+        } = self;
+
+        movement
+            .send_autonomous_position_heartbeat(
+                world,
+                session,
+                movement_types::MovementPacketMetadata::default(),
+            )
+            .await
+    }
+
     fn emit_spell_catalog_loaded(&self) {
-        if let Some(catalog) = &self.world.spell_catalog {
-            let _ = self
-                .client_view_event_tx
-                .send(ClientViewEvent::SpellCatalogLoaded {
-                    catalog: catalog.clone(),
-                });
-        }
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::SpellCatalogLoaded {
+                catalog: self.world.spell_catalog.clone(),
+            });
+    }
+
+    fn emit_initial_reference_data(&self) {
+        self.emit_spell_catalog_loaded();
     }
 
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
@@ -569,7 +590,7 @@ impl Client {
         self.send_status_event();
 
         let mut physics_tick = tokio::time::interval(Duration::from_millis(PHYSICS_TICK_MS));
-        let mut net_tick = tokio::time::interval(Duration::from_secs(1));
+        let mut net_tick = tokio::time::interval(MOVEMENT_HEARTBEAT_INTERVAL);
         let mut last_physics_time = Instant::now();
 
         loop {
@@ -580,6 +601,10 @@ impl Client {
             tokio::select! {
                 _ = net_tick.tick() => {
                     let now = Instant::now();
+
+                    if matches!(self.state, ClientState::InWorld) {
+                        self.send_autonomous_movement_heartbeat_if_moving().await?;
+                    }
 
                     // 1. Broadcast NetPulse
                     let _ = self.client_view_event_tx.send(ClientViewEvent::NetPulse {
@@ -656,9 +681,15 @@ impl Client {
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
 
-                    // TODO: Use actual player radius from DAT/Properties
-                    let physics_events = self.world.tick(dt, 0.35);
+                    let physics_events = self.world.tick();
                     for event in physics_events {
+                        self.handle_world_event(&event);
+                    }
+
+                    let predicted_events = self
+                        .movement
+                        .advance_local_motion_prediction(dt, &mut self.world);
+                    for event in predicted_events {
                         self.handle_world_event(&event);
                     }
                 }
@@ -672,33 +703,12 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
-    use holtburger_session::Session;
-    use tokio::sync::broadcast;
-
-    fn build_test_client() -> Client {
-        let (wire_event_tx, _) = broadcast::channel(32);
-        let (client_view_event_tx, _) = broadcast::channel(32);
-
-        Client {
-            session: Session::new_test(),
-            world: WorldState::new(None, None),
-            active_confirmation: None,
-            active_busy_operation: None,
-            state: ClientState::Connected,
-            wire_event_tx,
-            client_view_event_tx,
-            command_rx: None,
-            message_dump_dir: None,
-            message_counter: 0,
-            movement: MovementSystem::new(),
-            auth: AuthState::new("test".to_string()),
-        }
-    }
+    use holtburger_common::{Guid, Vector3};
+    use holtburger_world::entity::Entity;
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {
-        let mut client = build_test_client();
+        let mut client = builder::build_test_client(ClientState::Connected);
         let mut events = client.subscribe_client_view_events();
 
         assert!(client.arm_busy_operation(BusyOperationKind::Buy));
@@ -723,9 +733,49 @@ mod tests {
         assert!(saw_timeout);
     }
 
+    #[tokio::test]
+    async fn movement_heartbeat_sends_autonomous_position_when_local_velocity_is_nonzero() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        let mut entity = Entity::new(guid, "Player".to_string(), client.world.player.position);
+        entity.velocity = Vector3::new(1.0, 0.0, 0.0);
+        client.world.entities.insert(entity);
+
+        let sent = client
+            .send_autonomous_movement_heartbeat_if_moving()
+            .await
+            .expect("movement heartbeat should succeed");
+
+        assert!(sent);
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn movement_heartbeat_skips_stationary_players() {
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+
+        client.world.player.guid = guid;
+        client.world.player.position.landblock_id = Guid(0x1000_0001);
+        let entity = Entity::new(guid, "Player".to_string(), client.world.player.position);
+        client.world.entities.insert(entity);
+
+        let sent = client
+            .send_autonomous_movement_heartbeat_if_moving()
+            .await
+            .expect("stationary heartbeat check should succeed");
+
+        assert!(!sent);
+        assert_eq!(client.session.game_action_sequence, 0);
+    }
+
     #[test]
     fn arm_busy_operation_rejects_overlap_and_preserves_original_pending_state() {
-        let mut client = build_test_client();
+        let mut client = builder::build_test_client(ClientState::Connected);
 
         assert!(client.arm_busy_operation(BusyOperationKind::Buy));
         assert!(!client.arm_busy_operation(BusyOperationKind::Sell));

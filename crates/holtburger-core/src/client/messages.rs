@@ -32,7 +32,6 @@ impl Client {
                 match event {
                     WorldEvent::SelfServerControlledMotion(data) => {
                         self.movement
-                            .sequence_diagnostics
                             .record_server_control_sequence(data.server_control_sequence);
                         let (wire_events, world_events) = {
                             let Client {
@@ -55,7 +54,6 @@ impl Client {
                         ..
                     } => {
                         self.movement
-                            .sequence_diagnostics
                             .record_force_position_sequence(force_position_sequence);
                     }
                     WorldEvent::SelfAutonomousPosition {
@@ -63,13 +61,11 @@ impl Client {
                         force_position_sequence,
                         server_control_sequence,
                     } => {
-                        self.movement
-                            .sequence_diagnostics
-                            .record_autonomous_position_sequences(
-                                teleport_sequence,
-                                force_position_sequence,
-                                server_control_sequence,
-                            );
+                        self.movement.record_autonomous_position_sequences(
+                            teleport_sequence,
+                            force_position_sequence,
+                            server_control_sequence,
+                        );
                     }
                     _ => {}
                 }
@@ -468,36 +464,17 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ClientState, auth::AuthState, movement::MovementSystem};
+    use crate::client::{ClientState, builder};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, ConfirmationType};
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::traits::ProtocolPack;
-    use holtburger_session::Session;
     use holtburger_world::WorldEvent;
-    use holtburger_world::WorldState;
     use holtburger_world::stats::CharacterLevelInfo;
-    use tokio::sync::broadcast;
 
     fn build_test_client() -> Client {
-        let (wire_event_tx, _) = broadcast::channel(32);
-        let (client_view_event_tx, _) = broadcast::channel(32);
-
-        Client {
-            session: Session::new_test(),
-            world: WorldState::new(None, None),
-            active_confirmation: None,
-            active_busy_operation: None,
-            state: ClientState::Connected,
-            wire_event_tx,
-            client_view_event_tx,
-            command_rx: None,
-            message_dump_dir: None,
-            message_counter: 0,
-            movement: MovementSystem::new(),
-            auth: AuthState::new("test".to_string()),
-        }
+        builder::build_test_client(ClientState::Connected)
     }
 
     fn encode_message(message: &GameMessage) -> Vec<u8> {
@@ -550,15 +527,19 @@ mod tests {
     async fn test_current_server_controlled_update_motion_sends_heartbeat() {
         let mut client = build_test_client();
         let player_guid = holtburger_common::Guid(0x50000001);
+        let position = WorldPosition {
+            landblock_id: holtburger_common::Guid(0x01000000),
+            ..WorldPosition::default()
+        };
         client.world.player.guid = player_guid;
         client.world.player.server_control_sequence = 9;
-        client.world.player.position = WorldPosition::default();
+        client.world.player.position = position;
         client
             .world
             .add_entity(holtburger_world::entity::Entity::new(
                 player_guid,
                 "Player".to_string(),
-                WorldPosition::default(),
+                position,
             ));
 
         let encoded = encode_message(&server_controlled_motion(player_guid, 10, 20));

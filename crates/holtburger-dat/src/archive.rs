@@ -14,14 +14,34 @@ use crate::ResourceProvider;
 use crate::error::{DatError, Result};
 use crate::utils::FileExtPolyfill;
 use binrw::{BinRead, BinWrite, io::Cursor};
-use rayon::prelude::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
 pub const HBA_MAGIC: [u8; 4] = *b"HBA\0";
 pub const HBA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u32)]
+pub enum HbaProfile {
+    Unspecified = 0,
+    Full = 1,
+    Pruned = 2,
+    Micro = 3,
+}
+
+impl HbaProfile {
+    pub fn from_u32(value: u32) -> Option<Self> {
+        match value {
+            0 => Some(Self::Unspecified),
+            1 => Some(Self::Full),
+            2 => Some(Self::Pruned),
+            3 => Some(Self::Micro),
+            _ => None,
+        }
+    }
+}
 
 #[derive(BinRead, BinWrite, Debug)]
 #[br(little)]
@@ -254,6 +274,14 @@ pub struct HbaWriter {
     profile: u32,
 }
 
+pub struct HbaStreamWriter {
+    file: File,
+    seen_ids: HashSet<u32>,
+    entries: Vec<HbaEntry>,
+    compress: bool,
+    profile: u32,
+}
+
 impl HbaWriter {
     pub fn new() -> Self {
         Self {
@@ -275,8 +303,8 @@ impl HbaWriter {
         self.compress = compress;
     }
 
-    pub fn set_profile(&mut self, profile: u32) {
-        self.profile = profile;
+    pub fn set_profile(&mut self, profile: HbaProfile) {
+        self.profile = profile as u32;
     }
 
     pub fn add(&mut self, id: u32, type_id: u32, data: Vec<u8>) -> Result<()> {
@@ -295,90 +323,125 @@ impl HbaWriter {
         Ok(())
     }
 
-    pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let mut file = File::create(path)?;
+    pub fn write<P: AsRef<Path>>(self, path: P) -> Result<()> {
+        let mut writer = HbaStreamWriter::create(path)?;
+        writer.set_compression(self.compress);
+        writer.set_profile(HbaProfile::from_u32(self.profile).unwrap_or(HbaProfile::Unspecified));
 
-        // Placeholder for header
+        let mut entries: Vec<_> = self.entries.into_iter().collect();
+        entries.sort_by_key(|(id, _)| *id);
+
+        for (id, (type_id, data, is_pruned)) in entries {
+            if is_pruned {
+                writer.add_pruned(id, type_id, data)?;
+            } else {
+                writer.add(id, type_id, data)?;
+            }
+        }
+
+        writer.finish()
+    }
+}
+
+impl HbaStreamWriter {
+    pub fn create<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let mut file = File::create(path)?;
         let dummy_header = HbaHeader {
             magic: HBA_MAGIC,
             version: HBA_VERSION,
-            entry_count: self.entries.len() as u32,
+            entry_count: 0,
             index_offset: 0,
             metadata_size: 0,
-            profile: self.profile,
+            profile: HbaProfile::Unspecified as u32,
         };
         dummy_header.write(&mut file)?;
 
-        // Parallel compression and preparation
-        let processed: Vec<(u32, u32, Vec<u8>, u32, u8)> = self
-            .entries
-            .par_iter()
-            .map(|(id, (type_id, data, is_pruned))| {
-                let flags = if *is_pruned { HbaEntry::FLAG_PRUNED } else { 0 };
-                let original_size = data.len() as u32;
+        Ok(Self {
+            file,
+            seen_ids: HashSet::new(),
+            entries: Vec::new(),
+            compress: true,
+            profile: HbaProfile::Unspecified as u32,
+        })
+    }
 
-                if self.compress {
-                    match zstd::encode_all(Cursor::new(data), 3) {
-                        Ok(compressed) if compressed.len() < data.len() => {
-                            return (
-                                *id,
-                                *type_id,
-                                compressed,
-                                original_size,
-                                flags | HbaEntry::FLAG_ZSTD,
-                            );
-                        }
-                        Ok(_) => {} // Not smaller, use original
-                        Err(e) => {
-                            log::warn!("Compression failed for 0x{:08X}: {}", id, e);
-                        }
-                    }
-                }
+    pub fn set_compression(&mut self, compress: bool) {
+        self.compress = compress;
+    }
 
-                (*id, *type_id, data.clone(), original_size, flags)
-            })
-            .collect();
+    pub fn set_profile(&mut self, profile: HbaProfile) {
+        self.profile = profile as u32;
+    }
 
-        let mut processed = processed;
-        processed.sort_by_key(|p| p.0);
+    pub fn add(&mut self, id: u32, type_id: u32, data: Vec<u8>) -> Result<()> {
+        self.write_entry(id, type_id, data, false)
+    }
 
-        let mut hba_entries = Vec::new();
+    pub fn add_pruned(&mut self, id: u32, type_id: u32, data: Vec<u8>) -> Result<()> {
+        self.write_entry(id, type_id, data, true)
+    }
 
-        // Sequential write to disk
-        let mut current_offset = file.stream_position()?;
-        for (id, type_id, final_data, original_size, flags) in processed {
-            file.write_all(&final_data)?;
+    pub fn finish(mut self) -> Result<()> {
+        self.entries.sort_by_key(|entry| entry.id);
 
-            hba_entries.push(HbaEntry {
-                id,
-                type_id,
-                offset: current_offset,
-                size: original_size,
-                comp_size: final_data.len() as u32,
-                flags,
-                storage_id: 0,
-                reserved: [0; 2],
-            });
-            current_offset += final_data.len() as u64;
-        }
-
-        // Write index
-        let index_offset = current_offset;
+        let index_offset = self.file.stream_position()?;
         {
-            let mut buf_writer = std::io::BufWriter::new(&mut file);
-            for entry in hba_entries {
+            let mut buf_writer = std::io::BufWriter::new(&mut self.file);
+            for entry in &self.entries {
                 entry.write(&mut buf_writer)?;
             }
             buf_writer.flush()?;
         }
 
-        // Update header
-        file.seek(SeekFrom::Start(0))?;
+        self.file.seek(SeekFrom::Start(0))?;
         let final_header = HbaHeader {
+            magic: HBA_MAGIC,
+            version: HBA_VERSION,
+            entry_count: self.entries.len() as u32,
             index_offset,
-            ..dummy_header
+            metadata_size: 0,
+            profile: self.profile,
         };
-        final_header.write(&mut file)?;
+        final_header.write(&mut self.file)?;
+
+        Ok(())
+    }
+
+    fn write_entry(&mut self, id: u32, type_id: u32, data: Vec<u8>, is_pruned: bool) -> Result<()> {
+        if !self.seen_ids.insert(id) {
+            return Err(DatError::DuplicateId(id));
+        }
+
+        let original_size = data.len() as u32;
+        let mut flags = if is_pruned { HbaEntry::FLAG_PRUNED } else { 0 };
+        let mut final_data = data;
+
+        if self.compress {
+            match zstd::encode_all(Cursor::new(&final_data), 3) {
+                Ok(compressed) if compressed.len() < final_data.len() => {
+                    final_data = compressed;
+                    flags |= HbaEntry::FLAG_ZSTD;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("Compression failed for 0x{:08X}: {}", id, e);
+                }
+            }
+        }
+
+        let offset = self.file.stream_position()?;
+        self.file.write_all(&final_data)?;
+
+        self.entries.push(HbaEntry {
+            id,
+            type_id,
+            offset,
+            size: original_size,
+            comp_size: final_data.len() as u32,
+            flags,
+            storage_id: 0,
+            reserved: [0; 2],
+        });
 
         Ok(())
     }
@@ -427,6 +490,55 @@ mod tests {
         assert!(entry.is_compressed());
         assert!(entry.comp_size < entry.size);
         assert_eq!(reader.get_file(0x9999)?, data);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_hba_profile_roundtrip() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("profile.hba");
+
+        let mut writer = HbaWriter::new();
+        writer.set_compression(false);
+        writer.set_profile(HbaProfile::Micro);
+        writer.add(0x1234, 0x0E, vec![1, 2, 3])?;
+        writer.write(&path)?;
+
+        let reader = HbaReader::open(&path)?;
+        assert_eq!(
+            HbaProfile::from_u32(reader.header.profile),
+            Some(HbaProfile::Micro)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_stream_writer_roundtrip_out_of_order_adds() -> Result<()> {
+        let dir = tempdir()?;
+        let path = dir.path().join("stream.hba");
+
+        let mut writer = HbaStreamWriter::create(&path)?;
+        writer.set_compression(false);
+        writer.set_profile(HbaProfile::Pruned);
+        writer.add(0x2222, 0x02, vec![4, 5, 6])?;
+        writer.add_pruned(0x1111, 0x01, vec![1, 2, 3])?;
+        writer.finish()?;
+
+        let reader = HbaReader::open(&path)?;
+        let entries: Vec<_> = reader.entries().collect::<Result<Vec<_>>>()?;
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, 0x1111);
+        assert!(entries[0].is_pruned());
+        assert_eq!(entries[1].id, 0x2222);
+        assert_eq!(reader.get_file(0x1111)?, vec![1, 2, 3]);
+        assert_eq!(reader.get_file(0x2222)?, vec![4, 5, 6]);
+        assert_eq!(
+            HbaProfile::from_u32(reader.header.profile),
+            Some(HbaProfile::Pruned)
+        );
 
         Ok(())
     }

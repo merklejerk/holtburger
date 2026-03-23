@@ -182,7 +182,8 @@ impl NavigationAutomation {
 
         let mut result = self.sync_approach_target(input);
 
-        if let (Some(player_position), Some(target_position)) = (input.player_position, input.target_position)
+        if let (Some(player_position), Some(target_position)) =
+            (input.player_position, input.target_position)
             && result.commands.iter().any(|command| {
                 matches!(
                     command,
@@ -467,7 +468,10 @@ impl NavigationAutomation {
             MaintainRangeEffect::Stop => {
                 log::info!("sticky melee: pausing pursuit");
                 self.approach_target = None;
-                result.push_command(Self::movement_command(MovementPrimitive::Stop, input.metadata));
+                result.push_command(Self::movement_command(
+                    MovementPrimitive::Stop,
+                    input.metadata,
+                ));
             }
             MaintainRangeEffect::Finished(reason) => {
                 self.log_sticky_melee_finish(reason);
@@ -633,13 +637,13 @@ mod tests {
                 })
             )
         }));
-        assert!(!next
-            .commands
-            .iter()
-            .any(|command| matches!(command, ClientCommand::ExecuteMovement(MovementRequest {
+        assert!(!next.commands.iter().any(|command| matches!(
+            command,
+            ClientCommand::ExecuteMovement(MovementRequest {
                 primitive: MovementPrimitive::SnapFacing { .. },
                 ..
-            }))));
+            })
+        )));
         assert!(automation.has_active_approach());
     }
 

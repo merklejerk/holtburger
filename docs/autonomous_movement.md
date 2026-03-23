@@ -447,13 +447,24 @@ So the stop packet is not optional protocol hygiene. It is the clean termination
 
 In practice, a clean locally driven stop often wants **both** bookends:
 
-1. a final `AutonomousPosition` carrying the last locally accepted resting position
-2. a stop `MoveToState` that clears the observer-facing motion state
+1. a stop `MoveToState` that clears the observer-facing motion state
+2. a final `AutonomousPosition` carrying the last locally accepted resting position
 
 Those packets solve different problems:
 
-- the final `AutonomousPosition` immediately rebroadcasts the final accepted position and rotation through the authoritative position path
 - the stop `MoveToState` tells observers to stop simulating the previous forward / sidestep / turn intent
+- the final `AutonomousPosition` immediately rebroadcasts the final accepted position and rotation through the authoritative position path
+
+The ordering matters.
+
+ACE does not queue multiple pending requested locations. `SetRequestedLocation()` just stores one `RequestedLocation` plus one `RequestedLocationBroadcast` flag in [Player_Networking.cs](../ACE/Source/ACE.Server/WorldObjects/Player_Networking.cs). `AutonomousPosition` writes that slot with broadcast enabled, while `MoveToState` writes it with broadcast disabled before separately calling `BroadcastMovement()`.
+
+So if a client sends final `AutonomousPosition` first and immediate stop `MoveToState` second, the stop can overwrite the pending broadcast-enabled resting position before the next physics tick consumes it. The server still learns the final resting position, but nearby observers may keep rendering the last public motion result until another later action forces a fresh public `UpdatePosition`.
+
+For locally driven stops, prefer this order:
+
+1. send the stop `MoveToState`
+2. then send the final `AutonomousPosition`
 
 If you only send the stop pulse, observers can stop animating but still appear to stop slightly short until a later position update corrects them.
 

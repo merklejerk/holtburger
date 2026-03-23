@@ -371,10 +371,10 @@ impl MovementSystem {
                 ));
             }
             MovementPrimitive::Stop if self.should_send_stop_pulse() => {
+                Self::send_stop_pulse(world, session, request.metadata).await?;
                 if had_active_local_motion {
                     Self::send_autonomous_position_sync(world, session, request.metadata).await?;
                 }
-                Self::send_stop_pulse(world, session, request.metadata).await?;
                 self.note_server_motion_cleared();
             }
             _ => {}
@@ -722,12 +722,8 @@ impl MovementSystem {
 
         let state_events = world.set_player_position(next_pos);
 
-        Self::send_autonomous_position_sync(
-            world,
-            session,
-            MovementPacketMetadata::default(),
-        )
-        .await?;
+        Self::send_autonomous_position_sync(world, session, MovementPacketMetadata::default())
+            .await?;
 
         Ok((wire_events, state_events))
     }
@@ -1223,7 +1219,9 @@ mod tests {
         world.player.server_control_sequence = 22;
         world.player.teleport_sequence = 33;
         world.player.force_position_sequence = 44;
-        world.entities.insert(Entity::new(guid, "Player".to_string(), position));
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
 
         let sync = build_autonomous_position_sync(&world, MovementPacketMetadata::default())
             .expect("server-controlled sync should emit even when stationary");
@@ -1236,7 +1234,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn stop_after_active_drive_sends_final_position_sync_and_stop_pulse() {
+    async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
         let mut world = WorldState::new(None, None);
         let guid = Guid(0x0102_0304);
         let position = WorldPosition {
@@ -1295,7 +1293,9 @@ mod tests {
 
         world.player.guid = guid;
         world.player.position = position;
-        world.entities.insert(Entity::new(guid, "Player".to_string(), position));
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
 
         let mut movement = MovementSystem::new();
         let mut session = Session::new_test();
@@ -1330,7 +1330,9 @@ mod tests {
 
         world.player.guid = guid;
         world.player.position = position;
-        world.entities.insert(Entity::new(guid, "Player".to_string(), position));
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
 
         let mut movement = MovementSystem::new();
         let mut session = Session::new_test();

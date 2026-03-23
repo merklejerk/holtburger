@@ -2894,15 +2894,13 @@ mod tests {
             },
         ));
 
-        assert!(
-            result
-                .commands
-                .iter()
-                .any(|command| matches!(command, ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::SnapFacing { .. },
-                    ..
-                })))
-        );
+        assert!(result.commands.iter().any(|command| matches!(
+            command,
+            ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::SnapFacing { .. },
+                ..
+            })
+        )));
         assert!(has_active_approach(&state));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
 
@@ -3260,14 +3258,13 @@ mod tests {
         let mut turn = UpdateResult::new();
         state.sync_combat_automation(now, CombatMode::Missile, true, &mut turn);
 
-        assert!(
-            turn.commands
-                .iter()
-                .any(|command| matches!(command, ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: MovementPrimitive::SnapFacing { .. },
-                    ..
-                })))
-        );
+        assert!(turn.commands.iter().any(|command| matches!(
+            command,
+            ClientCommand::ExecuteMovement(MovementRequest {
+                primitive: MovementPrimitive::SnapFacing { .. },
+                ..
+            })
+        )));
         assert!(
             !turn
                 .commands

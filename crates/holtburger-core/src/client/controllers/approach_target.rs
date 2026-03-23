@@ -136,13 +136,10 @@ impl Controller for ApproachTargetController {
                         ));
                 }
 
-                let prediction = Self::predicted_velocity_toward(
-                    player_position,
-                    target_position,
-                    move_speed,
-                )
-                .map(MovementPrediction::WorldVelocity)
-                .unwrap_or(MovementPrediction::FromHeading);
+                let prediction =
+                    Self::predicted_velocity_toward(player_position, target_position, move_speed)
+                        .map(MovementPrediction::WorldVelocity)
+                        .unwrap_or(MovementPrediction::FromHeading);
 
                 ControllerUpdate::new(ControllerStatus::Active).with_effect(
                     ApproachTargetEffect::Movement(MovementPrimitive::Drive {
@@ -217,15 +214,13 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(
-                MovementPrimitive::Drive {
-                    intent: DriveIntent {
-                        heading: std::f32::consts::PI,
-                        speed: 4.5,
-                    },
-                    prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
-                }
-            )]
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
     }
 
@@ -255,15 +250,13 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(
-                MovementPrimitive::Drive {
-                    intent: DriveIntent {
-                        heading: std::f32::consts::PI,
-                        speed: 4.5,
-                    },
-                    prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
-                }
-            )]
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
     }
 
@@ -334,15 +327,13 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(
-                MovementPrimitive::Drive {
-                    intent: DriveIntent {
-                        heading: std::f32::consts::PI,
-                        speed: 4.5,
-                    },
-                    prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
-                }
-            )]
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
     }
 
@@ -370,15 +361,13 @@ mod tests {
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
             update.effects,
-            vec![ApproachTargetEffect::Movement(
-                MovementPrimitive::Drive {
-                    intent: DriveIntent {
-                        heading: std::f32::consts::PI,
-                        speed: 4.5,
-                    },
-                    prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
-                }
-            )]
+            vec![ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: std::f32::consts::PI,
+                    speed: 4.5,
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(18.0, 0.0, 0.0)),
+            })]
         );
     }
 

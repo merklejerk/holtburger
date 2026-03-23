@@ -1,8 +1,8 @@
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
-use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_common::Guid;
+use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
@@ -87,9 +87,7 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::ExecuteMovement(_) => {
-                self.handle_movement_command(cmd).await
-            }
+            ClientCommand::ExecuteMovement(_) => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }

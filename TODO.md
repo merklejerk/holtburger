@@ -79,6 +79,7 @@
 - [x] Preserve selected item + scroll offset when switching tabs, with sane fallback.
 - [x] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [x] `/set [CHARACTER_OPTION] ...` command.
+- [x] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
@@ -86,7 +87,6 @@
 - [ ] Use sibling files for tests.
 - [ ] Auto-follow.
 - [ ] Add a movable cursor to the chat input.
-- [ ] Micro HBA mode + bundle: only spell, skill, and xp tables.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.
 - [ ] Some echantments duplicated in char tab.
@@ -209,9 +209,9 @@
     - [x] Maybe just log any time something new is added to your inventory.
 - [x] Picked up items appear as wielded in nearby tab until you assess or debug them.
 - [x] Filter verb to vendor tab.
+- [x] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
-- [ ] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`
 

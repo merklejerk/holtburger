@@ -273,6 +273,7 @@ async fn main() -> Result<()> {
 
     client.set_command_rx(server_cmd_rx);
     let mut server_event_rx = client.subscribe_client_view_events();
+    client.emit_initial_reference_data();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();

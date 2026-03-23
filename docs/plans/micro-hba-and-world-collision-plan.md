@@ -30,7 +30,7 @@ Add a TUI-oriented micro DAT bundle that contains only the portal tables the cur
 - Current HBA/archive and provider abstractions in [crates/holtburger-dat/src/archive.rs](/home/me/code/holtburger/crates/holtburger-dat/src/archive.rs) and [crates/holtburger-dat/src/lib.rs](/home/me/code/holtburger/crates/holtburger-dat/src/lib.rs)
 - Current stripping flow in [apps/holtburger-tools/src/lib.rs](/home/me/code/holtburger/apps/holtburger-tools/src/lib.rs) and [apps/holtburger-tools/src/bin/dat2hba.rs](/home/me/code/holtburger/apps/holtburger-tools/src/bin/dat2hba.rs)
 - Current strip-manifest shape in [crates/holtburger-dat/src/manifest.rs](/home/me/code/holtburger/crates/holtburger-dat/src/manifest.rs)
-- Current world bootstrap and deferred table loading in [crates/holtburger-world/src/state/types.rs](/home/me/code/holtburger/crates/holtburger-world/src/state/types.rs)
+- Current world bootstrap and eager table loading in [crates/holtburger-world/src/state/types.rs](/home/me/code/holtburger/crates/holtburger-world/src/state/types.rs)
 - Current shared physics tick and collision path in [crates/holtburger-world/src/state/physics.rs](/home/me/code/holtburger/crates/holtburger-world/src/state/physics.rs) and [crates/holtburger-core/src/client/mod.rs](/home/me/code/holtburger/crates/holtburger-core/src/client/mod.rs)
 - Current client bootstrap requirements in [crates/holtburger-core/src/client/builder.rs](/home/me/code/holtburger/crates/holtburger-core/src/client/builder.rs)
 - Current spell, XP, and skill table parsers in [crates/holtburger-dat/src/file_type/spell_table.rs](/home/me/code/holtburger/crates/holtburger-dat/src/file_type/spell_table.rs), [crates/holtburger-dat/src/file_type/xp_table.rs](/home/me/code/holtburger/crates/holtburger-dat/src/file_type/xp_table.rs), and [crates/holtburger-dat/src/file_type/skill_table.rs](/home/me/code/holtburger/crates/holtburger-dat/src/file_type/skill_table.rs)
@@ -49,8 +49,8 @@ Add a TUI-oriented micro DAT bundle that contains only the portal tables the cur
 ### The Current Pruned Bundle Is Still Too Broad
 `StripperManifest::logic_only()` in [crates/holtburger-dat/src/manifest.rs](/home/me/code/holtburger/crates/holtburger-dat/src/manifest.rs) keeps whole file-type classes such as `DatFileType::Table`, `Model`, `SetupModel`, `EnvCell`, `Landblock`, and `IndoorCell`. That is appropriate for a logic/physics-oriented pruned bundle, but it is far too coarse for a TUI-only micro bundle.
 
-### The Current TUI Path Needs More Than Spell And XP Tables
-`WorldState::new()` eagerly loads `SkillTable::FILE_ID`, and `load_deferred_tables()` loads `SpellTable::FILE_ID` and `XpTable::FILE_ID` from portal data in [crates/holtburger-world/src/state/types.rs](/home/me/code/holtburger/crates/holtburger-world/src/state/types.rs). Player mutation logic consumes the skill table for skill cost and derivation behavior in [crates/holtburger-world/src/player/mutations.rs](/home/me/code/holtburger/crates/holtburger-world/src/player/mutations.rs). So the minimum confirmed micro payload is:
+### The Current TUI Path Needs All Three Gameplay Tables
+`WorldState::new()` eagerly loads `SkillTable::FILE_ID`, `SpellTable::FILE_ID`, and `XpTable::FILE_ID` from portal data in [crates/holtburger-world/src/state/types.rs](/home/me/code/holtburger/crates/holtburger-world/src/state/types.rs). Player mutation logic consumes the skill table for skill cost and derivation behavior in [crates/holtburger-world/src/player/mutations.rs](/home/me/code/holtburger/crates/holtburger-world/src/player/mutations.rs), XP lookups drive rank and level projections, and spell metadata backs runtime spell-name/catalog lookups. So the minimum confirmed micro payload is:
 
 - `0x0E000004` skill table
 - `0x0E00000E` spell table

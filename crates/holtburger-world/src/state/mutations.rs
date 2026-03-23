@@ -50,9 +50,7 @@ impl WorldState {
     }
 
     pub(crate) fn emit_level_info(&self, events: &mut Vec<WorldEvent>) {
-        if let Some(info) = self.get_level_info() {
-            events.push(WorldEvent::LevelInfoUpdated(info));
-        }
+        events.push(WorldEvent::LevelInfoUpdated(self.get_level_info()));
     }
 
     pub(crate) fn emit_player_info(
@@ -75,7 +73,7 @@ impl WorldState {
             skills: self.player.get_skills(),
             enchantments: self.player.enchantments.clone(),
             spells: self.player.spells.keys().cloned().collect(),
-            level_info: self.get_level_info().unwrap_or_default(),
+            level_info: self.get_level_info(),
             resistances: self.player.resistances(),
             armor: self.player.armor(),
             vitae: self.player.vitae(),

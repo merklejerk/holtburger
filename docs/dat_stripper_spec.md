@@ -28,7 +28,8 @@ The `ResourceProvider` trait in `holtburger-dat` defines the interface for fetch
 **Implementations:**
 *   `DatProvider`: Reads from legacy AC `.dat` files via `DatDatabase`.
 *   `HbaProvider`: Reads from the new high-performance `.hba` archives.
-*   `CompositeProvider`: Chains multiple providers (e.g., "Check HBA first, then fallback to DAT").
+
+Mounted providers are now composed at runtime through a scope-aware resolver that keeps portal and cell assets in distinct namespaces while still allowing quality-aware fallback within a scope.
 
 ### 3.2. The Holtburger Archive (.hba) Format
 The `.hba` format is a flat binary archive optimized for the VFS. It is content-agnostic and supports both stripped "Lite" data and "Full" visual data.
@@ -54,11 +55,11 @@ Each entry is the source of truth for its specific file.
 | Size | `u32le` | 4 | Decompressed size. |
 | Comp Size | `u32le` | 4 | Compressed size (on disk). |
 | Flags | `u8` | 1 | `0x01`: Zstd, `0x04`: Pruned (Internally stripped). |
-| Storage ID | `u8` | 1 | Reserved. |
+| Storage ID | `u8` | 1 | Reserved for external storage references. |
 | Reserved | `u8[2]` | 2 | Alignment. |
 
 ### 3.3. Smart VFS Fallback
-The `CompositeProvider` (VFS) should be quality-aware. If a 3D client requests a `GfxObj` and the first provider returns an entry marked with `FLAG_PRUNED` (or a "Lite" Type ID), the VFS can choose to "Continue Searching" other providers for a higher-fidelity version rather than just returning the first match.
+The scoped resolver should be quality-aware within each dataset role. If a future 3D client requests a `GfxObj` from the portal scope and the first mounted provider only has a pruned entry, the resolver can continue searching other portal-scoped providers for a higher-fidelity version rather than immediately returning the first match.
 
 ## 4. Proposed Solution: `holtburger-tools`
 The `holtburger-tools` binary crate in `apps/holtburger-tools` will act as a "Compiler" for the VFS.
@@ -74,7 +75,7 @@ The `holtburger-tools` binary crate in `apps/holtburger-tools` will act as a "Co
 
 ### 4.2. Handling Physics and Dependencies
 *   **Total Decoupling:** The `.hba` format remains generic. It stores the same blobs found in the DATs, just in a simpler container.
-*   **Client Loading:** The client will swap its `DatDatabase` implementation for a `CompositeProvider` (loading the HBA).
+*   **Client Loading:** The client mounts one or more `ResourceProvider` implementations behind the scoped resolver and probes required assets by dataset role.
 
 ## 5. File Type Selection
 The following rules determine which files are included in the Lite DATs.
@@ -140,8 +141,8 @@ Moving to a VFS-based architecture with an optimized `.hba` format solves the di
 | :---: | :--- | :--- |
 | [x] | Define `ResourceProvider` trait in `src/lib.rs` | Added to `holtburger-dat/src/lib.rs`. |
 | [x] | Refactor `DatDatabase` to implement `ResourceProvider` | Inherent `get_file` satisfies trait. |
-| [x] | Implement `CompositeProvider` (Chain of Responsibility) | Added with `add` method for trait objects. |
-| [x] | Add unit tests for `CompositeProvider` using mock providers | Verified via `cargo test`. |
+| [x] | Implement scope-aware mounted-provider routing | Current runtime uses `ScopedResourceResolver` for portal/cell namespacing and per-scope quality fallback. |
+| [x] | Add unit tests for scoped mounted-provider routing | Verified via `cargo test`. |
 | [x] | Create integration tests validating `ResourceProvider` against retail DAT fixtures | Verified against `HOLTBURGER_PORTAL_DAT` or local `dats/portal.dat`. |
 | **Criteria** | **Phase 1 Completion Criteria:** All unit and fixture-based tests pass. 0% reliance on TUI for validation. | Completed. |
 

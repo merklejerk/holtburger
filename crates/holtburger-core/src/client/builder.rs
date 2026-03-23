@@ -1,6 +1,8 @@
 use anyhow::{Result, anyhow};
-use holtburger_dat::ResourceProvider;
 use holtburger_dat::file_type::{SkillTable, SpellTable, XpTable};
+use holtburger_dat::{
+    MountedResourceProvider, ResourceProvider, ResourceScope, ScopedResourceResolver,
+};
 use holtburger_session::Session;
 use holtburger_world::WorldState;
 use std::path::{Path, PathBuf};
@@ -12,31 +14,25 @@ use super::{Client, ClientState, auth::AuthState, movement::MovementSystem};
 type Provider = Arc<dyn ResourceProvider>;
 
 #[derive(Clone, Copy)]
-struct RequiredPortalAsset {
+struct RequiredResourceAsset {
     id: u32,
     name: &'static str,
 }
 
-const REQUIRED_PORTAL_ASSETS: [RequiredPortalAsset; 3] = [
-    RequiredPortalAsset {
-        id: SkillTable::FILE_ID,
-        name: "skill table",
-    },
-    RequiredPortalAsset {
-        id: SpellTable::FILE_ID,
-        name: "spell table",
-    },
-    RequiredPortalAsset {
-        id: XpTable::FILE_ID,
-        name: "XP table",
-    },
-];
+const REQUIRED_SKILL_TABLE: RequiredResourceAsset = RequiredResourceAsset {
+    id: SkillTable::FILE_ID,
+    name: "skill table",
+};
 
-#[derive(Clone, Default)]
-struct MountedDatasets {
-    portal: Option<Provider>,
-    cell: Option<Provider>,
-}
+const REQUIRED_SPELL_TABLE: RequiredResourceAsset = RequiredResourceAsset {
+    id: SpellTable::FILE_ID,
+    name: "spell table",
+};
+
+const REQUIRED_XP_TABLE: RequiredResourceAsset = RequiredResourceAsset {
+    id: XpTable::FILE_ID,
+    name: "XP table",
+};
 
 #[derive(Clone)]
 struct ServerEndpoint {
@@ -49,8 +45,7 @@ pub struct ClientBuilder {
     account_name: String,
     dats_path: Option<PathBuf>,
     server_endpoint: Option<ServerEndpoint>,
-    portal_dat: Option<Provider>,
-    cell_dat: Option<Provider>,
+    mounted_providers: Vec<MountedResourceProvider>,
 }
 
 impl ClientBuilder {
@@ -59,8 +54,7 @@ impl ClientBuilder {
             account_name: account_name.into(),
             dats_path: None,
             server_endpoint: None,
-            portal_dat: None,
-            cell_dat: None,
+            mounted_providers: Vec::new(),
         }
     }
 
@@ -77,13 +71,9 @@ impl ClientBuilder {
         self
     }
 
-    pub fn portal_dat(mut self, portal_dat: Provider) -> Self {
-        self.portal_dat = Some(portal_dat);
-        self
-    }
-
-    pub fn cell_dat(mut self, cell_dat: Provider) -> Self {
-        self.cell_dat = Some(cell_dat);
+    pub fn mount_provider(mut self, scope: ResourceScope, provider: Provider) -> Self {
+        self.mounted_providers
+            .push(MountedResourceProvider::new(scope, provider));
         self
     }
 
@@ -107,7 +97,7 @@ impl ClientBuilder {
         let session_future = Session::new(target);
         let dat_builder = self.clone();
         let dat_future =
-            tokio::task::spawn_blocking(move || dat_builder.load_configured_datasets());
+            tokio::task::spawn_blocking(move || dat_builder.load_configured_resources());
 
         let (session_res, dat_res) = tokio::join!(session_future, dat_future);
         let session = session_res?;
@@ -118,28 +108,31 @@ impl ClientBuilder {
 
     #[cfg(test)]
     pub(crate) fn build_with_session(self, session: Session) -> Result<Client> {
-        let mounted = self.load_configured_datasets();
+        let mounted = self.load_configured_resources();
         self.finish(session, mounted)
     }
 
-    fn load_configured_datasets(&self) -> MountedDatasets {
-        let mut mounted = MountedDatasets {
-            portal: self.portal_dat.clone(),
-            cell: self.cell_dat.clone(),
-        };
+    fn load_configured_resources(&self) -> Arc<ScopedResourceResolver> {
+        let mut mounted = self.mounted_providers.clone();
 
         let Some(dats_path) = self.dats_path.as_ref() else {
-            return mounted;
+            return Arc::new(ScopedResourceResolver::from_mounted(mounted));
         };
 
-        if mounted.portal.is_none() {
+        if !mounted
+            .iter()
+            .any(|provider| provider.scope == ResourceScope::Portal)
+        {
             match holtburger_dat::open_provider(dats_path.join("portal")) {
                 Ok(provider) => {
                     log::info!(
                         "Loaded portal data from {}",
                         dats_path.join("portal").display()
                     );
-                    mounted.portal = Some(provider);
+                    mounted.push(MountedResourceProvider::new(
+                        ResourceScope::Portal,
+                        provider,
+                    ));
                 }
                 Err(error) => {
                     log::warn!("Could not load portal data: {}", error);
@@ -147,11 +140,14 @@ impl ClientBuilder {
             }
         }
 
-        if mounted.cell.is_none() {
+        if !mounted
+            .iter()
+            .any(|provider| provider.scope == ResourceScope::Cell)
+        {
             match holtburger_dat::open_provider(dats_path.join("cell")) {
                 Ok(provider) => {
                     log::info!("Loaded cell data from {}", dats_path.join("cell").display());
-                    mounted.cell = Some(provider);
+                    mounted.push(MountedResourceProvider::new(ResourceScope::Cell, provider));
                 }
                 Err(error) => {
                     log::warn!("Could not load cell data: {}", error);
@@ -159,20 +155,18 @@ impl ClientBuilder {
             }
         }
 
-        mounted
+        Arc::new(ScopedResourceResolver::from_mounted(mounted))
     }
 
-    fn finish(self, session: Session, mounted: MountedDatasets) -> Result<Client> {
-        if self.requires_mounted_dats() {
-            self.validate_required_assets(&mounted)?;
-        }
+    fn finish(self, session: Session, mounted: Arc<ScopedResourceResolver>) -> Result<Client> {
+        self.validate_required_assets(&mounted)?;
 
         let (wire_event_tx, _) = broadcast::channel(1024);
         let (client_view_event_tx, _) = broadcast::channel(256);
 
         Ok(Client {
             session,
-            world: WorldState::new(mounted.portal, mounted.cell),
+            world: WorldState::new(mounted)?,
             active_confirmation: None,
             active_busy_operation: None,
             state: ClientState::Connected,
@@ -186,30 +180,34 @@ impl ClientBuilder {
         })
     }
 
-    fn requires_mounted_dats(&self) -> bool {
-        self.dats_path.is_some() || self.portal_dat.is_some() || self.cell_dat.is_some()
-    }
-
-    fn validate_required_assets(&self, mounted: &MountedDatasets) -> Result<()> {
-        let Some(portal) = mounted.portal.as_ref() else {
-            return Err(missing_portal_asset_error(
-                REQUIRED_PORTAL_ASSETS[0],
+    fn validate_required_assets(&self, mounted: &ScopedResourceResolver) -> Result<()> {
+        if !mounted.exists_for::<SkillTable>() {
+            return Err(missing_resource_asset_error(
+                REQUIRED_SKILL_TABLE,
                 self.dats_path.as_deref(),
             ));
-        };
+        }
 
-        for asset in REQUIRED_PORTAL_ASSETS {
-            if !portal.exists(asset.id) {
-                return Err(missing_portal_asset_error(asset, self.dats_path.as_deref()));
-            }
+        if !mounted.exists_for::<SpellTable>() {
+            return Err(missing_resource_asset_error(
+                REQUIRED_SPELL_TABLE,
+                self.dats_path.as_deref(),
+            ));
+        }
+
+        if !mounted.exists_for::<XpTable>() {
+            return Err(missing_resource_asset_error(
+                REQUIRED_XP_TABLE,
+                self.dats_path.as_deref(),
+            ));
         }
 
         Ok(())
     }
 }
 
-fn missing_portal_asset_error(
-    asset: RequiredPortalAsset,
+fn missing_resource_asset_error(
+    asset: RequiredResourceAsset,
     dats_path: Option<&Path>,
 ) -> anyhow::Error {
     match dats_path {
@@ -229,9 +227,23 @@ fn missing_portal_asset_error(
 
 #[cfg(test)]
 pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
-    let mut client = ClientBuilder::new("test")
-        .build_with_session(Session::new_test())
-        .expect("test client should build");
+    let (wire_event_tx, _) = broadcast::channel(1024);
+    let (client_view_event_tx, _) = broadcast::channel(256);
+
+    let mut client = Client {
+        session: Session::new_test(),
+        world: WorldState::synthetic(),
+        active_confirmation: None,
+        active_busy_operation: None,
+        state: ClientState::Connected,
+        wire_event_tx,
+        client_view_event_tx,
+        command_rx: None,
+        message_dump_dir: None,
+        message_counter: 0,
+        movement: MovementSystem::new(),
+        auth: AuthState::new("test".to_string()),
+    };
     client.state = initial_state;
     client
 }
@@ -239,20 +251,25 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use holtburger_dat::HbaWriter;
+    use holtburger_dat::{DatFileType, HbaReader, HbaWriter};
     use tempfile::tempdir;
 
+    fn repo_portal_hba_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/portal.hba")
+    }
+
     fn write_hba(path: &Path, ids: &[u32]) {
+        let source = HbaReader::open(repo_portal_hba_path())
+            .expect("repo portal.hba should open for builder tests");
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
 
         for id in ids {
+            let data = source
+                .get_file(*id)
+                .unwrap_or_else(|_| panic!("repo portal.hba should contain 0x{id:08X}"));
             writer
-                .add(
-                    *id,
-                    holtburger_dat::DatFileType::from_id(*id) as u32,
-                    vec![0],
-                )
+                .add(*id, DatFileType::from_id(*id) as u32, data)
                 .expect("test HBA entry should be added");
         }
 
@@ -272,8 +289,14 @@ mod tests {
             .build_with_session(Session::new_test())
             .expect("portal-only startup should succeed");
 
-        assert!(client.world.portal_dat.is_some());
-        assert!(client.world.cell_dat.is_none());
+        let resources = client
+            .world
+            .resources
+            .as_ref()
+            .expect("portal-only startup should mount scoped resources");
+
+        assert!(resources.has_scope(ResourceScope::Portal));
+        assert!(!resources.has_scope(ResourceScope::Cell));
     }
 
     #[test]

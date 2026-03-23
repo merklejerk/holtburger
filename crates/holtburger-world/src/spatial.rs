@@ -1,18 +1,12 @@
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
-use holtburger_dat::ResourceProvider;
-use holtburger_dat::landblock::LandblockInfo;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 /// The SpatialScene is responsible for managing the "where" of everything.
 /// It tracks entity positions by landblock and handles spatial queries.
 pub struct SpatialScene {
     /// Entities indexed by LandblockID for fast local queries.
     pub landblock_map: HashMap<Guid, HashSet<Guid>>,
-
-    /// Cache of landblock-level physical info (Stabs, buildings from cell.dat).
-    pub landblock_info: HashMap<Guid, Arc<LandblockInfo>>,
 }
 
 impl Default for SpatialScene {
@@ -25,27 +19,7 @@ impl SpatialScene {
     pub fn new() -> Self {
         Self {
             landblock_map: HashMap::new(),
-            landblock_info: HashMap::new(),
         }
-    }
-
-    pub fn get_landblock_info(
-        &mut self,
-        dat: &dyn ResourceProvider,
-        lb_id: Guid,
-    ) -> Option<Arc<LandblockInfo>> {
-        if let Some(info) = self.landblock_info.get(&lb_id) {
-            return Some(info.clone());
-        }
-
-        // Outdoor landblock IDs end in 0xFFFF.
-        // LandblockInfo is usually stored with the ID as its key in the cell.dat.
-        if let Ok(info) = LandblockInfo::unpack(&dat.get_file(lb_id.into()).ok()?) {
-            let arc = Arc::new(info);
-            self.landblock_info.insert(lb_id, arc.clone());
-            return Some(arc);
-        }
-        None
     }
 
     pub fn update_entity(&mut self, guid: Guid, old_lb: Guid, new_lb: Guid) {

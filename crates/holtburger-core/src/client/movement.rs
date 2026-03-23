@@ -459,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_raw_motion_state_preserves_cached_server_style_by_default() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
 
         let raw_motion_state = raw_motion_state_with_motion_style(
@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_raw_motion_state_can_override_cached_server_style() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
 
         let raw_motion_state = raw_motion_state_with_motion_style(
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_raw_motion_state_can_omit_cached_server_style() {
-        let mut world = WorldState::new(None, None);
+        let mut world = WorldState::synthetic();
         world.player.last_server_motion_style = Some(MotionStance::SwordCombat);
 
         let raw_motion_state = raw_motion_state_with_motion_style(

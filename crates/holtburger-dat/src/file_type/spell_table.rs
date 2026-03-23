@@ -1,4 +1,5 @@
 use crate::utils::{align_boundary, read_obfuscated_string};
+use crate::{ResourceScope, ScopedResource};
 use binrw::{BinRead, BinResult};
 use std::collections::HashMap;
 use std::io::{Read, Seek};
@@ -16,6 +17,11 @@ pub struct SpellTable {
 
 impl SpellTable {
     pub const FILE_ID: u32 = 0x0E00000E;
+}
+
+impl ScopedResource for SpellTable {
+    const FILE_ID: u32 = Self::FILE_ID;
+    const RESOURCE_SCOPE: ResourceScope = ResourceScope::Portal;
 }
 
 #[derive(BinRead, Debug, Clone)]

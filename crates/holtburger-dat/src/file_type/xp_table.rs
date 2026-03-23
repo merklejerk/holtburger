@@ -1,3 +1,4 @@
+use crate::{ResourceScope, ScopedResource};
 use binrw::BinRead;
 
 /// Experience Tables from client_portal.dat (file 0x0E000018).
@@ -91,6 +92,30 @@ impl XpTable {
         }
         0
     }
+}
+
+impl Default for XpTable {
+    fn default() -> Self {
+        Self {
+            id: Self::FILE_ID,
+            attribute_count: 0,
+            vital_count: 0,
+            trained_skill_count: 0,
+            specialized_skill_count: 0,
+            level_count: 0,
+            attribute_xp_list: vec![0],
+            vital_xp_list: vec![0],
+            trained_skill_xp_list: vec![0],
+            specialized_skill_xp_list: vec![0],
+            character_level_xp_list: vec![0],
+            character_level_skill_credit_list: vec![0],
+        }
+    }
+}
+
+impl ScopedResource for XpTable {
+    const FILE_ID: u32 = Self::FILE_ID;
+    const RESOURCE_SCOPE: ResourceScope = ResourceScope::Portal;
 }
 
 #[cfg(test)]

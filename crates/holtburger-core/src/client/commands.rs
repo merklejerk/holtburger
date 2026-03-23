@@ -100,6 +100,7 @@ impl Client {
             ClientCommand::SetCombatMode(_)
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
+            | ClientCommand::RequestInitialViewState
             | ClientCommand::QueryEntityDebugInfo(_)
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
@@ -645,6 +646,11 @@ impl Client {
                 self.send_game_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
                     .await
             }
+            ClientCommand::RequestInitialViewState => {
+                log::info!(">>> Client requested initial view state snapshot");
+                self.emit_initial_reference_data();
+                Ok(())
+            }
             ClientCommand::SetCombatMode(mode) => {
                 log::info!(">>> Changing combat mode to: {:?}", mode);
                 self.send_game_action(GameAction::ChangeCombatMode(Box::new(
@@ -1003,6 +1009,28 @@ mod tests {
         }
 
         assert!(saw_projection);
+    }
+
+    #[tokio::test]
+    async fn request_initial_view_state_projects_cached_spell_catalog() {
+        let mut client = build_test_client();
+        client.world.spell_catalog = Arc::new(SpellCatalog::default());
+        let mut events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::RequestInitialViewState)
+            .await
+            .unwrap();
+
+        let mut saw_catalog = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(event, ClientViewEvent::SpellCatalogLoaded { .. }) {
+                saw_catalog = true;
+                break;
+            }
+        }
+
+        assert!(saw_catalog);
     }
 
     #[tokio::test]

@@ -328,6 +328,7 @@ pub enum ClientCommand {
         message: String,
     },
     Ping,
+    RequestInitialViewState,
     Identify(Guid),
     QueryHealth(Guid),
     Use(Guid),

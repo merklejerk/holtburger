@@ -1,19 +1,25 @@
 use crate::client::WireEvent;
 use crate::client::locomotion::{
     LocomotionPrimitive, LocomotionRequest, MotionStyle, MovementPacketMetadata,
+    world_velocity_for_heading,
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::sequence::is_newer_u16;
-use holtburger_common::{Guid, Quaternion};
+use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{WorldEvent, WorldState};
+use std::f32::consts::{PI, TAU};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
+const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
+const TURN_LEFT_MOTION_COMMAND: u32 = 0x6500_000e;
+const TURN_COMMAND_THRESHOLD_RAD: f32 = 10.0_f32.to_radians();
+const LOCAL_TURN_RATE_RAD_PER_SEC: f32 = PI;
 
 fn calculate_arrival_position(
     source: &WorldPosition,
@@ -28,6 +34,31 @@ fn calculate_arrival_position(
         fallback.x += distance;
         fallback
     }
+}
+
+fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
+    let mut delta = (desired_heading - current_heading) % TAU;
+    if delta <= -PI {
+        delta += TAU;
+    } else if delta > PI {
+        delta -= TAU;
+    }
+    delta
+}
+
+fn turn_motion_command(current_heading: f32, desired_heading: f32) -> Option<u32> {
+    let delta = signed_heading_delta(current_heading, desired_heading);
+    if delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+        None
+    } else if delta.is_sign_positive() {
+        Some(TURN_RIGHT_MOTION_COMMAND)
+    } else {
+        Some(TURN_LEFT_MOTION_COMMAND)
+    }
+}
+
+fn normalize_heading(heading: f32) -> f32 {
+    heading.rem_euclid(TAU)
 }
 
 pub(super) fn raw_motion_state_with_motion_style(
@@ -53,12 +84,83 @@ pub(super) fn raw_motion_state_with_motion_style(
     raw_motion_state
 }
 
-pub(super) fn encode_contact_long_jump(metadata: MovementPacketMetadata) -> u8 {
-    u8::from(metadata.contact.unwrap_or(true))
+fn resolve_contact(world: &WorldState, metadata: MovementPacketMetadata) -> bool {
+    metadata
+        .contact
+        .unwrap_or(world.player.server_grounded.unwrap_or(false))
 }
 
-pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
-    u8::from(metadata.contact.unwrap_or(true))
+pub(super) fn encode_contact_long_jump(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
+    u8::from(resolve_contact(world, metadata))
+}
+
+pub(super) fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
+    u8::from(resolve_contact(world, metadata))
+}
+
+pub(super) fn build_autonomous_position_heartbeat(
+    world: &WorldState,
+    metadata: MovementPacketMetadata,
+) -> Option<AutonomousPositionActionData> {
+    if world.player.guid == Guid::NULL || world.player.position.landblock_id == Guid::NULL {
+        return None;
+    }
+
+    let player_entity = world.entities.get(world.player.guid)?;
+    if player_entity.velocity.length_squared() < 0.0001 {
+        return None;
+    }
+
+    Some(AutonomousPositionActionData {
+        position: world.player.position,
+        instance_sequence: world.player.instance_sequence,
+        server_control_sequence: world.player.server_control_sequence,
+        teleport_sequence: world.player.teleport_sequence,
+        force_position_sequence: world.player.force_position_sequence,
+        last_contact: encode_last_contact(world, metadata),
+    })
+}
+
+pub(super) fn build_turn_raw_motion_state(
+    world: &WorldState,
+    current_heading: f32,
+    desired_heading: f32,
+    motion_style: MotionStyle,
+) -> RawMotionState {
+    let mut raw_motion_state = RawMotionState::default();
+
+    if let Some(turn_command) = turn_motion_command(current_heading, desired_heading) {
+        raw_motion_state.flags = RawMotionFlags::CURRENT_HOLD_KEY | RawMotionFlags::TURN_COMMAND;
+        raw_motion_state.current_hold_key = Some(HoldKey::Run as u32);
+        raw_motion_state.turn_command = Some(turn_command);
+    }
+
+    raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
+}
+
+fn build_drive_raw_motion_state(
+    world: &WorldState,
+    current_heading: f32,
+    desired_heading: f32,
+    speed: f32,
+    motion_style: MotionStyle,
+) -> RawMotionState {
+    let mut raw_motion_state = RawMotionState {
+        flags: RawMotionFlags::CURRENT_HOLD_KEY
+            | RawMotionFlags::FORWARD_COMMAND
+            | RawMotionFlags::FORWARD_SPEED,
+        current_hold_key: Some(HoldKey::Run as u32),
+        forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
+        forward_speed: Some(speed),
+        ..Default::default()
+    };
+
+    if let Some(turn_command) = turn_motion_command(current_heading, desired_heading) {
+        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND;
+        raw_motion_state.turn_command = Some(turn_command);
+    }
+
+    raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
 }
 
 #[derive(Debug, Default)]
@@ -161,12 +263,20 @@ impl MovementSequenceDiagnostics {
 
 pub(super) struct MovementSystem {
     pub(super) sequence_diagnostics: MovementSequenceDiagnostics,
+    local_motion: Option<LocalMotionIntent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LocalMotionIntent {
+    desired_heading: f32,
+    speed: f32,
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
+            local_motion: None,
         }
     }
 
@@ -177,6 +287,7 @@ impl MovementSystem {
         session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
         let primitive = request.primitive;
+        let current_heading = world.player.position.rotation.to_heading();
         let state_events = self.apply_locomotion_primitive(primitive, world);
 
         if primitive.refresh_server() {
@@ -185,8 +296,15 @@ impl MovementSystem {
                     // When refresh_server() is true, honor the explicit request by always
                     // sending a drive pulse, rather than suppressing it based on
                     // heading/speed thresholds.
-                    Self::send_drive_pulse(world, session, heading, speed, request.metadata)
-                        .await?;
+                    Self::send_drive_pulse(
+                        world,
+                        session,
+                        current_heading,
+                        heading,
+                        speed,
+                        request.metadata,
+                    )
+                    .await?;
                 }
                 LocomotionPrimitive::Stop { .. } => {
                     Self::send_stop_pulse(world, session, request.metadata).await?;
@@ -202,43 +320,125 @@ impl MovementSystem {
         primitive: LocomotionPrimitive,
         world: &mut WorldState,
     ) -> Vec<WorldEvent> {
-        let mut events = Vec::new();
+        match primitive {
+            LocomotionPrimitive::Drive { heading, speed, .. } => {
+                self.local_motion = Some(LocalMotionIntent {
+                    desired_heading: normalize_heading(heading),
+                    speed: speed.max(0.0),
+                });
+                self.sync_local_motion_vectors(world)
+            }
+            LocomotionPrimitive::Stop { .. } => {
+                self.local_motion = None;
+                world.set_player_vector(Vector3::zero(), Vector3::zero())
+            }
+        }
+    }
 
-        if let LocomotionPrimitive::Drive { heading, .. } = primitive {
-            let mut next_pos = world.player.position;
-            next_pos.rotation = Quaternion::from_heading(heading);
-            events.extend(world.set_player_position(next_pos));
+    fn sync_local_motion_vectors(&self, world: &mut WorldState) -> Vec<WorldEvent> {
+        let Some(intent) = self.local_motion else {
+            return world.set_player_vector(Vector3::zero(), Vector3::zero());
+        };
+
+        let current_heading = world.player.position.rotation.to_heading();
+        let heading_delta = signed_heading_delta(current_heading, intent.desired_heading);
+        let velocity = world_velocity_for_heading(current_heading, intent.speed);
+        let omega = if heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+            Vector3::zero()
+        } else {
+            Vector3::new(
+                0.0,
+                0.0,
+                heading_delta.signum() * LOCAL_TURN_RATE_RAD_PER_SEC,
+            )
+        };
+
+        world.set_player_vector(velocity, omega)
+    }
+
+    pub(super) fn advance_local_motion_prediction(
+        &mut self,
+        dt: f32,
+        world: &mut WorldState,
+    ) -> Vec<WorldEvent> {
+        let Some(intent) = self.local_motion else {
+            return Vec::new();
+        };
+
+        let Some(_player_entity) = world.entities.get(world.player.guid) else {
+            return Vec::new();
+        };
+
+        let dt = dt.max(0.0);
+        if dt <= f32::EPSILON {
+            return Vec::new();
         }
 
-        if let Some(velocity) = primitive.desired_velocity() {
-            events.extend(world.set_player_velocity(velocity));
-        }
+        let current_heading = world.player.position.rotation.to_heading();
+        let heading_delta = signed_heading_delta(current_heading, intent.desired_heading);
+        let max_turn_step = LOCAL_TURN_RATE_RAD_PER_SEC * dt;
+        let applied_turn = heading_delta.clamp(-max_turn_step, max_turn_step);
+        let next_heading = normalize_heading(current_heading + applied_turn);
+        let velocity = world_velocity_for_heading(next_heading, intent.speed);
+        let omega = if heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+            Vector3::zero()
+        } else {
+            Vector3::new(
+                0.0,
+                0.0,
+                heading_delta.signum() * LOCAL_TURN_RATE_RAD_PER_SEC,
+            )
+        };
 
+        let mut next_pos = world.player.position;
+        next_pos.rotation = Quaternion::from_heading(next_heading);
+        next_pos.coords = next_pos.coords + (velocity * dt);
+
+        let mut events = world.set_player_position(next_pos);
+        events.extend(world.set_player_vector(velocity, omega));
         events
+    }
+
+    pub(super) async fn send_autonomous_position_heartbeat(
+        &mut self,
+        world: &WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<bool> {
+        let Some(pulse) = build_autonomous_position_heartbeat(world, metadata) else {
+            return Ok(false);
+        };
+
+        log::debug!(
+            ">>>> Sending AutonomousPosition heartbeat. ServerSeq: {}, Pos: {:?}",
+            world.player.server_control_sequence,
+            pulse.position
+        );
+
+        session
+            .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
+            .await?;
+
+        Ok(true)
     }
 
     async fn send_drive_pulse(
         world: &WorldState,
         session: &mut Session,
-        heading: f32,
+        current_heading: f32,
+        desired_heading: f32,
         speed: f32,
         metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let mut position = world.player.position;
-        position.rotation = Quaternion::from_heading(heading);
+        position.rotation = Quaternion::from_heading(current_heading);
 
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_motion_style(
+            raw_motion_state: build_drive_raw_motion_state(
                 world,
-                RawMotionState {
-                    flags: RawMotionFlags::CURRENT_HOLD_KEY
-                        | RawMotionFlags::FORWARD_COMMAND
-                        | RawMotionFlags::FORWARD_SPEED,
-                    current_hold_key: Some(HoldKey::Run as u32),
-                    forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
-                    forward_speed: Some(speed),
-                    ..Default::default()
-                },
+                current_heading,
+                desired_heading,
+                speed,
                 metadata.motion_style,
             ),
             position,
@@ -246,7 +446,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(metadata),
+            contact_long_jump: encode_contact_long_jump(world, metadata),
         };
 
         session
@@ -270,7 +470,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(metadata),
+            contact_long_jump: encode_contact_long_jump(world, metadata),
         };
 
         session
@@ -382,31 +582,7 @@ impl MovementSystem {
 
         let state_events = world.set_player_position(next_pos);
 
-        // Respond with AutonomousPosition heartbeat to confirm arrival
-        // We use AutonomousPosition instead of MoveToState because MoveToState
-        // cancels server-side movement chains (like pickups) on the ACE server.
-        let pulse = AutonomousPositionActionData {
-            position: next_pos,
-            instance_sequence: world.player.instance_sequence,
-            server_control_sequence: world.player.server_control_sequence,
-            teleport_sequence: world.player.teleport_sequence,
-            force_position_sequence: world.player.force_position_sequence,
-            last_contact: encode_last_contact(MovementPacketMetadata::default()),
-        };
-
-        log::debug!(
-            ">>>> Sending AutonomousPosition heartbeat. ServerSeq: {}, Pos: {:?}",
-            world.player.server_control_sequence,
-            next_pos
-        );
-
-        let action = GameActionMessage {
-            sequence: 0, // Heartbeats usually use 0 or a separate counter
-            action: GameAction::AutonomousPosition(Box::new(pulse)),
-        };
-
-        session
-            .send_message(&GameMessage::GameAction(Box::new(action)))
+        self.send_autonomous_position_heartbeat(world, session, MovementPacketMetadata::default())
             .await?;
 
         Ok((wire_events, state_events))
@@ -419,6 +595,7 @@ mod tests {
     use holtburger_common::Vector3;
     use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_world::WorldState;
+    use holtburger_world::entity::Entity;
 
     #[test]
     fn test_calculate_heading_to() {
@@ -538,5 +715,247 @@ mod tests {
                 .contains(RawMotionFlags::CURRENT_STYLE)
         );
         assert_eq!(raw_motion_state.current_style, None);
+    }
+
+    #[test]
+    fn drive_raw_motion_state_adds_right_turn_when_heading_increases() {
+        let world = WorldState::new(None, None);
+
+        let raw_motion_state = build_drive_raw_motion_state(
+            &world,
+            0.0,
+            90.0_f32.to_radians(),
+            4.5,
+            MotionStyle::PreserveServer,
+        );
+
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::FORWARD_COMMAND)
+        );
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::TURN_COMMAND)
+        );
+        assert_eq!(
+            raw_motion_state.turn_command,
+            Some(TURN_RIGHT_MOTION_COMMAND)
+        );
+    }
+
+    #[test]
+    fn drive_raw_motion_state_adds_left_turn_when_heading_decreases() {
+        let world = WorldState::new(None, None);
+
+        let raw_motion_state = build_drive_raw_motion_state(
+            &world,
+            180.0_f32.to_radians(),
+            90.0_f32.to_radians(),
+            4.5,
+            MotionStyle::PreserveServer,
+        );
+
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::TURN_COMMAND)
+        );
+        assert_eq!(
+            raw_motion_state.turn_command,
+            Some(TURN_LEFT_MOTION_COMMAND)
+        );
+    }
+
+    #[test]
+    fn drive_raw_motion_state_omits_turn_when_heading_is_aligned() {
+        let world = WorldState::new(None, None);
+
+        let raw_motion_state = build_drive_raw_motion_state(
+            &world,
+            90.0_f32.to_radians(),
+            95.0_f32.to_radians(),
+            4.5,
+            MotionStyle::PreserveServer,
+        );
+
+        assert!(
+            !raw_motion_state
+                .flags
+                .contains(RawMotionFlags::TURN_COMMAND)
+        );
+        assert_eq!(raw_motion_state.turn_command, None);
+    }
+
+    #[test]
+    fn local_motion_prediction_advances_player_position_from_velocity() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        world.player.guid = player_guid;
+        world.player.position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            world.player.position,
+        ));
+        let mut movement = MovementSystem::new();
+        movement.apply_locomotion_primitive(
+            LocomotionPrimitive::Drive {
+                heading: 180.0_f32.to_radians(),
+                speed: 1.0,
+                refresh_server: false,
+            },
+            &mut world,
+        );
+
+        let events = movement.advance_local_motion_prediction(0.5, &mut world);
+
+        assert!(
+            events.iter().any(|event| matches!(event, WorldEvent::EntityMoved { guid, pos } if *guid == player_guid && (pos.coords.x - 12.0).abs() < 1e-5 && (pos.coords.y - 20.0).abs() < 1e-5))
+        );
+        assert!((world.player.position.coords.x - 12.0).abs() < 1e-5);
+        assert!((world.player.position.coords.y - 20.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn local_motion_prediction_ignores_missing_drive_intent() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        let position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.player.guid = player_guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), position));
+
+        let events = MovementSystem::new().advance_local_motion_prediction(0.5, &mut world);
+
+        assert!(events.is_empty());
+        assert_eq!(world.player.position, position);
+    }
+
+    #[test]
+    fn local_motion_prediction_turns_toward_desired_heading_without_snapping() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        let position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.player.guid = player_guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let events = movement.apply_locomotion_primitive(
+            LocomotionPrimitive::Drive {
+                heading: 180.0_f32.to_radians(),
+                speed: 1.0,
+                refresh_server: false,
+            },
+            &mut world,
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
+                if *guid == player_guid && velocity.length_squared() > 0.0
+        )));
+        assert_eq!(world.player.position.rotation, position.rotation);
+
+        let _ = movement.advance_local_motion_prediction(0.25, &mut world);
+
+        let new_heading = world.player.position.rotation.to_heading();
+        assert!(new_heading > 0.0);
+        assert!(new_heading < 180.0_f32.to_radians());
+    }
+
+    #[test]
+    fn autonomous_position_heartbeat_uses_latest_predicted_position_when_moving() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+        let mut entity = Entity::new(guid, "Player".to_string(), position);
+        entity.velocity = Vector3::new(2.0, 0.0, 0.0);
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world.player.instance_sequence = 11;
+        world.player.server_control_sequence = 22;
+        world.player.teleport_sequence = 33;
+        world.player.force_position_sequence = 44;
+        world.entities.insert(entity);
+
+        let heartbeat =
+            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
+                .expect("moving player should emit heartbeat");
+
+        assert_eq!(heartbeat.position, position);
+        assert_eq!(heartbeat.instance_sequence, 11);
+        assert_eq!(heartbeat.server_control_sequence, 22);
+        assert_eq!(heartbeat.teleport_sequence, 33);
+        assert_eq!(heartbeat.force_position_sequence, 44);
+        assert_eq!(heartbeat.last_contact, 0);
+    }
+
+    #[test]
+    fn autonomous_position_heartbeat_uses_server_grounded_when_contact_unspecified() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+        let mut entity = Entity::new(guid, "Player".to_string(), position);
+        entity.velocity = Vector3::new(2.0, 0.0, 0.0);
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world.player.server_grounded = Some(true);
+        world.entities.insert(entity);
+
+        let heartbeat =
+            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
+                .expect("moving player should emit heartbeat");
+
+        assert_eq!(heartbeat.last_contact, 1);
+    }
+
+    #[test]
+    fn autonomous_position_heartbeat_skips_stationary_players() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            ..Default::default()
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        assert!(
+            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
+                .is_none()
+        );
     }
 }

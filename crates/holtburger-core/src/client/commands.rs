@@ -1,11 +1,11 @@
-use crate::client::movement::{encode_contact_long_jump, raw_motion_state_with_motion_style};
+use crate::client::movement::{build_turn_raw_motion_state, encode_contact_long_jump};
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
-use holtburger_protocol::messages::game_message::{GameMessage, RawMotionState};
+use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::spell::MagicSchool;
@@ -591,6 +591,8 @@ impl Client {
             ClientCommand::TurnTo { heading, metadata } => {
                 log::info!(">>> Turning to heading: {}", heading);
 
+                let current_heading = self.world.player.position.rotation.to_heading();
+
                 // Prediction: update local state immediately so UI feels snappy
                 let mut next_pos = self.world.player.position;
                 next_pos.rotation = Quaternion::from_heading(heading);
@@ -605,9 +607,10 @@ impl Client {
                 let force_seq = self.world.player.force_position_sequence;
 
                 self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: raw_motion_state_with_motion_style(
+                    raw_motion_state: build_turn_raw_motion_state(
                         &self.world,
-                        RawMotionState::default(),
+                        current_heading,
+                        heading,
                         metadata.motion_style,
                     ),
                     position: self.world.player.position,
@@ -615,7 +618,7 @@ impl Client {
                     server_control_sequence: srv_seq,
                     teleport_sequence: tele_seq,
                     force_position_sequence: force_seq,
-                    contact_long_jump: encode_contact_long_jump(metadata),
+                    contact_long_jump: encode_contact_long_jump(&self.world, metadata),
                 })))
                 .await
             }

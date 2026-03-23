@@ -1139,8 +1139,9 @@ impl GameState {
         let target_guid = self
             .current_target_guid()
             .filter(|guid| self.is_valid_combat_target(*guid));
-        let target_position = target_guid
-            .and_then(|guid| self.data.entities.get(&guid).map(|entity| entity.position));
+        let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
+        let target_position = target_entity.map(|entity| entity.position);
+        let target_use_radius = target_entity.and_then(|entity| entity.use_radius());
         let update = self
             .runtime
             .navigation
@@ -1155,6 +1156,7 @@ impl GameState {
                 target_guid,
                 player_position: self.data.player_pos,
                 target_position,
+                target_use_radius: target_use_radius.map(|radius| radius as f32),
                 move_speed: self
                     .data
                     .get_run_rate()
@@ -1171,17 +1173,17 @@ impl GameState {
         result: &mut UpdateResult,
     ) {
         let now = Instant::now();
+        let target_entity = self.data.entities.get(&target);
         let update = self.runtime.navigation.start_approach_target(
             target,
             arrival_distance,
             ApproachSyncInput {
                 now,
                 player_position: self.data.player_pos,
-                target_position: self
-                    .data
-                    .entities
-                    .get(&target)
-                    .map(|entity| entity.position),
+                target_position: target_entity.map(|entity| entity.position),
+                target_use_radius: target_entity
+                    .and_then(|entity| entity.use_radius())
+                    .map(|radius| radius as f32),
                 move_speed: self
                     .data
                     .get_run_rate()
@@ -1209,6 +1211,12 @@ impl GameState {
                     .entities
                     .get(&target_guid)
                     .map(|entity| entity.position),
+                target_use_radius: self
+                    .data
+                    .entities
+                    .get(&target_guid)
+                    .and_then(|entity| entity.use_radius())
+                    .map(|radius| radius as f32),
                 move_speed: self
                     .data
                     .get_run_rate()
@@ -2176,6 +2184,7 @@ mod tests {
                 now: Instant::now(),
                 player_position: Some(start_pos),
                 target_position: Some(target_pos),
+                target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -2870,6 +2879,7 @@ mod tests {
                 target_guid: Some(target_guid),
                 player_position,
                 target_position: Some(target_position),
+                target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -3302,6 +3312,7 @@ mod tests {
                     coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
                     ..WorldPosition::default()
                 }),
+                target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
             },

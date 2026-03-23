@@ -2,7 +2,7 @@ The ultimate goal of this project is to develop a third-party client for Asheron
 - As part of this goal we will also need to reverse engineer and document the Asheron's Call protocol and file formats. These docs should be detailed to allow others to implement their own clients or tools from scratch. Be aware that docs will often fall behind our implementation. The ultimate source of truth is the ACE Server code.
 - Included in this repository are submodules for the [ACE Server](ACE/) and the [AC DAT viewer](ACViewer/), which we should use as ground truth references. Never guess. Guessing is dangerous! If you find yourself guessing, STOP and search for a basis in the references. Most likely everything you need to know can be proven by the server or dat viewer code. You are allowed to modify the code in there (like add tracing/logs) and create tests to validate your understanding.
 - DO NOT RUN THE TUI CLIENT for diagnostics/testing. It is interactive so will just hang. That's for me to use. You can just write your own bespoke client in the [harness](crates/holtburger-debug-harness/) if you need live data.
-- Temporary planning docs can go into the [plan folder](docs/plans/).
+- Temporary planning docs can go into the [plan folder](docs/plans/). Note that old are retained for posterity and may no longer represent the code.
 
 ## Architectural Direction
 

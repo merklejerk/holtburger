@@ -1,4 +1,4 @@
-use crate::client::locomotion::{LocomotionRequest, MovementPacketMetadata};
+use crate::client::movement_types::MovementRequest;
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -358,11 +358,7 @@ pub enum ClientCommand {
         slot: Option<TargetSlot>,
         amount: u32,
     },
-    TurnTo {
-        heading: f32,
-        metadata: MovementPacketMetadata,
-    },
-    ExecuteLocomotion(LocomotionRequest),
+    ExecuteMovement(MovementRequest),
     RaiseAttribute {
         attribute: AttributeType,
         xp_spent: u32,

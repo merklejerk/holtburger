@@ -1,19 +1,25 @@
 use crate::client::WireEvent;
-use crate::client::locomotion::{
-    LocomotionPrimitive, LocomotionRequest, MotionStyle, MovementPacketMetadata,
+use crate::client::movement_types::{
+    DriveIntent, MotionStyle, MovementPacketMetadata, MovementPrediction, MovementPrimitive,
+    MovementRequest,
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::sequence::is_newer_u16;
-use holtburger_common::{Guid, Quaternion};
+use holtburger_common::{Guid, Quaternion, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::{RawMotionFlags, RawMotionState};
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{WorldEvent, WorldState};
+use std::f32::consts::{PI, TAU};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
+const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
+const TURN_LEFT_MOTION_COMMAND: u32 = 0x6500_000e;
+const TURN_COMMAND_THRESHOLD_RAD: f32 = 10.0_f32.to_radians();
+const LOCAL_TURN_RATE_RAD_PER_SEC: f32 = PI;
 
 fn calculate_arrival_position(
     source: &WorldPosition,
@@ -30,7 +36,32 @@ fn calculate_arrival_position(
     }
 }
 
-pub(super) fn raw_motion_state_with_motion_style(
+fn signed_heading_delta(current_heading: f32, desired_heading: f32) -> f32 {
+    let mut delta = (desired_heading - current_heading) % TAU;
+    if delta <= -PI {
+        delta += TAU;
+    } else if delta > PI {
+        delta -= TAU;
+    }
+    delta
+}
+
+fn turn_motion_command(current_heading: f32, desired_heading: f32) -> Option<u32> {
+    let delta = signed_heading_delta(current_heading, desired_heading);
+    if delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+        None
+    } else if delta.is_sign_positive() {
+        Some(TURN_RIGHT_MOTION_COMMAND)
+    } else {
+        Some(TURN_LEFT_MOTION_COMMAND)
+    }
+}
+
+fn normalize_heading(heading: f32) -> f32 {
+    heading.rem_euclid(TAU)
+}
+
+fn raw_motion_state_with_motion_style(
     world: &WorldState,
     mut raw_motion_state: RawMotionState,
     motion_style: MotionStyle,
@@ -53,23 +84,85 @@ pub(super) fn raw_motion_state_with_motion_style(
     raw_motion_state
 }
 
-pub(super) fn encode_contact_long_jump(metadata: MovementPacketMetadata) -> u8 {
-    u8::from(metadata.contact.unwrap_or(true))
+fn resolve_contact(world: &WorldState, metadata: MovementPacketMetadata) -> bool {
+    metadata
+        .contact
+        .or(world.player.server_grounded)
+        .unwrap_or(true)
 }
 
-pub(super) fn encode_last_contact(metadata: MovementPacketMetadata) -> u8 {
-    u8::from(metadata.contact.unwrap_or(true))
+fn encode_contact_long_jump(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
+    u8::from(resolve_contact(world, metadata))
+}
+
+fn encode_last_contact(world: &WorldState, metadata: MovementPacketMetadata) -> u8 {
+    u8::from(resolve_contact(world, metadata))
+}
+
+fn build_autonomous_position_heartbeat(
+    world: &WorldState,
+    metadata: MovementPacketMetadata,
+) -> Option<AutonomousPositionActionData> {
+    let player_entity = world.entities.get(world.player.guid)?;
+    if player_entity.velocity.length_squared() < 0.0001 {
+        return None;
+    }
+
+    build_autonomous_position_sync(world, metadata)
+}
+
+fn build_autonomous_position_sync(
+    world: &WorldState,
+    metadata: MovementPacketMetadata,
+) -> Option<AutonomousPositionActionData> {
+    if world.player.guid == Guid::NULL || world.player.position.landblock_id == Guid::NULL {
+        return None;
+    }
+
+    Some(AutonomousPositionActionData {
+        position: world.player.position,
+        instance_sequence: world.player.instance_sequence,
+        server_control_sequence: world.player.server_control_sequence,
+        teleport_sequence: world.player.teleport_sequence,
+        force_position_sequence: world.player.force_position_sequence,
+        last_contact: encode_last_contact(world, metadata),
+    })
+}
+
+fn build_drive_raw_motion_state(
+    world: &WorldState,
+    current_heading: f32,
+    desired_heading: f32,
+    speed: f32,
+    motion_style: MotionStyle,
+) -> RawMotionState {
+    let mut raw_motion_state = RawMotionState {
+        flags: RawMotionFlags::CURRENT_HOLD_KEY
+            | RawMotionFlags::FORWARD_COMMAND
+            | RawMotionFlags::FORWARD_SPEED,
+        current_hold_key: Some(HoldKey::Run as u32),
+        forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
+        forward_speed: Some(speed),
+        ..Default::default()
+    };
+
+    if let Some(turn_command) = turn_motion_command(current_heading, desired_heading) {
+        raw_motion_state.flags |= RawMotionFlags::TURN_COMMAND;
+        raw_motion_state.turn_command = Some(turn_command);
+    }
+
+    raw_motion_state_with_motion_style(world, raw_motion_state, motion_style)
 }
 
 #[derive(Debug, Default)]
-pub(super) struct MovementSequenceDiagnostics {
+struct MovementSequenceDiagnostics {
     last_force_position_sequence: Option<u16>,
     last_teleport_sequence: Option<u16>,
     last_server_control_sequence: Option<u16>,
 }
 
 impl MovementSequenceDiagnostics {
-    pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
+    fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
         if let Some(old_seq) = self.last_force_position_sequence {
             if is_newer_u16(force_position_sequence, old_seq) {
                 log::warn!(
@@ -89,7 +182,7 @@ impl MovementSequenceDiagnostics {
         self.last_force_position_sequence = Some(force_position_sequence);
     }
 
-    pub(super) fn record_autonomous_position_sequences(
+    fn record_autonomous_position_sequences(
         &mut self,
         teleport_sequence: u16,
         force_position_sequence: u16,
@@ -130,7 +223,7 @@ impl MovementSequenceDiagnostics {
         self.last_server_control_sequence = Some(server_control_sequence);
     }
 
-    pub(super) fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
+    fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
         match self.last_server_control_sequence {
             Some(old_seq) if is_newer_u16(server_control_sequence, old_seq) => {
                 log::debug!(
@@ -160,85 +253,357 @@ impl MovementSequenceDiagnostics {
 }
 
 pub(super) struct MovementSystem {
-    pub(super) sequence_diagnostics: MovementSequenceDiagnostics,
+    sequence_diagnostics: MovementSequenceDiagnostics,
+    local_motion: Option<LocalMotionIntent>,
+    server_motion_active: bool,
+    last_server_drive_intent: Option<ServerDriveIntent>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct LocalMotionIntent {
+    drive: DriveIntent,
+    prediction: MovementPrediction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ServerDriveIntent {
+    speed: f32,
+    turn_command: Option<u32>,
+    motion_style: MotionStyle,
+}
+
+fn server_drive_intent(
+    current_heading: f32,
+    desired_heading: f32,
+    speed: f32,
+    motion_style: MotionStyle,
+) -> ServerDriveIntent {
+    ServerDriveIntent {
+        speed: speed.max(0.0),
+        turn_command: turn_motion_command(current_heading, desired_heading),
+        motion_style,
+    }
 }
 
 impl MovementSystem {
     pub(super) fn new() -> Self {
         Self {
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
+            local_motion: None,
+            server_motion_active: false,
+            last_server_drive_intent: None,
         }
     }
 
-    pub(super) async fn execute_locomotion_request(
+    pub(super) fn record_force_position_sequence(&mut self, force_position_sequence: u16) {
+        self.sequence_diagnostics
+            .record_force_position_sequence(force_position_sequence);
+    }
+
+    pub(super) fn record_autonomous_position_sequences(
         &mut self,
-        request: LocomotionRequest,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        server_control_sequence: u16,
+    ) {
+        self.sequence_diagnostics
+            .record_autonomous_position_sequences(
+                teleport_sequence,
+                force_position_sequence,
+                server_control_sequence,
+            );
+    }
+
+    pub(super) fn record_server_control_sequence(&mut self, server_control_sequence: u16) {
+        self.sequence_diagnostics
+            .record_server_control_sequence(server_control_sequence);
+    }
+
+    fn should_send_drive_pulse(
+        &self,
+        current_heading: f32,
+        desired_heading: f32,
+        speed: f32,
+        motion_style: MotionStyle,
+    ) -> bool {
+        if !self.server_motion_active {
+            return true;
+        }
+
+        self.last_server_drive_intent
+            != Some(server_drive_intent(
+                current_heading,
+                desired_heading,
+                speed,
+                motion_style,
+            ))
+    }
+
+    fn should_send_stop_pulse(&self) -> bool {
+        self.server_motion_active
+    }
+
+    fn note_server_drive_sent(&mut self, intent: ServerDriveIntent) {
+        self.server_motion_active = true;
+        self.last_server_drive_intent = Some(intent);
+    }
+
+    fn note_server_motion_cleared(&mut self) {
+        self.server_motion_active = false;
+        self.last_server_drive_intent = None;
+    }
+
+    pub(super) async fn execute_movement_request(
+        &mut self,
+        request: MovementRequest,
         world: &mut WorldState,
         session: &mut Session,
     ) -> Result<Vec<WorldEvent>> {
         let primitive = request.primitive;
-        let state_events = self.apply_locomotion_primitive(primitive, world);
+        if let MovementPrimitive::SnapFacing { heading } = primitive {
+            return self
+                .execute_snap_facing(heading, world, session, request.metadata)
+                .await;
+        }
 
-        if primitive.refresh_server() {
-            match primitive {
-                LocomotionPrimitive::Drive { heading, speed, .. } => {
-                    // When refresh_server() is true, honor the explicit request by always
-                    // sending a drive pulse, rather than suppressing it based on
-                    // heading/speed thresholds.
-                    Self::send_drive_pulse(world, session, heading, speed, request.metadata)
-                        .await?;
-                }
-                LocomotionPrimitive::Stop { .. } => {
-                    Self::send_stop_pulse(world, session, request.metadata).await?;
-                }
+        let current_heading = world.player.position.rotation.to_heading();
+        let had_active_local_motion = self.local_motion.is_some();
+        let state_events = self.apply_movement_primitive(primitive, world);
+
+        match primitive {
+            MovementPrimitive::Drive { intent, .. }
+                if self.should_send_drive_pulse(
+                    current_heading,
+                    intent.heading,
+                    intent.speed,
+                    request.metadata.motion_style,
+                ) =>
+            {
+                Self::send_drive_pulse(
+                    world,
+                    session,
+                    current_heading,
+                    intent.heading,
+                    intent.speed,
+                    request.metadata,
+                )
+                .await?;
+                self.note_server_drive_sent(server_drive_intent(
+                    current_heading,
+                    intent.heading,
+                    intent.speed,
+                    request.metadata.motion_style,
+                ));
             }
+            MovementPrimitive::Stop if self.should_send_stop_pulse() => {
+                Self::send_stop_pulse(world, session, request.metadata).await?;
+                if had_active_local_motion {
+                    Self::send_autonomous_position_sync(world, session, request.metadata).await?;
+                }
+                self.note_server_motion_cleared();
+            }
+            _ => {}
         }
 
         Ok(state_events)
     }
 
-    pub(super) fn apply_locomotion_primitive(
+    async fn execute_snap_facing(
         &mut self,
-        primitive: LocomotionPrimitive,
+        desired_heading: f32,
+        world: &mut WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<Vec<WorldEvent>> {
+        let normalized_heading = normalize_heading(desired_heading);
+        let current_heading = world.player.position.rotation.to_heading();
+
+        if signed_heading_delta(current_heading, normalized_heading).abs() <= 1e-4 {
+            return Ok(Vec::new());
+        }
+
+        let mut next_pos = world.player.position;
+        next_pos.rotation = Quaternion::from_heading(normalized_heading);
+        let mut world_events = world.set_player_position(next_pos);
+
+        if let Some(intent) = &mut self.local_motion {
+            intent.drive.heading = normalized_heading;
+            world_events.extend(self.sync_local_motion_vectors(world));
+        }
+
+        Self::send_autonomous_position_sync(world, session, metadata).await?;
+
+        Ok(world_events)
+    }
+
+    fn apply_movement_primitive(
+        &mut self,
+        primitive: MovementPrimitive,
         world: &mut WorldState,
     ) -> Vec<WorldEvent> {
-        let mut events = Vec::new();
+        match primitive {
+            MovementPrimitive::Drive { intent, prediction } => {
+                self.local_motion = Some(LocalMotionIntent {
+                    drive: DriveIntent {
+                        heading: normalize_heading(intent.heading),
+                        speed: intent.speed.max(0.0),
+                    },
+                    prediction,
+                });
+                self.sync_local_motion_vectors(world)
+            }
+            MovementPrimitive::SnapFacing { heading } => {
+                let mut next_pos = world.player.position;
+                next_pos.rotation = Quaternion::from_heading(normalize_heading(heading));
+                let mut events = world.set_player_position(next_pos);
 
-        if let LocomotionPrimitive::Drive { heading, .. } = primitive {
-            let mut next_pos = world.player.position;
-            next_pos.rotation = Quaternion::from_heading(heading);
-            events.extend(world.set_player_position(next_pos));
+                if let Some(intent) = &mut self.local_motion {
+                    intent.drive.heading = normalize_heading(heading);
+                    events.extend(self.sync_local_motion_vectors(world));
+                }
+
+                events
+            }
+            MovementPrimitive::Stop => {
+                self.local_motion = None;
+                world.set_player_vector(Vector3::zero(), Vector3::zero())
+            }
+        }
+    }
+
+    fn sync_local_motion_vectors(&self, world: &mut WorldState) -> Vec<WorldEvent> {
+        let Some(intent) = self.local_motion else {
+            return world.set_player_vector(Vector3::zero(), Vector3::zero());
+        };
+
+        let current_heading = world.player.position.rotation.to_heading();
+        let heading_delta = signed_heading_delta(current_heading, intent.drive.heading);
+        // When the caller supplied a world-space prediction vector, preserve it exactly,
+        // including any vertical component. Otherwise we derive planar motion from the
+        // current facing while the player is still turning toward the requested heading.
+        let velocity = intent
+            .prediction
+            .resolve_velocity(current_heading, intent.drive.speed);
+        let omega = if heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+            Vector3::zero()
+        } else {
+            Vector3::new(
+                0.0,
+                0.0,
+                heading_delta.signum() * LOCAL_TURN_RATE_RAD_PER_SEC,
+            )
+        };
+
+        world.set_player_vector(velocity, omega)
+    }
+
+    pub(super) fn advance_local_motion_prediction(
+        &mut self,
+        dt: f32,
+        world: &mut WorldState,
+    ) -> Vec<WorldEvent> {
+        let Some(intent) = self.local_motion else {
+            return Vec::new();
+        };
+
+        let Some(_player_entity) = world.entities.get(world.player.guid) else {
+            return Vec::new();
+        };
+
+        let dt = dt.max(0.0);
+        if dt <= f32::EPSILON {
+            return Vec::new();
         }
 
-        if let Some(velocity) = primitive.desired_velocity() {
-            events.extend(world.set_player_velocity(velocity));
-        }
+        let current_heading = world.player.position.rotation.to_heading();
+        let heading_delta = signed_heading_delta(current_heading, intent.drive.heading);
+        let max_turn_step = LOCAL_TURN_RATE_RAD_PER_SEC * dt;
+        let applied_turn = heading_delta.clamp(-max_turn_step, max_turn_step);
+        let next_heading = normalize_heading(current_heading + applied_turn);
+        let velocity = intent
+            .prediction
+            .resolve_velocity(next_heading, intent.drive.speed);
+        let omega = if heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+            Vector3::zero()
+        } else {
+            Vector3::new(
+                0.0,
+                0.0,
+                heading_delta.signum() * LOCAL_TURN_RATE_RAD_PER_SEC,
+            )
+        };
 
+        let mut next_pos = world.player.position;
+        next_pos.rotation = Quaternion::from_heading(next_heading);
+        next_pos.coords = next_pos.coords + (velocity * dt);
+
+        let mut events = world.set_player_position(next_pos);
+        events.extend(world.set_player_vector(velocity, omega));
         events
+    }
+
+    pub(super) async fn send_autonomous_position_heartbeat(
+        &mut self,
+        world: &WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<bool> {
+        let Some(pulse) = build_autonomous_position_heartbeat(world, metadata) else {
+            return Ok(false);
+        };
+
+        log::debug!(
+            ">>>> Sending AutonomousPosition heartbeat. ServerSeq: {}, Pos: {:?}",
+            world.player.server_control_sequence,
+            pulse.position
+        );
+
+        session
+            .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
+            .await?;
+
+        Ok(true)
+    }
+
+    async fn send_autonomous_position_sync(
+        world: &WorldState,
+        session: &mut Session,
+        metadata: MovementPacketMetadata,
+    ) -> Result<bool> {
+        let Some(pulse) = build_autonomous_position_sync(world, metadata) else {
+            return Ok(false);
+        };
+
+        log::debug!(
+            ">>>> Sending AutonomousPosition sync. ServerSeq: {}, Pos: {:?}",
+            world.player.server_control_sequence,
+            pulse.position
+        );
+
+        session
+            .send_action(GameAction::AutonomousPosition(Box::new(pulse)))
+            .await?;
+
+        Ok(true)
     }
 
     async fn send_drive_pulse(
         world: &WorldState,
         session: &mut Session,
-        heading: f32,
+        current_heading: f32,
+        desired_heading: f32,
         speed: f32,
         metadata: MovementPacketMetadata,
     ) -> Result<()> {
         let mut position = world.player.position;
-        position.rotation = Quaternion::from_heading(heading);
+        position.rotation = Quaternion::from_heading(current_heading);
 
         let data = holtburger_protocol::messages::game_action::MoveToStateActionData {
-            raw_motion_state: raw_motion_state_with_motion_style(
+            raw_motion_state: build_drive_raw_motion_state(
                 world,
-                RawMotionState {
-                    flags: RawMotionFlags::CURRENT_HOLD_KEY
-                        | RawMotionFlags::FORWARD_COMMAND
-                        | RawMotionFlags::FORWARD_SPEED,
-                    current_hold_key: Some(HoldKey::Run as u32),
-                    forward_command: Some(WALK_FORWARD_MOTION_COMMAND),
-                    forward_speed: Some(speed),
-                    ..Default::default()
-                },
+                current_heading,
+                desired_heading,
+                speed,
                 metadata.motion_style,
             ),
             position,
@@ -246,7 +611,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(metadata),
+            contact_long_jump: encode_contact_long_jump(world, metadata),
         };
 
         session
@@ -270,7 +635,7 @@ impl MovementSystem {
             server_control_sequence: world.player.server_control_sequence,
             teleport_sequence: world.player.teleport_sequence,
             force_position_sequence: world.player.force_position_sequence,
-            contact_long_jump: encode_contact_long_jump(metadata),
+            contact_long_jump: encode_contact_long_jump(world, metadata),
         };
 
         session
@@ -382,31 +747,7 @@ impl MovementSystem {
 
         let state_events = world.set_player_position(next_pos);
 
-        // Respond with AutonomousPosition heartbeat to confirm arrival
-        // We use AutonomousPosition instead of MoveToState because MoveToState
-        // cancels server-side movement chains (like pickups) on the ACE server.
-        let pulse = AutonomousPositionActionData {
-            position: next_pos,
-            instance_sequence: world.player.instance_sequence,
-            server_control_sequence: world.player.server_control_sequence,
-            teleport_sequence: world.player.teleport_sequence,
-            force_position_sequence: world.player.force_position_sequence,
-            last_contact: encode_last_contact(MovementPacketMetadata::default()),
-        };
-
-        log::debug!(
-            ">>>> Sending AutonomousPosition heartbeat. ServerSeq: {}, Pos: {:?}",
-            world.player.server_control_sequence,
-            next_pos
-        );
-
-        let action = GameActionMessage {
-            sequence: 0, // Heartbeats usually use 0 or a separate counter
-            action: GameAction::AutonomousPosition(Box::new(pulse)),
-        };
-
-        session
-            .send_message(&GameMessage::GameAction(Box::new(action)))
+        Self::send_autonomous_position_sync(world, session, MovementPacketMetadata::default())
             .await?;
 
         Ok((wire_events, state_events))
@@ -418,7 +759,9 @@ mod tests {
     use super::*;
     use holtburger_common::Vector3;
     use holtburger_protocol::messages::movement::MotionStance;
+    use holtburger_session::Session;
     use holtburger_world::WorldState;
+    use holtburger_world::entity::Entity;
 
     #[test]
     fn test_calculate_heading_to() {
@@ -538,5 +881,520 @@ mod tests {
                 .contains(RawMotionFlags::CURRENT_STYLE)
         );
         assert_eq!(raw_motion_state.current_style, None);
+    }
+
+    #[test]
+    fn drive_raw_motion_state_adds_right_turn_when_heading_increases() {
+        let world = WorldState::new(None, None);
+
+        let raw_motion_state = build_drive_raw_motion_state(
+            &world,
+            0.0,
+            90.0_f32.to_radians(),
+            4.5,
+            MotionStyle::PreserveServer,
+        );
+
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::FORWARD_COMMAND)
+        );
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::TURN_COMMAND)
+        );
+        assert_eq!(
+            raw_motion_state.turn_command,
+            Some(TURN_RIGHT_MOTION_COMMAND)
+        );
+    }
+
+    #[test]
+    fn drive_raw_motion_state_adds_left_turn_when_heading_decreases() {
+        let world = WorldState::new(None, None);
+
+        let raw_motion_state = build_drive_raw_motion_state(
+            &world,
+            180.0_f32.to_radians(),
+            90.0_f32.to_radians(),
+            4.5,
+            MotionStyle::PreserveServer,
+        );
+
+        assert!(
+            raw_motion_state
+                .flags
+                .contains(RawMotionFlags::TURN_COMMAND)
+        );
+        assert_eq!(
+            raw_motion_state.turn_command,
+            Some(TURN_LEFT_MOTION_COMMAND)
+        );
+    }
+
+    #[test]
+    fn drive_raw_motion_state_omits_turn_when_heading_is_aligned() {
+        let world = WorldState::new(None, None);
+
+        let raw_motion_state = build_drive_raw_motion_state(
+            &world,
+            90.0_f32.to_radians(),
+            95.0_f32.to_radians(),
+            4.5,
+            MotionStyle::PreserveServer,
+        );
+
+        assert!(
+            !raw_motion_state
+                .flags
+                .contains(RawMotionFlags::TURN_COMMAND)
+        );
+        assert_eq!(raw_motion_state.turn_command, None);
+    }
+
+    #[test]
+    fn local_motion_prediction_advances_player_position_from_velocity() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        world.player.guid = player_guid;
+        world.player.position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            world.player.position,
+        ));
+        let mut movement = MovementSystem::new();
+        movement.apply_movement_primitive(
+            MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: 180.0_f32.to_radians(),
+                    speed: 1.0,
+                },
+                prediction: MovementPrediction::FromHeading,
+            },
+            &mut world,
+        );
+
+        let events = movement.advance_local_motion_prediction(0.5, &mut world);
+
+        assert!(
+            events.iter().any(|event| matches!(event, WorldEvent::EntityMoved { guid, pos } if *guid == player_guid && (pos.coords.x - 12.0).abs() < 1e-5 && (pos.coords.y - 20.0).abs() < 1e-5))
+        );
+        assert!((world.player.position.coords.x - 12.0).abs() < 1e-5);
+        assert!((world.player.position.coords.y - 20.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn local_motion_prediction_ignores_missing_drive_intent() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        let position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.player.guid = player_guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), position));
+
+        let events = MovementSystem::new().advance_local_motion_prediction(0.5, &mut world);
+
+        assert!(events.is_empty());
+        assert_eq!(world.player.position, position);
+    }
+
+    #[test]
+    fn local_motion_prediction_turns_toward_desired_heading_without_snapping() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        let position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.player.guid = player_guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(player_guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let events = movement.apply_movement_primitive(
+            MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: 180.0_f32.to_radians(),
+                    speed: 1.0,
+                },
+                prediction: MovementPrediction::FromHeading,
+            },
+            &mut world,
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
+                if *guid == player_guid && velocity.length_squared() > 0.0
+        )));
+        assert_eq!(world.player.position.rotation, position.rotation);
+
+        let _ = movement.advance_local_motion_prediction(0.25, &mut world);
+
+        let new_heading = world.player.position.rotation.to_heading();
+        assert!(new_heading > 0.0);
+        assert!(new_heading < 180.0_f32.to_radians());
+    }
+
+    #[test]
+    fn local_motion_prediction_uses_world_space_predicted_velocity_when_provided() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        world.player.guid = player_guid;
+        world.player.position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            world.player.position,
+        ));
+        let mut movement = MovementSystem::new();
+        movement.apply_movement_primitive(
+            MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: 90.0_f32.to_radians(),
+                    speed: 1.0,
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(0.0, 2.0, 3.0)),
+            },
+            &mut world,
+        );
+
+        let events = movement.advance_local_motion_prediction(0.5, &mut world);
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityMoved { guid, pos }
+                if *guid == player_guid
+                && (pos.coords.y - 21.0).abs() < 1e-5
+                && (pos.coords.z - 1.5).abs() < 1e-5
+        )));
+    }
+
+    #[test]
+    fn apply_drive_preserves_vertical_prediction_in_entity_velocity() {
+        let mut world = WorldState::new(None, None);
+        let player_guid = Guid(0x50000123);
+        world.player.guid = player_guid;
+        world.player.position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            world.player.position,
+        ));
+
+        let mut movement = MovementSystem::new();
+        let events = movement.apply_movement_primitive(
+            MovementPrimitive::Drive {
+                intent: DriveIntent {
+                    heading: 90.0_f32.to_radians(),
+                    speed: 1.0,
+                },
+                prediction: MovementPrediction::WorldVelocity(Vector3::new(0.0, 2.0, 3.0)),
+            },
+            &mut world,
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
+                if *guid == player_guid && (velocity.z - 3.0).abs() < 1e-5
+        )));
+    }
+
+    #[test]
+    fn stop_pulse_is_still_required_when_server_motion_is_active() {
+        let mut movement = MovementSystem::new();
+        movement.note_server_drive_sent(server_drive_intent(
+            0.0,
+            std::f32::consts::PI,
+            4.5,
+            MotionStyle::PreserveServer,
+        ));
+
+        assert!(movement.should_send_stop_pulse());
+    }
+
+    #[test]
+    fn note_server_motion_cleared_resets_drive_tracking() {
+        let mut movement = MovementSystem::new();
+        movement.note_server_drive_sent(server_drive_intent(
+            0.0,
+            std::f32::consts::PI,
+            4.5,
+            MotionStyle::PreserveServer,
+        ));
+
+        movement.note_server_motion_cleared();
+
+        assert!(!movement.server_motion_active);
+        assert!(movement.last_server_drive_intent.is_none());
+    }
+
+    #[test]
+    fn unchanged_drive_intent_does_not_require_server_refresh() {
+        let mut movement = MovementSystem::new();
+        movement.note_server_drive_sent(server_drive_intent(
+            0.0,
+            std::f32::consts::PI,
+            4.5,
+            MotionStyle::PreserveServer,
+        ));
+
+        assert!(!movement.should_send_drive_pulse(
+            0.0,
+            std::f32::consts::PI,
+            4.5,
+            MotionStyle::PreserveServer,
+        ));
+    }
+
+    #[test]
+    fn autonomous_position_heartbeat_defaults_to_grounded_when_contact_unknown() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+        let mut entity = Entity::new(guid, "Player".to_string(), position);
+        entity.velocity = Vector3::new(2.0, 0.0, 0.0);
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world.player.instance_sequence = 11;
+        world.player.server_control_sequence = 22;
+        world.player.teleport_sequence = 33;
+        world.player.force_position_sequence = 44;
+        world.entities.insert(entity);
+
+        let heartbeat =
+            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
+                .expect("moving player should emit heartbeat");
+
+        assert_eq!(heartbeat.position, position);
+        assert_eq!(heartbeat.instance_sequence, 11);
+        assert_eq!(heartbeat.server_control_sequence, 22);
+        assert_eq!(heartbeat.teleport_sequence, 33);
+        assert_eq!(heartbeat.force_position_sequence, 44);
+        assert_eq!(heartbeat.last_contact, 1);
+    }
+
+    #[test]
+    fn autonomous_position_heartbeat_uses_server_grounded_when_contact_unspecified() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+        let mut entity = Entity::new(guid, "Player".to_string(), position);
+        entity.velocity = Vector3::new(2.0, 0.0, 0.0);
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world.player.server_grounded = Some(true);
+        world.entities.insert(entity);
+
+        let heartbeat =
+            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
+                .expect("moving player should emit heartbeat");
+
+        assert_eq!(heartbeat.last_contact, 1);
+    }
+
+    #[test]
+    fn autonomous_position_sync_can_be_built_for_stationary_player() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world.player.instance_sequence = 11;
+        world.player.server_control_sequence = 22;
+        world.player.teleport_sequence = 33;
+        world.player.force_position_sequence = 44;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let sync = build_autonomous_position_sync(&world, MovementPacketMetadata::default())
+            .expect("server-controlled sync should emit even when stationary");
+
+        assert_eq!(sync.position, position);
+        assert_eq!(sync.instance_sequence, 11);
+        assert_eq!(sync.server_control_sequence, 22);
+        assert_eq!(sync.teleport_sequence, 33);
+        assert_eq!(sync.force_position_sequence, 44);
+    }
+
+    #[tokio::test]
+    async fn stop_after_active_drive_sends_stop_pulse_then_final_position_sync() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+        let mut entity = Entity::new(guid, "Player".to_string(), position);
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world.entities.insert(entity.clone());
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+
+        movement
+            .execute_movement_request(
+                MovementRequest::new(MovementPrimitive::Drive {
+                    intent: DriveIntent {
+                        heading: 90.0_f32.to_radians(),
+                        speed: 1.0,
+                    },
+                    prediction: MovementPrediction::WorldVelocity(Vector3::new(0.0, 4.0, 0.0)),
+                }),
+                &mut world,
+                &mut session,
+            )
+            .await
+            .expect("drive request should succeed");
+
+        entity.velocity = Vector3::new(0.0, 4.0, 0.0);
+        world.entities.insert(entity);
+
+        movement
+            .execute_movement_request(
+                MovementRequest::new(MovementPrimitive::Stop),
+                &mut world,
+                &mut session,
+            )
+            .await
+            .expect("stop request should succeed");
+
+        assert_eq!(session.packet_sequence, 4);
+    }
+
+    #[tokio::test]
+    async fn stop_without_active_drive_does_not_send_final_position_sync() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        movement.note_server_drive_sent(server_drive_intent(
+            0.0,
+            std::f32::consts::PI,
+            4.5,
+            MotionStyle::PreserveServer,
+        ));
+
+        movement
+            .execute_movement_request(
+                MovementRequest::new(MovementPrimitive::Stop),
+                &mut world,
+                &mut session,
+            )
+            .await
+            .expect("stop request should succeed");
+
+        assert_eq!(session.packet_sequence, 2);
+    }
+
+    #[tokio::test]
+    async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::identity(),
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+
+        let events = movement
+            .execute_snap_facing(
+                90.0_f32.to_radians(),
+                &mut world,
+                &mut session,
+                MovementPacketMetadata::default(),
+            )
+            .await
+            .expect("snap facing should succeed");
+
+        let _ = events;
+        assert!((world.player.position.rotation.to_heading() - 90.0_f32.to_radians()).abs() < 1e-5);
+        assert_eq!(session.packet_sequence, 1);
+    }
+
+    #[test]
+    fn autonomous_position_heartbeat_skips_stationary_players() {
+        let mut world = WorldState::new(None, None);
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            ..Default::default()
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        assert!(
+            build_autonomous_position_heartbeat(&world, MovementPacketMetadata::default())
+                .is_none()
+        );
     }
 }

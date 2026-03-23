@@ -4,7 +4,7 @@ use holtburger_core::client::controllers::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetInput, Controller,
     ControllerStatus,
 };
-use holtburger_core::client::locomotion::LocomotionPrimitive;
+use holtburger_core::client::movement_types::{DriveIntent, MovementPrimitive};
 
 fn position(x: f32) -> WorldPosition {
     WorldPosition {
@@ -23,6 +23,7 @@ fn external_consumers_can_drive_approach_target_controller() {
         now,
         player_position: position(0.0),
         target_position: Some(position(5.0)),
+        target_use_radius: None,
         move_speed: 4.5,
     });
 
@@ -31,9 +32,8 @@ fn external_consumers_can_drive_approach_target_controller() {
     assert_eq!(controller.arrival_distance(), 1.0);
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
-            speed,
-            refresh_server: true,
+        [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            intent: DriveIntent { speed, .. },
             ..
         })] if (*speed - 4.5).abs() < f32::EPSILON
     ));
@@ -42,14 +42,14 @@ fn external_consumers_can_drive_approach_target_controller() {
         now: now + std::time::Duration::from_millis(100),
         player_position: position(0.45),
         target_position: Some(position(5.0)),
+        target_use_radius: None,
         move_speed: 4.5,
     });
 
     assert!(matches!(
         update.effects.as_slice(),
-        [ApproachTargetEffect::Locomotion(LocomotionPrimitive::Drive {
-            speed,
-            refresh_server: false,
+        [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+            intent: DriveIntent { speed, .. },
             ..
         })] if (*speed - 4.5).abs() < f32::EPSILON
     ));

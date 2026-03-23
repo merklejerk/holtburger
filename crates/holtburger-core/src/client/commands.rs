@@ -1,11 +1,10 @@
-use crate::client::movement::{encode_contact_long_jump, raw_motion_state_with_motion_style};
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
+use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
-use holtburger_common::{Guid, Quaternion};
 use holtburger_protocol::messages::game_action::*;
-use holtburger_protocol::messages::game_message::{GameMessage, RawMotionState};
+use holtburger_protocol::messages::game_message::GameMessage;
 use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::spell::MagicSchool;
@@ -88,9 +87,7 @@ impl Client {
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. } => self.handle_inventory_command(cmd).await,
 
-            ClientCommand::TurnTo { .. } | ClientCommand::ExecuteLocomotion(_) => {
-                self.handle_movement_command(cmd).await
-            }
+            ClientCommand::ExecuteMovement(_) => self.handle_movement_command(cmd).await,
 
             ClientCommand::RaiseAttribute { .. }
             | ClientCommand::RaiseVital { .. }
@@ -588,47 +585,11 @@ impl Client {
 
     async fn handle_movement_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
-            ClientCommand::TurnTo { heading, metadata } => {
-                log::info!(">>> Turning to heading: {}", heading);
-
-                // Prediction: update local state immediately so UI feels snappy
-                let mut next_pos = self.world.player.position;
-                next_pos.rotation = Quaternion::from_heading(heading);
-                let world_events = self.world.set_player_position(next_pos);
-                for event in world_events {
-                    self.handle_world_event(&event);
-                }
-
-                let obj_inst = self.world.player.instance_sequence;
-                let srv_seq = self.world.player.server_control_sequence;
-                let tele_seq = self.world.player.teleport_sequence;
-                let force_seq = self.world.player.force_position_sequence;
-
-                self.send_game_action(GameAction::MoveToState(Box::new(MoveToStateActionData {
-                    raw_motion_state: raw_motion_state_with_motion_style(
-                        &self.world,
-                        RawMotionState::default(),
-                        metadata.motion_style,
-                    ),
-                    position: self.world.player.position,
-                    instance_sequence: obj_inst,
-                    server_control_sequence: srv_seq,
-                    teleport_sequence: tele_seq,
-                    force_position_sequence: force_seq,
-                    contact_long_jump: encode_contact_long_jump(metadata),
-                })))
-                .await
-            }
-            ClientCommand::ExecuteLocomotion(request) => {
-                if request.primitive.refresh_server() {
-                    log::info!(
-                        ">>> Executing locomotion primitive: {:?}",
-                        request.primitive
-                    );
-                }
+            ClientCommand::ExecuteMovement(request) => {
+                log::info!(">>> Executing movement primitive: {:?}", request.primitive);
                 let world_events = self
                     .movement
-                    .execute_locomotion_request(request, &mut self.world, &mut self.session)
+                    .execute_movement_request(request, &mut self.world, &mut self.session)
                     .await?;
                 for event in world_events {
                     self.handle_world_event(&event);

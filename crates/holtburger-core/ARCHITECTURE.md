@@ -94,7 +94,7 @@ Movement in `holtburger-core` should converge on three distinct layers:
     - Approach target until arrival distance.
     - Follow or maintain range.
     - Combat-facing assist.
-    - Shared no-progress detection, retry cadence, and cancellation rules.
+    - Shared retry cadence and cancellation rules.
 
 This structure keeps the core crate powerful without baking one frontend's control policy directly into the engine loop.
 

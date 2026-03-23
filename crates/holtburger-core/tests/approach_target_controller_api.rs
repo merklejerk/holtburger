@@ -23,6 +23,7 @@ fn external_consumers_can_drive_approach_target_controller() {
         now,
         player_position: position(0.0),
         target_position: Some(position(5.0)),
+        target_use_radius: None,
         move_speed: 4.5,
     });
 
@@ -42,6 +43,7 @@ fn external_consumers_can_drive_approach_target_controller() {
         now: now + std::time::Duration::from_millis(100),
         player_position: position(0.45),
         target_position: Some(position(5.0)),
+        target_use_radius: None,
         move_speed: 4.5,
     });
 

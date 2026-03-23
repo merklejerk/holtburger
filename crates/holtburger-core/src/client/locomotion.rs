@@ -1,7 +1,17 @@
 use holtburger_common::Vector3;
 use holtburger_protocol::messages::movement::MotionStance;
 
-const RUN_ANIM_SPEED: f32 = 4.0;
+pub(crate) const RUN_ANIM_SPEED: f32 = 4.0;
+
+pub(crate) fn world_velocity_for_heading(heading: f32, speed: f32) -> Vector3 {
+    let world_speed = speed * RUN_ANIM_SPEED;
+
+    Vector3::new(
+        -heading.cos() * world_speed,
+        heading.sin() * world_speed,
+        0.0,
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MotionStyle {
@@ -76,15 +86,7 @@ pub enum LocomotionPrimitive {
 impl LocomotionPrimitive {
     pub fn desired_velocity(&self) -> Option<Vector3> {
         match *self {
-            Self::Drive { heading, speed, .. } => {
-                let world_speed = speed * RUN_ANIM_SPEED;
-
-                Some(Vector3::new(
-                    -heading.cos() * world_speed,
-                    heading.sin() * world_speed,
-                    0.0,
-                ))
-            }
+            Self::Drive { heading, speed, .. } => Some(world_velocity_for_heading(heading, speed)),
             Self::Stop { .. } => Some(Vector3::zero()),
         }
     }

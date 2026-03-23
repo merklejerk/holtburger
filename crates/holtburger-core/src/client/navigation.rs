@@ -33,6 +33,7 @@ pub struct ApproachSyncInput {
     pub now: Instant,
     pub player_position: Option<WorldPosition>,
     pub target_position: Option<WorldPosition>,
+    pub target_use_radius: Option<f32>,
     pub move_speed: f32,
     pub metadata: MovementPacketMetadata,
 }
@@ -45,6 +46,7 @@ pub struct StickyMeleeSyncInput {
     pub target_guid: Option<Guid>,
     pub player_position: Option<WorldPosition>,
     pub target_position: Option<WorldPosition>,
+    pub target_use_radius: Option<f32>,
     pub move_speed: f32,
     pub metadata: MovementPacketMetadata,
 }
@@ -198,6 +200,7 @@ impl NavigationAutomation {
             now: input.now,
             player_position,
             target_position: input.target_position,
+            target_use_radius: input.target_use_radius,
             move_speed: input.move_speed,
         });
 
@@ -446,6 +449,7 @@ impl NavigationAutomation {
                         now: input.now,
                         player_position: input.player_position,
                         target_position: input.target_position,
+                        target_use_radius: input.target_use_radius,
                         move_speed: input.move_speed,
                         metadata: input.metadata,
                     },
@@ -488,9 +492,6 @@ impl NavigationAutomation {
                 }
                 ApproachTargetFinishReason::TargetUnavailable => {
                     log::warn!("approach: target became unavailable");
-                }
-                ApproachTargetFinishReason::NoProgress => {
-                    log::warn!("approach: controller aborted because the player made no progress");
                 }
                 ApproachTargetFinishReason::Cancelled => {
                     log::info!("approach: controller cancelled by user");
@@ -552,6 +553,7 @@ mod tests {
                 now,
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
+                target_use_radius: None,
                 move_speed: 4.5,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -577,12 +579,55 @@ mod tests {
                 now,
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
+                target_use_radius: None,
                 move_speed: 4.5,
                 metadata: MovementPacketMetadata::default(),
             },
         );
 
         assert!(second.commands.is_empty());
+        assert!(automation.has_active_approach());
+    }
+
+    #[test]
+    fn unchanged_local_position_does_not_abort_active_approach() {
+        let now = Instant::now();
+        let mut automation = NavigationAutomation::default();
+
+        let _ = automation.start_approach_target(
+            Guid(0x1234),
+            1.0,
+            ApproachSyncInput {
+                now,
+                player_position: Some(position(0.0)),
+                target_position: Some(position(5.0)),
+                target_use_radius: None,
+                move_speed: 4.5,
+                metadata: MovementPacketMetadata::default(),
+            },
+        );
+
+        let next = automation.sync_approach_target(ApproachSyncInput {
+            now: now + Duration::from_millis(600),
+            player_position: Some(position(0.0)),
+            target_position: Some(position(5.0)),
+            target_use_radius: None,
+            move_speed: 4.5,
+            metadata: MovementPacketMetadata::default(),
+        });
+
+        assert!(next.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteLocomotion(LocomotionRequest {
+                    primitive: LocomotionPrimitive::Drive {
+                        refresh_server: true,
+                        ..
+                    },
+                    ..
+                })
+            )
+        }));
         assert!(automation.has_active_approach());
     }
 
@@ -597,6 +642,7 @@ mod tests {
                 now,
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
+                target_use_radius: None,
                 move_speed: 4.5,
                 metadata: MovementPacketMetadata::default(),
             },
@@ -632,6 +678,7 @@ mod tests {
             target_guid: Some(target_guid),
             player_position: Some(position(0.0)),
             target_position: Some(position(1.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });
@@ -663,6 +710,7 @@ mod tests {
             target_guid: Some(target_guid),
             player_position: Some(position(10.0)),
             target_position: Some(position(11.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });
@@ -693,6 +741,7 @@ mod tests {
             target_guid: Some(target_guid),
             player_position: Some(position(0.0)),
             target_position: Some(position(1.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });
@@ -727,6 +776,7 @@ mod tests {
             target_guid: Some(Guid(0x1234)),
             player_position: Some(position(0.0)),
             target_position: Some(position(1.5)),
+            target_use_radius: None,
             move_speed: 4.5,
             metadata: MovementPacketMetadata::default(),
         });

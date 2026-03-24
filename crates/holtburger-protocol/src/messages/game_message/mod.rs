@@ -1,5 +1,6 @@
 pub use crate::messages::character::types::*;
 pub use crate::messages::chat::types::*;
+pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::types::*;
 pub use crate::messages::effects::types::*;
 pub use crate::messages::inventory::types::*;
@@ -23,6 +24,7 @@ pub enum GameMessage {
     CharacterEnterWorldServerReady, // 0xF7DF
     ServerName(Box<ServerNameData>),
     ServerMessage(Box<ServerMessageData>),
+    TurbineChat(Box<TurbineChatMessageData>),
     DddInterrogation,
     DddInterrogationResponse(Box<DddInterrogationResponseData>),
     CharacterError(Box<CharacterErrorData>),

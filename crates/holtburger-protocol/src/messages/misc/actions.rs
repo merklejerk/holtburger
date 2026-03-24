@@ -138,6 +138,21 @@ mod tests {
     }
 
     #[test]
+    fn test_confirmation_response_fellowship_fixture() {
+        let action = GameActionMessage {
+            sequence: 0xCAFEBABE,
+            action: GameAction::ConfirmationResponse(Box::new(ConfirmationResponseActionData {
+                confirmation_type: ConfirmationType::Fellowship,
+                context: 0xABCDEF01,
+                accepted: true,
+            })),
+        };
+
+        let fixture = hex::decode("BEBAFECA750200000400000001EFCDAB01000000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
     fn test_tele_to_lifestone_fixture() {
         let action = GameActionMessage {
             sequence: 0x11111111,

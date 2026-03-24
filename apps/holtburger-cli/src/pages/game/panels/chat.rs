@@ -6,7 +6,10 @@ use ratatui::widgets::{List, ListItem};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use holtburger_common::properties::DamageType;
-use holtburger_core::client::types::CombatFeedback;
+use holtburger_core::client::types::{
+    ChatChannelInfo, ChatChannelKind, ChatChannelSource, CombatFeedback,
+};
+use holtburger_world::FellowshipActivity;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{AttackConditions, DamageLocation};
 use std::fs::File;
@@ -24,6 +27,7 @@ const MAX_CHAT: usize = 4000;
 pub struct ChatMessage {
     pub kind: ChatMessageKind,
     pub text: String,
+    pub channel: Option<ChatChannelInfo>,
 }
 
 pub struct ChatState {
@@ -92,6 +96,20 @@ impl ChatState {
             ClientViewEvent::Chat { sender, message } => {
                 self.log(ChatMessageKind::Chat, format!("{}: {}", sender, message));
             }
+            ClientViewEvent::ChannelMessage {
+                channel,
+                sender,
+                message,
+            } => {
+                self.log_channel(
+                    ChatMessageKind::Chat,
+                    channel,
+                    format_channel_message(channel, &sender, &message),
+                );
+            }
+            ClientViewEvent::FellowshipActivity { activity } => {
+                self.log(ChatMessageKind::System, format_fellowship_activity(&activity));
+            }
             ClientViewEvent::Tell { sender, message } => {
                 self.last_incoming_tell_sender = Some(sender.clone());
                 self.log(ChatMessageKind::Tell, format!("{} tells you: {}", sender, message));
@@ -116,13 +134,30 @@ impl ChatState {
     }
 
     pub fn log(&mut self, kind: ChatMessageKind, text: String) {
+        self.log_with_channel(kind, None, text);
+    }
+
+    pub fn log_channel(&mut self, kind: ChatMessageKind, channel: ChatChannelInfo, text: String) {
+        self.log_with_channel(kind, Some(channel), text);
+    }
+
+    fn log_with_channel(
+        &mut self,
+        kind: ChatMessageKind,
+        channel: Option<ChatChannelInfo>,
+        text: String,
+    ) {
         if let Some(log_mutex) = &self.chat_log
             && let Ok(mut file) = log_mutex.lock()
         {
             let _ = writeln!(file, "{}", text);
             let _ = file.flush();
         }
-        self.messages.push(ChatMessage { kind, text });
+        self.messages.push(ChatMessage {
+            kind,
+            text,
+            channel,
+        });
 
         if self.messages.len() > MAX_CHAT {
             let drop_count = self.messages.len() - MAX_CHAT;
@@ -314,6 +349,89 @@ impl ChatState {
     }
 }
 
+fn channel_label(channel: ChatChannelInfo) -> String {
+    match channel.kind {
+        ChatChannelKind::Fellowship => "Party".to_string(),
+        ChatChannelKind::Allegiance => "Guild".to_string(),
+        ChatChannelKind::Vassals => "Vassals".to_string(),
+        ChatChannelKind::Patron => "Patron".to_string(),
+        ChatChannelKind::Monarch => "Monarch".to_string(),
+        ChatChannelKind::CoVassals => "Co-Vassals".to_string(),
+        ChatChannelKind::General => "General".to_string(),
+        ChatChannelKind::Trade => "Trade".to_string(),
+        ChatChannelKind::Lfg => "LFG".to_string(),
+        ChatChannelKind::Roleplay => "Roleplay".to_string(),
+        ChatChannelKind::Society => "Society".to_string(),
+        ChatChannelKind::Olthoi => "Olthoi".to_string(),
+        ChatChannelKind::Unknown => match channel.source {
+            ChatChannelSource::Legacy { channel } => format!("Legacy 0x{:08X}", channel.raw()),
+            ChatChannelSource::Turbine { room_id, .. } => {
+                format!("Room 0x{:08X}", room_id.raw())
+            }
+        },
+    }
+}
+
+fn is_self_echo_channel(channel: ChatChannelInfo) -> bool {
+    matches!(
+        channel.source,
+        ChatChannelSource::Legacy { channel }
+            if matches!(
+                channel.known(),
+                Some(
+                    holtburger_protocol::messages::ChatChannel::Fellow
+                        | holtburger_protocol::messages::ChatChannel::Vassals
+                        | holtburger_protocol::messages::ChatChannel::Patron
+                        | holtburger_protocol::messages::ChatChannel::Monarch
+                        | holtburger_protocol::messages::ChatChannel::CoVassals
+                )
+            )
+    )
+}
+
+fn format_channel_message(channel: ChatChannelInfo, sender: &str, message: &str) -> String {
+    let label = channel_label(channel);
+
+    if sender.is_empty() {
+        if is_self_echo_channel(channel) {
+            format!("[{}] You: {}", label, message)
+        } else {
+            format!("[{}] {}", label, message)
+        }
+    } else {
+        format!("[{}] {}: {}", label, sender, message)
+    }
+}
+
+fn format_fellowship_activity(activity: &FellowshipActivity) -> String {
+    match activity {
+        FellowshipActivity::YouJoined { fellowship_name } => {
+            if fellowship_name.is_empty() {
+                "You joined the fellowship.".to_string()
+            } else {
+                format!("You joined the fellowship '{}'.", fellowship_name)
+            }
+        }
+        FellowshipActivity::MemberJoined { member_name } => {
+            format!("{} joined the fellowship.", member_name)
+        }
+        FellowshipActivity::YouLeft => "You left the fellowship.".to_string(),
+        FellowshipActivity::MemberLeft { member_name } => {
+            format!("{} left the fellowship.", member_name)
+        }
+        FellowshipActivity::YouWereDismissed => {
+            "You were dismissed from the fellowship.".to_string()
+        }
+        FellowshipActivity::MemberWasDismissed { member_name } => {
+            format!("{} was dismissed from the fellowship.", member_name)
+        }
+        FellowshipActivity::FellowshipDisbanded { fellowship_name } => match fellowship_name {
+            Some(name) if !name.is_empty() => format!("The fellowship '{}' was disbanded.", name),
+            _ => "The fellowship was disbanded.".to_string(),
+        },
+    }
+}
+
 fn format_damage_type(damage_type: DamageType) -> String {
     let names: Vec<_> = damage_type.iter_display_names().collect();
     if names.is_empty() {
@@ -418,6 +536,94 @@ pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn channel_message_formats_party_self_echo_without_blank_sender() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(holtburger_core::ClientViewEvent::ChannelMessage {
+            channel: ChatChannelInfo::legacy(holtburger_protocol::messages::ChatChannel::Fellow.into()),
+            sender: String::new(),
+            message: "party check".to_string(),
+        });
+
+        let message = chat.messages.last().expect("channel message should log");
+        assert_eq!(message.kind, ChatMessageKind::Chat);
+        assert_eq!(
+            message.channel,
+            Some(ChatChannelInfo::legacy(
+                holtburger_protocol::messages::ChatChannel::Fellow.into()
+            ))
+        );
+        assert_eq!(message.text, "[Party] You: party check");
+    }
+
+    #[test]
+    fn channel_message_formats_guild_sender_with_label() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(holtburger_core::ClientViewEvent::ChannelMessage {
+            channel: ChatChannelInfo::legacy(
+                holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into(),
+            ),
+            sender: "Bestie".to_string(),
+            message: "guild check".to_string(),
+        });
+
+        let message = chat.messages.last().expect("channel message should log");
+        assert_eq!(
+            message.channel,
+            Some(ChatChannelInfo::legacy(
+                holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into()
+            ))
+        );
+        assert_eq!(message.text, "[Guild] Bestie: guild check");
+    }
+
+    #[test]
+    fn turbine_general_message_formats_with_semantic_label() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(holtburger_core::ClientViewEvent::ChannelMessage {
+            channel: ChatChannelInfo::turbine(
+                holtburger_protocol::messages::TurbineChatChannel::General.into(),
+                holtburger_protocol::messages::TurbineChatType::General.into(),
+                holtburger_protocol::messages::TurbineChatDispatchType::SendToRoomByName,
+            ),
+            sender: "Bestie".to_string(),
+            message: "world check".to_string(),
+        });
+
+        let message = chat.messages.last().expect("channel message should log");
+        assert_eq!(message.text, "[General] Bestie: world check");
+    }
+
+    #[test]
+    fn fellowship_activity_formats_member_join() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(holtburger_core::ClientViewEvent::FellowshipActivity {
+            activity: FellowshipActivity::MemberJoined {
+                member_name: "Bravo".to_string(),
+            },
+        });
+
+        let message = chat.messages.last().expect("fellowship activity should log");
+        assert_eq!(message.kind, ChatMessageKind::System);
+        assert_eq!(message.text, "Bravo joined the fellowship.");
+    }
+
+    #[test]
+    fn fellowship_activity_formats_local_dismissal() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(holtburger_core::ClientViewEvent::FellowshipActivity {
+            activity: FellowshipActivity::YouWereDismissed,
+        });
+
+        let message = chat.messages.last().expect("fellowship activity should log");
+        assert_eq!(message.text, "You were dismissed from the fellowship.");
+    }
 
     #[test]
     fn attacker_feedback_formats_damage_summary() {

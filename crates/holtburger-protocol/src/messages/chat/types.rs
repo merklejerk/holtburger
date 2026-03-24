@@ -3,6 +3,61 @@ use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
 use strum_macros::FromRepr;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Hash)]
+#[repr(u32)]
+pub enum ChatChannel {
+    Abuse = 0x00000001,
+    Admin = 0x00000002,
+    Audit = 0x00000004,
+    Advocate1 = 0x00000008,
+    Advocate2 = 0x00000010,
+    Advocate3 = 0x00000020,
+    Sentinel = 0x00000200,
+    Help = 0x00000400,
+    Fellow = 0x00000800,
+    Vassals = 0x00001000,
+    Patron = 0x00002000,
+    Monarch = 0x00004000,
+    CoVassals = 0x01000000,
+    AllegianceBroadcast = 0x02000000,
+    FellowBroadcast = 0x04000000,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChatChannelId {
+    Known(ChatChannel),
+    Unknown(u32),
+}
+
+impl ChatChannelId {
+    pub fn from_raw(raw: u32) -> Self {
+        match ChatChannel::from_repr(raw) {
+            Some(channel) => Self::Known(channel),
+            None => Self::Unknown(raw),
+        }
+    }
+
+    pub fn raw(self) -> u32 {
+        match self {
+            Self::Known(channel) => channel as u32,
+            Self::Unknown(raw) => raw,
+        }
+    }
+
+    pub fn known(self) -> Option<ChatChannel> {
+        match self {
+            Self::Known(channel) => Some(channel),
+            Self::Unknown(_) => None,
+        }
+    }
+}
+
+impl From<ChatChannel> for ChatChannelId {
+    fn from(value: ChatChannel) -> Self {
+        Self::Known(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 #[repr(u32)]
 pub enum ChatMessageType {

@@ -2,7 +2,8 @@ use crate::pages::selection::SelectionState;
 use crate::state::AppState;
 use crate::types::{ChatMessageKind, Page, UpdateResult};
 use holtburger_core::{
-    BusyOperationKind, BusyOperationResult, ClientState, ClientViewEvent, ErrorReason,
+    BusyOperationKind, BusyOperationResult, ClientCommand, ClientState, ClientViewEvent,
+    ErrorReason,
 };
 use holtburger_protocol::errors::CharacterError;
 
@@ -72,13 +73,20 @@ impl AppState {
     }
 
     fn handle_client_status_event(&mut self, event: &ClientViewEvent) -> UpdateResult {
-        let result = UpdateResult::new();
+        let mut result = UpdateResult::new();
         match event {
             ClientViewEvent::StatusUpdate { state } => {
+                let was_in_world = self.client_state == ClientState::InWorld;
                 self.client_state = state.clone();
                 if self.client_state == ClientState::InWorld {
                     self.logon_retry.reset();
                     self.enter_retry.reset();
+
+                    if !was_in_world {
+                        result.commands.push(ClientCommand::SetFellowshipUpdatesSubscribed {
+                            enabled: true,
+                        });
+                    }
                 }
             }
             ClientViewEvent::ErrorRaised {
@@ -147,6 +155,7 @@ impl AppState {
                 | ClientViewEvent::LogMessage(_)
                 | ClientViewEvent::ServerMessage { .. }
                 | ClientViewEvent::Chat { .. }
+                | ClientViewEvent::ChannelMessage { .. }
                 | ClientViewEvent::Tell { .. }
                 | ClientViewEvent::Emote { .. }
                 | ClientViewEvent::PingResponse
@@ -220,5 +229,58 @@ impl AppState {
             }
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::NetStats;
+    use crate::types::Page;
+    use holtburger_core::RetryState;
+
+    fn build_test_app_state(client_state: ClientState) -> AppState {
+        AppState {
+            account_name: "account".to_string(),
+            account_password: "password".to_string(),
+            character_preference: None,
+            chat_log: None,
+            page: Page::Selection(SelectionState::default()),
+            modal: None,
+            logon_retry: RetryState::new(5),
+            enter_retry: RetryState::new(5),
+            client_state,
+            net_stats: NetStats::default(),
+            world_name: "World".to_string(),
+            server_time: None,
+            verbosity: 0,
+        }
+    }
+
+    #[test]
+    fn entering_world_subscribes_to_fellowship_updates() {
+        let mut app_state = build_test_app_state(ClientState::EnteringWorld);
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
+            state: ClientState::InWorld,
+        });
+
+        assert!(matches!(app_state.client_state, ClientState::InWorld));
+        assert_eq!(result.commands.len(), 1);
+        assert!(matches!(
+            result.commands[0],
+            ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true }
+        ));
+    }
+
+    #[test]
+    fn repeated_in_world_status_does_not_resubscribe() {
+        let mut app_state = build_test_app_state(ClientState::InWorld);
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
+            state: ClientState::InWorld,
+        });
+
+        assert!(result.commands.is_empty());
     }
 }

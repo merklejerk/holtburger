@@ -213,7 +213,15 @@
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
-- [ ] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`
+- [ ] Slash commands:
+    - [ ] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`
+    - [ ] `/? COMMAND` - targeted command help doc
+    - [ ] `/swear`, `/leave`, `/unswear <VASSAL>`.
+    - [ ] `/permit <player>`, `/unpermit <player>`, `/permits` - corpse looting options
+    - [ ] `/party` - get info on current party
+    - [ ] `/create-party <NAME>` or `/createparty <NAME>` or `/party-create <NAME>` or `/partycreate <NAME>` - create a party, name is optional
+    - [ ] `/invite <PLAYER>`, `/uninvite <PLAYER>` - party invites
+    - [ ] `/party-open <'on'|'off'>` - change party openness
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

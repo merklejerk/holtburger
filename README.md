@@ -32,6 +32,7 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **Spatial Radar** | 🟢 | 🟢 | Live positional tracking of nearby entities. |
 | **Movement & Physics** | 🟢 | 🟡 | Turn-to, locomotion primitives, sticky pursuit, approach/follow, and server-driven reposition handling work. Full 3D collision-aware navigation is still future-client territory. |
 | **Chat & Messaging** | 🟢 | 🟢 | Full parsing of chat channels, server messages, and emotes. |
+| **Leveling and Progression** | 🟢 | 🟢 | Comprehensive attribute and skill management with XP/Luminance tracking. |
 | **Inventory & Equipping** | 🟢 | 🟢 | Move, stack, split, drop, and equip items. |
 | **Vendors & Trade** | 🟢 | 🟢 | Full merchant interaction including alternate currencies. |
 | **Crafting** | 🟢 | 🟢 | Item combine flows, success prompts, and salvage preview/execution are implemented. |

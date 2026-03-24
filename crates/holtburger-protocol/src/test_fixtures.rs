@@ -100,3 +100,19 @@ pub const CHARACTER_CONFIRMATION_REQUEST: &[u8] =
     include_bytes!("../tests/fixtures/character_confirmation_request.bin");
 pub const CHARACTER_CONFIRMATION_DONE: &[u8] =
     include_bytes!("../tests/fixtures/character_confirmation_done.bin");
+pub const FELLOWSHIP_FULL_UPDATE: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_full_update.bin");
+pub const FELLOWSHIP_UPDATE_FELLOW_FULL: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_update_fellow_full.bin");
+pub const FELLOWSHIP_UPDATE_FELLOW_VITALS: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_update_fellow_vitals.bin");
+pub const FELLOWSHIP_DISBAND: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_disband.bin");
+pub const FELLOWSHIP_QUIT_EVENT: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_quit_event.bin");
+pub const FELLOWSHIP_DISMISS_EVENT: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_dismiss_event.bin");
+pub const FELLOWSHIP_FELLOW_UPDATE_DONE: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_fellow_update_done.bin");
+pub const FELLOWSHIP_FELLOW_STATS_DONE: &[u8] =
+    include_bytes!("../tests/fixtures/fellowship_fellow_stats_done.bin");

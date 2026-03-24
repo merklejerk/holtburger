@@ -225,7 +225,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input = "/help".to_string();
+        state.chat_input.input.set_text("/help");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -249,7 +249,7 @@ mod tests {
             options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
             options2: CharacterOptions2::HEAR_TRADE_CHAT,
         });
-        state.chat_input.input = "/options list".to_string();
+        state.chat_input.input.set_text("/options list");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -280,7 +280,7 @@ mod tests {
             options1: CharacterOptions1::empty(),
             options2: CharacterOptions2::HEAR_GENERAL_CHAT,
         });
-        state.chat_input.input = "/options get general-chat".to_string();
+        state.chat_input.input.set_text("/options get general-chat");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -300,7 +300,10 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input = "/options set craft-success-dialog on".to_string();
+        state
+            .chat_input
+            .input
+            .set_text("/options set craft-success-dialog on");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -323,7 +326,10 @@ mod tests {
             options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
             options2: CharacterOptions2::empty(),
         });
-        state.chat_input.input = "/options toggle craft-success-dialog".to_string();
+        state
+            .chat_input
+            .input
+            .set_text("/options toggle craft-success-dialog");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -342,7 +348,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input = "/options set bogus on".to_string();
+        state.chat_input.input.set_text("/options set bogus on");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -363,7 +369,7 @@ mod tests {
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
         state.view.previous_focused_pane = FocusedPane::Dashboard;
-        state.chat_input.input = "/wave hello".to_string();
+        state.chat_input.input.set_text("/wave hello");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));

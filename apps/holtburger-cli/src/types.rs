@@ -1,3 +1,4 @@
+use crate::components::text_input::SingleLineTextInput;
 use crate::pages::game::GameState;
 use crate::pages::game::{GameData, ViewState};
 use crate::pages::selection::SelectionState;
@@ -79,7 +80,7 @@ pub enum VerbInputEvent {
 pub struct VerbInputState {
     pub kind: VerbInputKind,
     pub prompt: Cow<'static, str>,
-    pub input: String,
+    pub input: SingleLineTextInput,
     pub min: Option<u32>,
     pub max: Option<u32>,
 }
@@ -89,7 +90,7 @@ impl VerbInputState {
         Self {
             kind: VerbInputKind::Quantity,
             prompt: prompt.into(),
-            input: String::new(),
+            input: SingleLineTextInput::default(),
             min: Some(min),
             max: Some(max),
         }
@@ -99,7 +100,7 @@ impl VerbInputState {
         Self {
             kind: VerbInputKind::Text,
             prompt: prompt.into(),
-            input: String::new(),
+            input: SingleLineTextInput::default(),
             min: None,
             max: None,
         }
@@ -112,6 +113,7 @@ impl VerbInputState {
 
         let value = self
             .input
+            .text()
             .parse::<u32>()
             .map_err(|_| VerbInputError::InvalidNumber)?;
 
@@ -133,27 +135,20 @@ impl VerbInputState {
                     Ok(value) => VerbInputEvent::SubmittedQuantity(value),
                     Err(err) => VerbInputEvent::Invalid(err),
                 },
-                VerbInputKind::Text => VerbInputEvent::SubmittedText(self.input.clone()),
+                VerbInputKind::Text => VerbInputEvent::SubmittedText(self.input.text().to_string()),
             },
-            KeyCode::Backspace => {
-                if self.input.pop().is_some() {
+            _ => {
+                let changed = match self.kind {
+                    VerbInputKind::Quantity => self.input.apply_key_if(key, |c| c.is_ascii_digit()),
+                    VerbInputKind::Text => self.input.apply_key(key),
+                };
+
+                if changed {
                     VerbInputEvent::Changed
                 } else {
                     VerbInputEvent::Ignored
                 }
             }
-            KeyCode::Char(c) => match self.kind {
-                VerbInputKind::Quantity if c.is_ascii_digit() => {
-                    self.input.push(c);
-                    VerbInputEvent::Changed
-                }
-                VerbInputKind::Text if !c.is_control() => {
-                    self.input.push(c);
-                    VerbInputEvent::Changed
-                }
-                _ => VerbInputEvent::Ignored,
-            },
-            _ => VerbInputEvent::Ignored,
         }
     }
 }

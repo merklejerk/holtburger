@@ -10,6 +10,7 @@ use crate::pages::game::hud::pulse::render_pulse_panel;
 use crate::pages::game::hud::status::render_status_bar;
 use crate::pages::game::layout::PULSE_PANEL_WIDTH;
 use crate::pages::game::layout::get_layout;
+use crate::pages::game::layout::layout_mode_for_size;
 use crate::pages::game::panels::chat::render_chat_pane;
 use crate::pages::game::panels::context::render_context_pane;
 use crate::pages::game::panels::dashboard::render_dashboard_pane;
@@ -45,9 +46,10 @@ fn render_confirmation_overlay(
 impl GameState {
     pub fn update_layout(&mut self, area: Rect) {
         let (_chunks, main_chunks_vec, _dynamic_chunk) = get_layout(area);
+        let layout_mode = layout_mode_for_size(area.width, area.height);
 
         // Update layout cache
-        self.set_layout_cache(main_chunks_vec.clone(), _dynamic_chunk);
+        self.set_layout_cache(main_chunks_vec.clone(), _dynamic_chunk, layout_mode);
 
         let chat_area = main_chunks_vec[1];
         // Note: the chat area rendering uses an inner margin horizontally
@@ -71,6 +73,8 @@ impl GameState {
         // The game view uses the shared status bar and the complex multi-pane layout.
         let (chunks, main_chunks_vec, dynamic_chunk) = get_layout(area);
         let chunks = &chunks;
+        let layout_mode = layout_mode_for_size(area.width, area.height);
+        self.set_layout_cache(main_chunks_vec.clone(), dynamic_chunk, layout_mode);
 
         // Status Area
         render_status_bar(

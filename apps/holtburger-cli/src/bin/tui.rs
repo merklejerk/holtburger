@@ -362,8 +362,7 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        let size = terminal.size()?;
-                        let res = app_state.handle_app_event(AppEvent::KeyPress(key, size.width));
+                        let res = app_state.handle_app_event(AppEvent::KeyPress(key));
                         update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
                     }
                     Event::Mouse(mouse) => {

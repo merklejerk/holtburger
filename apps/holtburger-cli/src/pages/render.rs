@@ -18,10 +18,10 @@ pub fn render_app(f: &mut Frame, state: &mut AppState) {
     };
 
     // We break the borrow cycle by borrowing disjoint fields from state.
-    state.page.render(f, f.size(), &ctx);
+    state.page.render(f, f.area(), &ctx);
 
     // 2. Modals are still top-level overlays that sit on top of any page.
     if let Some(_modal) = &state.modal {
-        render_modal(f, state, f.size());
+        render_modal(f, state, f.area());
     }
 }

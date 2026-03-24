@@ -5,7 +5,7 @@ use crate::pages::selection::SelectionState;
 use crate::types::UpdateResult;
 
 impl SelectionState {
-    pub fn handle_input(&mut self, key: KeyEvent, _width: u16) -> UpdateResult {
+    pub fn handle_input(&mut self, key: KeyEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
         match key.code {
             KeyCode::Up => {

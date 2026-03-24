@@ -28,6 +28,6 @@ strum.workspace = true
 strum_macros.workspace = true
 
 [dev-dependencies]
-hex = "0.4.3"
+hex.workspace = true
 tempfile.workspace = true
 holtburger-world = { workspace = true, features = ["test-support"] }

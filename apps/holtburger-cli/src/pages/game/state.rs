@@ -26,6 +26,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::pages::game::GameData;
+use crate::pages::game::layout::LayoutMode;
 use crate::pages::game::panels::chat::ChatState;
 use crate::pages::game::panels::chat_input::ChatInputState;
 use crate::pages::game::panels::context::build_context_panel_content;
@@ -119,9 +120,19 @@ impl GameState {
         std::rc::Rc::clone(&self.render_state.layout_cache.main_chunks)
     }
 
-    pub(super) fn set_layout_cache(&mut self, main_chunks: Vec<Rect>, dynamic_chunk: Rect) {
+    pub(super) fn layout_mode(&self) -> LayoutMode {
+        self.render_state.layout_cache.mode
+    }
+
+    pub(super) fn set_layout_cache(
+        &mut self,
+        main_chunks: Vec<Rect>,
+        dynamic_chunk: Rect,
+        mode: LayoutMode,
+    ) {
         self.render_state.layout_cache.main_chunks = std::rc::Rc::new(main_chunks);
         self.render_state.layout_cache.dynamic_chunk = dynamic_chunk;
+        self.render_state.layout_cache.mode = mode;
     }
 
     pub(super) fn context_buffer(&self) -> &[Line<'static>] {
@@ -1673,6 +1684,7 @@ struct GameRuntimeState {
 struct LayoutCache {
     pub main_chunks: std::rc::Rc<Vec<ratatui::layout::Rect>>,
     pub dynamic_chunk: ratatui::layout::Rect,
+    pub mode: LayoutMode,
 }
 
 #[derive(Debug, Clone, Default)]

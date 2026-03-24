@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-use super::{Client, ClientState, auth::AuthState, movement::MovementSystem};
+use super::{
+    Client, ClientState, TurbineChatState, auth::AuthState, movement::MovementSystem,
+};
 
 type Provider = Arc<dyn ResourceProvider>;
 
@@ -177,6 +179,7 @@ impl ClientBuilder {
             message_counter: 0,
             movement: MovementSystem::new(),
             auth: AuthState::new(self.account_name),
+            turbine_chat: TurbineChatState::default(),
         })
     }
 
@@ -243,6 +246,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> Client {
         message_counter: 0,
         movement: MovementSystem::new(),
         auth: AuthState::new("test".to_string()),
+        turbine_chat: TurbineChatState::default(),
     };
     client.state = initial_state;
     client

@@ -1,6 +1,7 @@
 use super::GameMessage;
 pub use crate::messages::character::types::*;
 pub use crate::messages::chat::types::*;
+pub use crate::messages::chat::turbine::*;
 pub use crate::messages::effects::types::*;
 pub use crate::messages::inventory::types::*;
 pub use crate::messages::misc::types::*;
@@ -66,6 +67,9 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::CharacterLogOff => Some(GameMessage::CharacterLogOff),
             GameOpcode::ServerMessage => Some(GameMessage::ServerMessage(Box::new(
                 ServerMessageData::unpack(data, offset)?,
+            ))),
+            GameOpcode::TurbineChat => Some(GameMessage::TurbineChat(Box::new(
+                TurbineChatMessageData::unpack(data, offset)?,
             ))),
             GameOpcode::GameAction => Some(GameMessage::GameAction(Box::new(
                 GameActionMessage::unpack(data, offset)?,

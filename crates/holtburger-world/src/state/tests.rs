@@ -17,6 +17,10 @@ use holtburger_dat::{
     ScopedResourceResolver,
 };
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
+use holtburger_protocol::messages::{
+    FellowUpdateType, FellowshipFullUpdateEventData, FellowshipMemberData,
+    FellowshipQuitEventData, FellowshipUpdateFellowEventData,
+};
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
 use tempfile::tempdir;
 
@@ -511,6 +515,231 @@ fn test_update_health_updates_target_entity_fraction_and_emits_replace() {
         event,
         WorldEvent::EntityReplaced(entity)
             if entity.guid == guid && entity.health_fraction == Some(0.5)
+    )));
+}
+
+#[test]
+fn test_fellowship_full_update_populates_world_state_and_emits_projection() {
+    let mut state = WorldState::synthetic();
+    state.player.guid = Guid(0x5000_0001);
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: state.player.guid,
+        sequence: 1,
+        event: GameEvent::FellowshipFullUpdate(Box::new(FellowshipFullUpdateEventData {
+            fellows: vec![
+                FellowshipMemberData {
+                    guid: Guid(0x5000_0001),
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    level: 12,
+                    max_health: 180,
+                    max_stamina: 150,
+                    max_mana: 120,
+                    current_health: 170,
+                    current_stamina: 140,
+                    current_mana: 110,
+                    share_loot: 1,
+                    name: "Player".to_string(),
+                },
+                FellowshipMemberData {
+                    guid: Guid(0x5000_0032),
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    level: 18,
+                    max_health: 220,
+                    max_stamina: 160,
+                    max_mana: 140,
+                    current_health: 215,
+                    current_stamina: 150,
+                    current_mana: 130,
+                    share_loot: 1,
+                    name: "Bravo".to_string(),
+                },
+            ],
+            fellowship_name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x5000_0001),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: true,
+            departed_members: Vec::new(),
+            fellowship_locks: Vec::new(),
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(matches!(
+        state.fellowship.as_ref(),
+        Some(fellowship)
+            if fellowship.name == "Raid Bus"
+                && fellowship.members.len() == 2
+                && fellowship.leader_guid == Guid(0x5000_0001)
+    ));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::FellowshipStateUpdated(Some(fellowship))
+            if fellowship.name == "Raid Bus" && fellowship.members.len() == 2
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::FellowshipActivity(crate::FellowshipActivity::YouJoined { fellowship_name })
+            if fellowship_name == "Raid Bus"
+    )));
+}
+
+#[test]
+fn test_fellowship_update_fellow_creates_placeholder_state_when_snapshot_missing() {
+    let mut state = WorldState::synthetic();
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 1,
+        event: GameEvent::FellowshipUpdateFellow(Box::new(FellowshipUpdateFellowEventData {
+            fellow: FellowshipMemberData {
+                guid: Guid(0x5000_0001),
+                cached_cp: 0,
+                cached_luminance: 0,
+                level: 12,
+                max_health: 180,
+                max_stamina: 150,
+                max_mana: 120,
+                current_health: 170,
+                current_stamina: 140,
+                current_mana: 110,
+                share_loot: 1,
+                name: "Player".to_string(),
+            },
+            update_type: FellowUpdateType::Vitals,
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(matches!(
+        state.fellowship.as_ref(),
+        Some(fellowship)
+            if fellowship.name.is_empty()
+                && fellowship.members.len() == 1
+                && fellowship.members[0].name == "Player"
+    ));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::FellowshipStateUpdated(Some(fellowship))
+            if fellowship.members.len() == 1 && fellowship.members[0].name == "Player"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::FellowshipActivity(crate::FellowshipActivity::YouJoined { .. })
+    )));
+}
+
+#[test]
+fn test_fellowship_quit_for_local_player_clears_state() {
+    let mut state = WorldState::synthetic();
+    let player_guid = Guid(0x5000_0001);
+    state.player.guid = player_guid;
+    state.fellowship = Some(FellowshipState {
+        name: "Raid Bus".to_string(),
+        leader_guid: player_guid,
+        share_xp: true,
+        even_share: false,
+        open: true,
+        is_locked: false,
+        members: vec![FellowshipMemberState {
+            guid: player_guid,
+            name: "Player".to_string(),
+            level: 12,
+            cached_cp: 0,
+            cached_luminance: 0,
+            max_health: 180,
+            max_stamina: 150,
+            max_mana: 120,
+            current_health: 170,
+            current_stamina: 140,
+            current_mana: 110,
+            share_loot: true,
+        }],
+        departed_members: Vec::new(),
+        locks: Vec::new(),
+    });
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 1,
+        event: GameEvent::FellowshipQuit(Box::new(FellowshipQuitEventData { player_guid })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(state.fellowship.is_none());
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::FellowshipActivity(crate::FellowshipActivity::YouLeft)
+    )));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, WorldEvent::FellowshipStateUpdated(None))));
+}
+
+#[test]
+fn test_fellowship_update_fellow_for_new_remote_member_emits_join_activity() {
+    let mut state = WorldState::synthetic();
+    state.player.guid = Guid(0x5000_0001);
+    state.fellowship = Some(FellowshipState {
+        name: "Raid Bus".to_string(),
+        leader_guid: Guid(0x5000_0001),
+        share_xp: true,
+        even_share: false,
+        open: true,
+        is_locked: false,
+        members: vec![FellowshipMemberState {
+            guid: Guid(0x5000_0001),
+            name: "Player".to_string(),
+            level: 12,
+            cached_cp: 0,
+            cached_luminance: 0,
+            max_health: 180,
+            max_stamina: 150,
+            max_mana: 120,
+            current_health: 170,
+            current_stamina: 140,
+            current_mana: 110,
+            share_loot: true,
+        }],
+        departed_members: Vec::new(),
+        locks: Vec::new(),
+    });
+
+    let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
+        target: Guid::NULL,
+        sequence: 1,
+        event: GameEvent::FellowshipUpdateFellow(Box::new(FellowshipUpdateFellowEventData {
+            fellow: FellowshipMemberData {
+                guid: Guid(0x5000_0032),
+                cached_cp: 0,
+                cached_luminance: 0,
+                level: 18,
+                max_health: 220,
+                max_stamina: 160,
+                max_mana: 140,
+                current_health: 215,
+                current_stamina: 150,
+                current_mana: 130,
+                share_loot: 1,
+                name: "Bravo".to_string(),
+            },
+            update_type: FellowUpdateType::Full,
+        })),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::FellowshipActivity(crate::FellowshipActivity::MemberJoined { member_name })
+            if member_name == "Bravo"
     )));
 }
 

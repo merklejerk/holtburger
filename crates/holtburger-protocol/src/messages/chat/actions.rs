@@ -1,3 +1,4 @@
+use crate::messages::ChatChannelId;
 use crate::messages::utils::{read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 
@@ -58,9 +59,36 @@ impl ProtocolPack for EmoteActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChatChannelActionData {
+    pub channel: ChatChannelId,
+    pub message: String,
+}
+
+impl ProtocolUnpack for ChatChannelActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        if *offset + 4 > data.len() {
+            return None;
+        }
+        let channel =
+            ChatChannelId::from_raw(u32::from_le_bytes(data[*offset..*offset + 4].try_into().ok()?));
+        *offset += 4;
+        let message = read_string16(data, offset)?;
+        Some(Self { channel, message })
+    }
+}
+
+impl ProtocolPack for ChatChannelActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        buf.extend_from_slice(&self.channel.raw().to_le_bytes());
+        write_string16(buf, &self.message);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::ChatChannel;
     use crate::messages::game_action::{GameAction, GameActionMessage};
     use crate::messages::game_message::GameMessage;
     use crate::test_fixtures;
@@ -101,6 +129,42 @@ mod tests {
         // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
         let fixture = hex::decode(
             "04030201DF0100001600776176657320656E74687573696173746963616C6C79",
+        )
+        .unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_chat_channel_fellow_fixture() {
+        let action = GameActionMessage {
+            sequence: 0xA1B2C3D4,
+            action: GameAction::ChatChannel(Box::new(ChatChannelActionData {
+                channel: ChatChannel::Fellow.into(),
+                message: "party check".to_string(),
+            })),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode(
+            "D4C3B2A147010000000800000B00706172747920636865636B000000",
+        )
+        .unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_chat_channel_allegiance_broadcast_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x10203040,
+            action: GameAction::ChatChannel(Box::new(ChatChannelActionData {
+                channel: ChatChannel::AllegianceBroadcast.into(),
+                message: "guild check".to_string(),
+            })),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode(
+            "4030201047010000000000020B006775696C6420636865636B000000",
         )
         .unwrap();
         assert_pack_unpack_parity(&fixture, &action);

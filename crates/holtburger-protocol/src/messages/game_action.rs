@@ -1,5 +1,6 @@
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
+pub use crate::messages::fellowship::actions::*;
 pub use crate::messages::inventory::actions::*;
 pub use crate::messages::magic::actions::*;
 pub use crate::messages::misc::actions::*;
@@ -33,6 +34,12 @@ pub enum GameAction {
     Talk(Box<TalkActionData>),
     Tell(Box<TellActionData>),
     Emote(Box<EmoteActionData>),
+    ChatChannel(Box<ChatChannelActionData>),
+    FellowshipCreate(Box<FellowshipCreateActionData>),
+    FellowshipQuit(Box<FellowshipQuitActionData>),
+    FellowshipDismiss(Box<FellowshipDismissActionData>),
+    FellowshipRecruit(Box<FellowshipRecruitActionData>),
+    FellowshipUpdateRequest(Box<FellowshipUpdateRequestActionData>),
     PingRequest(Box<PingRequestActionData>),
     DropItem(Box<DropItemActionData>),
     PutItemInContainer(Box<PutItemInContainerActionData>),
@@ -123,6 +130,24 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Emote => {
                     GameAction::Emote(Box::new(EmoteActionData::unpack(data, offset)?))
                 }
+                GameActionOpcode::ChatChannel => GameAction::ChatChannel(Box::new(
+                    ChatChannelActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::FellowshipCreate => GameAction::FellowshipCreate(Box::new(
+                    FellowshipCreateActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::FellowshipQuit => GameAction::FellowshipQuit(Box::new(
+                    FellowshipQuitActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::FellowshipDismiss => GameAction::FellowshipDismiss(Box::new(
+                    FellowshipDismissActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::FellowshipRecruit => GameAction::FellowshipRecruit(Box::new(
+                    FellowshipRecruitActionData::unpack(data, offset)?,
+                )),
+                GameActionOpcode::FellowshipUpdateRequest => GameAction::FellowshipUpdateRequest(
+                    Box::new(FellowshipUpdateRequestActionData::unpack(data, offset)?),
+                ),
                 GameActionOpcode::PingRequest => {
                     GameAction::PingRequest(Box::new(PingRequestActionData::unpack(data, offset)?))
                 }
@@ -304,6 +329,36 @@ impl ProtocolPack for GameActionMessage {
             }
             GameAction::Emote(data) => {
                 buf.write_u32::<LittleEndian>(GameActionOpcode::Emote as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::ChatChannel(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::ChatChannel as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::FellowshipCreate(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipCreate as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::FellowshipQuit(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipQuit as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::FellowshipDismiss(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipDismiss as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::FellowshipRecruit(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipRecruit as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameAction::FellowshipUpdateRequest(data) => {
+                buf.write_u32::<LittleEndian>(GameActionOpcode::FellowshipUpdateRequest as u32)
                     .unwrap();
                 data.pack(buf);
             }

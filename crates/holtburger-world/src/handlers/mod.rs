@@ -1,3 +1,4 @@
+pub mod fellowship;
 pub mod inventory;
 pub mod login;
 pub mod movement;

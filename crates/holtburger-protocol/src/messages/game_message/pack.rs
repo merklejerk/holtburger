@@ -58,6 +58,11 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameMessage::TurbineChat(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::TurbineChat as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameMessage::GameAction(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::GameAction as u32)
                     .unwrap();

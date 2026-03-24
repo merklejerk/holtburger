@@ -301,8 +301,8 @@ pub enum ContextView {
 #[derive(Debug)]
 pub enum AppEvent {
     Tick(f64),
-    KeyPress(KeyEvent, u16), // key, width
-    Mouse(MouseEvent),       // mouse
+    KeyPress(KeyEvent), // key
+    Mouse(MouseEvent),  // mouse
     ReceivedViewEvent(ClientViewEvent),
 }
 
@@ -371,10 +371,10 @@ impl Page {
         }
     }
 
-    pub fn handle_input(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
+    pub fn handle_input(&mut self, key: KeyEvent) -> UpdateResult {
         match self {
-            Page::Selection(selection) => selection.handle_input(key, width),
-            Page::Game(game) => game.handle_input(key, width),
+            Page::Selection(selection) => selection.handle_input(key),
+            Page::Game(game) => game.handle_input(key),
         }
     }
 

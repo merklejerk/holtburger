@@ -88,8 +88,7 @@ impl GameState {
         result
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn handle_input(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
+    pub fn handle_input(&mut self, key: KeyEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
 
         if let Some(confirmation_result) = self.handle_confirmation_input(key) {
@@ -139,8 +138,12 @@ impl GameState {
                 } else {
                     1
                 };
-                self.view.focused_pane =
-                    crate::utils::get_adjacent_pane(self.view.focused_pane, width, active, delta);
+                self.view.focused_pane = crate::utils::get_adjacent_pane(
+                    self.view.focused_pane,
+                    self.layout_mode(),
+                    active,
+                    delta,
+                );
                 result.needs_redraw = true;
             }
             KeyCode::Esc => {
@@ -390,8 +393,9 @@ mod tests {
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
         state.chat_input.input = "/combat".to_string();
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
         assert!(matches!(
@@ -410,8 +414,9 @@ mod tests {
         state.view.focused_pane = FocusedPane::Input;
         state.data.combat_mode = CombatMode::Missile;
         state.chat_input.input = "/combat".to_string();
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(
             result.actions.first(),
@@ -430,8 +435,9 @@ mod tests {
             rotation: holtburger_common::Quaternion::from_heading(0.0),
             ..Default::default()
         });
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
 
         assert!(result.needs_redraw);
         assert!(matches!(
@@ -454,8 +460,9 @@ mod tests {
             target_guid: Guid(0x60000001),
         });
         state.data.combat_mode = CombatMode::Melee;
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
 
         assert_eq!(result.actions.len(), 1);
         assert!(matches!(
@@ -472,8 +479,9 @@ mod tests {
             target_guid: Guid(0x60000001),
         });
         state.data.combat_mode = CombatMode::Melee;
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
 
         assert!(
             !result
@@ -487,8 +495,9 @@ mod tests {
     fn backtick_toggles_combat_mode_globally() {
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Dashboard;
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE));
 
         assert!(matches!(
             result.actions.first(),
@@ -507,8 +516,9 @@ mod tests {
         });
         state.data.combat_mode = CombatMode::Melee;
         state.data.combat_runtime.attack_sequence_active = true;
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         assert!(
             result
@@ -530,8 +540,9 @@ mod tests {
             context: 42,
             text: "Proceed with crafting?".to_string(),
         });
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.iter().any(|command| {
             matches!(
@@ -558,8 +569,9 @@ mod tests {
             context: 99,
             text: "Proceed with crafting?".to_string(),
         });
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
 
         assert!(result.commands.iter().any(|command| {
             matches!(
@@ -581,8 +593,9 @@ mod tests {
             context: 123,
             text: "Proceed with crafting?".to_string(),
         });
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
-        let result = state.handle_input(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE), 120);
+        let result = state.handle_input(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
         assert!(result.actions.is_empty());

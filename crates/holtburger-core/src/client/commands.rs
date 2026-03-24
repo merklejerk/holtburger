@@ -51,7 +51,7 @@ impl Client {
             | ClientCommand::SelectCharacter(_)
             | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
 
-            ClientCommand::Talk(_) | ClientCommand::Tell { .. } => {
+            ClientCommand::Talk(_) | ClientCommand::Tell { .. } | ClientCommand::Emote(_) => {
                 self.handle_chat_command(cmd).await
             }
 
@@ -75,6 +75,10 @@ impl Client {
             | ClientCommand::AddToTrade { .. }
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterOption { .. }
+            | ClientCommand::RecallLifestone
+            | ClientCommand::RecallAllegianceHousing
+            | ClientCommand::Suicide
+            | ClientCommand::EnterPkLite
             | ClientCommand::RespondToConfirmation { .. } => {
                 self.handle_interaction_command(cmd).await
             }
@@ -172,6 +176,17 @@ impl Client {
                         .send_game_action(GameAction::Tell(Box::new(TellActionData {
                             target,
                             message,
+                        })))
+                        .await;
+                }
+                Ok(())
+            }
+            ClientCommand::Emote(text) => {
+                if matches!(self.state, ClientState::InWorld) {
+                    log::info!(">>> You emote: \"{}\"", text);
+                    return self
+                        .send_game_action(GameAction::Emote(Box::new(EmoteActionData {
+                            message: text,
                         })))
                         .await;
                 }
@@ -386,6 +401,32 @@ impl Client {
                     .set_character_option_enabled(option, value);
                 self.emit_player_options_updated();
                 Ok(())
+            }
+            ClientCommand::RecallLifestone => {
+                log::info!(">>> Recalling to lifestone");
+                self.send_game_action(GameAction::TeleToLifestone(Box::new(
+                    TeleToLifestoneActionData,
+                )))
+                .await
+            }
+            ClientCommand::RecallAllegianceHousing => {
+                log::info!(">>> Recalling to allegiance housing");
+                self.send_game_action(GameAction::TeleToMansion(Box::new(
+                    TeleToMansionActionData,
+                )))
+                .await
+            }
+            ClientCommand::Suicide => {
+                log::info!(">>> Initiating suicide");
+                self.send_game_action(GameAction::Suicide(Box::new(SuicideActionData)))
+                    .await
+            }
+            ClientCommand::EnterPkLite => {
+                log::info!(">>> Entering PK Lite");
+                self.send_game_action(GameAction::EnterPkLite(Box::new(
+                    EnterPkLiteActionData,
+                )))
+                .await
             }
             ClientCommand::RespondToConfirmation { accepted } => {
                 let Some(confirmation) = self.active_confirmation.clone() else {

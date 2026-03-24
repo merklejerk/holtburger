@@ -33,6 +33,7 @@ pub struct ChatState {
     pub last_chat_width: usize,
     pub scroll_offset: usize,
     pub total_lines: usize,
+    pub last_incoming_tell_sender: Option<String>,
 }
 
 impl Default for ChatState {
@@ -44,6 +45,7 @@ impl Default for ChatState {
             last_chat_width: 0,
             scroll_offset: 0,
             total_lines: 0,
+            last_incoming_tell_sender: None,
         }
     }
 }
@@ -89,6 +91,10 @@ impl ChatState {
             }
             ClientViewEvent::Chat { sender, message } => {
                 self.log(ChatMessageKind::Chat, format!("{}: {}", sender, message));
+            }
+            ClientViewEvent::Tell { sender, message } => {
+                self.last_incoming_tell_sender = Some(sender.clone());
+                self.log(ChatMessageKind::Tell, format!("{} tells you: {}", sender, message));
             }
             ClientViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageKind::Emote, format!("{} {}", sender, text));

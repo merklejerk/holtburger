@@ -10,6 +10,37 @@ fn parse_option_value(raw: &str) -> Option<bool> {
     }
 }
 
+fn parse_targeted_chat_command<'a>(command: &'a str, aliases: &[&str]) -> Option<(&'a str, &'a str)> {
+    let (verb, rest) = command.split_once(char::is_whitespace)?;
+    if !aliases.contains(&verb) {
+        return None;
+    }
+
+    let rest = rest.trim_start();
+    let (target, message) = rest.split_once(char::is_whitespace)?;
+    let message = message.trim_start();
+
+    if target.is_empty() || message.is_empty() {
+        return None;
+    }
+
+    Some((target, message))
+}
+
+fn parse_message_only_command<'a>(command: &'a str, aliases: &[&str]) -> Option<&'a str> {
+    let (verb, rest) = command.split_once(char::is_whitespace)?;
+    if !aliases.contains(&verb) {
+        return None;
+    }
+
+    let message = rest.trim_start();
+    if message.is_empty() {
+        return None;
+    }
+
+    Some(message)
+}
+
 impl GameState {
     fn finish_input_command_submission(&mut self, command: &str) {
         self.chat_input.input_history.push(command.to_string());
@@ -41,6 +72,10 @@ impl GameState {
             ChatMessageKind::Warning,
             "Player option state has not been loaded yet.".to_string(),
         );
+    }
+
+    fn log_command_usage(&mut self, usage: &str) {
+        self.chat.log(ChatMessageKind::System, usage.to_string());
     }
 
     fn log_option_state(&mut self, option: CuratedCharacterOption, enabled: bool) {
@@ -161,6 +196,42 @@ impl GameState {
     pub(super) fn handle_slash_command(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
 
+        if let Some((target, message)) = parse_targeted_chat_command(command, &["/tell", "/t"]) {
+            result.commands.push(ClientCommand::Tell {
+                target: target.to_string(),
+                message: message.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/tell" || command == "/t" {
+            self.log_command_usage("Usage: /tell <NAME> <MSG>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(message) = parse_message_only_command(command, &["/reply", "/r"]) {
+            let Some(target) = self.chat.last_incoming_tell_sender.clone() else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    "No incoming tell to reply to yet.".to_string(),
+                );
+                return result.with_redraw(true);
+            };
+
+            result.commands.push(ClientCommand::Tell {
+                target,
+                message: message.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/reply" || command == "/r" {
+            self.log_command_usage("Usage: /reply <MSG>");
+            return result.with_redraw(true);
+        }
+
         match command {
             "/quit" | "/exit" => {
                 result.commands.push(ClientCommand::Quit);
@@ -180,11 +251,35 @@ impl GameState {
                 self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
-            "/help" => {
+            "/ls" | "/lifestone" => {
+                result.commands.push(ClientCommand::RecallLifestone);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/hq" => {
+                result.commands.push(ClientCommand::RecallAllegianceHousing);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/rip" => {
+                result.commands.push(ClientCommand::Suicide);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/pkl" => {
+                result.commands.push(ClientCommand::EnterPkLite);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/?" | "/help" => {
                 self.chat.log(
                     ChatMessageKind::System,
-                    "Available commands: /quit, /exit, /clear, /help, /combat, /options"
+                    "Available commands: /?,  /help, /quit, /exit, /clear, /combat, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /options"
                         .to_string(),
+                );
+                self.chat.log(
+                    ChatMessageKind::System,
+                    "Chat: /tell <NAME> <MSG>, /reply <MSG>, : <MSG>".to_string(),
                 );
                 self.chat.log(
                     ChatMessageKind::System,
@@ -193,7 +288,7 @@ impl GameState {
                 );
                 self.chat.log(
                     ChatMessageKind::System,
-                    "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)".to_string(),
+                    "Shortcuts: Tab/Shift+Tab (Cycle Panel Focus), 0-9 (Dashboard Tabs), a-z (Actions)".to_string(),
                 );
                 self.chat_input.input.clear();
                 result.with_redraw(true)
@@ -238,6 +333,62 @@ mod tests {
                 .iter()
                 .any(|message| message.text.contains("/options list"))
         );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains(": <MSG>"))
+        );
+    }
+
+    #[test]
+    fn tell_command_dispatches_tell_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/tell Bestie hi there");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Tell { target, message }) if target == "Bestie" && message == "hi there"
+        ));
+    }
+
+    #[test]
+    fn reply_command_uses_last_incoming_tell_sender() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.chat.last_incoming_tell_sender = Some("Bestie".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/reply back at you");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Tell { target, message }) if target == "Bestie" && message == "back at you"
+        ));
+    }
+
+    #[test]
+    fn reply_without_last_incoming_tell_logs_warning() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/r hi");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| {
+            message.text == "No incoming tell to reply to yet."
+        }));
     }
 
     #[test]

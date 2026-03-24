@@ -40,6 +40,24 @@ impl ProtocolPack for TellActionData {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct EmoteActionData {
+    pub message: String,
+}
+
+impl ProtocolUnpack for EmoteActionData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let message = read_string16(data, offset)?;
+        Some(Self { message })
+    }
+}
+
+impl ProtocolPack for EmoteActionData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        write_string16(buf, &self.message);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +87,22 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(test_fixtures::ACTION_TELL, &action);
+    }
+
+    #[test]
+    fn test_emote_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x01020304,
+            action: GameAction::Emote(Box::new(EmoteActionData {
+                message: "waves enthusiastically".to_string(),
+            })),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode(
+            "04030201DF0100001600776176657320656E74687573696173746963616C6C79",
+        )
+        .unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
     }
 }

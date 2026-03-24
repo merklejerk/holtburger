@@ -284,6 +284,12 @@ impl Client {
                     message: message.clone(),
                 });
             }
+            WireEvent::Tell { sender, message } => {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Tell {
+                    sender: sender.clone(),
+                    message: message.clone(),
+                });
+            }
             WireEvent::CharacterList(list) => {
                 let _ = self
                     .client_view_event_tx

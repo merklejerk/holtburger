@@ -29,6 +29,58 @@ impl ProtocolPack for LoginCompleteActionData {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct TeleToLifestoneActionData;
+
+impl ProtocolUnpack for TeleToLifestoneActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for TeleToLifestoneActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TeleToMansionActionData;
+
+impl ProtocolUnpack for TeleToMansionActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for TeleToMansionActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SuicideActionData;
+
+impl ProtocolUnpack for SuicideActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for SuicideActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnterPkLiteActionData;
+
+impl ProtocolUnpack for EnterPkLiteActionData {
+    fn unpack(_data: &[u8], _offset: &mut usize) -> Option<Self> {
+        Some(Self)
+    }
+}
+
+impl ProtocolPack for EnterPkLiteActionData {
+    fn pack(&self, _buf: &mut Vec<u8>) {}
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConfirmationResponseActionData {
     pub confirmation_type: ConfirmationType,
     pub context: u32,
@@ -83,5 +135,53 @@ mod tests {
             })),
         };
         assert_pack_unpack_parity(fixtures::ACTION_CONFIRMATION_RESPONSE, &action);
+    }
+
+    #[test]
+    fn test_tele_to_lifestone_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x11111111,
+            action: GameAction::TeleToLifestone(Box::new(TeleToLifestoneActionData)),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode("1111111163000000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_tele_to_mansion_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x22222222,
+            action: GameAction::TeleToMansion(Box::new(TeleToMansionActionData)),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode("2222222278020000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_suicide_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x33333333,
+            action: GameAction::Suicide(Box::new(SuicideActionData)),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode("3333333379020000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
+    }
+
+    #[test]
+    fn test_enter_pkl_fixture() {
+        let action = GameActionMessage {
+            sequence: 0x44444444,
+            action: GameAction::EnterPkLite(Box::new(EnterPkLiteActionData)),
+        };
+
+        // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
+        let fixture = hex::decode("444444448F020000").unwrap();
+        assert_pack_unpack_parity(&fixture, &action);
     }
 }

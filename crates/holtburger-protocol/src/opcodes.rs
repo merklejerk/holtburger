@@ -275,8 +275,8 @@ pub enum GameActionOpcode {
     // ModifyAccountSquelch = 0x0059,
     // /// C2S: Mute/squelch a global chat channel.
     // ModifyGlobalSquelch = 0x005B,
-    // /// C2S: Perform a character emote.
-    // Emote = 0x01DF,
+    /// C2S: Perform a character emote.
+    Emote = 0x01DF,
     // /// C2S: Perform a visual "soul emote".
     // SoulEmote = 0x01E1,
     /// C2S: Request a ping response.
@@ -397,8 +397,8 @@ pub enum GameActionOpcode {
     // RemoveSpellFavorite = 0x01E4,
     // /// C2S: Apply active filters to the spellbook view.
     // SpellbookFilter = 0x0286,
-    // /// C2S: Forcibly kill the character.
-    // Suicide = 0x0279,
+    /// C2S: Forcibly kill the character.
+    Suicide = 0x0279,
     /// C2S: Increase a vital (Health, Stamina, Mana) using experience.
     RaiseVital = 0x0044,
     /// C2S: Increase an attribute (Strength, Endurance, etc) using experience.
@@ -529,16 +529,16 @@ pub enum GameActionOpcode {
     // TeleToPklArena = 0x0026,
     // /// C2S: Teleport to a PK arena.
     // TeleToPkArena = 0x0027,
-    // /// C2S: Teleport to the character's attuned Lifestone.
-    // TeleToLifestone = 0x0063,
+    /// C2S: Teleport to the character's attuned Lifestone.
+    TeleToLifestone = 0x0063,
     // /// C2S: Special advocate-only teleport command.
     // AdvocateTeleport = 0x00D6,
-    // /// C2S: Teleport to the allegiance mansion.
-    // TeleToMansion = 0x0278,
+    /// C2S: Teleport to the allegiance mansion or villa.
+    TeleToMansion = 0x0278,
     // /// C2S: Teleport to the Marketplace.
     // TeleToMarketPlace = 0x028D,
-    // /// C2S: Enter a PK-Lite zone or state.
-    // EnterPkLite = 0x028F,
+    /// C2S: Enter PK-Lite state.
+    EnterPkLite = 0x028F,
     // /// C2S: Server-controlled or legacy jump command.
     // JumpNonAutonomous = 0xF7C9,
     // /// C2S: Start a movement command (legacy).

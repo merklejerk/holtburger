@@ -11,7 +11,10 @@ fn parse_option_value(raw: &str) -> Option<bool> {
     }
 }
 
-fn parse_targeted_chat_command<'a>(command: &'a str, aliases: &[&str]) -> Option<(&'a str, &'a str)> {
+fn parse_targeted_chat_command<'a>(
+    command: &'a str,
+    aliases: &[&str],
+) -> Option<(&'a str, &'a str)> {
     let (verb, rest) = command.split_once(char::is_whitespace)?;
     if !aliases.contains(&verb) {
         return None;
@@ -159,8 +162,7 @@ impl GameState {
         );
         self.chat.log(
             ChatMessageKind::System,
-            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>"
-                .to_string(),
+            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>".to_string(),
         );
         self.chat.log(
             ChatMessageKind::System,
@@ -183,12 +185,16 @@ impl GameState {
     }
 
     fn command_help_lines(&self, raw_topic: &str) -> Option<Vec<String>> {
-        let topic = raw_topic.trim().trim_start_matches('/').to_ascii_lowercase();
+        let topic = raw_topic
+            .trim()
+            .trim_start_matches('/')
+            .to_ascii_lowercase();
 
         let lines = match topic.as_str() {
             "?" | "help" => vec![
                 "Usage: /help [COMMAND] or /? [COMMAND]".to_string(),
-                "Show the general command list or detailed help for a specific command.".to_string(),
+                "Show the general command list or detailed help for a specific command."
+                    .to_string(),
                 "Examples: /help party, /? create-party, /help options".to_string(),
             ],
             "tell" | "t" => vec![
@@ -234,8 +240,7 @@ impl GameState {
                 "Dismiss a player from your party.".to_string(),
             ],
             "options" => vec![
-                "Usage: /options [list|get <name>|set <name> <on|off>|toggle <name>]"
-                    .to_string(),
+                "Usage: /options [list|get <name>|set <name> <on|off>|toggle <name>]".to_string(),
                 "Inspect and change curated character options exposed by the TUI.".to_string(),
                 "Examples: /options list, /options get trade-chat, /options toggle share-xp"
                     .to_string(),
@@ -266,10 +271,7 @@ impl GameState {
                 "Usage: /rip".to_string(),
                 "Kill your character.".to_string(),
             ],
-            "pkl" => vec![
-                "Usage: /pkl".to_string(),
-                "Enter PK Lite mode.".to_string(),
-            ],
+            "pkl" => vec!["Usage: /pkl".to_string(), "Enter PK Lite mode.".to_string()],
             _ => return None,
         };
 
@@ -483,7 +485,12 @@ impl GameState {
 
         if let Some(name) = parse_optional_message_command(
             command,
-            &["/create-party", "/createparty", "/party-create", "/partycreate"],
+            &[
+                "/create-party",
+                "/createparty",
+                "/party-create",
+                "/partycreate",
+            ],
         ) {
             result.commands.push(ClientCommand::CreateParty {
                 name: if name.is_empty() {
@@ -639,12 +646,20 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
-        assert!(state.chat.messages.iter().any(|message| {
-            message.text == "Usage: /create-party [NAME]"
-        }));
-        assert!(state.chat.messages.iter().any(|message| {
-            message.text.contains("TUI generates a default")
-        }));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| { message.text == "Usage: /create-party [NAME]" })
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| { message.text.contains("TUI generates a default") })
+        );
     }
 
     #[test]
@@ -658,8 +673,20 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
-        assert!(state.chat.messages.iter().any(|message| message.text == "Usage: /party"));
-        assert!(state.chat.messages.iter().any(|message| message.text == "Usage: /p <MSG>"));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Usage: /party")
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Usage: /p <MSG>")
+        );
     }
 
     #[test]
@@ -722,9 +749,13 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
-        assert!(state.chat.messages.iter().any(|message| {
-            message.text == "No incoming tell to reply to yet."
-        }));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| { message.text == "No incoming tell to reply to yet." })
+        );
     }
 
     #[test]
@@ -732,7 +763,10 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input.set_text("/g assemble at the mansion");
+        state
+            .chat_input
+            .input
+            .set_text("/g assemble at the mansion");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -789,11 +823,13 @@ mod tests {
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(result.commands.is_empty());
-        assert!(state
-            .chat
-            .messages
-            .iter()
-            .any(|message| message.text == "Usage: /p <MSG> or /party"));
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Usage: /p <MSG> or /party")
+        );
     }
 
     #[test]
@@ -870,7 +906,10 @@ mod tests {
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
-        assert!(matches!(result.commands.first(), Some(ClientCommand::LeaveParty)));
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::LeaveParty)
+        ));
     }
 
     #[test]

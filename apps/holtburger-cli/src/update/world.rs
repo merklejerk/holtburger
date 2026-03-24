@@ -83,9 +83,9 @@ impl AppState {
                     self.enter_retry.reset();
 
                     if !was_in_world {
-                        result.commands.push(ClientCommand::SetFellowshipUpdatesSubscribed {
-                            enabled: true,
-                        });
+                        result
+                            .commands
+                            .push(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true });
                     }
                 }
             }

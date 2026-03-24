@@ -169,7 +169,9 @@ impl GameState {
                         self.chat_input.input_history.push(command.clone());
                         self.chat_input.history_index = None;
                         self.view.focused_pane = self.view.previous_focused_pane;
-                        result.commands.push(ClientCommand::Emote(emote.to_string()));
+                        result
+                            .commands
+                            .push(ClientCommand::Emote(emote.to_string()));
                         result.needs_redraw = true;
                         return result;
                     }

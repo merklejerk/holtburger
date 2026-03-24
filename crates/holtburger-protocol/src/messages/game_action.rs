@@ -130,9 +130,9 @@ impl ProtocolUnpack for GameActionMessage {
                 GameActionOpcode::Emote => {
                     GameAction::Emote(Box::new(EmoteActionData::unpack(data, offset)?))
                 }
-                GameActionOpcode::ChatChannel => GameAction::ChatChannel(Box::new(
-                    ChatChannelActionData::unpack(data, offset)?,
-                )),
+                GameActionOpcode::ChatChannel => {
+                    GameAction::ChatChannel(Box::new(ChatChannelActionData::unpack(data, offset)?))
+                }
                 GameActionOpcode::FellowshipCreate => GameAction::FellowshipCreate(Box::new(
                     FellowshipCreateActionData::unpack(data, offset)?,
                 )),

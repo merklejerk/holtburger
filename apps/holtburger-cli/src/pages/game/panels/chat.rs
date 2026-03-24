@@ -9,9 +9,9 @@ use holtburger_common::properties::DamageType;
 use holtburger_core::client::types::{
     ChatChannelInfo, ChatChannelKind, ChatChannelSource, CombatFeedback,
 };
-use holtburger_world::FellowshipActivity;
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{AttackConditions, DamageLocation};
+use holtburger_world::FellowshipActivity;
 use std::fs::File;
 use std::io::Write;
 use std::sync::Mutex;
@@ -112,11 +112,17 @@ impl ChatState {
                 );
             }
             ClientViewEvent::FellowshipActivity { activity } => {
-                self.log(ChatMessageKind::System, format_fellowship_activity(&activity));
+                self.log(
+                    ChatMessageKind::System,
+                    format_fellowship_activity(&activity),
+                );
             }
             ClientViewEvent::Tell { sender, message } => {
                 self.last_incoming_tell_sender = Some(sender.clone());
-                self.log(ChatMessageKind::Tell, format!("{} tells you: {}", sender, message));
+                self.log(
+                    ChatMessageKind::Tell,
+                    format!("{} tells you: {}", sender, message),
+                );
             }
             ClientViewEvent::Emote { sender, text } => {
                 self.log(ChatMessageKind::Emote, format!("{} {}", sender, text));
@@ -654,7 +660,10 @@ mod tests {
             Some("Player"),
         );
 
-        let message = chat.messages.last().expect("fellowship activity should log");
+        let message = chat
+            .messages
+            .last()
+            .expect("fellowship activity should log");
         assert_eq!(message.kind, ChatMessageKind::System);
         assert_eq!(message.text, "Bravo joined the fellowship.");
     }
@@ -670,7 +679,10 @@ mod tests {
             Some("Player"),
         );
 
-        let message = chat.messages.last().expect("fellowship activity should log");
+        let message = chat
+            .messages
+            .last()
+            .expect("fellowship activity should log");
         assert_eq!(message.text, "You were dismissed from the fellowship.");
     }
 

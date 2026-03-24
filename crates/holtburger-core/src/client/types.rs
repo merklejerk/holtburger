@@ -15,10 +15,10 @@ use holtburger_protocol::messages::{
     TurbineChatChannel, TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType,
     TurbineChatTypeId, ViewContentsEventItem,
 };
+use holtburger_world::FellowshipActivity;
 use holtburger_world::entity::{Entity, EntityMotionSnapshot};
 use holtburger_world::spell::SpellCatalog;
 use holtburger_world::state::{FellowshipState, TradeState};
-use holtburger_world::FellowshipActivity;
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };

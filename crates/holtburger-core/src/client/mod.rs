@@ -299,11 +299,13 @@ impl Client {
                 sender,
                 message,
             } => {
-                let _ = self.client_view_event_tx.send(ClientViewEvent::ChannelMessage {
-                    channel: *channel,
-                    sender: sender.clone(),
-                    message: message.clone(),
-                });
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ChannelMessage {
+                        channel: *channel,
+                        sender: sender.clone(),
+                        message: message.clone(),
+                    });
             }
             WireEvent::Tell { sender, message } => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Tell {
@@ -747,8 +749,8 @@ impl Client {
 mod tests {
     use super::*;
     use holtburger_common::{Guid, Vector3};
-    use holtburger_world::entity::Entity;
     use holtburger_world::FellowshipActivity;
+    use holtburger_world::entity::Entity;
 
     #[test]
     fn busy_operation_timeout_clears_state_and_emits_completion() {

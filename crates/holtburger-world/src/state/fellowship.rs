@@ -119,7 +119,10 @@ impl FellowshipState {
     }
 
     pub fn upsert_member(&mut self, member: FellowshipMemberState) {
-        if let Some(existing) = self.members.iter_mut().find(|existing| existing.guid == member.guid)
+        if let Some(existing) = self
+            .members
+            .iter_mut()
+            .find(|existing| existing.guid == member.guid)
         {
             *existing = member;
         } else {

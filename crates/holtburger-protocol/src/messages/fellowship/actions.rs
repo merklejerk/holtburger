@@ -37,7 +37,9 @@ impl ProtocolUnpack for FellowshipRecruitActionData {
         if *offset + 4 > data.len() {
             return None;
         }
-        let player_guid = Guid(u32::from_le_bytes(data[*offset..*offset + 4].try_into().ok()?));
+        let player_guid = Guid(u32::from_le_bytes(
+            data[*offset..*offset + 4].try_into().ok()?,
+        ));
         *offset += 4;
         Some(Self { player_guid })
     }
@@ -81,7 +83,9 @@ impl ProtocolUnpack for FellowshipDismissActionData {
         if *offset + 4 > data.len() {
             return None;
         }
-        let player_guid = Guid(u32::from_le_bytes(data[*offset..*offset + 4].try_into().ok()?));
+        let player_guid = Guid(u32::from_le_bytes(
+            data[*offset..*offset + 4].try_into().ok()?,
+        ));
         *offset += 4;
         Some(Self { player_guid })
     }

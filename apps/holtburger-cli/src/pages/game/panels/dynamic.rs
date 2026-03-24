@@ -136,13 +136,7 @@ pub fn render_dynamic_pane(
 
         f.render_widget(Paragraph::new(line), chunks[0]);
     } else {
-        let current_char = data.character_name.as_deref().unwrap_or("In World");
-        let server = if data.world_name.is_empty() {
-            "Unknown Server"
-        } else {
-            &data.world_name
-        };
-        let info = format!(" {}:{} on {} ", account_name, current_char, server);
+        let info = format_world_info(data, account_name);
         f.render_widget(Paragraph::new(info), chunks[0]);
     }
 
@@ -155,6 +149,28 @@ pub fn render_dynamic_pane(
 
 fn busy_title() -> &'static str {
     " (BUSY...) "
+}
+
+fn format_world_info(data: &GameData, account_name: &str) -> String {
+    let current_char = data.character_name.as_deref().unwrap_or("In World");
+    let server = if data.world_name.is_empty() {
+        "Unknown Server"
+    } else {
+        &data.world_name
+    };
+
+    let mut info = format!(" {}:{} on {} ", account_name, current_char, server);
+
+    if let Some(party) = data.party.as_ref() {
+        let party_name = if party.name.trim().is_empty() {
+            "(unnamed)"
+        } else {
+            party.name.trim()
+        };
+        info.push_str(&format!("| Party: {} ", party_name));
+    }
+
+    info
 }
 
 fn format_target_line(name: &str, guid: Guid, health_fraction: Option<f32>) -> Line<'static> {
@@ -309,7 +325,7 @@ fn format_salvage_results(bags: &[SalvagePreviewBag]) -> Line<'static> {
 mod tests {
     use super::{
         TARGET_HEALTH_BAR_WIDTH, attack_indicator_span, busy_title, combat_controls_line,
-        format_target_line, health_bar_spans, render_dynamic_pane,
+        format_target_line, format_world_info, health_bar_spans, render_dynamic_pane,
     };
     use crate::pages::game::combat::{AttackActivity, combat_mode_label};
     use crate::pages::game::{GameData, ViewState};
@@ -319,6 +335,7 @@ mod tests {
     use holtburger_core::BusyOperationKind;
     use holtburger_protocol::messages::combat::{AttackHeight, CombatMode};
     use holtburger_world::entity::Entity;
+    use holtburger_world::state::FellowshipState;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
@@ -450,6 +467,56 @@ mod tests {
     #[test]
     fn combat_mode_title_uses_peace_label() {
         assert_eq!(combat_mode_label(CombatMode::NonCombat), "🕊️ PEACE");
+    }
+
+    #[test]
+    fn world_info_includes_party_name_when_in_party() {
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
+        data.party = Some(FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x50000001),
+            share_xp: true,
+            even_share: false,
+            open: false,
+            is_locked: false,
+            members: Vec::new(),
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        });
+
+        assert_eq!(
+            format_world_info(&data, "acct"),
+            " acct:Player on World | Party: Raid Bus "
+        );
+    }
+
+    #[test]
+    fn world_info_uses_unnamed_party_fallback() {
+        let mut data = GameData::new(
+            Default::default(),
+            "Player".to_string(),
+            "World".to_string(),
+        );
+        data.party = Some(FellowshipState {
+            name: "   ".to_string(),
+            leader_guid: Guid(0x50000001),
+            share_xp: true,
+            even_share: false,
+            open: false,
+            is_locked: false,
+            members: Vec::new(),
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        });
+
+        assert_eq!(
+            format_world_info(&data, "acct"),
+            " acct:Player on World | Party: (unnamed) "
+        );
     }
 
     #[test]

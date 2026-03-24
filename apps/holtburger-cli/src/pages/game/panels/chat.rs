@@ -62,7 +62,11 @@ impl ChatState {
         }
     }
 
-    pub fn handle_event(&mut self, event: holtburger_core::ClientViewEvent) {
+    pub fn handle_event(
+        &mut self,
+        event: holtburger_core::ClientViewEvent,
+        local_player_name: Option<&str>,
+    ) {
         use holtburger_core::ClientViewEvent;
         use holtburger_protocol::messages::ChatMessageType;
         match event {
@@ -104,7 +108,7 @@ impl ChatState {
                 self.log_channel(
                     ChatMessageKind::Chat,
                     channel,
-                    format_channel_message(channel, &sender, &message),
+                    format_channel_message(channel, &sender, &message, local_player_name),
                 );
             }
             ClientViewEvent::FellowshipActivity { activity } => {
@@ -389,12 +393,21 @@ fn is_self_echo_channel(channel: ChatChannelInfo) -> bool {
     )
 }
 
-fn format_channel_message(channel: ChatChannelInfo, sender: &str, message: &str) -> String {
+fn format_channel_message(
+    channel: ChatChannelInfo,
+    sender: &str,
+    message: &str,
+    local_player_name: Option<&str>,
+) -> String {
     let label = channel_label(channel);
 
     if sender.is_empty() {
         if is_self_echo_channel(channel) {
-            format!("[{}] You: {}", label, message)
+            let display_name = local_player_name
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .unwrap_or("You");
+            format!("[{}] {}: {}", label, display_name, message)
         } else {
             format!("[{}] {}", label, message)
         }
@@ -541,11 +554,16 @@ mod tests {
     fn channel_message_formats_party_self_echo_without_blank_sender() {
         let mut chat = ChatState::new(None);
 
-        chat.handle_event(holtburger_core::ClientViewEvent::ChannelMessage {
-            channel: ChatChannelInfo::legacy(holtburger_protocol::messages::ChatChannel::Fellow.into()),
-            sender: String::new(),
-            message: "party check".to_string(),
-        });
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::ChannelMessage {
+                channel: ChatChannelInfo::legacy(
+                    holtburger_protocol::messages::ChatChannel::Fellow.into(),
+                ),
+                sender: String::new(),
+                message: "party check".to_string(),
+            },
+            Some("Player"),
+        );
 
         let message = chat.messages.last().expect("channel message should log");
         assert_eq!(message.kind, ChatMessageKind::Chat);
@@ -555,20 +573,23 @@ mod tests {
                 holtburger_protocol::messages::ChatChannel::Fellow.into()
             ))
         );
-        assert_eq!(message.text, "[Party] You: party check");
+        assert_eq!(message.text, "[Party] Player: party check");
     }
 
     #[test]
     fn channel_message_formats_guild_sender_with_label() {
         let mut chat = ChatState::new(None);
 
-        chat.handle_event(holtburger_core::ClientViewEvent::ChannelMessage {
-            channel: ChatChannelInfo::legacy(
-                holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into(),
-            ),
-            sender: "Bestie".to_string(),
-            message: "guild check".to_string(),
-        });
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::ChannelMessage {
+                channel: ChatChannelInfo::legacy(
+                    holtburger_protocol::messages::ChatChannel::AllegianceBroadcast.into(),
+                ),
+                sender: "Bestie".to_string(),
+                message: "guild check".to_string(),
+            },
+            Some("Player"),
+        );
 
         let message = chat.messages.last().expect("channel message should log");
         assert_eq!(
@@ -584,29 +605,54 @@ mod tests {
     fn turbine_general_message_formats_with_semantic_label() {
         let mut chat = ChatState::new(None);
 
-        chat.handle_event(holtburger_core::ClientViewEvent::ChannelMessage {
-            channel: ChatChannelInfo::turbine(
-                holtburger_protocol::messages::TurbineChatChannel::General.into(),
-                holtburger_protocol::messages::TurbineChatType::General.into(),
-                holtburger_protocol::messages::TurbineChatDispatchType::SendToRoomByName,
-            ),
-            sender: "Bestie".to_string(),
-            message: "world check".to_string(),
-        });
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::ChannelMessage {
+                channel: ChatChannelInfo::turbine(
+                    holtburger_protocol::messages::TurbineChatChannel::General.into(),
+                    holtburger_protocol::messages::TurbineChatType::General.into(),
+                    holtburger_protocol::messages::TurbineChatDispatchType::SendToRoomByName,
+                ),
+                sender: "Bestie".to_string(),
+                message: "world check".to_string(),
+            },
+            Some("Player"),
+        );
 
         let message = chat.messages.last().expect("channel message should log");
         assert_eq!(message.text, "[General] Bestie: world check");
     }
 
     #[test]
+    fn channel_message_self_echo_falls_back_to_you_without_local_name() {
+        let mut chat = ChatState::new(None);
+
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::ChannelMessage {
+                channel: ChatChannelInfo::legacy(
+                    holtburger_protocol::messages::ChatChannel::Fellow.into(),
+                ),
+                sender: String::new(),
+                message: "party check".to_string(),
+            },
+            None,
+        );
+
+        let message = chat.messages.last().expect("channel message should log");
+        assert_eq!(message.text, "[Party] You: party check");
+    }
+
+    #[test]
     fn fellowship_activity_formats_member_join() {
         let mut chat = ChatState::new(None);
 
-        chat.handle_event(holtburger_core::ClientViewEvent::FellowshipActivity {
-            activity: FellowshipActivity::MemberJoined {
-                member_name: "Bravo".to_string(),
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::FellowshipActivity {
+                activity: FellowshipActivity::MemberJoined {
+                    member_name: "Bravo".to_string(),
+                },
             },
-        });
+            Some("Player"),
+        );
 
         let message = chat.messages.last().expect("fellowship activity should log");
         assert_eq!(message.kind, ChatMessageKind::System);
@@ -617,9 +663,12 @@ mod tests {
     fn fellowship_activity_formats_local_dismissal() {
         let mut chat = ChatState::new(None);
 
-        chat.handle_event(holtburger_core::ClientViewEvent::FellowshipActivity {
-            activity: FellowshipActivity::YouWereDismissed,
-        });
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::FellowshipActivity {
+                activity: FellowshipActivity::YouWereDismissed,
+            },
+            Some("Player"),
+        );
 
         let message = chat.messages.last().expect("fellowship activity should log");
         assert_eq!(message.text, "You were dismissed from the fellowship.");
@@ -629,16 +678,20 @@ mod tests {
     fn attacker_feedback_formats_damage_summary() {
         let mut chat = ChatState::new(None);
 
-        chat.handle_event(holtburger_core::ClientViewEvent::CombatFeedback(
-            CombatFeedback::AttackerNotification {
-                defender_name: "Drudge".to_string(),
-                damage_type: DamageType::SLASH,
-                health_percent: 0.25,
-                damage: 37,
-                critical_hit: true,
-                attack_conditions: AttackConditions::RECKLESSNESS | AttackConditions::SNEAK_ATTACK,
-            },
-        ));
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::CombatFeedback(
+                CombatFeedback::AttackerNotification {
+                    defender_name: "Drudge".to_string(),
+                    damage_type: DamageType::SLASH,
+                    health_percent: 0.25,
+                    damage: 37,
+                    critical_hit: true,
+                    attack_conditions: AttackConditions::RECKLESSNESS
+                        | AttackConditions::SNEAK_ATTACK,
+                },
+            ),
+            Some("Player"),
+        );
 
         let message = chat.messages.last().expect("combat feedback should log");
 
@@ -658,17 +711,20 @@ mod tests {
     fn defender_feedback_formats_location_summary() {
         let mut chat = ChatState::new(None);
 
-        chat.handle_event(holtburger_core::ClientViewEvent::CombatFeedback(
-            CombatFeedback::DefenderNotification {
-                attacker_name: "Banderling".to_string(),
-                damage_type: DamageType::FIRE,
-                health_percent: 0.125,
-                damage: 18,
-                damage_location: DamageLocation::Chest,
-                critical_hit: false,
-                attack_conditions: AttackConditions::OVERPOWER,
-            },
-        ));
+        chat.handle_event(
+            holtburger_core::ClientViewEvent::CombatFeedback(
+                CombatFeedback::DefenderNotification {
+                    attacker_name: "Banderling".to_string(),
+                    damage_type: DamageType::FIRE,
+                    health_percent: 0.125,
+                    damage: 18,
+                    damage_location: DamageLocation::Chest,
+                    critical_hit: false,
+                    attack_conditions: AttackConditions::OVERPOWER,
+                },
+            ),
+            Some("Player"),
+        );
 
         let message = chat.messages.last().expect("combat feedback should log");
 

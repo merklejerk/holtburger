@@ -210,18 +210,17 @@
 - [x] Picked up items appear as wielded in nearby tab until you assess or debug them.
 - [x] Filter verb to vendor tab.
 - [x] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
-- [ ] Character creation
-- [ ] Some equipment swapping jank going on.
-- [ ] Slash-commands should use `AppAction`s.
-- [ ] Slash commands:
-    - [ ] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`
+- [~] Slash commands:
+    - [x] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`
+    - [x] `/party` - get info on current party
+    - [x] `/create-party <NAME>` or `/createparty <NAME>` or `/party-create <NAME>` or `/partycreate <NAME>` - create a party, name is optional
+    - [x] `/invite <PLAYER>`, `/uninvite <PLAYER>` - party invites
     - [ ] `/? COMMAND` - targeted command help doc
     - [ ] `/swear`, `/leave`, `/unswear <VASSAL>`.
     - [ ] `/permit <player>`, `/unpermit <player>`, `/permits` - corpse looting options
-    - [ ] `/party` - get info on current party
-    - [ ] `/create-party <NAME>` or `/createparty <NAME>` or `/party-create <NAME>` or `/partycreate <NAME>` - create a party, name is optional
-    - [ ] `/invite <PLAYER>`, `/uninvite <PLAYER>` - party invites
-    - [ ] `/party-open <'on'|'off'>` - change party openness
+- [ ] Character creation
+- [ ] Some equipment swapping jank going on.
+- [ ] Slash-commands should use `AppAction`s.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

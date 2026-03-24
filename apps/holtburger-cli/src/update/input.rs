@@ -5,7 +5,7 @@ use crate::state::AppState;
 use crate::types::UpdateResult;
 
 impl AppState {
-    pub(super) fn handle_key_press(&mut self, key: KeyEvent, width: u16) -> UpdateResult {
+    pub(super) fn handle_key_press(&mut self, key: KeyEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
 
         // Modal blocks all input except Quit
@@ -31,7 +31,7 @@ impl AppState {
         }
 
         // --- Delegation to Active Page ---
-        let mut page_result = self.page.handle_input(key, width);
+        let mut page_result = self.page.handle_input(key);
 
         while !page_result.actions.is_empty() {
             let actions: Vec<_> = page_result.actions.drain(..).collect();

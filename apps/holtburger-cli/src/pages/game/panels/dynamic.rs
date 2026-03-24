@@ -50,34 +50,30 @@ pub fn render_dynamic_pane(
             }
         );
 
-        block = block.title(
-            ratatui::widgets::block::Title::from(Span::styled(
-                title_text,
-                pane_title_style(is_focused),
-            ))
-            .alignment(ratatui::layout::Alignment::Left),
+        block = block.title_top(
+            Line::from(Span::styled(title_text, pane_title_style(is_focused))).left_aligned(),
         );
     }
 
     if view.active_busy_operation.is_some() {
-        block = block.title(
-            ratatui::widgets::block::Title::from(Span::styled(
+        block = block.title_top(
+            Line::from(Span::styled(
                 busy_title(),
                 Style::default()
                     .fg(Color::Yellow)
                     .add_modifier(Modifier::BOLD | Modifier::SLOW_BLINK),
             ))
-            .alignment(ratatui::layout::Alignment::Center),
+            .centered(),
         );
     }
 
     // Right title: Combat Mode
-    block = block.title(
-        ratatui::widgets::block::Title::from(Span::styled(
+    block = block.title_top(
+        Line::from(Span::styled(
             format!(" [`] Combat mode: {} ", combat_mode_label(data.combat_mode)),
             Style::default().add_modifier(Modifier::BOLD),
         ))
-        .alignment(ratatui::layout::Alignment::Right),
+        .right_aligned(),
     );
 
     let inner = block.inner(area);

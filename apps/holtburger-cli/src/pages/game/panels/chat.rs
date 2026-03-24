@@ -400,7 +400,7 @@ pub fn render_chat_pane(f: &mut Frame, chat: &ChatState, is_focused: bool, area:
 
     crate::components::scroll::render_scrollbar(
         f,
-        area.inner(&ratatui::layout::Margin {
+        area.inner(ratatui::layout::Margin {
             vertical: 1,
             horizontal: 0,
         }),

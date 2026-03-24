@@ -43,6 +43,7 @@ pub fn render_dynamic_pane(
             match interaction {
                 Interaction::Targeting { .. } => "Targeting",
                 Interaction::Approaching { .. } => "Approaching",
+                Interaction::Following { .. } => "Following",
                 Interaction::Moving { .. } => "Moving",
                 Interaction::Combining { .. } => "Combining",
                 Interaction::Salvaging => "Salvaging",
@@ -124,6 +125,7 @@ pub fn render_dynamic_pane(
             Interaction::Moving { item_guid } => item_guid,
             Interaction::Targeting { target_guid } => target_guid,
             Interaction::Approaching { target_guid } => target_guid,
+            Interaction::Following { target_guid } => target_guid,
             Interaction::Combining { item_guid } => item_guid,
             Interaction::Salvaging => unreachable!(),
         };

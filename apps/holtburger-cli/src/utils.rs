@@ -75,7 +75,8 @@ pub fn active_interaction_subject_guid(interaction: Option<Interaction>) -> Opti
             Some(item_guid)
         }
         Some(Interaction::Targeting { target_guid })
-        | Some(Interaction::Approaching { target_guid }) => Some(target_guid),
+        | Some(Interaction::Approaching { target_guid })
+        | Some(Interaction::Following { target_guid }) => Some(target_guid),
         Some(Interaction::Salvaging) | None => None,
     }
 }

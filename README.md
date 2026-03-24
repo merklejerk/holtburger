@@ -198,4 +198,4 @@ The GitHub Actions workflows currently fetch release HBA assets from repository 
 
 ## License
 
-Holtburger is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+Holtburger is licensed under the [GNU Affero General Public License v3.0](LICENSE.md).

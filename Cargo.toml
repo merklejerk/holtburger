@@ -17,7 +17,7 @@ default-members = ["apps/holtburger-cli"]
 version = "0.1.0"
 edition = "2024"
 authors = ["holtburger contributors"]
-license = "GPL-3.0"
+license = "AGPL-3.0"
 repository = "https://github.com/merklejerk/holtburger"
 
 [workspace.dependencies]

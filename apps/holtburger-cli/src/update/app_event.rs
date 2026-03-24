@@ -7,8 +7,8 @@ impl AppState {
     pub fn handle_app_event(&mut self, action: AppEvent) -> UpdateResult {
         let mut result = match action {
             AppEvent::Tick(elapsed) => self.update_tick(elapsed),
-            AppEvent::KeyPress(key, width) => {
-                let mut res = self.handle_key_press(key, width);
+            AppEvent::KeyPress(key) => {
+                let mut res = self.handle_key_press(key);
                 res.needs_redraw = true; // Input always redraws
                 res
             }

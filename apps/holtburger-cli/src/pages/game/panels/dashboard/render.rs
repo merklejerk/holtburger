@@ -4,7 +4,7 @@ use crate::theme::pane_block;
 use crate::types::{DashboardTab, FocusedPane, Verb, VerbInputState};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
@@ -15,7 +15,7 @@ pub fn render_dashboard_pane(
     view: &ViewState,
     dashboard: &mut DashboardState,
     area: Rect,
-) -> Option<(u16, u16)> {
+) {
     let (focused_pane, _dashboard_tab) = (view.focused_pane, dashboard.active_tab);
     let is_focused = focused_pane == FocusedPane::Dashboard;
 
@@ -84,17 +84,15 @@ pub fn render_dashboard_pane(
         .render(f, data, view, dashboard_inner_chunks[0]);
 
     if let Some(input_state) = dashboard.active_tab_footer_input() {
-        let input_widget = render_footer_text_input(input_state);
-        f.render_widget(input_widget, dashboard_inner_chunks[1]);
-
-        let cursor_x =
-            dashboard_inner_chunks[1].x + 1 + footer_text_input_cursor_offset(input_state);
-        let cursor_y = dashboard_inner_chunks[1].y + 1;
-        Some((cursor_x, cursor_y))
+        render_footer_text_input(
+            f,
+            input_state,
+            dashboard_inner_chunks[1],
+            focused_pane == FocusedPane::Dashboard,
+        );
     } else {
         let verb_bar = render_verb_bar(dashboard, data, view);
         f.render_widget(verb_bar, dashboard_inner_chunks[1]);
-        None
     }
 }
 
@@ -139,42 +137,54 @@ fn visible_footer_verbs(mut verbs: Vec<Verb>) -> Vec<Verb> {
     verbs
 }
 
-fn render_footer_text_input(input: &VerbInputState) -> Paragraph<'static> {
+fn render_footer_text_input(f: &mut Frame, input: &VerbInputState, area: Rect, focused: bool) {
     let prompt = input.prompt.to_string();
-    let value = if input.input.is_empty() {
-        "_".to_string()
+    let suffix = if let (Some(min), Some(max)) = (input.min, input.max) {
+        format!("  [{}-{}]", min, max)
     } else {
-        input.input.clone()
+        String::new()
     };
+    let prompt_text = format!("{}: ", prompt);
+    let prompt_width = UnicodeWidthStr::width(prompt_text.as_str()) as u16;
+    let suffix_width = UnicodeWidthStr::width(suffix.as_str()) as u16;
+    let outer_block = Block::default().borders(Borders::TOP);
+    let inner_area = outer_block.inner(area);
+    f.render_widget(outer_block, area);
 
-    let mut value_spans = vec![
-        Span::raw(format!("{}: ", prompt)),
-        Span::styled(value, Style::default().add_modifier(Modifier::BOLD)),
-    ];
+    let row_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Length(1)])
+        .split(inner_area);
 
-    if let (Some(min), Some(max)) = (input.min, input.max) {
-        value_spans.push(Span::raw(format!("  [{}-{}]", min, max)));
+    let value_width = row_chunks[0]
+        .width
+        .saturating_sub(prompt_width + suffix_width);
+    let col_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length(prompt_width),
+            Constraint::Length(value_width),
+            Constraint::Length(suffix_width),
+        ])
+        .split(row_chunks[0]);
+
+    f.render_widget(Paragraph::new(prompt_text), col_chunks[0]);
+
+    if value_width > 0 {
+        let input_widget = input
+            .input
+            .rendered(Style::default().add_modifier(Modifier::BOLD), focused);
+        f.render_widget(&input_widget, col_chunks[1]);
     }
 
-    let value_line = Line::from(value_spans);
+    if suffix_width > 0 {
+        f.render_widget(Paragraph::new(suffix), col_chunks[2]);
+    }
 
     let hint_line = Line::from(vec![Span::raw("[ENTER] Submit  [ESC] Cancel")])
         .alignment(ratatui::layout::Alignment::Right);
 
-    Paragraph::new(vec![value_line, hint_line])
-        .block(Block::default().borders(Borders::TOP))
-        .wrap(ratatui::widgets::Wrap { trim: true })
-}
-
-fn footer_text_input_cursor_offset(input: &VerbInputState) -> u16 {
-    let prompt_text = format!("{}: ", input.prompt);
-    let value = if input.input.is_empty() {
-        "_"
-    } else {
-        input.input.as_str()
-    };
-
-    (UnicodeWidthStr::width(prompt_text.as_str()) + UnicodeWidthStr::width(value)) as u16
+    f.render_widget(Paragraph::new(hint_line), row_chunks[1]);
 }
 
 #[cfg(test)]

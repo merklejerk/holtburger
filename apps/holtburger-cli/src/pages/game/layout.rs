@@ -4,7 +4,8 @@ pub const DYNAMIC_PANEL_HEIGHT: u16 = 3;
 pub const INPUT_AREA_HEIGHT: u16 = 3;
 pub const PULSE_PANEL_WIDTH: u16 = 8;
 pub const MIN_MAIN_AREA_HEIGHT: u16 = 10;
-pub const WIDTH_BREAKPOINT: u16 = 150;
+pub const WIDE_LAYOUT_ASPECT_WIDTH: u16 = 3;
+pub const WIDE_LAYOUT_ASPECT_HEIGHT: u16 = 1;
 
 pub const LAYOUT_WIDE_NEARBY_PCT: u16 = 25;
 pub const LAYOUT_WIDE_CHAT_PCT: u16 = 50;
@@ -17,6 +18,23 @@ pub const NET_PULSE_HISTORY_SIZE: usize = 32;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LayoutMode {
+    #[default]
+    Narrow,
+    Wide,
+}
+
+pub fn layout_mode_for_size(width: u16, height: u16) -> LayoutMode {
+    if u32::from(width) * u32::from(WIDE_LAYOUT_ASPECT_HEIGHT)
+        > u32::from(height) * u32::from(WIDE_LAYOUT_ASPECT_WIDTH)
+    {
+        LayoutMode::Wide
+    } else {
+        LayoutMode::Narrow
+    }
+}
+
 pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -27,7 +45,7 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
         ])
         .split(area);
 
-    let is_narrow = area.width < WIDTH_BREAKPOINT || area.height > area.width;
+    let is_narrow = layout_mode_for_size(area.width, area.height) == LayoutMode::Narrow;
 
     if is_narrow {
         let vertical_chunks = Layout::default()
@@ -76,5 +94,19 @@ pub fn get_layout(area: Rect) -> (Vec<Rect>, Vec<Rect>, Rect) {
             ],
             vertical_chunks[1],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LayoutMode, layout_mode_for_size};
+
+    #[test]
+    fn layout_mode_only_becomes_wide_above_three_to_one_ratio() {
+        assert_eq!(layout_mode_for_size(3, 1), LayoutMode::Narrow);
+        assert_eq!(layout_mode_for_size(4, 1), LayoutMode::Wide);
+        assert_eq!(layout_mode_for_size(30, 10), LayoutMode::Narrow);
+        assert_eq!(layout_mode_for_size(31, 10), LayoutMode::Wide);
+        assert_eq!(layout_mode_for_size(192, 108), LayoutMode::Narrow);
     }
 }

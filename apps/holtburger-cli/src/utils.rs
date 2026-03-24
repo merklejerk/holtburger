@@ -1,3 +1,4 @@
+use crate::pages::game::layout::LayoutMode;
 use crate::types::FocusedPane;
 use crate::types::Interaction;
 use holtburger_common::Guid;
@@ -218,11 +219,11 @@ pub fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
 pub fn get_adjacent_pane(
     current: FocusedPane,
-    width: u16,
+    layout_mode: LayoutMode,
     active_interaction: bool,
     delta: i32,
 ) -> FocusedPane {
-    let order = get_pane_order(width);
+    let order = get_pane_order(layout_mode);
     let n = order.len() as i32;
     let current_idx = order.iter().position(|&p| p == current).unwrap_or(0) as i32;
 
@@ -236,9 +237,9 @@ pub fn get_adjacent_pane(
     order[next_idx as usize]
 }
 
-fn get_pane_order(width: u16) -> [FocusedPane; 4] {
-    if width < crate::pages::game::layout::WIDTH_BREAKPOINT {
-        // Portrait: Dashboard -> Context -> Dynamic -> Chat
+fn get_pane_order(layout_mode: LayoutMode) -> [FocusedPane; 4] {
+    if layout_mode == LayoutMode::Narrow {
+        // Narrow: Dashboard -> Context -> Dynamic -> Chat
         [
             FocusedPane::Dashboard,
             FocusedPane::Context,
@@ -246,7 +247,7 @@ fn get_pane_order(width: u16) -> [FocusedPane; 4] {
             FocusedPane::Chat,
         ]
     } else {
-        // Landscape: Dashboard -> Chat -> Context -> Dynamic
+        // Wide: Dashboard -> Chat -> Context -> Dynamic
         [
             FocusedPane::Dashboard,
             FocusedPane::Chat,

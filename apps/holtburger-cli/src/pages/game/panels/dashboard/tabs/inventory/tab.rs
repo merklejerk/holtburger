@@ -195,7 +195,7 @@ impl InventoryTab {
 
         let mut input = VerbInputState::text("Filter");
         if let Some(active_filter) = &self.active_filter {
-            input.input = active_filter.raw_pattern.clone();
+            input.input.set_text(&active_filter.raw_pattern);
         }
 
         self.filter_input = Some(FilterInputSession {

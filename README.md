@@ -30,7 +30,7 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **Character Selection** | 🟢 | 🟢 | Login via terminal UI or CLI arguments. |
 | **Character Creation** | 🟢 | 🔴 | Planned for a future update. |
 | **Spatial Radar** | 🟢 | 🟢 | Live positional tracking of nearby entities. |
-| **Movement & Physics** | 🟢 | 🟡 | Turn-to, locomotion primitives, sticky pursuit, and server-driven reposition handling work. Full 3D collision-aware navigation is still future-client territory. |
+| **Movement & Physics** | 🟢 | 🟡 | Turn-to, locomotion primitives, sticky pursuit, approach/follow, and server-driven reposition handling work. Full 3D collision-aware navigation is still future-client territory. |
 | **Chat & Messaging** | 🟢 | 🟢 | Full parsing of chat channels, server messages, and emotes. |
 | **Inventory & Equipping** | 🟢 | 🟢 | Move, stack, split, drop, and equip items. |
 | **Vendors & Trade** | 🟢 | 🟢 | Full merchant interaction including alternate currencies. |
@@ -39,70 +39,145 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **Melee & Missile Combat** | 🟢 | 🟢 | Manual targeted melee and missile attacks work, and the TUI can drive shared combat-facing and sticky-melee helpers. This is the practical ceiling for the terminal client unless scripting is introduced. |
 | **Scripting / Automation** | 🔴 | 🔴 | Embedded scripting remains planned, and that is the main path for pushing combat or spellcasting beyond the current TUI ceiling. |
 
+## Roadmap
+
+Holtburger is being built in phases, and the current TUI client is intentionally serving two roles at once:
+
+- It is the first usable client for the stack today.
+- It is the proving ground for the shared protocol, session, world, and core layers that a future 3D client will rely on.
+
+The long-term goal is not to stop at a terminal client. The TUI is how we validate the full client stack quickly, iterate on gameplay and automation semantics, and de-risk the architecture before investing in a richer frontend.
+
+### Phase 1: TUI and Stack Buildout
+
+The current phase is feature buildout. The goal here is to keep expanding protocol coverage and client behavior until the stack supports as much practical retail-client parity as makes sense in a terminal UI.
+
+That includes work such as:
+
+- login and character flows
+- world-state fidelity and movement behavior
+- inventory, vendors, crafting, and magic systems
+- combat helpers and automation-oriented control surfaces
+- shared client abstractions that will still make sense for a future 3D frontend
+
+### Phase 2: Consolidation
+
+Once the TUI and shared stack are sufficiently built out, the focus shifts to consolidation:
+
+- refactors and cleanup
+- hardening APIs and crate boundaries
+- reducing duplication and patchwork logic
+- improving maintainability, testability, and architectural clarity
+
+This phase matters because the TUI is not the end state, but the underlying stack needs to be clean and stable enough to support multiple frontends without dragging terminal-specific assumptions forward.
+
+### Phase 3: Scripting Engine
+
+After consolidation, embedded scripting is the next major milestone. The expectation is that scripting will become the primary value add of the TUI client beyond manual play.
+
+That should turn the TUI into a lightweight alternative to hosting bots while still sitting on the same shared client foundation. It also creates a much better environment for automation, experimentation, and custom workflows before the 3D client arrives.
+
+### Phase 4: 3D Client
+
+With the stack proven out and scripting in place, work can begin on a full 3D client as a fast follow. The current expectation is a Tauri-based client with a classic visual style, backed by a modern, scriptable, and more extensible UI model.
+
+The TUI is therefore not a side project or disposable prototype. It is the shortest path to validating the complete client architecture, and it should continue to produce useful standalone value even after the 3D client exists.
+
 ## Disclaimers
 
 Holtburger is **highly experimental**. APIs are unstable and subject to frequent breaking changes. Much of this code is heavily developed with the assistance of AI coding agents, so don't treat its implementation as authoritative.
 
-### Prerequisites
+## Installation and First Run
 
-- [Rust](https://www.rust-lang.org/tools/install) (latest stable or nightly)
+There are three practical ways to get started:
 
-## Installation
+- **Binary release**: best for most users on Windows, macOS, and Linux.
+- **Flatpak**: best for Linux users who want a packaged install.
+- **From source**: best if you are developing on Holtburger itself.
 
 ### Binary Releases (Recommended)
-Pre-compiled binaries for the nightly builds are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives include the bundled micro `portal.hba` required for the current TUI/runtime path.
 
-1.  Download the archive for your platform (Windows, macOS, or Linux).
-2.  Extract the contents.
-3.  Run the `holtburger-cli` (or `holtburger-cli.exe` on Windows) binary.
+Nightly prebuilt archives are available on the [Releases](https://github.com/merklejerk/holtburger/releases) page. These archives already include the bundled micro `portal.hba` needed for the current TUI/runtime path, so this is the fastest way to get to a running client.
 
+1. Download the archive for your platform.
+2. Extract it.
+3. Launch the binary from the extracted folder:
 
-### Flatpak (Linux)
-For Linux users, a Flatpak bundle is built nightly:
 ```bash
-# Install the bundle
-flatpak install holtburger-cli.flatpak
+./holtburger-cli --help
 ```
 
+On Windows, run `holtburger-cli.exe --help` instead.
+
+### Flatpak (Linux)
+
+A nightly Flatpak bundle is also produced for Linux. Install it, then launch the app directly:
+
+```bash
+flatpak install ./holtburger-cli.flatpak
+flatpak run io.github.merklejerk.holtburger-cli --help
+```
+
+The Flatpak ships with the same bundled micro `portal.hba`, so it is ready to run immediately.
+
 ### From Source
-To build the ecosystem from scratch, ensure you have the [Rust toolchain](https://www.rust-lang.org/tools/install) installed.
+
+Building from source is mainly for local development.
+
+**Prerequisite:** [Rust](https://www.rust-lang.org/tools/install) (latest stable or nightly)
 
 ```bash
 git clone https://github.com/merklejerk/holtburger.git
 cd holtburger
 cargo build --release
 ```
-The binaries will be located in `target/release/`.
+
+For day-to-day development, run the TUI through Cargo:
+
+```bash
+cargo run --bin tui -- --help
+```
+
+Unlike the release archive and Flatpak, source builds do **not** bundle client data automatically. See [Data File Configuration](#data-file-configuration).
 
 ## Running the TUI Client
 
-### Using the Binary Release
-Simply run the executable from your terminal. If you are in the folder where you extracted the release:
+Once installed, use the launch path that matches how you obtained the client:
+
+### Release Archive
+
 ```bash
 ./holtburger-cli [ARGS]
 ```
 
-### Windows
-The TUI/CLI client requires a modern terminal emulator to render correctly. The built-in Command Prompt or PowerShell on Windows are not adequate. Fortunately, there are a number of options available, even directly from Microsoft, such as the [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) app (preinstalled on Windows 11).
+### Flatpak
 
-> [!TIP]
-> If you get an error about missing `VCRuntime140.dll`, you may need to install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe). Additionally, you might have to whitelist the `.exe` with Windows Defender by attempting to run it once, hitting "More info", and then selecting "Run anyway".
-
-After you have extracted the Windows zip file to a folder, open up your terminal emulator of choice, navigate to said folder, and run `holtburger-cli.exe --help` to get started.
-
-### Using Flatpak (Linux)
 ```bash
 flatpak run io.github.merklejerk.holtburger-cli [ARGS]
 ```
 
 ### Local Development
-For development, you can run the TUI client directly through `cargo`. We use `--bin tui` as a shorthand in the dev environment. Note that this will require you to provide the client `.dat` files in the `./dats/` folder (see [below](#data-file-configuration)):
+
 ```bash
 cargo run --bin tui -- [ARGS]
 ```
 
-### Data File Configuration
-The TUI client requires game data (`portal` and `cell`) to function. It is compatible with both official DAT files and our optimized HBA format, which is >90% smaller. The repo and source distribution does not check these files in so you will have to provide them separately. You can either provide your own DAT files or download the latest `hba.zip` from our [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into a `./dats` folder in the root of the project.
+### Windows Notes
+
+The TUI client needs a modern terminal emulator to render correctly. The built-in Command Prompt and legacy PowerShell console are not adequate. [Windows Terminal](https://apps.microsoft.com/detail/9n0dx20hk701) is a good default and ships with Windows 11.
+
+> [!TIP]
+> If you get an error about missing `VCRuntime140.dll`, install the [VC Runtime](https://aka.ms/vc14/vc_redist.x64.exe). You may also need to allow the executable through Windows Defender by running it once, choosing "More info", and then selecting "Run anyway".
+
+## Data File Configuration
+
+The TUI client requires game data (`portal.hba`/`portal.dat` and `cell.hba`/`cell.dat`) to function. It supports both the original DAT files and the much smaller HBA format.
+
+- Release archives already include the micro `portal.hba` needed for the current runtime path.
+- Flatpak builds also include that bundled micro `portal.hba`.
+- Source builds and local development setups require you to provide the data files yourself.
+
+If you are setting up local data, you can either provide your own DAT files or download the latest `hba.zip` from the [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into a `./dats` folder at the project root.
 
 ### Release Maintenance
 The GitHub Actions workflows currently fetch release HBA assets from repository variables instead of committed archive files:
@@ -123,4 +198,4 @@ The GitHub Actions workflows currently fetch release HBA assets from repository 
 
 ## License
 
-Holtburger is licensed under the [GNU General Public License v3.0](LICENSE).
+Holtburger is licensed under the [GNU Affero General Public License v3.0](LICENSE.md).

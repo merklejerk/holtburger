@@ -362,8 +362,7 @@ async fn main() -> Result<()> {
                             continue;
                         }
 
-                        let size = terminal.size()?;
-                        let res = app_state.handle_app_event(AppEvent::KeyPress(key, size.width));
+                        let res = app_state.handle_app_event(AppEvent::KeyPress(key));
                         update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
                     }
                     Event::Mouse(mouse) => {
@@ -391,7 +390,7 @@ async fn main() -> Result<()> {
             let now = Instant::now();
             if now.duration_since(last_draw) >= frame_rate {
                 let size = terminal.size()?;
-                app_state.page.update_layout(size);
+                app_state.page.update_layout(size.into());
                 terminal.draw(|f| pages::render_app(f, &mut app_state))?;
                 last_draw = now;
                 needs_redraw = false;

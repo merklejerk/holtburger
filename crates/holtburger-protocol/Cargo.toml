@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-log = "0.4"
+log.workspace = true
 holtburger-common.workspace = true
 binrw.workspace = true
 serde.workspace = true
@@ -17,6 +17,6 @@ bitflags.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 byteorder.workspace = true
-hex = "0.4.3"
+hex.workspace = true
 
 [dev-dependencies]

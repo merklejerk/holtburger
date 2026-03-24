@@ -592,6 +592,7 @@ fn test_fellowship_full_update_populates_world_state_and_emits_projection() {
 #[test]
 fn test_fellowship_update_fellow_creates_placeholder_state_when_snapshot_missing() {
     let mut state = WorldState::synthetic();
+    state.player.guid = Guid(0x5000_0001);
 
     let msg = GameMessage::GameEvent(Box::new(GameEventMessage {
         target: Guid::NULL,

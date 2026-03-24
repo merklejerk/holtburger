@@ -157,12 +157,15 @@ impl GameState {
             | ClientViewEvent::BootAccount(_)
             | ClientViewEvent::NetPulse { .. }
             | ClientViewEvent::Disconnected => {
-                self.chat.handle_event(event);
+                self.chat
+                    .handle_event(event, self.data.character_name.as_deref());
             }
             ClientViewEvent::CombatFeedback(feedback) => {
                 result.merge(self.handle_combat_feedback(&feedback));
-                self.chat
-                    .handle_event(ClientViewEvent::CombatFeedback(feedback));
+                self.chat.handle_event(
+                    ClientViewEvent::CombatFeedback(feedback),
+                    self.data.character_name.as_deref(),
+                );
                 self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }

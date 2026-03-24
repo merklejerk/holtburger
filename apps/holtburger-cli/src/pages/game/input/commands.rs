@@ -80,6 +80,31 @@ fn parse_single_argument_command<'a>(command: &'a str, aliases: &[&str]) -> Opti
     Some(argument)
 }
 
+fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a str>> {
+    for alias in aliases {
+        if command == *alias {
+            return Some(None);
+        }
+
+        let Some(rest) = command.strip_prefix(alias) else {
+            continue;
+        };
+
+        let Some(first) = rest.chars().next() else {
+            return Some(None);
+        };
+
+        if !first.is_whitespace() {
+            continue;
+        }
+
+        let topic = rest.trim();
+        return Some(if topic.is_empty() { None } else { Some(topic) });
+    }
+
+    None
+}
+
 impl GameState {
     fn default_party_name(&self) -> String {
         self.data
@@ -124,6 +149,148 @@ impl GameState {
 
     fn log_command_usage(&mut self, usage: &str) {
         self.chat.log(ChatMessageKind::System, usage.to_string());
+    }
+
+    fn log_command_help_overview(&mut self) {
+        self.chat.log(
+            ChatMessageKind::System,
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /leave, /uninvite <PLAYER>"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Options: /options list, /options get <name>, /options set <name> <on|off>, /options toggle <name>"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Use /help <COMMAND> for detailed help on a specific command.".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Shortcuts: Tab/Shift+Tab (Cycle Panel Focus), 0-9 (Dashboard Tabs), a-z (Verbs), ` (Combat Toggle)".to_string(),
+        );
+    }
+
+    fn command_help_lines(&self, raw_topic: &str) -> Option<Vec<String>> {
+        let topic = raw_topic.trim().trim_start_matches('/').to_ascii_lowercase();
+
+        let lines = match topic.as_str() {
+            "?" | "help" => vec![
+                "Usage: /help [COMMAND] or /? [COMMAND]".to_string(),
+                "Show the general command list or detailed help for a specific command.".to_string(),
+                "Examples: /help party, /? create-party, /help options".to_string(),
+            ],
+            "tell" | "t" => vec![
+                "Usage: /tell <NAME> <MSG>".to_string(),
+                "Send a private message to a specific player.".to_string(),
+                "Alias: /t <NAME> <MSG>".to_string(),
+                "Example: /tell Bestie meet at subway".to_string(),
+            ],
+            "reply" | "r" => vec![
+                "Usage: /reply <MSG>".to_string(),
+                "Reply to the most recent incoming tell.".to_string(),
+                "Alias: /r <MSG>".to_string(),
+            ],
+            "guild" | "g" => vec![
+                "Usage: /g <MSG>".to_string(),
+                "Send a message to allegiance chat.".to_string(),
+                "Alias: /guild <MSG>".to_string(),
+            ],
+            "party" | "p" => vec![
+                "Usage: /party".to_string(),
+                "Show the current party status summary.".to_string(),
+                "Usage: /p <MSG>".to_string(),
+                "Send a message to party chat.".to_string(),
+                "Aliases: /party <MSG>, /p <MSG>".to_string(),
+            ],
+            "create-party" | "createparty" | "party-create" | "partycreate" => vec![
+                "Usage: /create-party [NAME]".to_string(),
+                "Create a new party.".to_string(),
+                "If NAME is omitted, the TUI generates a default like '<player>'s Fellowship'."
+                    .to_string(),
+                "Aliases: /createparty, /party-create, /partycreate".to_string(),
+            ],
+            "invite" => vec![
+                "Usage: /invite <PLAYER>".to_string(),
+                "Invite a nearby or known player to your party.".to_string(),
+            ],
+            "leave" => vec![
+                "Usage: /leave".to_string(),
+                "Leave your current party.".to_string(),
+            ],
+            "uninvite" => vec![
+                "Usage: /uninvite <PLAYER>".to_string(),
+                "Dismiss a player from your party.".to_string(),
+            ],
+            "options" => vec![
+                "Usage: /options [list|get <name>|set <name> <on|off>|toggle <name>]"
+                    .to_string(),
+                "Inspect and change curated character options exposed by the TUI.".to_string(),
+                "Examples: /options list, /options get trade-chat, /options toggle share-xp"
+                    .to_string(),
+            ],
+            "quit" | "exit" => vec![
+                "Usage: /quit".to_string(),
+                "Exit the client.".to_string(),
+                "Alias: /exit".to_string(),
+            ],
+            "clear" => vec![
+                "Usage: /clear".to_string(),
+                "Clear the chat log and current input line.".to_string(),
+            ],
+            "combat" => vec![
+                "Usage: /combat".to_string(),
+                "Toggle combat mode.".to_string(),
+            ],
+            "ls" | "lifestone" => vec![
+                "Usage: /ls".to_string(),
+                "Recall to your lifestone.".to_string(),
+                "Alias: /lifestone".to_string(),
+            ],
+            "hq" => vec![
+                "Usage: /hq".to_string(),
+                "Recall to allegiance housing.".to_string(),
+            ],
+            "rip" => vec![
+                "Usage: /rip".to_string(),
+                "Kill your character.".to_string(),
+            ],
+            "pkl" => vec![
+                "Usage: /pkl".to_string(),
+                "Enter PK Lite mode.".to_string(),
+            ],
+            _ => return None,
+        };
+
+        Some(lines)
+    }
+
+    fn log_command_help_topic(&mut self, topic: &str) {
+        let Some(lines) = self.command_help_lines(topic) else {
+            self.chat.log(
+                ChatMessageKind::Error,
+                format!(
+                    "Unknown help topic '{}'. Use /help to see available commands.",
+                    topic
+                ),
+            );
+            return;
+        };
+
+        for line in lines {
+            self.chat.log(ChatMessageKind::System, line);
+        }
     }
 
     fn log_option_state(&mut self, option: CuratedCharacterOption, enabled: bool) {
@@ -361,6 +528,15 @@ impl GameState {
             return result.with_redraw(true);
         }
 
+        if let Some(topic) = parse_help_topic(command, &["/?", "/help"]) {
+            match topic {
+                Some(topic) => self.log_command_help_topic(topic),
+                None => self.log_command_help_overview(),
+            }
+            self.chat_input.input.clear();
+            return result.with_redraw(true);
+        }
+
         match command {
             "/quit" | "/exit" => {
                 result.commands.push(ClientCommand::Quit);
@@ -398,34 +574,6 @@ impl GameState {
             "/pkl" => {
                 result.commands.push(ClientCommand::EnterPkLite);
                 self.finish_input_command_submission(command);
-                result.with_redraw(true)
-            }
-            "/?" | "/help" => {
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Available commands: /?,  /help, /quit, /exit, /clear, /combat, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
-                        .to_string(),
-                );
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>"
-                        .to_string(),
-                );
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /leave, /uninvite <PLAYER>"
-                        .to_string(),
-                );
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Options: /options list, /options get <name>, /options set <name> <on|off>, /options toggle <name>"
-                        .to_string(),
-                );
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Shortcuts: Tab/Shift+Tab (Cycle Panel Focus), 0-9 (Dashboard Tabs), a-z (Actions)".to_string(),
-                );
-                self.chat_input.input.clear();
                 result.with_redraw(true)
             }
             _ if command.starts_with("/options") => self.handle_options_command(command),
@@ -475,6 +623,59 @@ mod tests {
                 .iter()
                 .any(|message| message.text.contains(":<MSG>"))
         );
+        assert!(state.chat.messages.iter().any(|message| {
+            message.text == "Use /help <COMMAND> for detailed help on a specific command."
+        }));
+    }
+
+    #[test]
+    fn help_command_for_specific_topic_logs_detailed_help() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/help create-party");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| {
+            message.text == "Usage: /create-party [NAME]"
+        }));
+        assert!(state.chat.messages.iter().any(|message| {
+            message.text.contains("TUI generates a default")
+        }));
+    }
+
+    #[test]
+    fn question_mark_help_alias_supports_specific_topic() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/? /party");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| message.text == "Usage: /party"));
+        assert!(state.chat.messages.iter().any(|message| message.text == "Usage: /p <MSG>"));
+    }
+
+    #[test]
+    fn help_command_for_unknown_topic_logs_error() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/help bogus");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| {
+            message.text == "Unknown help topic 'bogus'. Use /help to see available commands."
+        }));
     }
 
     #[test]

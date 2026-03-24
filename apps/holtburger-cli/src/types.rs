@@ -243,6 +243,7 @@ pub enum Interaction {
     Moving { item_guid: Guid },
     Targeting { target_guid: Guid },
     Approaching { target_guid: Guid },
+    Following { target_guid: Guid },
     Combining { item_guid: Guid },
     Salvaging,
 }
@@ -419,6 +420,9 @@ pub enum AppAction {
         guid: Guid,
     },
     Approach {
+        guid: Guid,
+    },
+    Follow {
         guid: Guid,
     },
     Drop {

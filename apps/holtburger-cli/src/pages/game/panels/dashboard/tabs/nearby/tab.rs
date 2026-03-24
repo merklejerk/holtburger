@@ -285,16 +285,6 @@ impl TabController for NearbyTab {
                     }
                     return verbs;
                 }
-                Interaction::Approaching { target_guid } => {
-                    if e.guid == target_guid {
-                        verbs.push(Verb::new(
-                            AppAction::CancelInteraction,
-                            '\x1b',
-                            "Cancel approach",
-                        ));
-                    }
-                    return verbs;
-                }
                 _ => {}
             }
         }
@@ -326,6 +316,14 @@ impl TabController for NearbyTab {
                     vec![AppAction::Approach { guid: e.guid }],
                     'r',
                     "Approach",
+                ));
+            }
+
+            if e.is_root() && class.is_creature() {
+                verbs.push(Verb::new(
+                    vec![AppAction::Follow { guid: e.guid }],
+                    'w',
+                    "Follow",
                 ));
             }
 

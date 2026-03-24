@@ -8,7 +8,7 @@ use holtburger_core::client::movement_types::{
     MovementPacketMetadata, MovementPrimitive, MovementRequest,
 };
 use holtburger_core::client::navigation::{
-    ApproachSyncInput, NavigationAutomation, NavigationIntent, NavigationIntentKind,
+    ApproachSyncInput, NavigationAutomation, NavigationIntent, NavigationMode,
 };
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
@@ -361,7 +361,7 @@ impl GameState {
                         .retain(|queued_guid| *queued_guid != guid);
 
                     if session.queued_items.is_empty() {
-                        self.set_active_interaction(None, &mut result);
+                        self.clear_active_interaction(&mut result);
                         self.view.salvaging = None;
                     }
                     result.needs_redraw = true;
@@ -377,17 +377,16 @@ impl GameState {
                         items: item_guids,
                     });
                 }
-                self.set_active_interaction(None, &mut result);
+                self.clear_active_interaction(&mut result);
                 self.view.salvaging = None;
                 result.needs_redraw = true;
             }
             AppAction::Approach { guid } => {
                 self.start_approach_target(guid, GENERIC_APPROACH_DISTANCE, &mut result);
-                if self
-                    .runtime
-                    .navigation
-                    .is_intent_active(NavigationIntentKind::Approach)
-                {
+                if matches!(
+                    self.runtime.navigation.navigation_mode(),
+                    Some(NavigationMode::Approach { .. })
+                ) {
                     self.set_active_interaction(
                         Some(Interaction::Approaching { target_guid: guid }),
                         &mut result,
@@ -397,11 +396,10 @@ impl GameState {
             }
             AppAction::Follow { guid } => {
                 self.start_follow_target(guid, GENERIC_APPROACH_DISTANCE, &mut result);
-                if self
-                    .runtime
-                    .navigation
-                    .is_intent_active(NavigationIntentKind::Follow)
-                {
+                if matches!(
+                    self.runtime.navigation.navigation_mode(),
+                    Some(NavigationMode::Follow { .. })
+                ) {
                     self.set_active_interaction(
                         Some(Interaction::Following { target_guid: guid }),
                         &mut result,
@@ -515,7 +513,7 @@ impl GameState {
                     container,
                     placement: 0,
                 });
-                self.set_active_interaction(None, &mut result);
+                self.clear_active_interaction(&mut result);
             }
             AppAction::StackItems {
                 source,
@@ -694,12 +692,21 @@ impl GameState {
                         return Some(result);
                     }
                 } else {
+                    if Self::is_frontend_navigation_interaction(self.view.active_interaction)
+                        && !Self::is_frontend_navigation_interaction(Some(interaction))
+                    {
+                        let update = self
+                            .runtime
+                            .navigation
+                            .clear_navigation(self.current_movement_metadata());
+                        result.commands.extend(update.commands);
+                    }
                     self.set_active_interaction(Some(interaction), &mut result);
                 }
                 result.needs_redraw = true;
             }
             AppAction::CancelInteraction => {
-                self.set_active_interaction(None, &mut result);
+                self.clear_active_interaction(&mut result);
                 self.view.salvaging = None;
                 result.needs_redraw = true;
             }
@@ -912,6 +919,14 @@ impl GameState {
     }
 
     pub(crate) fn clear_active_interaction(&mut self, result: &mut UpdateResult) {
+        if Self::is_frontend_navigation_interaction(self.view.active_interaction) {
+            let update = self
+                .runtime
+                .navigation
+                .clear_navigation(self.current_movement_metadata());
+            result.commands.extend(update.commands);
+        }
+
         self.set_active_interaction(None, result);
     }
 
@@ -925,22 +940,6 @@ impl GameState {
 
         self.sync_target_health_query(previous_interaction, next_interaction, result);
 
-        if self.should_cancel_active_approach(previous_interaction, next_interaction) {
-            let update = self.runtime.navigation.clear_intent(
-                NavigationIntentKind::Approach,
-                self.current_movement_metadata(),
-            );
-            result.commands.extend(update.commands);
-        }
-
-        if self.should_cancel_active_follow(previous_interaction, next_interaction) {
-            let update = self.runtime.navigation.clear_intent(
-                NavigationIntentKind::Follow,
-                self.current_movement_metadata(),
-            );
-            result.commands.extend(update.commands);
-        }
-
         if self.should_cancel_attack(previous_interaction, next_interaction) {
             result.commands.push(ClientCommand::CancelAttack);
             self.data.combat_runtime.cancel_attack();
@@ -950,6 +949,13 @@ impl GameState {
         if self.should_resume_attack(previous_interaction, next_interaction) {
             self.queue_auto_attack_for_mode(self.data.combat_mode, result);
         }
+    }
+
+    fn is_frontend_navigation_interaction(interaction: Option<Interaction>) -> bool {
+        matches!(
+            interaction,
+            Some(Interaction::Approaching { .. }) | Some(Interaction::Following { .. })
+        )
     }
 
     fn sync_target_health_query(
@@ -1034,44 +1040,6 @@ impl GameState {
                 CombatMode::Melee | CombatMode::Missile
             )
         )
-    }
-
-    fn should_cancel_active_approach(
-        &self,
-        previous_interaction: Option<Interaction>,
-        next_interaction: Option<Interaction>,
-    ) -> bool {
-        match (previous_interaction, next_interaction) {
-            (
-                Some(Interaction::Approaching {
-                    target_guid: previous_target,
-                }),
-                Some(Interaction::Approaching {
-                    target_guid: next_target,
-                }),
-            ) => previous_target != next_target,
-            (Some(Interaction::Approaching { .. }), _) => true,
-            _ => false,
-        }
-    }
-
-    fn should_cancel_active_follow(
-        &self,
-        previous_interaction: Option<Interaction>,
-        next_interaction: Option<Interaction>,
-    ) -> bool {
-        match (previous_interaction, next_interaction) {
-            (
-                Some(Interaction::Following {
-                    target_guid: previous_target,
-                }),
-                Some(Interaction::Following {
-                    target_guid: next_target,
-                }),
-            ) => previous_target != next_target,
-            (Some(Interaction::Following { .. }), _) => true,
-            _ => false,
-        }
     }
 
     fn queue_auto_attack_for_mode(&mut self, mode: CombatMode, result: &mut UpdateResult) {
@@ -1190,7 +1158,7 @@ impl GameState {
         let target_guid = self
             .current_target_guid()
             .filter(|guid| self.is_valid_combat_target(*guid));
-        self.sync_navigation_intent(
+        self.reconcile_navigation(
             NavigationIntent::StickyMelee {
                 target_guid,
                 combat_mode: self.data.combat_mode,
@@ -1223,7 +1191,7 @@ impl GameState {
         }
     }
 
-    fn sync_navigation_intent(
+    fn reconcile_navigation(
         &mut self,
         intent: NavigationIntent,
         target_guid: Option<Guid>,
@@ -1233,7 +1201,7 @@ impl GameState {
         let update = self
             .runtime
             .navigation
-            .sync_intent(intent, self.navigation_sync_input(now, target_guid));
+            .reconcile_navigation(intent, self.navigation_sync_input(now, target_guid));
         result.commands.extend(update.commands);
     }
 
@@ -1243,24 +1211,12 @@ impl GameState {
         arrival_distance: f32,
         result: &mut UpdateResult,
     ) {
-        if self
-            .runtime
-            .navigation
-            .active_intent_target_guid(NavigationIntentKind::Approach)
-            == Some(target)
-        {
-            return;
-        }
-
-        self.sync_navigation_intent(
-            NavigationIntent::Approach {
-                target,
-                arrival_distance,
-            },
-            Some(target),
-            Instant::now(),
-            result,
+        let update = self.runtime.navigation.activate_approach(
+            target,
+            arrival_distance,
+            self.navigation_sync_input(Instant::now(), Some(target)),
         );
+        result.commands.extend(update.commands);
     }
 
     fn start_follow_target(
@@ -1269,37 +1225,25 @@ impl GameState {
         arrival_distance: f32,
         result: &mut UpdateResult,
     ) {
-        if self
-            .runtime
-            .navigation
-            .active_intent_target_guid(NavigationIntentKind::Follow)
-            == Some(target)
-        {
-            return;
-        }
-
-        self.sync_navigation_intent(
-            NavigationIntent::Follow {
-                target,
-                arrival_distance,
-            },
-            Some(target),
-            Instant::now(),
-            result,
+        let update = self.runtime.navigation.activate_follow(
+            target,
+            arrival_distance,
+            self.navigation_sync_input(Instant::now(), Some(target)),
         );
+        result.commands.extend(update.commands);
     }
 
     fn sync_approach_target(&mut self, now: Instant, result: &mut UpdateResult) {
-        let Some(target_guid) = self
-            .runtime
-            .navigation
-            .active_intent_target_guid(NavigationIntentKind::Approach)
+        let Some(NavigationMode::Approach {
+            target: target_guid,
+            ..
+        }) = self.runtime.navigation.navigation_mode()
         else {
             self.clear_finished_approach_interaction(result);
             return;
         };
 
-        self.sync_navigation_intent(
+        self.reconcile_navigation(
             NavigationIntent::Approach {
                 target: target_guid,
                 arrival_distance: GENERIC_APPROACH_DISTANCE,
@@ -1309,26 +1253,25 @@ impl GameState {
             result,
         );
 
-        if !self
-            .runtime
-            .navigation
-            .is_intent_active(NavigationIntentKind::Approach)
-        {
+        if !matches!(
+            self.runtime.navigation.navigation_mode(),
+            Some(NavigationMode::Approach { .. })
+        ) {
             self.clear_finished_approach_interaction(result);
         }
     }
 
     fn sync_follow_target(&mut self, now: Instant, result: &mut UpdateResult) {
-        let Some(target_guid) = self
-            .runtime
-            .navigation
-            .active_intent_target_guid(NavigationIntentKind::Follow)
+        let Some(NavigationMode::Follow {
+            target: target_guid,
+            ..
+        }) = self.runtime.navigation.navigation_mode()
         else {
             self.clear_finished_follow_interaction(result);
             return;
         };
 
-        self.sync_navigation_intent(
+        self.reconcile_navigation(
             NavigationIntent::Follow {
                 target: target_guid,
                 arrival_distance: GENERIC_APPROACH_DISTANCE,
@@ -1338,11 +1281,10 @@ impl GameState {
             result,
         );
 
-        if !self
-            .runtime
-            .navigation
-            .is_intent_active(NavigationIntentKind::Follow)
-        {
+        if !matches!(
+            self.runtime.navigation.navigation_mode(),
+            Some(NavigationMode::Follow { .. })
+        ) {
             self.clear_finished_follow_interaction(result);
         }
     }
@@ -1354,7 +1296,12 @@ impl GameState {
             .handle_forced_reposition(self.current_movement_metadata());
         result.commands.extend(update.commands);
         self.clear_finished_approach_interaction(result);
-        self.clear_finished_follow_interaction(result);
+        if !matches!(
+            self.runtime.navigation.navigation_mode(),
+            Some(NavigationMode::Follow { .. })
+        ) {
+            self.clear_finished_follow_interaction(result);
+        }
     }
 
     fn handle_teleport_start(&mut self, result: &mut UpdateResult) {
@@ -1656,7 +1603,7 @@ impl GameState {
             self.view.active_interaction,
             Some(Interaction::Targeting { target_guid }) if target_guid == guid
         ) {
-            self.set_active_interaction(None, &mut result);
+            self.clear_active_interaction(&mut result);
         }
         if let Some(session) = self.view.salvaging.as_mut() {
             session
@@ -1665,7 +1612,7 @@ impl GameState {
             if session.ust_guid == guid {
                 self.view.salvaging = None;
                 if self.view.active_interaction == Some(Interaction::Salvaging) {
-                    self.set_active_interaction(None, &mut result);
+                    self.clear_active_interaction(&mut result);
                 }
             }
         }
@@ -1773,10 +1720,10 @@ mod tests {
     }
 
     fn has_active_approach(state: &GameState) -> bool {
-        state
-            .runtime
-            .navigation
-            .is_intent_active(NavigationIntentKind::Approach)
+        matches!(
+            state.runtime.navigation.navigation_mode(),
+            Some(NavigationMode::Approach { .. })
+        )
     }
 
     fn sticky_latched_target_guid(state: &GameState) -> Option<Guid> {
@@ -1793,7 +1740,7 @@ mod tests {
         arrival_distance: f32,
         input: ApproachSyncInput,
     ) {
-        let _ = state.runtime.navigation.sync_intent(
+        let _ = state.runtime.navigation.reconcile_navigation(
             NavigationIntent::Approach {
                 target,
                 arrival_distance,
@@ -1803,7 +1750,7 @@ mod tests {
     }
 
     fn seed_sticky_melee(state: &mut GameState, input: StickyMeleeSyncInput) {
-        let _ = state.runtime.navigation.sync_intent(
+        let _ = state.runtime.navigation.reconcile_navigation(
             NavigationIntent::StickyMelee {
                 target_guid: input.target_guid,
                 combat_mode: input.combat_mode,
@@ -3174,6 +3121,59 @@ mod tests {
     }
 
     #[test]
+    fn forced_reposition_keeps_follow_interaction_while_follow_is_paused() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(5.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(target_guid, "Drudge", target_position),
+        );
+
+        let _ = state
+            .handle_action(AppAction::Follow { guid: target_guid })
+            .unwrap();
+
+        let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
+            guid: player_guid,
+            pos: WorldPosition {
+                landblock_id: Guid(0x01000000),
+                coords: holtburger_common::Vector3::new(10.0, 0.0, 0.0),
+                ..WorldPosition::default()
+            },
+            sequence: 42,
+        });
+
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
+                    ..
+                })
+            )
+        }));
+        assert!(matches!(
+            state.runtime.navigation.navigation_mode(),
+            Some(NavigationMode::Follow { .. })
+        ));
+        assert_eq!(
+            state.view.active_interaction,
+            Some(Interaction::Following { target_guid })
+        );
+    }
+
+    #[test]
     fn follow_keeps_interaction_after_arrival_and_restarts_when_target_moves() {
         let player_guid = Guid(0x50000001);
         let target_guid = Guid(0x60000001);
@@ -3301,6 +3301,66 @@ mod tests {
             )
         }));
         assert_eq!(state.view.active_interaction, None);
+    }
+
+    #[test]
+    fn switching_from_follow_to_approach_stops_follow_before_new_drive() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        let target_position = WorldPosition {
+            landblock_id: Guid(0x01000000),
+            coords: holtburger_common::Vector3::new(5.0, 0.0, 0.0),
+            ..WorldPosition::default()
+        };
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(target_guid, "Drudge", target_position),
+        );
+
+        let _ = state
+            .handle_action(AppAction::Follow { guid: target_guid })
+            .unwrap();
+
+        let result = state
+            .handle_action(AppAction::Approach { guid: target_guid })
+            .unwrap();
+
+        let stop_index = result.commands.iter().position(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
+                    ..
+                })
+            )
+        });
+        let drive_index = result.commands.iter().position(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive:
+                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
+                    ..
+                })
+            )
+        });
+
+        assert!(matches!((stop_index, drive_index), (Some(stop), Some(drive)) if stop < drive));
+        assert!(has_active_approach(&state));
+        assert!(!matches!(
+            state.runtime.navigation.navigation_mode(),
+            Some(NavigationMode::Follow { .. })
+        ));
+        assert_eq!(
+            state.view.active_interaction,
+            Some(Interaction::Approaching { target_guid })
+        );
     }
 
     #[test]

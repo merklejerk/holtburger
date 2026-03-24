@@ -2,7 +2,7 @@ use holtburger_common::ConfirmationType;
 use holtburger_core::ActiveCharacterConfirmation;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use unicode_width::UnicodeWidthStr;
+use ratatui::style::Style;
 
 use crate::components::modal::{ModalCardSpec, ModalPalette, render_modal_card};
 use crate::pages::game::GameState;
@@ -90,7 +90,7 @@ impl GameState {
         let main_chunks = &main_chunks_vec;
 
         // Dashboard Pane
-        let dashboard_cursor = render_dashboard_pane(
+        render_dashboard_pane(
             f,
             &self.data,
             &self.view,
@@ -132,42 +132,17 @@ impl GameState {
         let input_block = pane_block(is_focused)
             .title(input_title)
             .title_style(pane_title_style(is_focused));
-        let input_width = self.chat_input.input.width() as u16;
-        let max_visible_width = input_chunks[0].width.saturating_sub(2);
-
-        let display_input = if input_width > max_visible_width {
-            let mut width = 0;
-            let mut start_index = self.chat_input.input.len();
-            for (i, c) in self.chat_input.input.char_indices().rev() {
-                let c_width = UnicodeWidthStr::width(c.to_string().as_str());
-                if width + c_width > max_visible_width as usize {
-                    break;
-                }
-                width += c_width;
-                start_index = i;
-            }
-            &self.chat_input.input[start_index..]
-        } else {
-            &self.chat_input.input
-        };
-
-        let input_para = ratatui::widgets::Paragraph::new(display_input).block(input_block);
-        f.render_widget(input_para, input_chunks[0]);
+        let input_widget =
+            self.chat_input
+                .input
+                .rendered_with_block(input_block, Style::default(), is_focused);
+        f.render_widget(&input_widget, input_chunks[0]);
 
         // Pulse Panel
         render_pulse_panel(f, ctx.client_state, ctx.net_stats, input_chunks[1]);
 
         if let Some(confirmation) = self.view.active_confirmation.as_ref() {
             render_confirmation_overlay(f, area, confirmation);
-        }
-
-        if !ctx.is_modal_active && self.view.active_confirmation.is_none() {
-            if let Some((x, y)) = dashboard_cursor {
-                f.set_cursor(x, y);
-            } else if focused_pane == FocusedPane::Input {
-                let display_width = UnicodeWidthStr::width(display_input) as u16;
-                f.set_cursor(input_chunks[0].x + 1 + display_width, input_chunks[0].y + 1);
-            }
         }
     }
 }

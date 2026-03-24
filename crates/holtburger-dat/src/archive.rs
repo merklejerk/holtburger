@@ -575,8 +575,8 @@ mod tests {
 
     #[test]
     fn test_hba_robustness_random() -> Result<()> {
-        use rand::Rng;
-        let mut rng = rand::thread_rng();
+        use rand::RngExt;
+        let mut rng = rand::rng();
         let dir = tempdir()?;
         let path = dir.path().join("robust.hba");
 
@@ -584,10 +584,10 @@ mod tests {
         let mut writer = HbaWriter::new();
 
         for _ in 0..50 {
-            let id = rng.r#gen::<u32>();
-            let type_id = rng.r#gen::<u32>();
-            let size = rng.gen_range(0..5000);
-            let data: Vec<u8> = (0..size).map(|_| rng.r#gen::<u8>()).collect();
+            let id = rng.random::<u32>();
+            let type_id = rng.random::<u32>();
+            let size = rng.random_range(0..5000);
+            let data: Vec<u8> = (0..size).map(|_| rng.random::<u8>()).collect();
 
             writer.add(id, type_id, data.clone())?;
             expected.insert(id, data);

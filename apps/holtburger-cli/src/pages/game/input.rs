@@ -157,7 +157,7 @@ impl GameState {
             }
             KeyCode::Enter => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    let command = std::mem::take(&mut self.chat_input.input);
+                    let command = self.chat_input.input.take_text();
                     if command.is_empty() {
                         self.view.focused_pane = self.view.previous_focused_pane;
                         return result.with_redraw(true);
@@ -176,14 +176,19 @@ impl GameState {
                     result.needs_redraw = true;
                 }
             }
-            KeyCode::Backspace => {
-                if self.view.focused_pane == FocusedPane::Input {
-                    self.chat_input.input.pop();
+            KeyCode::Backspace | KeyCode::Delete => {
+                if self.view.focused_pane == FocusedPane::Input
+                    && self.chat_input.input.apply_key(key)
+                {
                     result.needs_redraw = true;
                 }
             }
             KeyCode::Left | KeyCode::Right => {
-                if self.view.focused_pane != FocusedPane::Input {
+                if self.view.focused_pane == FocusedPane::Input {
+                    if self.chat_input.input.apply_key(key) {
+                        result.needs_redraw = true;
+                    }
+                } else {
                     let mut pos = self.data.player_pos.unwrap_or_default();
                     let delta = if key.code == KeyCode::Right {
                         0.1
@@ -218,7 +223,9 @@ impl GameState {
                             .map(|i| i.saturating_sub(1))
                             .unwrap_or(self.chat_input.input_history.len().saturating_sub(1));
                         self.chat_input.history_index = Some(idx);
-                        self.chat_input.input = self.chat_input.input_history[idx].clone();
+                        self.chat_input
+                            .input
+                            .set_text(&self.chat_input.input_history[idx]);
                         result.needs_redraw = true;
                     }
                 }
@@ -241,7 +248,9 @@ impl GameState {
                         if idx + 1 < self.chat_input.input_history.len() {
                             let next = idx + 1;
                             self.chat_input.history_index = Some(next);
-                            self.chat_input.input = self.chat_input.input_history[next].clone();
+                            self.chat_input
+                                .input
+                                .set_text(&self.chat_input.input_history[next]);
                         } else {
                             self.chat_input.history_index = None;
                             self.chat_input.input.clear();
@@ -294,8 +303,9 @@ impl GameState {
             },
             KeyCode::Char(c) => {
                 if self.view.focused_pane == FocusedPane::Input {
-                    self.chat_input.input.push(c);
-                    result.needs_redraw = true;
+                    if self.chat_input.input.apply_key(key) {
+                        result.needs_redraw = true;
+                    }
                 } else if c == '`' {
                     result.actions.push(crate::types::AppAction::SetCombatMode {
                         mode: self.toggled_combat_mode(),
@@ -328,6 +338,11 @@ impl GameState {
                 }
             }
             KeyCode::Home => match self.view.focused_pane {
+                FocusedPane::Input => {
+                    if self.chat_input.input.apply_key(key) {
+                        result.needs_redraw = true;
+                    }
+                }
                 FocusedPane::Chat => {
                     let h = main_chunks[1].height.saturating_sub(2) as usize;
                     self.chat.scroll_offset = self.chat.total_lines.saturating_sub(h);
@@ -340,6 +355,11 @@ impl GameState {
                 _ => {}
             },
             KeyCode::End => match self.view.focused_pane {
+                FocusedPane::Input => {
+                    if self.chat_input.input.apply_key(key) {
+                        result.needs_redraw = true;
+                    }
+                }
                 FocusedPane::Chat => {
                     self.chat.scroll_offset = 0;
                     result.needs_redraw = true;
@@ -392,7 +412,7 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input = "/combat".to_string();
+        state.chat_input.input.set_text("/combat");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -413,7 +433,7 @@ mod tests {
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
         state.data.combat_mode = CombatMode::Missile;
-        state.chat_input.input = "/combat".to_string();
+        state.chat_input.input.set_text("/combat");
         state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
 
         let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -534,7 +554,7 @@ mod tests {
     fn enter_accepts_active_confirmation_and_clears_overlay_state() {
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input = "/options list".to_string();
+        state.chat_input.input.set_text("/options list");
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 42,
@@ -553,7 +573,7 @@ mod tests {
         assert!(result.actions.is_empty());
         assert!(result.needs_redraw);
         assert!(state.view.active_confirmation.is_none());
-        assert_eq!(state.chat_input.input, "/options list");
+        assert_eq!(state.chat_input.input.text(), "/options list");
     }
 
     #[test]
@@ -587,7 +607,7 @@ mod tests {
     fn unrelated_keys_are_swallowed_while_confirmation_is_active() {
         let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
         state.view.focused_pane = FocusedPane::Input;
-        state.chat_input.input = "hello".to_string();
+        state.chat_input.input.set_text("hello");
         state.view.active_confirmation = Some(ActiveCharacterConfirmation {
             confirmation_type: ConfirmationType::CraftInteraction,
             context: 123,
@@ -600,7 +620,7 @@ mod tests {
         assert!(result.commands.is_empty());
         assert!(result.actions.is_empty());
         assert!(!result.needs_redraw);
-        assert_eq!(state.chat_input.input, "hello");
+        assert_eq!(state.chat_input.input.text(), "hello");
         assert!(state.view.active_confirmation.is_some());
     }
 }

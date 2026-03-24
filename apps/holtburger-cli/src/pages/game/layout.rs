@@ -102,10 +102,11 @@ mod tests {
     use super::{LayoutMode, layout_mode_for_size};
 
     #[test]
-    fn layout_mode_only_becomes_wide_above_sixteen_ten_ratio() {
-        assert_eq!(layout_mode_for_size(16, 10), LayoutMode::Narrow);
-        assert_eq!(layout_mode_for_size(17, 10), LayoutMode::Wide);
-        assert_eq!(layout_mode_for_size(8, 10), LayoutMode::Narrow);
-        assert_eq!(layout_mode_for_size(192, 108), LayoutMode::Wide);
+    fn layout_mode_only_becomes_wide_above_three_to_one_ratio() {
+        assert_eq!(layout_mode_for_size(3, 1), LayoutMode::Narrow);
+        assert_eq!(layout_mode_for_size(4, 1), LayoutMode::Wide);
+        assert_eq!(layout_mode_for_size(30, 10), LayoutMode::Narrow);
+        assert_eq!(layout_mode_for_size(31, 10), LayoutMode::Wide);
+        assert_eq!(layout_mode_for_size(192, 108), LayoutMode::Narrow);
     }
 }

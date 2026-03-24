@@ -1,6 +1,6 @@
 pub use crate::messages::character::types::*;
-pub use crate::messages::chat::types::*;
 pub use crate::messages::chat::turbine::*;
+pub use crate::messages::chat::types::*;
 pub use crate::messages::combat::types::*;
 pub use crate::messages::effects::types::*;
 pub use crate::messages::inventory::types::*;

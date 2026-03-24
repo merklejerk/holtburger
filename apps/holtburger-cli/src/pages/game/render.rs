@@ -29,7 +29,10 @@ fn confirmation_title(confirmation_type: ConfirmationType) -> &'static str {
 fn confirmation_body_text(confirmation: &ActiveCharacterConfirmation) -> String {
     match confirmation.confirmation_type {
         ConfirmationType::Fellowship if !confirmation.text.trim().is_empty() => {
-            format!("{} invited you to join their fellowship.", confirmation.text.trim())
+            format!(
+                "{} invited you to join their fellowship.",
+                confirmation.text.trim()
+            )
         }
         _ => confirmation.text.clone(),
     }

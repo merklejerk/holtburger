@@ -82,7 +82,8 @@ impl ProtocolPack for FellowshipMemberData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.guid.0).unwrap();
         buf.write_u32::<LittleEndian>(self.cached_cp).unwrap();
-        buf.write_u32::<LittleEndian>(self.cached_luminance).unwrap();
+        buf.write_u32::<LittleEndian>(self.cached_luminance)
+            .unwrap();
         buf.write_u32::<LittleEndian>(self.level).unwrap();
         buf.write_u32::<LittleEndian>(self.max_health).unwrap();
         buf.write_u32::<LittleEndian>(self.max_stamina).unwrap();
@@ -121,7 +122,8 @@ impl ProtocolUnpack for FellowshipDepartedMemberData {
 impl ProtocolPack for FellowshipDepartedMemberData {
     fn pack(&self, buf: &mut Vec<u8>) {
         buf.write_u32::<LittleEndian>(self.guid.0).unwrap();
-        buf.write_u32::<LittleEndian>(self.departed_timestamp).unwrap();
+        buf.write_u32::<LittleEndian>(self.departed_timestamp)
+            .unwrap();
     }
 }
 
@@ -259,10 +261,13 @@ impl ProtocolPack for FellowshipFullUpdateEventData {
 
         write_string16(buf, &self.fellowship_name);
         buf.write_u32::<LittleEndian>(self.leader_guid.0).unwrap();
-        buf.write_u32::<LittleEndian>(u32::from(self.share_xp)).unwrap();
-        buf.write_u32::<LittleEndian>(u32::from(self.even_share)).unwrap();
+        buf.write_u32::<LittleEndian>(u32::from(self.share_xp))
+            .unwrap();
+        buf.write_u32::<LittleEndian>(u32::from(self.even_share))
+            .unwrap();
         buf.write_u32::<LittleEndian>(u32::from(self.open)).unwrap();
-        buf.write_u32::<LittleEndian>(u32::from(self.is_locked)).unwrap();
+        buf.write_u32::<LittleEndian>(u32::from(self.is_locked))
+            .unwrap();
 
         write_hashtable_header(buf, self.departed_members.len(), FELLOWSHIP_LOCK_BUCKETS);
         let mut departed = self.departed_members.clone();
@@ -306,7 +311,8 @@ impl ProtocolUnpack for FellowshipUpdateFellowEventData {
 impl ProtocolPack for FellowshipUpdateFellowEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
         self.fellow.pack(buf);
-        buf.write_u32::<LittleEndian>(self.update_type as u32).unwrap();
+        buf.write_u32::<LittleEndian>(self.update_type as u32)
+            .unwrap();
     }
 }
 
@@ -359,7 +365,9 @@ impl ProtocolPack for FellowshipDismissEventData {
 fn compare_guid_hash(left: Guid, right: Guid, buckets: usize) -> std::cmp::Ordering {
     let left_bucket = (left.0 as usize) % buckets;
     let right_bucket = (right.0 as usize) % buckets;
-    left_bucket.cmp(&right_bucket).then_with(|| left.0.cmp(&right.0))
+    left_bucket
+        .cmp(&right_bucket)
+        .then_with(|| left.0.cmp(&right.0))
 }
 
 #[cfg(test)]

@@ -9,9 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
-use super::{
-    Client, ClientState, TurbineChatState, auth::AuthState, movement::MovementSystem,
-};
+use super::{Client, ClientState, TurbineChatState, auth::AuthState, movement::MovementSystem};
 
 type Provider = Arc<dyn ResourceProvider>;
 

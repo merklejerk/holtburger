@@ -1,8 +1,8 @@
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
-use holtburger_common::Guid;
 use holtburger_common::CharacterOption;
+use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
@@ -83,9 +83,9 @@ impl Client {
         let channels = self.turbine_chat.channels.as_ref()?;
 
         match kind {
-            crate::client::types::ChatChannelKind::Allegiance => {
-                channels.allegiance.map(|channel| (channel, TurbineChatType::Allegiance))
-            }
+            crate::client::types::ChatChannelKind::Allegiance => channels
+                .allegiance
+                .map(|channel| (channel, TurbineChatType::Allegiance)),
             crate::client::types::ChatChannelKind::General => channels
                 .channel_for_type(TurbineChatType::General)
                 .map(|channel| (channel, TurbineChatType::General)),
@@ -117,9 +117,7 @@ impl Client {
             ClientCommand::Talk(_)
             | ClientCommand::Tell { .. }
             | ClientCommand::ChannelMessage { .. }
-            | ClientCommand::Emote(_) => {
-                self.handle_chat_command(cmd).await
-            }
+            | ClientCommand::Emote(_) => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
             | ClientCommand::QueryHealth(_)
@@ -535,10 +533,8 @@ impl Client {
             }
             ClientCommand::RecallAllegianceHousing => {
                 log::info!(">>> Recalling to allegiance housing");
-                self.send_game_action(GameAction::TeleToMansion(Box::new(
-                    TeleToMansionActionData,
-                )))
-                .await
+                self.send_game_action(GameAction::TeleToMansion(Box::new(TeleToMansionActionData)))
+                    .await
             }
             ClientCommand::Suicide => {
                 log::info!(">>> Initiating suicide");
@@ -547,10 +543,8 @@ impl Client {
             }
             ClientCommand::EnterPkLite => {
                 log::info!(">>> Entering PK Lite");
-                self.send_game_action(GameAction::EnterPkLite(Box::new(
-                    EnterPkLiteActionData,
-                )))
-                .await
+                self.send_game_action(GameAction::EnterPkLite(Box::new(EnterPkLiteActionData)))
+                    .await
             }
             ClientCommand::RespondToConfirmation { accepted } => {
                 let Some(confirmation) = self.active_confirmation.clone() else {
@@ -782,10 +776,7 @@ impl Client {
                     return Ok(());
                 }
 
-                log::info!(
-                    ">>> Setting fellowship update subscription to {}",
-                    enabled
-                );
+                log::info!(">>> Setting fellowship update subscription to {}", enabled);
                 self.send_game_action(GameAction::FellowshipUpdateRequest(Box::new(
                     FellowshipUpdateRequestActionData {
                         panel_open: enabled,
@@ -1148,17 +1139,16 @@ mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
-        ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent,
-        WireEvent,
+        ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent, WireEvent,
     };
     use crate::client::{Client, ClientState};
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
+    use holtburger_world::WorldState;
+    use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use holtburger_world::state::{
         FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
         FellowshipMemberState, FellowshipState,
     };
-    use holtburger_world::WorldState;
-    use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -1429,11 +1419,14 @@ mod tests {
     #[tokio::test]
     async fn invite_to_party_resolves_player_name_to_guid() {
         let mut client = build_test_client();
-        client.world.entities.insert(holtburger_world::entity::Entity::new(
-            Guid(0x5000_0042),
-            "Bestie".to_string(),
-            holtburger_common::position::WorldPosition::default(),
-        ));
+        client
+            .world
+            .entities
+            .insert(holtburger_world::entity::Entity::new(
+                Guid(0x5000_0042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ));
 
         client
             .handle_command(ClientCommand::InviteToParty {
@@ -1516,21 +1509,25 @@ mod tests {
             }
         }
 
-        assert!(log_lines
-            .iter()
-            .any(|line| line == "Party: Raid Bus | Leader: Player | Members: 2"));
-        assert!(log_lines
-            .iter()
-            .any(|line| line == "Sharing: XP on | Even off | Open on | Locked on"));
+        assert!(
+            log_lines
+                .iter()
+                .any(|line| line == "Party: Raid Bus | Leader: Player | Members: 2")
+        );
+        assert!(
+            log_lines
+                .iter()
+                .any(|line| line == "Sharing: XP on | Even off | Open on | Locked on")
+        );
         assert!(log_lines.iter().any(|line| {
             line == "- Player [leader] [you] L12 H 170/180 S 140/150 M 110/120 Loot on"
         }));
-        assert!(log_lines
-            .iter()
-            .any(|line| line == "Departed members tracked: 1"));
-        assert!(log_lines
-            .iter()
-            .any(|line| line == "Locks: Leader Lock"));
+        assert!(
+            log_lines
+                .iter()
+                .any(|line| line == "Departed members tracked: 1")
+        );
+        assert!(log_lines.iter().any(|line| line == "Locks: Leader Lock"));
     }
 
     #[tokio::test]

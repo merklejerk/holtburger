@@ -244,9 +244,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::UpdateHealth => {
                     GameEvent::UpdateHealth(Box::new(UpdateHealthEventData::unpack(data, offset)?))
                 }
-                GameEventOpcode::FellowshipFullUpdate => GameEvent::FellowshipFullUpdate(
-                    Box::new(FellowshipFullUpdateEventData::unpack(data, offset)?),
-                ),
+                GameEventOpcode::FellowshipFullUpdate => GameEvent::FellowshipFullUpdate(Box::new(
+                    FellowshipFullUpdateEventData::unpack(data, offset)?,
+                )),
                 GameEventOpcode::FellowshipDisband => GameEvent::FellowshipDisband,
                 GameEventOpcode::FellowshipUpdateFellow => GameEvent::FellowshipUpdateFellow(
                     Box::new(FellowshipUpdateFellowEventData::unpack(data, offset)?),
@@ -279,17 +279,15 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::ApproachVendor => GameEvent::ApproachVendor(Box::new(
                     ApproachVendorEventData::unpack(data, offset)?,
                 )),
-                GameEventOpcode::FellowshipQuit => {
-                    GameEvent::FellowshipQuit(Box::new(FellowshipQuitEventData::unpack(
-                        data, offset,
-                    )?))
+                GameEventOpcode::FellowshipQuit => GameEvent::FellowshipQuit(Box::new(
+                    FellowshipQuitEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::FellowshipDismiss => GameEvent::FellowshipDismiss(Box::new(
+                    FellowshipDismissEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::FellowshipFellowUpdateDone => {
+                    GameEvent::FellowshipFellowUpdateDone
                 }
-                GameEventOpcode::FellowshipDismiss => {
-                    GameEvent::FellowshipDismiss(Box::new(FellowshipDismissEventData::unpack(
-                        data, offset,
-                    )?))
-                }
-                GameEventOpcode::FellowshipFellowUpdateDone => GameEvent::FellowshipFellowUpdateDone,
                 GameEventOpcode::FellowshipFellowStatsDone => GameEvent::FellowshipFellowStatsDone,
             },
             None => {

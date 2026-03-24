@@ -1,5 +1,5 @@
-use crate::events::FellowshipActivity;
 use crate::WorldEvent;
+use crate::events::FellowshipActivity;
 use crate::state::{FellowshipMemberState, FellowshipState, WorldState};
 use holtburger_protocol::messages::{GameEvent, GameEventMessage};
 
@@ -15,11 +15,16 @@ pub(crate) fn handle_event(
 
             if previous_fellowship.is_none()
                 && let Some(fellowship) = state.fellowship.as_ref()
-                && fellowship.members.iter().any(|member| member.guid == state.player.guid)
+                && fellowship
+                    .members
+                    .iter()
+                    .any(|member| member.guid == state.player.guid)
             {
-                events.push(WorldEvent::FellowshipActivity(FellowshipActivity::YouJoined {
-                    fellowship_name: fellowship.name.clone(),
-                }));
+                events.push(WorldEvent::FellowshipActivity(
+                    FellowshipActivity::YouJoined {
+                        fellowship_name: fellowship.name.clone(),
+                    },
+                ));
             }
 
             events.push(WorldEvent::FellowshipStateUpdated(state.fellowship.clone()));
@@ -27,16 +32,18 @@ pub(crate) fn handle_event(
         }
         GameEvent::FellowshipUpdateFellow(data) => {
             let member = FellowshipMemberState::from(&data.fellow);
-            let member_is_new = state
-                .fellowship
-                .as_ref()
-                .is_none_or(|fellowship| {
-                    !fellowship.members.iter().any(|existing| existing.guid == member.guid)
-                });
+            let member_is_new = state.fellowship.as_ref().is_none_or(|fellowship| {
+                !fellowship
+                    .members
+                    .iter()
+                    .any(|existing| existing.guid == member.guid)
+            });
 
             match state.fellowship.as_mut() {
                 Some(fellowship) => fellowship.upsert_member(member.clone()),
-                None => state.fellowship = Some(FellowshipState::unknown_with_member(member.clone())),
+                None => {
+                    state.fellowship = Some(FellowshipState::unknown_with_member(member.clone()))
+                }
             }
 
             if member_is_new {
@@ -46,9 +53,9 @@ pub(crate) fn handle_event(
                         .as_ref()
                         .map(|fellowship| fellowship.name.clone())
                         .unwrap_or_default();
-                    events.push(WorldEvent::FellowshipActivity(FellowshipActivity::YouJoined {
-                        fellowship_name,
-                    }));
+                    events.push(WorldEvent::FellowshipActivity(
+                        FellowshipActivity::YouJoined { fellowship_name },
+                    ));
                 } else {
                     events.push(WorldEvent::FellowshipActivity(
                         FellowshipActivity::MemberJoined {

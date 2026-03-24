@@ -17,11 +17,11 @@ use holtburger_dat::{
     ScopedResourceResolver,
 };
 use holtburger_protocol::messages::game_event::{GameEvent, GameEventMessage};
-use holtburger_protocol::messages::{
-    FellowUpdateType, FellowshipFullUpdateEventData, FellowshipMemberData,
-    FellowshipQuitEventData, FellowshipUpdateFellowEventData,
-};
 use holtburger_protocol::messages::object::events::UpdateHealthEventData;
+use holtburger_protocol::messages::{
+    FellowUpdateType, FellowshipFullUpdateEventData, FellowshipMemberData, FellowshipQuitEventData,
+    FellowshipUpdateFellowEventData,
+};
 use tempfile::tempdir;
 
 fn repo_portal_hba_path() -> PathBuf {
@@ -678,9 +678,11 @@ fn test_fellowship_quit_for_local_player_clears_state() {
         event,
         WorldEvent::FellowshipActivity(crate::FellowshipActivity::YouLeft)
     )));
-    assert!(events
-        .iter()
-        .any(|event| matches!(event, WorldEvent::FellowshipStateUpdated(None))));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, WorldEvent::FellowshipStateUpdated(None)))
+    );
 }
 
 #[test]

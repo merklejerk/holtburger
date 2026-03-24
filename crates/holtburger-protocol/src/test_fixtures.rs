@@ -106,8 +106,7 @@ pub const FELLOWSHIP_UPDATE_FELLOW_FULL: &[u8] =
     include_bytes!("../tests/fixtures/fellowship_update_fellow_full.bin");
 pub const FELLOWSHIP_UPDATE_FELLOW_VITALS: &[u8] =
     include_bytes!("../tests/fixtures/fellowship_update_fellow_vitals.bin");
-pub const FELLOWSHIP_DISBAND: &[u8] =
-    include_bytes!("../tests/fixtures/fellowship_disband.bin");
+pub const FELLOWSHIP_DISBAND: &[u8] = include_bytes!("../tests/fixtures/fellowship_disband.bin");
 pub const FELLOWSHIP_QUIT_EVENT: &[u8] =
     include_bytes!("../tests/fixtures/fellowship_quit_event.bin");
 pub const FELLOWSHIP_DISMISS_EVENT: &[u8] =

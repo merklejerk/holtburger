@@ -255,10 +255,12 @@ impl ProtocolUnpack for TurbineChatMessageData {
         let _blob_size = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         *offset += 4;
 
-        let blob_type = TurbineChatBlobType::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
+        let blob_type =
+            TurbineChatBlobType::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
         *offset += 4;
-        let dispatch_type =
-            TurbineChatDispatchType::from_repr(LittleEndian::read_u32(&data[*offset..*offset + 4]))?;
+        let dispatch_type = TurbineChatDispatchType::from_repr(LittleEndian::read_u32(
+            &data[*offset..*offset + 4],
+        ))?;
         *offset += 4;
         let target_type = LittleEndian::read_u32(&data[*offset..*offset + 4]);
         let target_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
@@ -282,8 +284,9 @@ impl ProtocolUnpack for TurbineChatMessageData {
                 let extra_data_size = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let sender_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 let hresult = LittleEndian::read_i32(&data[*offset + 8..*offset + 12]);
-                let chat_type =
-                    TurbineChatTypeId::from_raw(LittleEndian::read_u32(&data[*offset + 12..*offset + 16]));
+                let chat_type = TurbineChatTypeId::from_raw(LittleEndian::read_u32(
+                    &data[*offset + 12..*offset + 16],
+                ));
                 *offset += 16;
 
                 TurbineChatPayload::EventSendToRoom {
@@ -314,8 +317,9 @@ impl ProtocolUnpack for TurbineChatMessageData {
                 let extra_data_size = LittleEndian::read_u32(&data[*offset..*offset + 4]);
                 let sender_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
                 let hresult = LittleEndian::read_i32(&data[*offset + 8..*offset + 12]);
-                let chat_type =
-                    TurbineChatTypeId::from_raw(LittleEndian::read_u32(&data[*offset + 12..*offset + 16]));
+                let chat_type = TurbineChatTypeId::from_raw(LittleEndian::read_u32(
+                    &data[*offset + 12..*offset + 16],
+                ));
                 *offset += 16;
 
                 TurbineChatPayload::RequestSendToRoomById {
@@ -456,7 +460,10 @@ fn unpack_channel(data: &[u8], offset: &mut usize) -> Option<TurbineChatChannelI
     Some(TurbineChatChannelId::from_raw(raw))
 }
 
-fn unpack_optional_channel(data: &[u8], offset: &mut usize) -> Option<Option<TurbineChatChannelId>> {
+fn unpack_optional_channel(
+    data: &[u8],
+    offset: &mut usize,
+) -> Option<Option<TurbineChatChannelId>> {
     let channel = unpack_channel(data, offset)?;
     ok_channel_option(channel)
 }
@@ -474,7 +481,12 @@ fn pack_channel(buf: &mut Vec<u8>, channel: TurbineChatChannelId) {
 }
 
 fn pack_optional_channel(buf: &mut Vec<u8>, channel: Option<TurbineChatChannelId>) {
-    buf.extend_from_slice(&channel.map(TurbineChatChannelId::raw).unwrap_or(0).to_le_bytes());
+    buf.extend_from_slice(
+        &channel
+            .map(TurbineChatChannelId::raw)
+            .unwrap_or(0)
+            .to_le_bytes(),
+    );
 }
 
 fn read_turbine_string(data: &[u8], offset: &mut usize) -> Option<String> {

@@ -70,8 +70,9 @@ impl ProtocolUnpack for ChatChannelActionData {
         if *offset + 4 > data.len() {
             return None;
         }
-        let channel =
-            ChatChannelId::from_raw(u32::from_le_bytes(data[*offset..*offset + 4].try_into().ok()?));
+        let channel = ChatChannelId::from_raw(u32::from_le_bytes(
+            data[*offset..*offset + 4].try_into().ok()?,
+        ));
         *offset += 4;
         let message = read_string16(data, offset)?;
         Some(Self { channel, message })
@@ -127,10 +128,9 @@ mod tests {
         };
 
         // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
-        let fixture = hex::decode(
-            "04030201DF0100001600776176657320656E74687573696173746963616C6C79",
-        )
-        .unwrap();
+        let fixture =
+            hex::decode("04030201DF0100001600776176657320656E74687573696173746963616C6C79")
+                .unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 
@@ -145,10 +145,8 @@ mod tests {
         };
 
         // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
-        let fixture = hex::decode(
-            "D4C3B2A147010000000800000B00706172747920636865636B000000",
-        )
-        .unwrap();
+        let fixture =
+            hex::decode("D4C3B2A147010000000800000B00706172747920636865636B000000").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 
@@ -163,10 +161,8 @@ mod tests {
         };
 
         // Generated from ACE: SyntheticProtocolTests.GenerateChatAndRecallActionFixtures
-        let fixture = hex::decode(
-            "4030201047010000000000020B006775696C6420636865636B000000",
-        )
-        .unwrap();
+        let fixture =
+            hex::decode("4030201047010000000000020B006775696C6420636865636B000000").unwrap();
         assert_pack_unpack_parity(&fixture, &action);
     }
 }

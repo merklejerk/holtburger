@@ -80,12 +80,12 @@
 - [x] items with REQUIRES_PACK_SLOT flag/prop shxuld not count towards main pack item count.
 - [x] `/set [CHARACTER_OPTION] ...` command.
 - [x] Micro HBA mode + bundle: only spell, skill, and xp tables.
+- [x] Auto-follow.
 - [ ] All verbs should have equivalent slash chat commands.
 - [ ] Missing many unit tests for protocol types (lost in the refactor?).
 - [ ] PlayerState and entities mirroring in `WorldState` is annoying.
 - [ ] Implement actual collisions.
 - [ ] Use sibling files for tests.
-- [ ] Auto-follow.
 - [ ] Add a movable cursor to the chat input.
 - [ ] Exit combat when trying to craft? Combine action that isn't unlocking with a key?
 - [ ] Server messages being colored as errors, even though they aren't all errors.

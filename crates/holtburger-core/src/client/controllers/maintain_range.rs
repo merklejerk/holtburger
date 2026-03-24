@@ -64,6 +64,10 @@ impl MaintainRangeController {
         self.pursuing
     }
 
+    pub fn arrival_distance(&self) -> f32 {
+        self.config.arrival_distance
+    }
+
     fn reset_for_target_change(&mut self, target_guid: Guid) {
         if self.latched_target != Some(target_guid) {
             self.latched_target = None;

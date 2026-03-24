@@ -215,9 +215,10 @@
     - [x] `/party` - get info on current party
     - [x] `/create-party <NAME>` or `/createparty <NAME>` or `/party-create <NAME>` or `/partycreate <NAME>` - create a party, name is optional
     - [x] `/invite <PLAYER>`, `/uninvite <PLAYER>` - party invites
-    - [ ] `/? COMMAND` - targeted command help doc
-    - [ ] `/swear`, `/leave`, `/unswear <VASSAL>`.
+    - [x] `/? COMMAND` - targeted command help doc
+    - [~] `/swear`, `/leave`, `/unswear <VASSAL>`.
     - [ ] `/permit <player>`, `/unpermit <player>`, `/permits` - corpse looting options
+- [ ] Fellowship tab (vitals HUDs).
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.

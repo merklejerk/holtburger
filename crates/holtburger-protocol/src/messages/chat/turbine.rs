@@ -2,6 +2,9 @@ use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
 use strum_macros::FromRepr;
 
+const SEND_TO_ROOM_BY_ID_RESPONSE_ID: u32 = 2;
+const SEND_TO_ROOM_BY_ID_METHOD_ID: u32 = 2;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr, Hash)]
 #[repr(u32)]
 pub enum TurbineChatBlobType {
@@ -304,12 +307,19 @@ impl ProtocolUnpack for TurbineChatMessageData {
                     return None;
                 }
                 let context_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
-                let _response_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
-                let _method_id = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
+                let response_id = LittleEndian::read_u32(&data[*offset + 4..*offset + 8]);
+                let method_id = LittleEndian::read_u32(&data[*offset + 8..*offset + 12]);
                 let room_id = TurbineChatChannelId::from_raw(LittleEndian::read_u32(
                     &data[*offset + 12..*offset + 16],
                 ));
                 *offset += 16;
+
+                if response_id != SEND_TO_ROOM_BY_ID_RESPONSE_ID
+                    || method_id != SEND_TO_ROOM_BY_ID_METHOD_ID
+                {
+                    return None;
+                }
+
                 let message = read_turbine_string(data, offset)?;
                 if *offset + 16 > data.len() {
                     return None;
@@ -409,8 +419,8 @@ impl ProtocolPack for TurbineChatMessageData {
                 chat_type,
             } => {
                 payload.extend_from_slice(&context_id.to_le_bytes());
-                payload.extend_from_slice(&2u32.to_le_bytes());
-                payload.extend_from_slice(&2u32.to_le_bytes());
+                payload.extend_from_slice(&SEND_TO_ROOM_BY_ID_RESPONSE_ID.to_le_bytes());
+                payload.extend_from_slice(&SEND_TO_ROOM_BY_ID_METHOD_ID.to_le_bytes());
                 pack_channel(&mut payload, *room_id);
                 write_turbine_string(&mut payload, message);
                 payload.extend_from_slice(&extra_data_size.to_le_bytes());
@@ -626,6 +636,18 @@ mod tests {
 
         // Generated from ACE: SyntheticProtocolTests.GenerateTurbineChatFixtures
         assert_pack_unpack_parity(&fixture, &expected);
+    }
+
+    #[test]
+    fn turbine_chat_request_general_rejects_non_ace_request_ids() {
+        let mut fixture = hex::decode(
+            "DEF700005D000000030000000200000001000000000000000000000000000000000000003D000000070000000200000002000000020000000A7400720061006400650020007300700061006D000C000000010000500000000003000000",
+        )
+        .unwrap();
+        fixture[44..48].copy_from_slice(&3u32.to_le_bytes());
+
+        let mut offset = 0;
+        assert!(GameMessage::unpack(&fixture, &mut offset).is_none());
     }
 
     #[test]

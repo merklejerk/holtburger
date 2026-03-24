@@ -165,6 +165,14 @@ impl GameState {
                     if command.starts_with('/') {
                         return self.handle_slash_command(&command);
                     }
+                    if let Some(emote) = command.strip_prefix(':') {
+                        self.chat_input.input_history.push(command.clone());
+                        self.chat_input.history_index = None;
+                        self.view.focused_pane = self.view.previous_focused_pane;
+                        result.commands.push(ClientCommand::Emote(emote.to_string()));
+                        result.needs_redraw = true;
+                        return result;
+                    }
                     self.chat_input.input_history.push(command.clone());
                     self.chat_input.history_index = None;
                     self.view.focused_pane = self.view.previous_focused_pane;
@@ -574,6 +582,36 @@ mod tests {
         assert!(result.needs_redraw);
         assert!(state.view.active_confirmation.is_none());
         assert_eq!(state.chat_input.input.text(), "/options list");
+    }
+
+    #[test]
+    fn enter_submits_colon_prefixed_input_as_emote_without_required_space() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text(":waves");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Emote(text)) if text == "waves"
+        ));
+    }
+
+    #[test]
+    fn enter_preserves_everything_after_colon_as_emote_content() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text(": hello there");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Emote(text)) if text == " hello there"
+        ));
     }
 
     #[test]

@@ -147,6 +147,7 @@ impl AppState {
                 | ClientViewEvent::LogMessage(_)
                 | ClientViewEvent::ServerMessage { .. }
                 | ClientViewEvent::Chat { .. }
+                | ClientViewEvent::Tell { .. }
                 | ClientViewEvent::Emote { .. }
                 | ClientViewEvent::PingResponse
                 | ClientViewEvent::BootAccount(_)

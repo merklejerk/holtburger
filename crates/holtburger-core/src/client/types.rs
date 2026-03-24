@@ -93,6 +93,10 @@ pub enum WireEvent {
         sender: String,
         message: String,
     },
+    Tell {
+        sender: String,
+        message: String,
+    },
     Emote {
         sender: String,
         text: String,
@@ -289,6 +293,10 @@ pub enum ClientViewEvent {
         sender: String,
         message: String,
     },
+    Tell {
+        sender: String,
+        message: String,
+    },
     WeenieError {
         error: WeenieError,
         parameter: Option<String>,
@@ -327,6 +335,11 @@ pub enum ClientCommand {
         target: String,
         message: String,
     },
+    Emote(String),
+    RecallLifestone,
+    RecallAllegianceHousing,
+    Suicide,
+    EnterPkLite,
     Ping,
     RequestInitialViewState,
     Identify(Guid),

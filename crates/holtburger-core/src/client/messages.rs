@@ -159,7 +159,7 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::Tell(data) => {
-                    self.emit_wire_event(WireEvent::Chat {
+                    self.emit_wire_event(WireEvent::Tell {
                         sender: data.sender_name.clone(),
                         message: data.message.clone(),
                     });

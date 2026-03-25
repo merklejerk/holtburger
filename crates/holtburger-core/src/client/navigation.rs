@@ -19,7 +19,7 @@ use crate::client::controllers::maintain_range::MaintainRangeSpatialInput;
 use crate::client::movement_types::{MovementPacketMetadata, MovementPrimitive, MovementRequest};
 use crate::client::projection::EntitySpatialSample;
 use crate::client::types::ClientCommand;
-use holtburger_common::{Guid, Vector3};
+use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::combat::CombatMode;
 use std::time::{Duration, Instant};
@@ -188,13 +188,12 @@ impl NavigationAutomation {
         result
     }
 
-    pub fn activate_follow<T: Into<MaintainedTargetSyncInput>>(
+    pub fn activate_follow(
         &mut self,
         target: Guid,
         arrival_distance: f32,
-        input: T,
+        input: MaintainedTargetSyncInput,
     ) -> NavigationUpdate {
-        let input = input.into();
         if matches!(
             self.navigation_mode(),
             Some(NavigationMode::Follow {
@@ -218,12 +217,11 @@ impl NavigationAutomation {
         result
     }
 
-    pub fn reconcile_navigation<T: Into<NavigationSyncInput>>(
+    pub fn reconcile_navigation(
         &mut self,
         intent: NavigationIntent,
-        input: T,
+        input: NavigationSyncInput,
     ) -> NavigationUpdate {
-        let input = input.into();
         match intent {
             NavigationIntent::Approach {
                 target,
@@ -1004,41 +1002,25 @@ impl NavigationAutomation {
     }
 }
 
-impl From<ApproachSyncInput> for MaintainedTargetSyncInput {
-    fn from(value: ApproachSyncInput) -> Self {
-        Self {
-            now: value.now,
-            player_position: value.player_position,
-            target_guid: None,
-            target: value.target_position.map(|target_position| EntitySpatialSample {
-                guid: Guid::NULL,
-                authoritative_pose: target_position,
-                projected_pose: target_position,
-                velocity: Vector3::zero(),
-                omega: Vector3::zero(),
-                motion_state: None,
-                projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
-            }),
-            target_use_radius: value.target_use_radius,
-            move_speed: value.move_speed,
-            metadata: value.metadata,
-        }
-    }
-}
-
-impl From<ApproachSyncInput> for NavigationSyncInput {
-    fn from(value: ApproachSyncInput) -> Self {
-        Self {
-            approach: value,
-            maintained_target: value.into(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use holtburger_common::Vector3;
+
+    fn approach_input(
+        now: Instant,
+        player_position: Option<WorldPosition>,
+        target_position: Option<WorldPosition>,
+    ) -> ApproachSyncInput {
+        ApproachSyncInput {
+            now,
+            player_position,
+            target_position,
+            target_use_radius: None,
+            move_speed: 4.5,
+            metadata: MovementPacketMetadata::default(),
+        }
+    }
 
     fn sync_input(
         now: Instant,
@@ -1046,14 +1028,7 @@ mod tests {
         target_position: Option<WorldPosition>,
     ) -> NavigationSyncInput {
         NavigationSyncInput {
-            approach: ApproachSyncInput {
-                now,
-                player_position,
-                target_position,
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            approach: approach_input(now, player_position, target_position),
             maintained_target: MaintainedTargetSyncInput {
                 now,
                 player_position,
@@ -1248,10 +1223,19 @@ mod tests {
         let _ = automation.activate_follow(
             Guid(0x1234),
             1.0,
-            ApproachSyncInput {
+            MaintainedTargetSyncInput {
                 now,
                 player_position: Some(position(0.0)),
-                target_position: Some(position(5.0)),
+                target_guid: Some(Guid(0x1234)),
+                target: Some(EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(5.0),
+                    projected_pose: position(5.0),
+                    velocity: Vector3::zero(),
+                    omega: Vector3::zero(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                }),
                 target_use_radius: None,
                 move_speed: 4.5,
                 metadata: MovementPacketMetadata::default(),
@@ -1305,14 +1289,7 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 1.0,
             },
-            ApproachSyncInput {
-                now,
-                player_position: Some(position_xy(0.0, 0.0)),
-                target_position: Some(position_xy(5.0, 0.0)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(now, Some(position_xy(0.0, 0.0)), Some(position_xy(5.0, 0.0))),
         );
 
         let initial_heading = drive_heading(&first).expect("initial follow should drive");
@@ -1322,14 +1299,11 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 1.0,
             },
-            ApproachSyncInput {
-                now: now + Duration::from_millis(300),
-                player_position: Some(position_xy(4.0, 0.0)),
-                target_position: Some(position_xy(5.0, 5.0)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(
+                now + Duration::from_millis(300),
+                Some(position_xy(4.0, 0.0)),
+                Some(position_xy(5.0, 5.0)),
+            ),
         );
 
         let refreshed_heading =
@@ -1348,14 +1322,7 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 1.0,
             },
-            ApproachSyncInput {
-                now,
-                player_position: Some(position(0.0)),
-                target_position: Some(position(5.0)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(now, Some(position(0.0)), Some(position(5.0))),
         );
 
         let next = automation.reconcile_navigation(
@@ -1363,14 +1330,11 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 1.0,
             },
-            ApproachSyncInput {
-                now: now + Duration::from_millis(600),
-                player_position: Some(position(0.0)),
-                target_position: Some(position(5.0)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(
+                now + Duration::from_millis(600),
+                Some(position(0.0)),
+                Some(position(5.0)),
+            ),
         );
 
         assert!(next.commands.iter().any(|command| {
@@ -1401,14 +1365,7 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 1.0,
             },
-            ApproachSyncInput {
-                now,
-                player_position: Some(position(0.0)),
-                target_position: Some(position(5.0)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(now, Some(position(0.0)), Some(position(5.0))),
         );
 
         let result = automation
@@ -1438,14 +1395,7 @@ mod tests {
                 combat_mode: CombatMode::Melee,
                 attack_sequence_active: true,
             },
-            ApproachSyncInput {
-                now,
-                player_position: Some(position(0.0)),
-                target_position: Some(position(1.5)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(now, Some(position(0.0)), Some(position(1.5))),
         );
 
         assert!(!initial.commands.is_empty());
@@ -1472,14 +1422,11 @@ mod tests {
                 combat_mode: CombatMode::Melee,
                 attack_sequence_active: true,
             },
-            ApproachSyncInput {
-                now: now + Duration::from_millis(1),
-                player_position: Some(position(10.0)),
-                target_position: Some(position(11.5)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(
+                now + Duration::from_millis(1),
+                Some(position(10.0)),
+                Some(position(11.5)),
+            ),
         );
 
         assert!(resumed.commands.iter().any(|command| {
@@ -1507,14 +1454,7 @@ mod tests {
                 combat_mode: CombatMode::Melee,
                 attack_sequence_active: true,
             },
-            ApproachSyncInput {
-                now,
-                player_position: Some(position(0.0)),
-                target_position: Some(position(1.5)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(now, Some(position(0.0)), Some(position(1.5))),
         );
 
         let cleared = automation.handle_teleport_start(MovementPacketMetadata::default());
@@ -1544,14 +1484,7 @@ mod tests {
                 combat_mode: CombatMode::Melee,
                 attack_sequence_active: true,
             },
-            ApproachSyncInput {
-                now,
-                player_position: Some(position(0.0)),
-                target_position: Some(position(1.5)),
-                target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
-            },
+            sync_input(now, Some(position(0.0)), Some(position(1.5))),
         );
 
         assert!(result.commands.iter().any(|command| {

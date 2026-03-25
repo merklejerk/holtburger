@@ -1810,12 +1810,15 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use holtburger_common::ConfirmationType;
+    use holtburger_common::Vector3;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::ActiveCharacterConfirmation;
+    use holtburger_core::{
+        ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode,
+    };
     use holtburger_core::client::navigation::StickyMeleeSyncInput;
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
@@ -1850,7 +1853,26 @@ mod tests {
                 target,
                 arrival_distance,
             },
-            input,
+            NavigationSyncInput {
+                approach: input,
+                maintained_target: MaintainedTargetSyncInput {
+                    now: input.now,
+                    player_position: input.player_position,
+                    target_guid: Some(target),
+                    target: input.target_position.map(|target_position| EntitySpatialSample {
+                        guid: target,
+                        authoritative_pose: target_position,
+                        projected_pose: target_position,
+                        velocity: Vector3::zero(),
+                        omega: Vector3::zero(),
+                        motion_state: None,
+                        projection_mode: ProjectionMode::AuthoritativeOnly,
+                    }),
+                    target_use_radius: input.target_use_radius,
+                    move_speed: input.move_speed,
+                    metadata: input.metadata,
+                },
+            },
         );
     }
 

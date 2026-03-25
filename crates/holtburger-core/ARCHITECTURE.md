@@ -65,6 +65,8 @@ The same split applies to entity motion coming back from the server:
 
 Render-oriented consumers should keep that boundary explicit: drive an `EntityProjectionSystem` from `ClientViewEvent`s, tick it from frame time, and batch-read projected transforms from `iter_projected_entities()` while leaving gameplay legality and authority checks on the world mirror.
 
+Projection lifecycle is intentionally authoritative-first. Delta-only motion and kinematics events may refresh cached projection inputs for already tracked entities, but they do not bootstrap tracking and they do not resume suspended projection on their own. Bootstrap and resume come from authoritative snapshots, authoritative pose updates, or explicit reset events.
+
 That boundary keeps 3D-client rendering needs compatible with shared combat logic: frontends can observe motion directly, but they should not become the authority for interpreting death motion or similar gameplay signals.
 
 The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). After extracting real movement and combat controllers, it has been refined down to the proven shared surface and currently standardizes only:

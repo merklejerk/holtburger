@@ -836,10 +836,12 @@ That keeps the current automation-distance gate authoritative while still lettin
 - Documented the same consumer boundary in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) so future clients have a crate-level reference, not just inline API docs.
 - Follow-up review fixes tightened projection lifecycle behavior in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs): delta-only kinematics and motion events no longer invent tracked entities, forced reposition now clears stale linear and angular velocity, and authoritative move handling now advances projection state to `now` before choosing a new interpolation baseline.
 - Added regression coverage in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) for forced-reposition reset, no-phantom projection entries from partial deltas, and interpolation baselines when authoritative moves arrive between projection ticks.
+- The later lifecycle-hardening follow-up kept the public API stable while refactoring projection internals around explicit tracked inputs, normalized projection ingest, cache-backed single-source derivation, and authoritative-only suspension/resume rules. Additional lifecycle tests now cover first authoritative bootstrap, authoritative snapshot resume from suspension, same-turn read coherence, and suspension persistence across delta-only motion updates.
 
 ### Verification
 - `cargo test -p holtburger-core --lib` passed after adding renderer-oriented docs and batch iterator coverage.
 - `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after the follow-up lifecycle fixes and regression additions.
+- `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` continued to pass after the dedicated lifecycle-hardening phases that split tracked inputs, normalized ingest, centralized reset/suspend helpers, and expanded policy-focused test coverage.
 
 ### Decisions Confirmed By Phase 5
 - The existing pull-based API is already sufficient for future renderers; Phase 5 did not need a harness or a frame-event firehose to prove consumer ergonomics.
@@ -847,6 +849,7 @@ That keeps the current automation-distance gate authoritative while still lettin
 - No additional convenience helpers or config knobs were justified by this validation pass.
 - Delta events should never bootstrap projection state on their own. Projection ownership starts from authoritative entity snapshots or authoritative position events, not from vector or motion deltas.
 - Projection lifecycle rules must be single-sourced. Advancing tracked state in both the render tick and authoritative move handling avoids stale interpolation baselines and keeps correction behavior predictable.
+- Suspension and resume are authoritative-only semantics: delta-only motion or kinematics updates may refresh cached inputs for a tracked entity, but they do not resume suspended projection on their own.
 
 ## Risks And Mitigations
 
@@ -914,6 +917,7 @@ Mitigation:
 - Phase 4: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after CLI adoption, maintain-range smoothing integration, and the later render-time-only debug refresh adjustment.
 - Phase 5: `cargo test -p holtburger-core --lib` passed after adding renderer-oriented projection docs and iterator coverage for batch scene updates.
 - Phase 5 follow-up review fixes: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after tightening projection lifecycle behavior around forced reposition, authoritative move baselines, and delta-only event handling.
+- Projection lifecycle hardening follow-up: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after splitting tracked authoritative inputs from cached public state, adding normalized projection ingest, centralizing reset/suspend helpers, and expanding lifecycle-policy regression coverage.
 
 ### Deferred Follow-Ups
 - After the first projection pass lands, measure whether retaining `MoveToPosition` or `MoveToObject` directives improves remote-entity fidelity enough to justify the added world-state complexity.

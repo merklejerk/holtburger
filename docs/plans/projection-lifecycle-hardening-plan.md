@@ -278,6 +278,20 @@ Because `iter_projected_entities()` currently returns references to stored `Proj
 - Projection behavior is documented in terms of explicit invariants.
 - The refactor leaves the public projection consumer story simpler, not more magical.
 
+### Phase 4 Implementation Notes
+- Added lifecycle-policy regression coverage in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) for authoritative snapshot resume from suspension and same-turn projection coherence immediately after authoritative event ingest.
+- Updated [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) to document the hardened lifecycle invariants: delta-only motion and kinematics updates do not bootstrap or resume projection, while authoritative snapshots, authoritative pose updates, and explicit resets do.
+- Updated [docs/plans/entity-motion-projection-spec-plan.md](/home/cluracan/code/holtburger/docs/plans/entity-motion-projection-spec-plan.md) so the original projection implementation plan now records the later lifecycle-hardening follow-up instead of leaving that work as tribal knowledge.
+
+### Verification
+- `cargo test -p holtburger-core --lib` passed after adding the remaining lifecycle-policy tests.
+- `cargo test -p holtburger-cli --lib` passed after the documentation and test updates, confirming no downstream behavioral drift.
+
+### Decisions Confirmed By Phase 4
+- Same-turn projection reads are part of the effective consumer contract and deserve dedicated regression coverage, not just indirect reliance through CLI tests.
+- Authoritative snapshot resume behavior should be documented explicitly because suspension semantics are no longer just an internal implementation detail.
+- The hardened lifecycle model is stable enough to record in both the narrow hardening plan and the original projection plan.
+
 ## Risks And Mitigations
 
 ### Risk: Internal Refactor Accidentally Changes Public Consumer Semantics
@@ -320,7 +334,7 @@ Mitigation:
 - [x] Phase 1: encode lifecycle and input separation
 - [x] Phase 2: normalize event ingestion and bootstrap policy
 - [x] Phase 3: centralize derivation and reset semantics
-- [ ] Phase 4: add lifecycle tests and doc updates
+- [x] Phase 4: add lifecycle tests and doc updates
 
 ### Decisions Log
 - Preserve the existing public projection API unless the internal hardening work proves a consumer-facing change is necessary.
@@ -333,14 +347,16 @@ Mitigation:
 - Phase 1 confirmed that the tracked-input split can land without changing CLI consumers or widening projection accessors.
 - Phase 2 confirmed that normalized projection ingest can remain internal and lightweight while still making bootstrap policy explicit.
 - Phase 3 confirmed that suspension should remain authoritative-only: motion-state deltas may update cached inputs while suspended, but they must not resume projection by themselves.
+- Phase 4 confirmed that same-turn projection coherence and authoritative snapshot resume semantics should be explicitly documented and regression-tested rather than inferred indirectly.
 
 ### Verification Log
 - Phase 1: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after separating tracked authoritative inputs from cached public state and introducing explicit internal lifecycle state.
 - Phase 2: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after adding internal projection-input normalization and explicit bootstrap handling for first authoritative `EntityMoved` updates.
 - Phase 3: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after centralizing authoritative-update/reset/suspend helpers and adding regression coverage for suspension-resume policy.
+- Phase 4: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after adding the remaining lifecycle-policy tests and updating both projection-related plan docs plus the core architecture note.
 
 ### Open Questions
-- Should first authoritative bootstrap from `EntityMoved` be permanently documented as part of the public projection contract, or remain an internal policy detail?
+- Should first authoritative bootstrap from `EntityMoved` be permanently documented as part of the public projection contract, or remain an internal policy detail? The hardening work now tests and depends on this policy, but the docs still frame it more as an invariant than a consumer-facing API guarantee.
 
 ## Dry Run Findings
 

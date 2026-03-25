@@ -226,6 +226,7 @@
 - [ ] Harden reconnect.
 - [ ] Interpolate entity motion properties.
 - [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
+- [ ] Asset pipeline.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

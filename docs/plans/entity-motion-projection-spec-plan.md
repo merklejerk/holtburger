@@ -621,6 +621,9 @@ Completed.
 
 ## Phase 3: Implement Shared Projection System In Core
 
+### Status
+Completed.
+
 ### Deliverables
 - Add [crates/holtburger-core/src/client/projection.rs](../../crates/holtburger-core/src/client/projection.rs).
 - Implement `EntityProjectionSystem`, `ProjectedEntityState`, and `ProjectionConfig`.
@@ -636,6 +639,45 @@ Completed.
 - The shared projection system can be driven entirely from `ClientViewEvent` plus time.
 - Projected and authoritative poses remain distinct in the API.
 - Turn-to-heading no longer requires consumers to snap rotation manually.
+
+### Phase 3 Implementation Notes
+- Added [crates/holtburger-core/src/client/projection.rs](../../crates/holtburger-core/src/client/projection.rs) with a reusable `EntityProjectionSystem` driven entirely by `ClientViewEvent` and `Instant`.
+- Implemented public projection types:
+    - `ProjectionMode`
+    - `ProjectedEntityState`
+    - `EntitySpatialSample`
+    - `ProjectionConfig`
+    - `EntityProjectionSystem`
+- Exposed the projection module from [crates/holtburger-core/src/client/mod.rs](../../crates/holtburger-core/src/client/mod.rs) and re-exported the public projection types from [crates/holtburger-core/src/lib.rs](../../crates/holtburger-core/src/lib.rs) so consumers can adopt the system without reaching through private module seams.
+- Implemented conservative authoritative correction handling:
+    - small same-landblock corrections interpolate over `max_position_interp`
+    - large corrections or landblock changes snap immediately
+    - forced reposition snaps to the authoritative pose and clears retained motion simulation state
+- Implemented vector-driven dead reckoning from authoritative pose plus retained velocity, bounded by `max_dead_reckon`.
+- Implemented over-time heading simulation for:
+    - sticky interpreted turn commands with retained turn speed
+    - `TurnToHeading` directives
+    - `TurnToObject` directives only when they carry an explicit desired heading
+- Added convenience sampling APIs so later consumers can fetch projected and authoritative state together without introducing projected state into `holtburger-world`.
+- `TeleportStarted` currently suspends all cached projections conservatively by snapping projected pose back to authoritative pose and marking the entry suspended. That is intentionally conservative because the current client-view event does not carry a guid, so Phase 3 cannot target only the local player from this signal alone.
+- The implemented `ProjectionConfig` keeps duration knobs as `Duration` and snap thresholds as integer meter and milliradian values so the config stays trivially comparable in tests while still converting cleanly to runtime float thresholds.
+
+### Phase 3 Validation
+- Added projection regression coverage in [crates/holtburger-core/src/client/projection.rs](../../crates/holtburger-core/src/client/projection.rs) for:
+    - authoritative position interpolation
+    - velocity-driven dead reckoning
+    - continuous turn command simulation
+    - over-time `TurnToHeading` rotation
+    - large correction snapping
+    - despawn and full-cache clear cleanup
+- `cargo test -p holtburger-core --lib` passed with 107 tests.
+- `cargo test -p holtburger-cli --lib` passed with 163 tests.
+
+### Decisions Confirmed By Phase 3
+- A shared pull-based projection system fits cleanly in `holtburger-core` without forcing a per-frame event stream into the existing client-view channel.
+- The projection boundary can stay explicit: `authoritative_pose` remains the stable truth while `projected_pose` is opt-in consumer state.
+- Conservative same-landblock interpolation plus bounded dead reckoning is enough to unblock Phase 4 adoption without pretending core already has full pathing or target-relative turn resolution.
+- `TurnToObject` without an explicit desired heading cannot be faithfully resolved inside the current projection system from `ClientViewEvent` alone, because the event stream does not provide target pose lookup as part of the directive. That case remains conservative for now instead of guessing.
 
 ## Phase 4: Adopt The Projection System In CLI As An Optional Consumer
 

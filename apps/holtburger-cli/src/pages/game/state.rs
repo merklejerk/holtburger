@@ -249,6 +249,17 @@ impl GameState {
                 }
                 result.needs_redraw = true;
             }
+            ClientViewEvent::EntityKinematicsUpdated {
+                guid,
+                velocity,
+                omega,
+            } => {
+                if let Some(entity) = self.data.entities.get_mut(&guid) {
+                    entity.velocity = velocity;
+                    entity.omega = omega;
+                    result.needs_redraw = true;
+                }
+            }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.motion_snapshot = snapshot;
@@ -2339,6 +2350,35 @@ mod tests {
         assert!(result.commands.is_empty());
         assert_eq!(state.data.player_pos, Some(moved_pos));
         assert!(has_active_approach(&state));
+    }
+
+    #[test]
+    fn entity_kinematics_event_updates_cached_entity_state_and_requests_redraw() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.data.entities.insert(
+            target_guid,
+            Entity::new(target_guid, "Drudge".to_string(), WorldPosition::default()),
+        );
+
+        let velocity = holtburger_common::Vector3::new(1.0, 2.0, 3.0);
+        let omega = holtburger_common::Vector3::new(0.0, 0.0, 4.0);
+        let result = state.handle_view_event(ClientViewEvent::EntityKinematicsUpdated {
+            guid: target_guid,
+            velocity,
+            omega,
+        });
+
+        assert!(result.needs_redraw);
+        let entity = state
+            .data
+            .entities
+            .get(&target_guid)
+            .expect("target entity should exist");
+        assert_eq!(entity.velocity, velocity);
+        assert_eq!(entity.omega, omega);
     }
 
     #[test]

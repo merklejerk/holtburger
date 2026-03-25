@@ -32,11 +32,13 @@ Because Holtburger is a terminal-first client, its current feature set emphasize
 | **Spatial Radar** | 🟢 | 🟢 | Live positional tracking of nearby entities. |
 | **Movement & Physics** | 🟢 | 🟡 | Turn-to, locomotion primitives, sticky pursuit, approach/follow, and server-driven reposition handling work. Full 3D collision-aware navigation is still future-client territory. |
 | **Chat & Messaging** | 🟢 | 🟢 | Full parsing of chat channels, server messages, and emotes. |
+| **Leveling and Progression** | 🟢 | 🟢 | Comprehensive attribute and skill management with XP/Luminance tracking. |
 | **Inventory & Equipping** | 🟢 | 🟢 | Move, stack, split, drop, and equip items. |
 | **Vendors & Trade** | 🟢 | 🟢 | Full merchant interaction including alternate currencies. |
 | **Crafting** | 🟢 | 🟢 | Item combine flows, success prompts, and salvage preview/execution are implemented. |
 | **Magic System** | 🟢 | 🟢 | Spell catalog loading, spellbook/enchantment tracking, and targeted or untargeted casting are implemented. In the TUI, this is effectively the ceiling without scripting or a richer frontend. |
 | **Melee & Missile Combat** | 🟢 | 🟢 | Manual targeted melee and missile attacks work, and the TUI can drive shared combat-facing and sticky-melee helpers. This is the practical ceiling for the terminal client unless scripting is introduced. |
+| **Social Gameplay** | 🟢 | 🟡 | Most fellowship interactions supported. Allegiance still TODO. |
 | **Scripting / Automation** | 🔴 | 🔴 | Embedded scripting remains planned, and that is the main path for pushing combat or spellcasting beyond the current TUI ceiling. |
 
 ## Roadmap

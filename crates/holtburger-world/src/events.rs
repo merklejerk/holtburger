@@ -39,6 +39,17 @@ pub struct DerivedStatsData {
 }
 
 #[derive(Debug, Clone)]
+pub enum FellowshipActivity {
+    YouJoined { fellowship_name: String },
+    MemberJoined { member_name: String },
+    YouLeft,
+    MemberLeft { member_name: String },
+    YouWereDismissed,
+    MemberWasDismissed { member_name: String },
+    FellowshipDisbanded { fellowship_name: Option<String> },
+}
+
+#[derive(Debug, Clone)]
 pub enum WorldEvent {
     EntitySpawned(Box<Entity>),
     EntityReplaced(Box<Entity>),
@@ -123,5 +134,7 @@ pub enum WorldEvent {
     ContainerClosed(Guid),
     VendorStateUpdated(Option<vendor::VendorState>),
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
+    FellowshipStateUpdated(Option<state::FellowshipState>),
+    FellowshipActivity(FellowshipActivity),
     TradeStateUpdated(Option<state::TradeState>),
 }

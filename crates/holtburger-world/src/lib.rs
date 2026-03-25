@@ -26,4 +26,4 @@ pub mod stats;
 pub mod vendor;
 
 pub use self::state::WorldState;
-pub use events::{DerivedStatsData, PlayerInfoData, WorldEvent};
+pub use events::{DerivedStatsData, FellowshipActivity, PlayerInfoData, WorldEvent};

@@ -165,8 +165,8 @@ pub enum GameOpcode {
     /// S2C: System or chat message.
     /// Used for general server announcements, combat logs, and error messages.
     ServerMessage = 0xF7E0,
-    // /// S2C: Turbine chat message.
-    // TurbineChat = 0xF7DE,
+    /// S2C/C2S: Turbine chat message.
+    TurbineChat = 0xF7DE,
 
     // --- Visuals & Audio ---
     /// S2C: Play a sound effect.
@@ -255,8 +255,8 @@ pub enum GameActionOpcode {
     // AddChannel = 0x0145,
     // /// C2S: Remove a custom chat channel.
     // RemoveChannel = 0x0146,
-    // /// C2S: Send message to a specific chat channel.
-    // ChatChannel = 0x0147,
+    /// C2S: Send message to a specific chat channel.
+    ChatChannel = 0x0147,
     // /// C2S: Request list of available chat channels.
     // ListChannels = 0x0148,
     // /// C2S: Request an index of chat channels.
@@ -275,8 +275,8 @@ pub enum GameActionOpcode {
     // ModifyAccountSquelch = 0x0059,
     // /// C2S: Mute/squelch a global chat channel.
     // ModifyGlobalSquelch = 0x005B,
-    // /// C2S: Perform a character emote.
-    // Emote = 0x01DF,
+    /// C2S: Perform a character emote.
+    Emote = 0x01DF,
     // /// C2S: Perform a visual "soul emote".
     // SoulEmote = 0x01E1,
     /// C2S: Request a ping response.
@@ -397,8 +397,8 @@ pub enum GameActionOpcode {
     // RemoveSpellFavorite = 0x01E4,
     // /// C2S: Apply active filters to the spellbook view.
     // SpellbookFilter = 0x0286,
-    // /// C2S: Forcibly kill the character.
-    // Suicide = 0x0279,
+    /// C2S: Forcibly kill the character.
+    Suicide = 0x0279,
     /// C2S: Increase a vital (Health, Stamina, Mana) using experience.
     RaiseVital = 0x0044,
     /// C2S: Increase an attribute (Strength, Endurance, etc) using experience.
@@ -469,16 +469,16 @@ pub enum GameActionOpcode {
     /// Also updates the server-side selected target used for follow-up health heartbeats.
     QueryHealth = 0x01BF,
     // --- Fellowship ---
-    // /// C2S: Create a new fellowship group.
-    // FellowshipCreate = 0x00A2,
-    // /// C2S: Invite a player into the fellowship.
-    // FellowshipRecruit = 0x00A5,
-    // /// C2S: Leave the current fellowship.
-    // FellowshipQuit = 0x00A3,
-    // /// C2S: Remove another player from the fellowship.
-    // FellowshipDismiss = 0x00A4,
-    // /// C2S: Update fellowship configuration (open/closed, etc).
-    // FellowshipUpdateRequest = 0x00A6,
+    /// C2S: Create a new fellowship group.
+    FellowshipCreate = 0x00A2,
+    /// C2S: Leave the current fellowship.
+    FellowshipQuit = 0x00A3,
+    /// C2S: Remove another player from the fellowship.
+    FellowshipDismiss = 0x00A4,
+    /// C2S: Invite a player into the fellowship.
+    FellowshipRecruit = 0x00A5,
+    /// C2S: Tell the server whether the fellowship panel is open so it can stream updates.
+    FellowshipUpdateRequest = 0x00A6,
     // /// C2S: Designate a new fellowship leader.
     // FellowshipAssignNewLeader = 0x0290,
     // /// C2S: Toggle the fellowship's open/closed enrollment status.
@@ -529,16 +529,16 @@ pub enum GameActionOpcode {
     // TeleToPklArena = 0x0026,
     // /// C2S: Teleport to a PK arena.
     // TeleToPkArena = 0x0027,
-    // /// C2S: Teleport to the character's attuned Lifestone.
-    // TeleToLifestone = 0x0063,
+    /// C2S: Teleport to the character's attuned Lifestone.
+    TeleToLifestone = 0x0063,
     // /// C2S: Special advocate-only teleport command.
     // AdvocateTeleport = 0x00D6,
-    // /// C2S: Teleport to the allegiance mansion.
-    // TeleToMansion = 0x0278,
+    /// C2S: Teleport to the allegiance mansion or villa.
+    TeleToMansion = 0x0278,
     // /// C2S: Teleport to the Marketplace.
     // TeleToMarketPlace = 0x028D,
-    // /// C2S: Enter a PK-Lite zone or state.
-    // EnterPkLite = 0x028F,
+    /// C2S: Enter PK-Lite state.
+    EnterPkLite = 0x028F,
     // /// C2S: Server-controlled or legacy jump command.
     // JumpNonAutonomous = 0xF7C9,
     // /// C2S: Start a movement command (legacy).
@@ -621,12 +621,12 @@ pub enum GameEventOpcode {
     UpdateHealth = 0x01C0,
 
     // --- Fellowship ---
-    // /// S2C: Complete fellowship update.
-    // FellowshipFullUpdate = 0x02BE,
-    // /// S2C: Fellowship has been disbanded.
-    // FellowshipDisband = 0x02BF,
-    // /// S2C: Update for a specific fellowship member.
-    // FellowshipUpdateFellow = 0x02C0,
+    /// S2C: Complete fellowship update.
+    FellowshipFullUpdate = 0x02BE,
+    /// S2C: Fellowship has been disbanded.
+    FellowshipDisband = 0x02BF,
+    /// S2C: Update for a specific fellowship member.
+    FellowshipUpdateFellow = 0x02C0,
 
     // --- Vendor & Trade ---
     /// S2C: Vendor information event / Approach vendor.
@@ -678,8 +678,8 @@ pub enum GameEventOpcode {
     // Emote = 0x01E2,
     // /// S2C: Synchronizes the client's squelch (ignore) list.
     // SetSquelchDb = 0x01F4,
-    // /// S2C: Configures the Turbine-specific chat channels.
-    // SetTurbineChatChannels = 0x0295,
+    /// S2C: Configures the Turbine-specific chat channels.
+    SetTurbineChatChannels = 0x0295,
 
     // --- Allegiance & Social ---
     // /// S2C: Allegiance update operation was aborted.
@@ -779,14 +779,14 @@ pub enum GameEventOpcode {
     // AvailableHouses = 0x0271,
 
     // --- Fellowship (Extra) ---
-    // /// S2C: Notifies that a member has quit the fellowship.
-    // FellowshipQuit = 0x00A3,
-    // /// S2C: Notifies that a member was dismissed from the fellowship.
-    // FellowshipDismiss = 0x00A4,
-    // /// S2C: Confirms that a fellow's data update is complete.
-    // FellowshipFellowUpdateDone = 0x01C9,
-    // /// S2C: Confirms that a fellow's statistics update is complete.
-    // FellowshipFellowStatsDone = 0x01CA,
+    /// S2C: Notifies that a member has quit the fellowship.
+    FellowshipQuit = 0x00A3,
+    /// S2C: Notifies that a member was dismissed from the fellowship.
+    FellowshipDismiss = 0x00A4,
+    /// S2C: Confirms that a fellow's data update is complete.
+    FellowshipFellowUpdateDone = 0x01C9,
+    /// S2C: Confirms that a fellow's statistics update is complete.
+    FellowshipFellowStatsDone = 0x01CA,
     // // (Already present: FellowshipFullUpdate, Disband, UpdateFellow)
 
     // --- Minigames (Chess) ---

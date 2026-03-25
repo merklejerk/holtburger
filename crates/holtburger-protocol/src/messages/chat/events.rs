@@ -1,3 +1,4 @@
+use crate::messages::ChatChannelId;
 use crate::messages::utils::{read_string16, write_string16};
 use crate::traits::{ProtocolPack, ProtocolUnpack};
 use byteorder::{ByteOrder, LittleEndian};
@@ -45,7 +46,7 @@ impl ProtocolPack for TellEventData {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChannelBroadcastEventData {
-    pub channel_id: u32,
+    pub channel: ChatChannelId,
     pub sender_name: String,
     pub message: String,
 }
@@ -55,12 +56,12 @@ impl ProtocolUnpack for ChannelBroadcastEventData {
         if *offset + 4 > data.len() {
             return None;
         }
-        let channel_id = LittleEndian::read_u32(&data[*offset..*offset + 4]);
+        let channel = ChatChannelId::from_raw(LittleEndian::read_u32(&data[*offset..*offset + 4]));
         *offset += 4;
         let sender_name = read_string16(data, offset)?;
         let message = read_string16(data, offset)?;
         Some(ChannelBroadcastEventData {
-            channel_id,
+            channel,
             sender_name,
             message,
         })
@@ -69,7 +70,7 @@ impl ProtocolUnpack for ChannelBroadcastEventData {
 
 impl ProtocolPack for ChannelBroadcastEventData {
     fn pack(&self, buf: &mut Vec<u8>) {
-        buf.extend_from_slice(&self.channel_id.to_le_bytes());
+        buf.extend_from_slice(&self.channel.raw().to_le_bytes());
         write_string16(buf, &self.sender_name);
         write_string16(buf, &self.message);
     }

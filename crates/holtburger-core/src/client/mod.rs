@@ -45,6 +45,7 @@ pub struct Client {
     message_counter: usize,
     movement: MovementSystem,
     auth: AuthState,
+    turbine_chat: TurbineChatState,
 }
 
 impl Client {
@@ -183,8 +184,17 @@ impl Client {
             });
     }
 
+    fn emit_fellowship_state_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::FellowshipStateUpdated {
+                fellowship: self.world.fellowship.clone(),
+            });
+    }
+
     fn emit_initial_reference_data(&self) {
         self.emit_spell_catalog_loaded();
+        self.emit_fellowship_state_updated();
     }
 
     pub fn subscribe_wire_events(&self) -> broadcast::Receiver<WireEvent> {
@@ -280,6 +290,25 @@ impl Client {
             }
             WireEvent::Chat { sender, message } => {
                 let _ = self.client_view_event_tx.send(ClientViewEvent::Chat {
+                    sender: sender.clone(),
+                    message: message.clone(),
+                });
+            }
+            WireEvent::ChannelMessage {
+                channel,
+                sender,
+                message,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::ChannelMessage {
+                        channel: *channel,
+                        sender: sender.clone(),
+                        message: message.clone(),
+                    });
+            }
+            WireEvent::Tell { sender, message } => {
+                let _ = self.client_view_event_tx.send(ClientViewEvent::Tell {
                     sender: sender.clone(),
                     message: message.clone(),
                 });
@@ -564,6 +593,22 @@ impl Client {
                     .client_view_event_tx
                     .send(ClientViewEvent::VendorItemIdentified(item.clone()));
             }
+            WorldEvent::FellowshipStateUpdated(fellowship) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::FellowshipStateUpdated {
+                        fellowship: fellowship.clone(),
+                    });
+            }
+            WorldEvent::FellowshipActivity(activity) => {
+                if self.state == ClientState::InWorld {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::FellowshipActivity {
+                            activity: activity.clone(),
+                        });
+                }
+            }
             WorldEvent::TradeStateUpdated(trade) => {
                 let _ = self
                     .client_view_event_tx
@@ -704,6 +749,7 @@ impl Client {
 mod tests {
     use super::*;
     use holtburger_common::{Guid, Vector3};
+    use holtburger_world::FellowshipActivity;
     use holtburger_world::entity::Entity;
 
     #[test]
@@ -787,5 +833,46 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn fellowship_activity_is_only_projected_after_entering_world() {
+        let client = builder::build_test_client(ClientState::EnteringWorld);
+        let mut events = client.subscribe_client_view_events();
+
+        client.handle_world_event(&WorldEvent::FellowshipActivity(
+            FellowshipActivity::MemberJoined {
+                member_name: "Bravo".to_string(),
+            },
+        ));
+
+        assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn fellowship_activity_projects_when_in_world() {
+        let client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+
+        client.handle_world_event(&WorldEvent::FellowshipActivity(
+            FellowshipActivity::MemberLeft {
+                member_name: "Bravo".to_string(),
+            },
+        ));
+
+        let mut saw_activity = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::FellowshipActivity {
+                    activity: FellowshipActivity::MemberLeft { member_name }
+                } if member_name == "Bravo"
+            ) {
+                saw_activity = true;
+                break;
+            }
+        }
+
+        assert!(saw_activity);
     }
 }

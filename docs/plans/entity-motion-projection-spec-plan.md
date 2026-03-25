@@ -549,6 +549,9 @@ Guidance:
 
 ## Phase 1: Expand Authoritative Motion Inputs In World
 
+### Status
+Completed.
+
 ### Deliverables
 - Expand or replace `EntityMotionSnapshot` with a richer `EntityMotionState` in [crates/holtburger-world/src/entity.rs](../../crates/holtburger-world/src/entity.rs).
 - Preserve current combat-target semantics while retaining speeds and turn directives needed for projection.
@@ -563,6 +566,26 @@ Guidance:
 - Existing combat-target and motion tests still pass or are updated intentionally.
 - No projected state is stored in world entities.
 - The plan for replacing the current `TurnToHeading` and `TurnToObject` rotation snap is explicit, so we do not regress visible turning before projection exists.
+
+### Phase 1 Implementation Notes
+- Kept the existing `EntityMotionSnapshot` type name in [crates/holtburger-world/src/entity.rs](../../crates/holtburger-world/src/entity.rs) for this phase to minimize churn while still expanding the retained authoritative motion inputs.
+- Added retained interpreted speeds to the snapshot as `forward_speed`, `sidestep_speed`, and `turn_speed` using a small `OrderedMotionSpeed` wrapper so projection inputs can preserve the ordered motion value without depending on raw protocol structs later.
+- Added explicit retained turn directives as `EntityMotionDirective::{TurnToHeading, TurnToObject}` so later projection work can reconstruct over-time turn behavior from world-owned state.
+- Updated `EntityMotionSnapshot::from_movement_event()` to retain interpreted motion speeds for `MovementTypeData::Invalid` and directive data for `MovementTypeData::TurnToHeading` and `MovementTypeData::TurnToObject`.
+- Deliberately did not remove the current immediate heading snap in [crates/holtburger-world/src/handlers/movement.rs](../../crates/holtburger-world/src/handlers/movement.rs) during this phase. That shortcut remains until the shared projection system exists to replace it.
+- Left `Entity.position`, `velocity`, `acceleration`, `omega`, and `autonomous_movement` authoritative and world-owned.
+
+### Phase 1 Validation
+- Added regression coverage in [crates/holtburger-world/src/player/tests.rs](../../crates/holtburger-world/src/player/tests.rs) for retained interpreted motion speeds.
+- Added regression coverage in [crates/holtburger-world/src/player/tests.rs](../../crates/holtburger-world/src/player/tests.rs) for retained `TurnToHeading` directives.
+- Updated existing snapshot fixtures in [crates/holtburger-world/src/context.rs](../../crates/holtburger-world/src/context.rs) and [apps/holtburger-cli/src/pages/game/state.rs](../../apps/holtburger-cli/src/pages/game/state.rs) to remain compatible with the expanded snapshot shape.
+- `cargo test -p holtburger-world --lib` passed with 104 tests.
+- `cargo test -p holtburger-cli --lib` passed with 162 tests.
+
+### Decisions Confirmed By Phase 1
+- The minimum world-retained motion surface needed for projection is broader than the preexisting snapshot, but it still fits cleanly in authoritative world state without introducing projected poses.
+- Preserving a compact world-owned snapshot is sufficient for now; Phase 1 did not need a full `EntityMotionState` rename to unblock later phases.
+- Replacing turn snaps must stay deferred until Phase 3, otherwise remote turning would visibly regress before projection exists.
 
 ## Phase 2: Expose Kinematics And Motion Inputs Through Core
 

@@ -1,7 +1,7 @@
 use super::*;
 use crate::WorldEvent;
 use crate::WorldState;
-use crate::entity::{Entity, EntityMotionSnapshot};
+use crate::entity::{Entity, EntityMotionDirective, EntityMotionSnapshot, OrderedMotionSpeed};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectPropertyAccessorsMut,
@@ -672,6 +672,7 @@ fn test_update_motion_caches_remote_entity_motion_snapshot_and_emits_event() {
         snapshot.forward_command,
         Some(InterpretedMotionCommand::DEAD)
     );
+    assert_eq!(snapshot.forward_speed, None);
     assert_eq!(
         state
             .entities
@@ -704,6 +705,7 @@ fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
         forward_command: Some(InterpretedMotionCommand::WALK_FORWARD),
         sidestep_command: None,
         turn_command: None,
+        ..Default::default()
     });
     state.add_entity(entity);
 
@@ -733,6 +735,108 @@ fn test_update_motion_clears_remote_entity_motion_snapshot_and_emits_event() {
         WorldEvent::EntityMotionUpdated { guid: target, snapshot }
             if *target == guid && snapshot.is_none()
     )));
+}
+
+#[test]
+fn test_update_motion_retains_interpreted_motion_speeds() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x60000001);
+
+    state.add_entity(Entity::new(guid, "Drudge".to_string(), WorldPosition::default()));
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 7,
+        movement_sequence: 8,
+        server_control_sequence: 9,
+        is_autonomous: false,
+        movement_type: MovementType::Invalid,
+        motion_flags: 0,
+        current_style: MotionStance::NonCombat.interpreted(),
+        data: MovementTypeData::Invalid(MovementInvalid {
+            state: InterpretedMotionState {
+                flags: MovementStateFlags::FORWARD_COMMAND
+                    | MovementStateFlags::FORWARD_SPEED
+                    | MovementStateFlags::TURN_COMMAND
+                    | MovementStateFlags::TURN_SPEED,
+                num_commands: 0,
+                forward_command: Some(InterpretedMotionCommand::RUN_FORWARD),
+                forward_speed: Some(3.5),
+                turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+                turn_speed: Some(1.25),
+                ..Default::default()
+            },
+            sticky_object: None,
+        }),
+    }));
+
+    let events = state.handle_message(&msg);
+
+    let snapshot = state
+        .entities
+        .get(guid)
+        .and_then(|entity| entity.motion_snapshot)
+        .expect("expected motion snapshot to be cached");
+
+    assert_eq!(snapshot.forward_command, Some(InterpretedMotionCommand::RUN_FORWARD));
+    assert_eq!(
+        snapshot.forward_speed,
+        OrderedMotionSpeed::from_f32(3.5)
+    );
+    assert_eq!(snapshot.turn_command, Some(InterpretedMotionCommand::TURN_RIGHT));
+    assert_eq!(snapshot.turn_speed, OrderedMotionSpeed::from_f32(1.25));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        WorldEvent::EntityMotionUpdated { guid: target, snapshot }
+            if *target == guid
+            && snapshot.as_ref().is_some_and(|snapshot| snapshot.forward_speed == OrderedMotionSpeed::from_f32(3.5))
+            && snapshot.as_ref().is_some_and(|snapshot| snapshot.turn_speed == OrderedMotionSpeed::from_f32(1.25))
+    )));
+}
+
+#[test]
+fn test_update_motion_retains_turn_to_heading_directive() {
+    let mut state = WorldState::synthetic();
+    let guid = Guid(0x60000001);
+
+    state.add_entity(Entity::new(guid, "Drudge".to_string(), WorldPosition::default()));
+
+    let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
+        guid,
+        object_instance_sequence: 7,
+        movement_sequence: 8,
+        server_control_sequence: 9,
+        is_autonomous: false,
+        movement_type: MovementType::TurnToHeading,
+        motion_flags: 0,
+        current_style: MotionStance::NonCombat.interpreted(),
+        data: MovementTypeData::TurnToHeading(
+            holtburger_protocol::messages::movement::messages::motion::TurnToHeading {
+                params: holtburger_protocol::messages::movement::messages::motion::TurnToParameters {
+                    movement_parameters: 0,
+                    speed: 1.5,
+                    desired_heading: 0.75,
+                },
+            },
+        ),
+    }));
+
+    let _events = state.handle_message(&msg);
+
+    let snapshot = state
+        .entities
+        .get(guid)
+        .and_then(|entity| entity.motion_snapshot)
+        .expect("expected motion snapshot to be cached");
+
+    assert_eq!(
+        snapshot.directive,
+        Some(EntityMotionDirective::TurnToHeading {
+            desired_heading: OrderedMotionSpeed::from_f32(0.75)
+                .expect("finite desired heading"),
+            speed: OrderedMotionSpeed::from_f32(1.5).expect("finite speed"),
+        })
+    );
 }
 
 #[test]

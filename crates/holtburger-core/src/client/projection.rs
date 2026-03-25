@@ -1,3 +1,46 @@
+//! Client-owned motion projection for render and presentation consumers.
+//!
+//! The world layer remains authoritative. Consumers feed [`ClientViewEvent`] deltas into an
+//! [`EntityProjectionSystem`], tick it with their frame time, and then pull projected poses for
+//! scene updates. Gameplay and authority checks should continue to read from authoritative world
+//! state unless a caller deliberately opts into projected visuals.
+//!
+//! Typical render-loop usage:
+//!
+//! ```rust,ignore
+//! use std::time::Instant;
+//! use holtburger_core::client::projection::{EntityProjectionSystem, ProjectionConfig};
+//! use holtburger_core::client::types::ClientViewEvent;
+//!
+//! struct SceneFrame {
+//!     projection: EntityProjectionSystem,
+//! }
+//!
+//! impl SceneFrame {
+//!     fn on_view_event(&mut self, event: &ClientViewEvent) {
+//!         self.projection.handle_view_event(event, Instant::now());
+//!     }
+//!
+//!     fn render(&mut self, now: Instant) {
+//!         self.projection.tick(now);
+//!
+//!         for entity in self.projection.iter_projected_entities() {
+//!             self.update_scene_node(entity.guid, entity.projected_pose);
+//!         }
+//!     }
+//!
+//!     fn update_scene_node(
+//!         &mut self,
+//!         guid: holtburger_common::Guid,
+//!         pose: holtburger_common::position::WorldPosition,
+//!     ) {
+//!         let _ = (guid, pose);
+//!     }
+//! }
+//!
+//! let _ = ProjectionConfig::default();
+//! ```
+
 use crate::client::types::ClientViewEvent;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
@@ -114,21 +157,25 @@ impl EntityProjectionSystem {
                 velocity,
                 omega,
             } => {
-                let tracked = self.ensure_entity(*guid, WorldPosition::default(), now);
-                tracked.public_state.velocity = *velocity;
-                tracked.public_state.omega = *omega;
+                if let Some(tracked) = self.entities.get_mut(guid) {
+                    tracked.public_state.velocity = *velocity;
+                    tracked.public_state.omega = *omega;
+                }
             }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
-                let tracked = self.ensure_entity(*guid, WorldPosition::default(), now);
-                tracked.public_state.motion_state = *snapshot;
-                if tracked.public_state.projection_mode == ProjectionMode::Suspended {
-                    tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+                if let Some(tracked) = self.entities.get_mut(guid) {
+                    tracked.public_state.motion_state = *snapshot;
+                    if tracked.public_state.projection_mode == ProjectionMode::Suspended {
+                        tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+                    }
                 }
             }
             ClientViewEvent::ForcedReposition { guid, pos, .. } => {
                 let tracked = self.ensure_entity(*guid, *pos, now);
                 tracked.public_state.authoritative_pose = *pos;
                 tracked.public_state.projected_pose = *pos;
+                tracked.public_state.velocity = Vector3::zero();
+                tracked.public_state.omega = Vector3::zero();
                 tracked.public_state.motion_state = None;
                 tracked.public_state.last_authoritative_update = now;
                 tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
@@ -153,46 +200,7 @@ impl EntityProjectionSystem {
     pub fn tick(&mut self, now: Instant) {
         let config = self.config;
         for tracked in self.entities.values_mut() {
-            let dt = now
-                .checked_duration_since(tracked.last_simulated_at)
-                .unwrap_or_default();
-            tracked.last_simulated_at = now;
-
-            if tracked.public_state.projection_mode == ProjectionMode::Suspended {
-                continue;
-            }
-
-            if Self::advance_interpolation(tracked, now) {
-                continue;
-            }
-
-            let mut mode = ProjectionMode::AuthoritativeOnly;
-            let authoritative_pose = tracked.public_state.authoritative_pose;
-            tracked.public_state.projected_pose.landblock_id = authoritative_pose.landblock_id;
-
-            let elapsed_since_authoritative = now
-                .checked_duration_since(tracked.public_state.last_authoritative_update)
-                .unwrap_or_default()
-                .min(config.max_dead_reckon);
-
-            if tracked.public_state.velocity.length_squared() > EPSILON
-                && elapsed_since_authoritative > Duration::ZERO
-            {
-                tracked.public_state.projected_pose.coords = authoritative_pose.coords
-                    + tracked.public_state.velocity * elapsed_since_authoritative.as_secs_f32();
-                mode = ProjectionMode::SimulatingVelocity;
-            } else {
-                tracked.public_state.projected_pose.coords = authoritative_pose.coords;
-            }
-
-            let simulated_heading = Self::advance_heading_projection(tracked, dt);
-            if simulated_heading {
-                mode = ProjectionMode::SimulatingMotionState;
-            } else {
-                tracked.public_state.projected_pose.rotation = authoritative_pose.rotation;
-            }
-
-            tracked.public_state.projection_mode = mode;
+            Self::advance_projection_state(tracked, now, config);
         }
     }
 
@@ -243,6 +251,10 @@ impl EntityProjectionSystem {
             .map(|entity| entity.authoritative_pose)
     }
 
+    /// Returns the current projected scene view for batch consumers such as renderers.
+    ///
+    /// Each item retains both authoritative and projected poses so callers can update visual
+    /// transforms from `projected_pose` without losing access to the last server-authored pose.
     pub fn iter_projected_entities(&self) -> impl Iterator<Item = &ProjectedEntityState> {
         self.entities.values().map(|tracked| &tracked.public_state)
     }
@@ -272,10 +284,12 @@ impl EntityProjectionSystem {
     }
 
     fn handle_entity_moved(&mut self, guid: Guid, pos: WorldPosition, now: Instant) {
-        let snap_distance = self.config.snap_distance_meters();
-        let snap_heading = self.config.snap_heading_radians();
-        let max_interp = self.config.max_position_interp;
+        let config = self.config;
+        let snap_distance = config.snap_distance_meters();
+        let snap_heading = config.snap_heading_radians();
+        let max_interp = config.max_position_interp;
         let tracked = self.ensure_entity(guid, pos, now);
+        Self::advance_projection_state(tracked, now, config);
         let should_snap = should_snap_to_authoritative(
             tracked.public_state.projected_pose,
             pos,
@@ -299,6 +313,53 @@ impl EntityProjectionSystem {
                 duration: max_interp,
             });
         }
+    }
+
+    fn advance_projection_state(
+        tracked: &mut TrackedEntityProjection,
+        now: Instant,
+        config: ProjectionConfig,
+    ) {
+        let dt = now
+            .checked_duration_since(tracked.last_simulated_at)
+            .unwrap_or_default();
+        tracked.last_simulated_at = now;
+
+        if tracked.public_state.projection_mode == ProjectionMode::Suspended {
+            return;
+        }
+
+        if Self::advance_interpolation(tracked, now) {
+            return;
+        }
+
+        let mut mode = ProjectionMode::AuthoritativeOnly;
+        let authoritative_pose = tracked.public_state.authoritative_pose;
+        tracked.public_state.projected_pose.landblock_id = authoritative_pose.landblock_id;
+
+        let elapsed_since_authoritative = now
+            .checked_duration_since(tracked.public_state.last_authoritative_update)
+            .unwrap_or_default()
+            .min(config.max_dead_reckon);
+
+        if tracked.public_state.velocity.length_squared() > EPSILON
+            && elapsed_since_authoritative > Duration::ZERO
+        {
+            tracked.public_state.projected_pose.coords = authoritative_pose.coords
+                + tracked.public_state.velocity * elapsed_since_authoritative.as_secs_f32();
+            mode = ProjectionMode::SimulatingVelocity;
+        } else {
+            tracked.public_state.projected_pose.coords = authoritative_pose.coords;
+        }
+
+        let simulated_heading = Self::advance_heading_projection(tracked, dt);
+        if simulated_heading {
+            mode = ProjectionMode::SimulatingMotionState;
+        } else {
+            tracked.public_state.projected_pose.rotation = authoritative_pose.rotation;
+        }
+
+        tracked.public_state.projection_mode = mode;
     }
 
     fn advance_interpolation(tracked: &mut TrackedEntityProjection, now: Instant) -> bool {
@@ -692,5 +753,187 @@ mod tests {
         system.clear();
         assert!(system.projected_entity(guid).is_none());
         assert_eq!(system.iter_projected_entities().count(), 0);
+    }
+
+    #[test]
+    fn forced_reposition_clears_stale_kinematics() {
+        let guid = Guid(0x5000_0007);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
+        let entity = make_entity(guid, make_position(10.0, 20.0, 0.5));
+
+        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntityKinematicsUpdated {
+                guid,
+                velocity: Vector3::new(2.0, 0.0, 0.0),
+                omega: Vector3::new(0.0, 0.0, 1.0),
+            },
+            start,
+        );
+        system.handle_view_event(
+            &ClientViewEvent::ForcedReposition {
+                guid,
+                pos: make_position(100.0, 50.0, 1.5),
+                sequence: 42,
+            },
+            start + Duration::from_millis(50),
+        );
+
+        system.tick(start + Duration::from_millis(200));
+
+        let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(projected.velocity, Vector3::zero());
+        assert_eq!(projected.omega, Vector3::zero());
+        assert_eq!(projected.projection_mode, ProjectionMode::AuthoritativeOnly);
+        assert_eq!(projected.projected_pose, make_position(100.0, 50.0, 1.5));
+    }
+
+    #[test]
+    fn entity_moved_interpolates_from_current_simulated_pose() {
+        let guid = Guid(0x5000_0008);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig {
+            max_position_interp: Duration::from_millis(200),
+            ..ProjectionConfig::default()
+        });
+        let entity = make_entity(guid, make_position(0.0, 0.0, 0.0));
+
+        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntityKinematicsUpdated {
+                guid,
+                velocity: Vector3::new(2.0, 0.0, 0.0),
+                omega: Vector3::zero(),
+            },
+            start,
+        );
+        system.handle_view_event(
+            &ClientViewEvent::EntityMoved {
+                guid,
+                pos: make_position(1.0, 0.0, 0.0),
+            },
+            start + Duration::from_millis(100),
+        );
+
+        let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(projected.projection_mode, ProjectionMode::InterpolatingPosition);
+        assert!((projected.projected_pose.coords.x - 0.2).abs() < 1e-4);
+    }
+
+    #[test]
+    fn partial_kinematics_updates_do_not_create_projection_entries() {
+        let guid = Guid(0x5000_0009);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
+
+        system.handle_view_event(
+            &ClientViewEvent::EntityKinematicsUpdated {
+                guid,
+                velocity: Vector3::new(2.0, 0.0, 0.0),
+                omega: Vector3::zero(),
+            },
+            start,
+        );
+
+        assert!(system.projected_entity(guid).is_none());
+        assert_eq!(system.iter_projected_entities().count(), 0);
+    }
+
+    #[test]
+    fn partial_motion_updates_do_not_create_projection_entries() {
+        let guid = Guid(0x5000_000A);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
+
+        system.handle_view_event(
+            &ClientViewEvent::EntityMotionUpdated {
+                guid,
+                snapshot: Some(EntityMotionSnapshot {
+                    turn_command: Some(InterpretedMotionCommand::TURN_RIGHT),
+                    turn_speed: Some(
+                        holtburger_world::entity::OrderedMotionSpeed::from_f32(1.0)
+                            .expect("speed should encode"),
+                    ),
+                    ..Default::default()
+                }),
+            },
+            start,
+        );
+
+        assert!(system.projected_entity(guid).is_none());
+        assert_eq!(system.iter_projected_entities().count(), 0);
+    }
+
+    #[test]
+    fn iter_projected_entities_supports_batch_scene_updates() {
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig {
+            max_position_interp: Duration::from_millis(200),
+            ..ProjectionConfig::default()
+        });
+        let first_guid = Guid(0x5000_000B);
+        let second_guid = Guid(0x5000_000C);
+
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(make_entity(first_guid, make_position(0.0, 0.0, 0.0))),
+            },
+            start,
+        );
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(make_entity(second_guid, make_position(10.0, 5.0, 0.25))),
+            },
+            start,
+        );
+
+        system.handle_view_event(
+            &ClientViewEvent::EntityMoved {
+                guid: first_guid,
+                pos: make_position(2.0, 0.0, 0.5),
+            },
+            start,
+        );
+        system.handle_view_event(
+            &ClientViewEvent::EntityKinematicsUpdated {
+                guid: second_guid,
+                velocity: Vector3::new(2.0, 0.0, 0.0),
+                omega: Vector3::zero(),
+            },
+            start,
+        );
+
+        system.tick(start + Duration::from_millis(100));
+
+        let scene_nodes: HashMap<Guid, (WorldPosition, WorldPosition, ProjectionMode)> = system
+            .iter_projected_entities()
+            .map(|entity| {
+                (
+                    entity.guid,
+                    (
+                        entity.projected_pose,
+                        entity.authoritative_pose,
+                        entity.projection_mode,
+                    ),
+                )
+            })
+            .collect();
+
+        assert_eq!(scene_nodes.len(), 2);
+
+        let first = scene_nodes
+            .get(&first_guid)
+            .expect("interpolated entity should be present");
+        assert_eq!(first.1, make_position(2.0, 0.0, 0.5));
+        assert_eq!(first.2, ProjectionMode::InterpolatingPosition);
+        assert!((first.0.coords.x - 1.0).abs() < 1e-4);
+
+        let second = scene_nodes
+            .get(&second_guid)
+            .expect("dead-reckoned entity should be present");
+        assert_eq!(second.1, make_position(10.0, 5.0, 0.25));
+        assert_eq!(second.2, ProjectionMode::SimulatingVelocity);
+        assert!((second.0.coords.x - 10.2).abs() < 1e-4);
     }
 }

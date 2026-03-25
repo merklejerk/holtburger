@@ -251,6 +251,21 @@ Because `iter_projected_entities()` currently returns references to stored `Proj
 - Suspension and resume behavior remain deterministic and covered by tests.
 - Shared derivation logic does not require a consumer-facing API change from reference-backed iteration to owned snapshots.
 
+### Phase 3 Implementation Notes
+- Centralized authoritative pose update handling in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) so non-bootstrap authoritative pose changes now route through one update path before deciding snap vs interpolation.
+- Extracted explicit reset and suspension helpers for tracked entities, replacing duplicated branch-local state rewrites in the normalized ingest path.
+- Tightened suspension semantics so motion-state deltas no longer resume suspended projection. Suspension now persists until an authoritative snapshot, authoritative pose update, or reset event resumes the tracked entry.
+- Preserved the cache-backed public surface: `iter_projected_entities()` and the rest of the reference-returning accessors still read stored projected state, but that state is now updated from more explicit reset/suspend/authoritative-update helpers.
+
+### Verification
+- `cargo test -p holtburger-core --lib` passed after centralizing authoritative update, reset, and suspension handling.
+- `cargo test -p holtburger-cli --lib` passed without downstream consumer changes.
+
+### Decisions Confirmed By Phase 3
+- The hardening pass should treat motion-state and kinematics deltas as non-authoritative even while suspended; they may update cached inputs, but they do not resume projection on their own.
+- Reset and suspension semantics are clearer and safer when encoded in dedicated helpers rather than repeated branch-local mutations.
+- The cache-backed model still holds up after derivation centralization; no consumer-facing iteration or read API changes were required.
+
 ## Phase 4: Policy Tests, Docs, And Cleanup
 
 ### Deliverables
@@ -304,7 +319,7 @@ Mitigation:
 ### Task Checklist
 - [x] Phase 1: encode lifecycle and input separation
 - [x] Phase 2: normalize event ingestion and bootstrap policy
-- [ ] Phase 3: centralize derivation and reset semantics
+- [x] Phase 3: centralize derivation and reset semantics
 - [ ] Phase 4: add lifecycle tests and doc updates
 
 ### Decisions Log
@@ -317,10 +332,12 @@ Mitigation:
 - Any authoritative snapshot event (`EntitySpawned`, `EntityReplaced`, `EntityIdentified`, authoritative pose updates, and forced reposition) is a valid resume point from suspension unless implementation evidence proves a stricter rule is necessary.
 - Phase 1 confirmed that the tracked-input split can land without changing CLI consumers or widening projection accessors.
 - Phase 2 confirmed that normalized projection ingest can remain internal and lightweight while still making bootstrap policy explicit.
+- Phase 3 confirmed that suspension should remain authoritative-only: motion-state deltas may update cached inputs while suspended, but they must not resume projection by themselves.
 
 ### Verification Log
 - Phase 1: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after separating tracked authoritative inputs from cached public state and introducing explicit internal lifecycle state.
 - Phase 2: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after adding internal projection-input normalization and explicit bootstrap handling for first authoritative `EntityMoved` updates.
+- Phase 3: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after centralizing authoritative-update/reset/suspend helpers and adding regression coverage for suspension-resume policy.
 
 ### Open Questions
 - Should first authoritative bootstrap from `EntityMoved` be permanently documented as part of the public projection contract, or remain an internal policy detail?

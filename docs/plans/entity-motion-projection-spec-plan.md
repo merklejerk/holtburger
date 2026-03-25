@@ -681,6 +681,9 @@ Completed.
 
 ## Phase 4: Adopt The Projection System In CLI As An Optional Consumer
 
+### Status
+Completed.
+
 ### Deliverables
 - Add a projection-system instance to CLI game state.
 - Feed incoming view events into the projection system.
@@ -792,6 +795,30 @@ That keeps the current automation-distance gate authoritative while still lettin
 - No controller or gameplay helper starts depending on projected poses accidentally beyond the explicitly allowed maintain-range distance smoothing path.
 - The projection-aware maintain-range adoption does not force unrelated approach-target flows to consume projected samples until they opt in.
 
+### Phase 4 Implementation Notes
+- Added an `EntityProjectionSystem` instance to CLI runtime state in [apps/holtburger-cli/src/pages/game/state.rs](../../apps/holtburger-cli/src/pages/game/state.rs).
+- The CLI now feeds incoming `ClientViewEvent`s into projection state before applying its local authoritative mirror updates, and advances projection on each game tick.
+- Added a projection-aware debug path by threading projection access through [apps/holtburger-cli/src/pages/game/panels/context.rs](../../apps/holtburger-cli/src/pages/game/panels/context.rs) and [apps/holtburger-cli/src/pages/game/panels/dashboard/debug.rs](../../apps/holtburger-cli/src/pages/game/panels/dashboard/debug.rs). Debug output now surfaces projected pose and projection mode alongside authoritative entity information.
+- Kept the existing cached context-buffer path for normal TUI views, but switched projected entity debug content to a render-time live path in [apps/holtburger-cli/src/pages/game/render.rs](../../apps/holtburger-cli/src/pages/game/render.rs). That avoids rebuilding the cached context buffer on every projection tick while still showing current projected debug data when the context pane is actually rendered.
+- Introduced `MaintainRangeSpatialInput` in [crates/holtburger-core/src/client/controllers/maintain_range.rs](../../crates/holtburger-core/src/client/controllers/maintain_range.rs) so maintain-range can consume a typed `EntitySpatialSample` instead of a bare target position.
+- Updated maintain-range distance checks to use `target.projected_pose`, while still requiring an authoritative world-space gate before a sample is admitted into the controller.
+- Introduced `MaintainedTargetSyncInput` and `NavigationSyncInput` in [crates/holtburger-core/src/client/navigation.rs](../../crates/holtburger-core/src/client/navigation.rs). Direct approach remains on `ApproachSyncInput`; follow and sticky-melee now consume the typed maintained-target path.
+- `StickyMeleeSyncInput` now carries `target: Option<EntitySpatialSample>` instead of `target_position`.
+- Added compatibility conversions from `ApproachSyncInput` into the new maintained-target/navigation wrapper types so existing authoritative-only core tests and call sites can keep expressing intent without fabricating projection state. That preserves Phase 4’s seam without forcing unrelated approach paths to be rewritten immediately.
+
+### Phase 4 Validation
+- Added a core regression test in [crates/holtburger-core/src/client/controllers/maintain_range.rs](../../crates/holtburger-core/src/client/controllers/maintain_range.rs) proving projected target pose drives maintain-range smoothing.
+- Existing navigation regression coverage in [crates/holtburger-core/src/client/navigation.rs](../../crates/holtburger-core/src/client/navigation.rs) continued to pass after the maintained-target split, validating that direct approach flows stayed compatible while follow and sticky-melee moved to typed target samples.
+- Existing CLI state regression coverage in [apps/holtburger-cli/src/pages/game/state.rs](../../apps/holtburger-cli/src/pages/game/state.rs) continued to pass after adding projection ownership and the projected sticky-melee sample path.
+- `cargo test -p holtburger-core --lib` passed with 108 tests.
+- `cargo test -p holtburger-cli --lib` passed with 163 tests.
+
+### Decisions Confirmed By Phase 4
+- The first controller consumer should indeed be maintain-range, not direct approach. That kept gameplay legality and approach ownership authoritative while still harvesting the projection benefit where packet cadence actually causes churn.
+- A dedicated maintained-target input seam is worth it. Keeping `ApproachSyncInput` narrow avoided leaking projected sample requirements into direct approach code paths.
+- The CLI can safely own projection as local presentation/runtime state while continuing to mirror authoritative entities for gameplay logic.
+- Projection-aware debug output is useful, but for the TUI it should be render-time only rather than tick-driven cached-buffer refresh. That keeps debug data current without paying a per-tick context rebuild cost.
+
 ## Phase 5: Validate 3D-Client-Oriented Consumer Ergonomics
 
 ### Deliverables
@@ -845,10 +872,10 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: expand authoritative motion inputs in world
-- [ ] Phase 2: expose kinematics through core view events
-- [ ] Phase 3: implement `EntityProjectionSystem`
-- [ ] Phase 4: adopt projection system in CLI debug or render paths
+- [x] Phase 1: expand authoritative motion inputs in world
+- [x] Phase 2: expose kinematics through core view events
+- [x] Phase 3: implement `EntityProjectionSystem`
+- [x] Phase 4: adopt projection system in CLI debug or render paths
 - [ ] Phase 5: validate 3D-client consumer ergonomics
 
 ### Decisions Log
@@ -858,6 +885,7 @@ Mitigation:
 - Do not widen `ApproachSyncInput` for the first projection-aware controller adoption. Add a narrower `MaintainedTargetSyncInput` for follow and sticky-melee instead.
 - Keep authoritative kinematics and motion-adjacent fields on `world::Entity`; projection consumes them but does not own their source of truth.
 - For the initial projection pass, treat `VectorUpdate` plus interpreted locomotion and turn directives as sufficient. Defer `MoveToPosition` and `MoveToObject` directive retention until a later fidelity pass proves they materially improve observer projection.
+- Keep maintain-range admission authoritative by gating on `authoritative_pose`, then let the controller smooth range checks from `projected_pose` once the target has already passed the world-space validity filter.
 - Use projection first in CLI debug surfaces and maintain-range smoothing, not as a wholesale replacement for authoritative UI state.
 - Do not add a generic `projected_pose_or_authoritative(guid)` helper. Prefer explicit `projected_pose`, `authoritative_pose`, and typed `spatial_sample` access so consumers must choose the trust boundary deliberately.
 

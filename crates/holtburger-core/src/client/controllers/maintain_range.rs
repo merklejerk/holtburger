@@ -1,4 +1,5 @@
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
+use crate::client::projection::EntitySpatialSample;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use std::time::{Duration, Instant};
@@ -12,12 +13,17 @@ pub struct MaintainRangeConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaintainRangeSpatialInput {
+    pub target: EntitySpatialSample,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MaintainRangeInput {
     Tick {
         now: Instant,
         target_guid: Guid,
         player_position: WorldPosition,
-        target_position: Option<WorldPosition>,
+        target: Option<MaintainRangeSpatialInput>,
     },
     Suspend {
         clear_latch: bool,
@@ -108,14 +114,16 @@ impl Controller for MaintainRangeController {
                 now,
                 target_guid,
                 player_position,
-                target_position,
+                target,
             } => {
                 self.reset_for_target_change(target_guid);
 
-                let Some(target_position) = target_position else {
+                let Some(target) = target else {
                     return self
                         .stop_and_finish(MaintainRangeFinishReason::TargetUnavailable, true);
                 };
+
+                let target_position = target.target.projected_pose;
 
                 let max_follow_distance = if self.latched_target == Some(target_guid) {
                     self.config.repeat_distance
@@ -195,7 +203,17 @@ mod tests {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(1.5)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(1.5),
+                    projected_pose: position(1.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -219,14 +237,34 @@ mod tests {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(1.5)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(1.5),
+                    projected_pose: position(1.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         let paused = controller.handle(&MaintainRangeInput::Tick {
             now: now + Duration::from_millis(16),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(0.5)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(0.5),
+                    projected_pose: position(0.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         assert_eq!(paused.status, ControllerStatus::Paused);
@@ -244,21 +282,51 @@ mod tests {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(1.5)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(1.5),
+                    projected_pose: position(1.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         let _ = controller.handle(&MaintainRangeInput::Tick {
             now: now + Duration::from_millis(16),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(0.5)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(0.5),
+                    projected_pose: position(0.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         let update = controller.handle(&MaintainRangeInput::Tick {
             now: now + Duration::from_millis(32),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(6.0)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(6.0),
+                    projected_pose: position(6.0),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -282,14 +350,34 @@ mod tests {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(1.5)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(1.5),
+                    projected_pose: position(1.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         let update = controller.handle(&MaintainRangeInput::Tick {
             now: now + Duration::from_millis(16),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(20.0)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(20.0),
+                    projected_pose: position(20.0),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -313,7 +401,17 @@ mod tests {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
-            target_position: Some(position(1.5)),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(1.5),
+                    projected_pose: position(1.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::AuthoritativeOnly,
+                },
+            }),
         });
 
         let update = controller.handle(&MaintainRangeInput::Suspend { clear_latch: true });
@@ -328,5 +426,37 @@ mod tests {
         );
         assert_eq!(controller.latched_target_guid(), None);
         assert!(!controller.is_pursuing());
+    }
+
+    #[test]
+    fn projected_target_pose_drives_range_smoothing() {
+        let now = Instant::now();
+        let mut controller = controller();
+
+        let update = controller.handle(&MaintainRangeInput::Tick {
+            now,
+            target_guid: Guid(0x1234),
+            player_position: position(0.0),
+            target: Some(MaintainRangeSpatialInput {
+                target: EntitySpatialSample {
+                    guid: Guid(0x1234),
+                    authoritative_pose: position(0.5),
+                    projected_pose: position(1.5),
+                    velocity: Default::default(),
+                    omega: Default::default(),
+                    motion_state: None,
+                    projection_mode: crate::client::projection::ProjectionMode::SimulatingVelocity,
+                },
+            }),
+        });
+
+        assert_eq!(update.status, ControllerStatus::Active);
+        assert_eq!(
+            update.effects,
+            vec![MaintainRangeEffect::StartApproach {
+                target: Guid(0x1234),
+                arrival_distance: 0.6,
+            }]
+        );
     }
 }

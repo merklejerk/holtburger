@@ -71,7 +71,7 @@ impl Default for ProjectionConfig {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct EntityProjectionSystem {
     config: ProjectionConfig,
     entities: HashMap<Guid, TrackedEntityProjection>,

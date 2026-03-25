@@ -8,26 +8,23 @@ use ratatui::layout::Rect;
 use super::render::render_party_tab;
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{
-    AppAction, AppUiAction, DashboardTab, FilterInputSession, FooterVerbVisibility, InspectTarget,
-    Interaction, TabController, TabFilterState, UpdateResult, Verb, VerbInputEvent,
-    VerbInputState,
+    AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb,
 };
-use crate::utils::{fuzzy_subsequence_match, normalize_filter_tokens};
 
 #[derive(Debug, Clone)]
 pub struct PartyListEntry<'a> {
     pub member: &'a FellowshipMemberState,
-    pub badges: String,
-    pub distance_suffix: String,
-    nearby: bool,
+    pub is_leader: bool,
+    pub is_self: bool,
+    pub shares_loot: bool,
+    pub nearby: bool,
+    pub distance_m: Option<f32>,
 }
 
 #[derive(Default, Debug, Clone)]
 pub struct PartyTab {
     pub selected_index: usize,
     pub list_state: ratatui::widgets::ListState,
-    active_filter: Option<TabFilterState>,
-    filter_input: Option<FilterInputSession>,
 }
 
 impl PartyTab {
@@ -36,12 +33,21 @@ impl PartyTab {
             return Vec::new();
         };
 
-        party
+        let mut members: Vec<_> = party
             .members
             .iter()
-            .filter(|member| self.matches_active_filter(&member.name))
             .map(|member| self.build_member_entry(data, member, party.leader_guid))
-            .collect()
+            .collect();
+
+        members.sort_by(|left, right| {
+            left.member
+                .name
+                .to_lowercase()
+                .cmp(&right.member.name.to_lowercase())
+                .then_with(|| left.member.guid.0.cmp(&right.member.guid.0))
+        });
+
+        members
     }
 
     fn build_member_entry<'a>(
@@ -52,57 +58,15 @@ impl PartyTab {
     ) -> PartyListEntry<'a> {
         let is_self = Some(member.guid) == data.player_guid;
         let nearby = self.is_member_nearby(data, member.guid);
-        let distance_suffix = self
-            .member_distance(data, member.guid)
-            .map(|distance| format!("  [{distance:.1}m]"))
-            .unwrap_or_else(|| {
-                if nearby && !is_self {
-                    "  [nearby]".to_string()
-                } else if !is_self {
-                    "  [far]".to_string()
-                } else {
-                    String::new()
-                }
-            });
-
-        let mut badges = String::new();
-        if member.guid == leader_guid {
-            badges.push('👑');
-        }
-        if is_self {
-            badges.push('🫵');
-        }
-        if member.share_loot {
-            badges.push('💰');
-        }
-        if nearby && !is_self {
-            badges.push('📍');
-        }
-        if badges.is_empty() {
-            badges.push('·');
-        }
 
         PartyListEntry {
             member,
-            badges,
-            distance_suffix,
+            is_leader: member.guid == leader_guid,
+            is_self,
+            shares_loot: member.share_loot,
             nearby,
+            distance_m: self.member_distance(data, member.guid),
         }
-    }
-
-    fn matches_active_filter(&self, name: &str) -> bool {
-        let Some(active_filter) = &self.active_filter else {
-            return true;
-        };
-
-        if active_filter.tokens.is_empty() {
-            return true;
-        }
-
-        active_filter
-            .tokens
-            .iter()
-            .any(|token| fuzzy_subsequence_match(token, name))
     }
 
     fn member_distance(&self, data: &GameData, guid: Guid) -> Option<f32> {
@@ -120,9 +84,17 @@ impl PartyTab {
             return true;
         }
 
-        data.entities
-            .get(&guid)
-            .is_some_and(|entity| entity.position.landblock_id != Guid::NULL)
+        let Some(player_pos) = data.player_pos else {
+            return false;
+        };
+        let Some(entity) = data.entities.get(&guid) else {
+            return false;
+        };
+
+        entity
+            .position
+            .landblock_chebyshev_distance_to(&player_pos)
+            .is_some_and(|distance| distance <= 1)
     }
 
     fn selected_member<'a>(&self, data: &'a GameData) -> Option<PartyListEntry<'a>> {
@@ -131,44 +103,6 @@ impl PartyTab {
 
     fn is_party_leader(&self, data: &GameData) -> bool {
         data.party.as_ref().is_some_and(|party| Some(party.leader_guid) == data.player_guid)
-    }
-
-    fn clamp_selected_index(&mut self, data: &GameData) {
-        let count = self.visible_members(data).len();
-        if count == 0 {
-            self.selected_index = 0;
-        } else {
-            self.selected_index = self.selected_index.min(count - 1);
-        }
-    }
-
-    fn begin_filter_input(&mut self, _view: &ViewState) -> Option<UpdateResult> {
-        let mut input = VerbInputState::text("Filter");
-        if let Some(active_filter) = &self.active_filter {
-            input.input.set_text(&active_filter.raw_pattern);
-        }
-
-        self.filter_input = Some(FilterInputSession {
-            input,
-            clears_active_filter_on_cancel: self.active_filter.is_some(),
-        });
-
-        Some(UpdateResult::new().with_redraw(true))
-    }
-
-    fn apply_filter_input(&mut self, raw_pattern: String, data: &GameData) -> UpdateResult {
-        let trimmed = raw_pattern.trim().to_string();
-        self.active_filter = if trimmed.is_empty() {
-            None
-        } else {
-            Some(TabFilterState {
-                tokens: normalize_filter_tokens(&trimmed),
-                raw_pattern: trimmed,
-            })
-        };
-        self.filter_input = None;
-        self.clamp_selected_index(data);
-        UpdateResult::new().with_redraw(true)
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
@@ -191,32 +125,16 @@ impl TabController for PartyTab {
             return Vec::new();
         };
 
-        let mut verbs = vec![
-            Verb::new(
-                AppAction::UiAction {
-                    action: AppUiAction::BeginTabFilterInput {
-                        tab: DashboardTab::Party,
-                    },
-                },
-                'f',
-                "Filter",
-            )
-            .with_footer_visibility(if self.active_filter.is_some() {
-                FooterVerbVisibility::Hidden
-            } else {
-                FooterVerbVisibility::Visible
-            }),
-            Verb::new(
+        let mut verbs = Vec::new();
+
+        if selected.is_self {
+            verbs.push(Verb::new(
                 AppAction::SendCommands {
                     commands: vec![ClientCommand::LeaveParty],
                 },
                 'l',
                 "Leave",
-            ),
-        ];
-
-        if !matches!(interaction, None | Some(Interaction::Targeting { .. })) {
-            return verbs;
+            ));
         }
 
         verbs.extend([
@@ -256,7 +174,7 @@ impl TabController for PartyTab {
                     AppAction::OpenTrade {
                         guid: selected.member.guid,
                     },
-                    't',
+                    'd',
                     "Trade",
                 ),
             ]);
@@ -269,8 +187,8 @@ impl TabController for PartyTab {
                         player: selected.member.name.clone(),
                     }],
                 },
-                'm',
-                "Remove",
+                'k',
+                "Kick",
             ));
         }
 
@@ -328,59 +246,6 @@ impl TabController for PartyTab {
             _ => None,
         }
     }
-
-    fn handle_ui_action(
-        &mut self,
-        action: &AppUiAction,
-        _data: &GameData,
-        view: &ViewState,
-    ) -> Option<UpdateResult> {
-        match action {
-            AppUiAction::BeginTabFilterInput {
-                tab: DashboardTab::Party,
-            } => self.begin_filter_input(view),
-            _ => None,
-        }
-    }
-
-    fn footer_input(&self) -> Option<&VerbInputState> {
-        self.filter_input.as_ref().map(|session| &session.input)
-    }
-
-    fn footer_header(&self) -> Option<String> {
-        self.active_filter
-            .as_ref()
-            .map(|filter| format!("[F]ilter: {}", filter.raw_pattern))
-    }
-
-    fn handle_footer_input(
-        &mut self,
-        key: KeyEvent,
-        data: &GameData,
-        _view: &ViewState,
-    ) -> Option<UpdateResult> {
-        let session = self.filter_input.as_mut()?;
-
-        match session.input.handle_key(key) {
-            VerbInputEvent::Changed | VerbInputEvent::Ignored => {
-                Some(UpdateResult::new().with_redraw(true))
-            }
-            VerbInputEvent::Cancelled => {
-                if session.clears_active_filter_on_cancel {
-                    self.active_filter = None;
-                    self.clamp_selected_index(data);
-                }
-                self.filter_input = None;
-                Some(UpdateResult::new().with_redraw(true))
-            }
-            VerbInputEvent::SubmittedText(raw_pattern) => {
-                Some(self.apply_filter_input(raw_pattern, data))
-            }
-            VerbInputEvent::Invalid(_) | VerbInputEvent::SubmittedQuantity(_) => {
-                Some(UpdateResult::new().with_redraw(true))
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -389,6 +254,63 @@ mod tests {
     use holtburger_common::position::WorldPosition;
     use holtburger_world::entity::Entity;
     use holtburger_world::state::FellowshipState;
+
+    fn select_member(tab: &mut PartyTab, data: &GameData, name: &str) {
+        tab.selected_index = tab
+            .visible_members(data)
+            .iter()
+            .position(|entry| entry.member.name == name)
+            .expect("member should be visible");
+    }
+
+    #[test]
+    fn visible_members_are_sorted_by_name() {
+        let player_guid = Guid(0x50000001);
+        let member_guid = Guid(0x50000002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.party = Some(FellowshipState {
+            members: vec![
+                FellowshipMemberState {
+                    guid: player_guid,
+                    name: "Zulu".to_string(),
+                    level: 275,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 300,
+                    max_stamina: 250,
+                    max_mana: 200,
+                    current_health: 300,
+                    current_stamina: 250,
+                    current_mana: 200,
+                    share_loot: true,
+                },
+                FellowshipMemberState {
+                    guid: member_guid,
+                    name: "alpha".to_string(),
+                    level: 274,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 280,
+                    max_stamina: 220,
+                    max_mana: 180,
+                    current_health: 250,
+                    current_stamina: 200,
+                    current_mana: 175,
+                    share_loot: false,
+                },
+            ],
+            ..party_state(player_guid, member_guid)
+        });
+
+        let tab = PartyTab::default();
+        let visible_names: Vec<_> = tab
+            .visible_members(&data)
+            .into_iter()
+            .map(|entry| entry.member.name.clone())
+            .collect();
+
+        assert_eq!(visible_names, vec!["alpha".to_string(), "Zulu".to_string()]);
+    }
 
     #[test]
     fn nearby_member_shows_social_verbs() {
@@ -401,14 +323,48 @@ mod tests {
             .insert(nearby_guid, Entity::new(nearby_guid, "Bestie".to_string(), world_pos(3.0)));
 
         let mut tab = PartyTab::default();
-        tab.selected_index = 1;
+        select_member(&mut tab, &data, "Bestie");
         let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
 
         assert!(has_label(&verbs, "Approach"));
         assert!(has_label(&verbs, "Follow"));
         assert!(has_label(&verbs, "Trade"));
-        assert!(has_label(&verbs, "Remove"));
+        assert!(has_label(&verbs, "Kick"));
+        assert!(!has_label(&verbs, "Leave"));
+    }
+
+    #[test]
+    fn selecting_self_offers_leave_but_not_kick() {
+        let player_guid = Guid(0x50000001);
+        let member_guid = Guid(0x50000002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.party = Some(party_state(player_guid, member_guid));
+
+        let mut tab = PartyTab::default();
+        select_member(&mut tab, &data, "Player");
+        let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
+
         assert!(has_label(&verbs, "Leave"));
+        assert!(!has_label(&verbs, "Kick"));
+    }
+
+    #[test]
+    fn selecting_other_as_non_leader_offers_neither_leave_nor_kick() {
+        let player_guid = Guid(0x50000001);
+        let leader_guid = Guid(0x50000009);
+        let member_guid = Guid(0x50000002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.party = Some(FellowshipState {
+            leader_guid,
+            ..party_state(player_guid, member_guid)
+        });
+
+        let mut tab = PartyTab::default();
+        select_member(&mut tab, &data, "Bestie");
+        let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
+
+        assert!(!has_label(&verbs, "Leave"));
+        assert!(!has_label(&verbs, "Kick"));
     }
 
     #[test]
@@ -416,10 +372,22 @@ mod tests {
         let player_guid = Guid(0x50000001);
         let remote_guid = Guid(0x50000002);
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(world_pos(0.0));
         data.party = Some(party_state(player_guid, remote_guid));
+        data.entities.insert(
+            remote_guid,
+            Entity::new(
+                remote_guid,
+                "Bestie".to_string(),
+                WorldPosition {
+                    landblock_id: Guid(0x03000000),
+                    ..world_pos(0.0)
+                },
+            ),
+        );
 
         let mut tab = PartyTab::default();
-        tab.selected_index = 1;
+        select_member(&mut tab, &data, "Bestie");
         let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
 
         assert!(!has_label(&verbs, "Approach"));
@@ -427,6 +395,64 @@ mod tests {
         assert!(!has_label(&verbs, "Trade"));
         assert!(has_label(&verbs, "Assess"));
         assert!(has_label(&verbs, "Debug"));
+    }
+
+    #[test]
+    fn adjacent_landblock_counts_as_nearby() {
+        let player_guid = Guid(0x50000001);
+        let nearby_guid = Guid(0x50000002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(world_pos(0.0));
+        data.party = Some(party_state(player_guid, nearby_guid));
+        data.entities.insert(
+            nearby_guid,
+            Entity::new(
+                nearby_guid,
+                "Bestie".to_string(),
+                WorldPosition {
+                    landblock_id: Guid(0x02010000),
+                    ..world_pos(3.0)
+                },
+            ),
+        );
+
+        let mut tab = PartyTab::default();
+        select_member(&mut tab, &data, "Bestie");
+
+        assert!(tab.selected_member(&data).is_some_and(|entry| entry.nearby));
+        assert!(has_label(
+            &tab.get_verbs(&data, &ViewState::default(), &None),
+            "Approach"
+        ));
+    }
+
+    #[test]
+    fn two_landblocks_away_is_not_nearby() {
+        let player_guid = Guid(0x50000001);
+        let remote_guid = Guid(0x50000002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.player_pos = Some(world_pos(0.0));
+        data.party = Some(party_state(player_guid, remote_guid));
+        data.entities.insert(
+            remote_guid,
+            Entity::new(
+                remote_guid,
+                "Bestie".to_string(),
+                WorldPosition {
+                    landblock_id: Guid(0x03010000),
+                    ..world_pos(3.0)
+                },
+            ),
+        );
+
+        let mut tab = PartyTab::default();
+        select_member(&mut tab, &data, "Bestie");
+
+        assert!(tab.selected_member(&data).is_some_and(|entry| !entry.nearby));
+        assert!(!has_label(
+            &tab.get_verbs(&data, &ViewState::default(), &None),
+            "Approach"
+        ));
     }
 
     #[test]
@@ -441,32 +467,11 @@ mod tests {
         });
 
         let mut tab = PartyTab::default();
-        tab.selected_index = 1;
+        select_member(&mut tab, &data, "Bestie");
         let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
 
-        assert!(!has_label(&verbs, "Remove"));
-        assert!(has_label(&verbs, "Leave"));
-    }
-
-    #[test]
-    fn filter_applies_to_party_members() {
-        let player_guid = Guid(0x50000001);
-        let member_guid = Guid(0x50000002);
-        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
-        data.party = Some(party_state(player_guid, member_guid));
-        let view = ViewState::default();
-        let mut tab = PartyTab::default();
-
-        let result = tab.apply_filter_input("best".to_string(), &data);
-
-        assert!(result.needs_redraw);
-        assert_eq!(tab.visible_members(&data).len(), 1);
-        assert_eq!(tab.visible_members(&data)[0].member.name, "Bestie");
-
-        let _ = tab.begin_filter_input(&view);
-        let result = tab.handle_footer_input(KeyEvent::from(KeyCode::Esc), &data, &view);
-        assert!(result.is_some_and(|update| update.needs_redraw));
-        assert!(tab.active_filter.is_none());
+        assert!(!has_label(&verbs, "Kick"));
+        assert!(!has_label(&verbs, "Leave"));
     }
 
     fn has_label(verbs: &[Verb], label: &str) -> bool {

@@ -19,6 +19,16 @@ fn confirmation_done_requires_auto_response(confirmation_type: ConfirmationType)
 }
 
 impl Client {
+    async fn enter_world(&mut self) -> Result<()> {
+        if self.state == ClientState::InWorld {
+            return Ok(());
+        }
+
+        self.state = ClientState::InWorld;
+        self.send_status_event();
+        Ok(())
+    }
+
     async fn handle_world_events(&mut self, initial_events: Vec<WorldEvent>) -> Result<()> {
         let mut pending_events = initial_events;
 
@@ -119,6 +129,10 @@ impl Client {
             GameMessage::AutonomousPosition(_) => Ok(()),
             GameMessage::CharacterList(data) => {
                 self.auth.characters = data.characters.clone();
+                self.turbine_chat.enabled = data.use_turbine_chat;
+                if !data.use_turbine_chat {
+                    self.turbine_chat.channels = None;
+                }
 
                 log::info!("Character List for account: {}", data.account_name);
                 for (i, c) in self.auth.characters.iter().enumerate() {
@@ -142,8 +156,7 @@ impl Client {
             GameMessage::GameEvent(ev) => match &ev.event {
                 GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
-                        self.state = ClientState::InWorld;
-                        self.send_status_event();
+                        self.enter_world().await?;
                     }
                     Ok(())
                 }
@@ -159,17 +172,22 @@ impl Client {
                     Ok(())
                 }
                 GameEvent::Tell(data) => {
-                    self.emit_wire_event(WireEvent::Chat {
+                    self.emit_wire_event(WireEvent::Tell {
                         sender: data.sender_name.clone(),
                         message: data.message.clone(),
                     });
                     Ok(())
                 }
                 GameEvent::ChannelBroadcast(data) => {
-                    self.emit_wire_event(WireEvent::Chat {
+                    self.emit_wire_event(WireEvent::ChannelMessage {
+                        channel: ChatChannelInfo::legacy(data.channel),
                         sender: data.sender_name.clone(),
                         message: data.message.clone(),
                     });
+                    Ok(())
+                }
+                GameEvent::SetTurbineChatChannels(data) => {
+                    self.turbine_chat.channels = Some((**data).clone());
                     Ok(())
                 }
                 GameEvent::PopupString(data) => {
@@ -369,8 +387,7 @@ impl Client {
                 });
 
                 self.send_login_complete().await?;
-                self.state = ClientState::InWorld;
-                self.send_status_event();
+                self.enter_world().await?;
                 Ok(())
             }
             GameMessage::PlayerTeleport(data) => {
@@ -444,6 +461,23 @@ impl Client {
                     sender: data.sender_name.clone(),
                     text: data.text.clone(),
                 });
+                Ok(())
+            }
+            GameMessage::TurbineChat(data) => {
+                if let TurbineChatPayload::EventSendToRoom {
+                    channel,
+                    sender_name,
+                    message,
+                    chat_type,
+                    ..
+                } = &data.payload
+                {
+                    self.emit_wire_event(WireEvent::ChannelMessage {
+                        channel: ChatChannelInfo::turbine(*channel, *chat_type, data.dispatch_type),
+                        sender: sender_name.clone(),
+                        message: message.clone(),
+                    });
+                }
                 Ok(())
             }
             _ => Ok(()),
@@ -549,6 +583,24 @@ mod tests {
         assert_eq!(client.world.player.server_control_sequence, 10);
         assert_eq!(client.session.packet_sequence, 2);
         assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn test_entering_world_does_not_auto_subscribe_to_fellowship_updates() {
+        let mut client = build_test_client();
+        client.state = ClientState::EnteringWorld;
+
+        let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: holtburger_common::Guid::NULL,
+            sequence: 1,
+            event: GameEvent::StartGame,
+        })));
+
+        client.handle_message(&encoded).await.unwrap();
+
+        assert_eq!(client.state, ClientState::InWorld);
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(client.session.bytes_out, 0);
     }
 
     #[tokio::test]

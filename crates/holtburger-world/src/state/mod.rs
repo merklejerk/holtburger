@@ -1,3 +1,4 @@
+pub mod fellowship;
 pub mod liveness;
 pub mod mutations;
 pub mod physics;
@@ -6,6 +7,10 @@ pub mod tests;
 pub mod trade;
 pub mod types;
 
+pub use fellowship::{
+    FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
+    FellowshipMemberState, FellowshipState,
+};
 pub use trade::{TradeSide, TradeState};
 pub use types::{ServerTimeSync, WorldState};
 

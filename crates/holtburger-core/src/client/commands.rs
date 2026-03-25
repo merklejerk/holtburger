@@ -1,6 +1,7 @@
 use crate::client::types::{BusyOperationKind, ClientCommand, TargetSlot, WireEvent};
 use crate::client::{Client, ClientState};
 use anyhow::Result;
+use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
 use holtburger_common::properties::{EquipMask, PseudoEquipMask, WorldObjectExt as _};
 use holtburger_protocol::messages::game_action::*;
@@ -45,15 +46,78 @@ fn normalize_spell_cast(
     }
 }
 impl Client {
+    fn resolve_player_guid_by_name(&self, name: &str) -> Option<Guid> {
+        if self.world.player.name().eq_ignore_ascii_case(name) {
+            return Some(self.world.player.guid);
+        }
+
+        self.world
+            .entities
+            .iter()
+            .find(|entity| entity.name().eq_ignore_ascii_case(name))
+            .map(|entity| entity.guid)
+    }
+
+    fn resolve_legacy_channel(kind: crate::client::types::ChatChannelKind) -> Option<ChatChannel> {
+        match kind {
+            crate::client::types::ChatChannelKind::Fellowship => Some(ChatChannel::Fellow),
+            crate::client::types::ChatChannelKind::Allegiance => {
+                Some(ChatChannel::AllegianceBroadcast)
+            }
+            crate::client::types::ChatChannelKind::Vassals => Some(ChatChannel::Vassals),
+            crate::client::types::ChatChannelKind::Patron => Some(ChatChannel::Patron),
+            crate::client::types::ChatChannelKind::Monarch => Some(ChatChannel::Monarch),
+            crate::client::types::ChatChannelKind::CoVassals => Some(ChatChannel::CoVassals),
+            _ => None,
+        }
+    }
+
+    fn resolve_turbine_channel(
+        &self,
+        kind: crate::client::types::ChatChannelKind,
+    ) -> Option<(TurbineChatChannelId, TurbineChatType)> {
+        if !self.turbine_chat.enabled {
+            return None;
+        }
+
+        let channels = self.turbine_chat.channels.as_ref()?;
+
+        match kind {
+            crate::client::types::ChatChannelKind::Allegiance => channels
+                .allegiance
+                .map(|channel| (channel, TurbineChatType::Allegiance)),
+            crate::client::types::ChatChannelKind::General => channels
+                .channel_for_type(TurbineChatType::General)
+                .map(|channel| (channel, TurbineChatType::General)),
+            crate::client::types::ChatChannelKind::Trade => channels
+                .channel_for_type(TurbineChatType::Trade)
+                .map(|channel| (channel, TurbineChatType::Trade)),
+            crate::client::types::ChatChannelKind::Lfg => channels
+                .channel_for_type(TurbineChatType::Lfg)
+                .map(|channel| (channel, TurbineChatType::Lfg)),
+            crate::client::types::ChatChannelKind::Roleplay => channels
+                .channel_for_type(TurbineChatType::Roleplay)
+                .map(|channel| (channel, TurbineChatType::Roleplay)),
+            crate::client::types::ChatChannelKind::Society => channels
+                .channel_for_type(TurbineChatType::Society)
+                .map(|channel| (channel, TurbineChatType::Society)),
+            crate::client::types::ChatChannelKind::Olthoi => channels
+                .channel_for_type(TurbineChatType::Olthoi)
+                .map(|channel| (channel, TurbineChatType::Olthoi)),
+            _ => None,
+        }
+    }
+
     pub(super) async fn handle_command(&mut self, cmd: ClientCommand) -> Result<()> {
         match cmd {
             ClientCommand::Login(_)
             | ClientCommand::SelectCharacter(_)
             | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
 
-            ClientCommand::Talk(_) | ClientCommand::Tell { .. } => {
-                self.handle_chat_command(cmd).await
-            }
+            ClientCommand::Talk(_)
+            | ClientCommand::Tell { .. }
+            | ClientCommand::ChannelMessage { .. }
+            | ClientCommand::Emote(_) => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
             | ClientCommand::QueryHealth(_)
@@ -75,9 +139,19 @@ impl Client {
             | ClientCommand::AddToTrade { .. }
             | ClientCommand::GiveObjectRequest { .. }
             | ClientCommand::SetCharacterOption { .. }
+            | ClientCommand::RecallLifestone
+            | ClientCommand::RecallAllegianceHousing
+            | ClientCommand::Suicide
+            | ClientCommand::EnterPkLite
             | ClientCommand::RespondToConfirmation { .. } => {
                 self.handle_interaction_command(cmd).await
             }
+
+            ClientCommand::CreateParty { .. }
+            | ClientCommand::ShowPartyStatus
+            | ClientCommand::InviteToParty { .. }
+            | ClientCommand::LeaveParty
+            | ClientCommand::UninviteFromParty { .. } => self.handle_social_command(cmd).await,
 
             ClientCommand::Drop(_)
             | ClientCommand::Get(_)
@@ -98,6 +172,7 @@ impl Client {
             | ClientCommand::CancelAttack
             | ClientCommand::Ping
             | ClientCommand::RequestInitialViewState
+            | ClientCommand::SetFellowshipUpdatesSubscribed { .. }
             | ClientCommand::QueryEntityDebugInfo(_)
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
@@ -172,6 +247,68 @@ impl Client {
                         .send_game_action(GameAction::Tell(Box::new(TellActionData {
                             target,
                             message,
+                        })))
+                        .await;
+                }
+                Ok(())
+            }
+            ClientCommand::ChannelMessage { channel, message } => {
+                if matches!(self.state, ClientState::InWorld) {
+                    log::info!(">>> You send {:?}: \"{}\"", channel, message);
+                    if let Some((room_id, chat_type)) = self.resolve_turbine_channel(channel) {
+                        let context_id = self.turbine_chat.next_context_id;
+                        self.turbine_chat.next_context_id =
+                            self.turbine_chat.next_context_id.wrapping_add(1).max(1);
+
+                        return self
+                            .session
+                            .send_message(&GameMessage::TurbineChat(Box::new(
+                                TurbineChatMessageData {
+                                    blob_type: TurbineChatBlobType::RequestBinary,
+                                    dispatch_type: TurbineChatDispatchType::SendToRoomById,
+                                    target_type: 1,
+                                    target_id: 0,
+                                    transport_type: 0,
+                                    transport_id: 0,
+                                    cookie: 0,
+                                    payload: TurbineChatPayload::RequestSendToRoomById {
+                                        context_id,
+                                        room_id,
+                                        message,
+                                        extra_data_size: 0x0C,
+                                        sender_id: self.world.player.guid.0,
+                                        hresult: 0,
+                                        chat_type: chat_type.into(),
+                                    },
+                                },
+                            )))
+                            .await;
+                    }
+
+                    if let Some(channel) = Self::resolve_legacy_channel(channel) {
+                        return self
+                            .send_game_action(GameAction::ChatChannel(Box::new(
+                                ChatChannelActionData {
+                                    channel: channel.into(),
+                                    message,
+                                },
+                            )))
+                            .await;
+                    }
+
+                    self.emit_wire_event(WireEvent::ClientError(format!(
+                        "No supported chat transport is available for {:?}.",
+                        channel
+                    )));
+                }
+                Ok(())
+            }
+            ClientCommand::Emote(text) => {
+                if matches!(self.state, ClientState::InWorld) {
+                    log::info!(">>> You emote: \"{}\"", text);
+                    return self
+                        .send_game_action(GameAction::Emote(Box::new(EmoteActionData {
+                            message: text,
                         })))
                         .await;
                 }
@@ -386,6 +523,28 @@ impl Client {
                     .set_character_option_enabled(option, value);
                 self.emit_player_options_updated();
                 Ok(())
+            }
+            ClientCommand::RecallLifestone => {
+                log::info!(">>> Recalling to lifestone");
+                self.send_game_action(GameAction::TeleToLifestone(Box::new(
+                    TeleToLifestoneActionData,
+                )))
+                .await
+            }
+            ClientCommand::RecallAllegianceHousing => {
+                log::info!(">>> Recalling to allegiance housing");
+                self.send_game_action(GameAction::TeleToMansion(Box::new(TeleToMansionActionData)))
+                    .await
+            }
+            ClientCommand::Suicide => {
+                log::info!(">>> Initiating suicide");
+                self.send_game_action(GameAction::Suicide(Box::new(SuicideActionData)))
+                    .await
+            }
+            ClientCommand::EnterPkLite => {
+                log::info!(">>> Entering PK Lite");
+                self.send_game_action(GameAction::EnterPkLite(Box::new(EnterPkLiteActionData)))
+                    .await
             }
             ClientCommand::RespondToConfirmation { accepted } => {
                 let Some(confirmation) = self.active_confirmation.clone() else {
@@ -612,6 +771,19 @@ impl Client {
                 self.emit_initial_reference_data();
                 Ok(())
             }
+            ClientCommand::SetFellowshipUpdatesSubscribed { enabled } => {
+                if !matches!(self.state, ClientState::InWorld) {
+                    return Ok(());
+                }
+
+                log::info!(">>> Setting fellowship update subscription to {}", enabled);
+                self.send_game_action(GameAction::FellowshipUpdateRequest(Box::new(
+                    FellowshipUpdateRequestActionData {
+                        panel_open: enabled,
+                    },
+                )))
+                .await
+            }
             ClientCommand::SetCombatMode(mode) => {
                 log::info!(">>> Changing combat mode to: {:?}", mode);
                 self.send_game_action(GameAction::ChangeCombatMode(Box::new(
@@ -765,6 +937,155 @@ impl Client {
 
         Ok((target_mask, resolved_slot))
     }
+
+    async fn handle_social_command(&mut self, cmd: ClientCommand) -> Result<()> {
+        if !matches!(self.state, ClientState::InWorld) {
+            return Ok(());
+        }
+
+        match cmd {
+            ClientCommand::CreateParty { name } => {
+                log::info!(">>> Creating party: \"{}\"", name);
+                let share_xp = self
+                    .world
+                    .player
+                    .character_option_enabled(CharacterOption::ShareFellowshipExpAndLuminance);
+                self.send_game_action(GameAction::FellowshipCreate(Box::new(
+                    FellowshipCreateActionData { name, share_xp },
+                )))
+                .await
+            }
+            ClientCommand::ShowPartyStatus => {
+                for line in self.format_party_status_lines() {
+                    self.emit_wire_event(WireEvent::LogMessage(line));
+                }
+                Ok(())
+            }
+            ClientCommand::InviteToParty { player } => {
+                let Some(player_guid) = self.resolve_player_guid_by_name(&player) else {
+                    self.emit_wire_event(WireEvent::ClientError(format!(
+                        "Unable to find player '{}' to invite.",
+                        player
+                    )));
+                    return Ok(());
+                };
+
+                log::info!(">>> Inviting {} to party", player);
+                self.send_game_action(GameAction::FellowshipRecruit(Box::new(
+                    FellowshipRecruitActionData { player_guid },
+                )))
+                .await
+            }
+            ClientCommand::LeaveParty => {
+                log::info!(">>> Leaving party");
+                self.send_game_action(GameAction::FellowshipQuit(Box::new(
+                    FellowshipQuitActionData { disband: false },
+                )))
+                .await
+            }
+            ClientCommand::UninviteFromParty { player } => {
+                let Some(player_guid) = self.resolve_player_guid_by_name(&player) else {
+                    self.emit_wire_event(WireEvent::ClientError(format!(
+                        "Unable to find player '{}' to remove from party.",
+                        player
+                    )));
+                    return Ok(());
+                };
+
+                log::info!(">>> Removing {} from party", player);
+                self.send_game_action(GameAction::FellowshipDismiss(Box::new(
+                    FellowshipDismissActionData { player_guid },
+                )))
+                .await
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn format_party_status_lines(&self) -> Vec<String> {
+        let Some(fellowship) = self.world.fellowship.as_ref() else {
+            return vec!["Not currently in a party.".to_string()];
+        };
+
+        let mut lines = Vec::new();
+        let leader_name = fellowship
+            .members
+            .iter()
+            .find(|member| member.guid == fellowship.leader_guid)
+            .map(|member| member.name.as_str())
+            .unwrap_or("Unknown");
+
+        let party_name = if fellowship.name.is_empty() {
+            "(unknown)"
+        } else {
+            fellowship.name.as_str()
+        };
+
+        lines.push(format!(
+            "Party: {} | Leader: {} | Members: {}",
+            party_name,
+            leader_name,
+            fellowship.members.len()
+        ));
+        lines.push(format!(
+            "Sharing: XP {} | Even {} | Open {} | Locked {}",
+            on_off(fellowship.share_xp),
+            on_off(fellowship.even_share),
+            on_off(fellowship.open),
+            on_off(fellowship.is_locked)
+        ));
+
+        for member in &fellowship.members {
+            let leader_suffix = if member.guid == fellowship.leader_guid {
+                " [leader]"
+            } else {
+                ""
+            };
+            let self_suffix = if member.guid == self.world.player.guid {
+                " [you]"
+            } else {
+                ""
+            };
+
+            lines.push(format!(
+                "- {}{}{} L{} H {}/{} S {}/{} M {}/{} Loot {}",
+                member.name,
+                leader_suffix,
+                self_suffix,
+                member.level,
+                member.current_health,
+                member.max_health,
+                member.current_stamina,
+                member.max_stamina,
+                member.current_mana,
+                member.max_mana,
+                on_off(member.share_loot)
+            ));
+        }
+
+        if !fellowship.departed_members.is_empty() {
+            lines.push(format!(
+                "Departed members tracked: {}",
+                fellowship.departed_members.len()
+            ));
+        }
+
+        if !fellowship.locks.is_empty() {
+            let lock_names = fellowship
+                .locks
+                .iter()
+                .map(|lock| lock.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("Locks: {}", lock_names));
+        }
+
+        lines
+    }
+}
+
+fn on_off(value: bool) -> &'static str {
+    if value { "on" } else { "off" }
 }
 
 /// Pure/stateless function to determine the unequip mask for a given target slot and item.
@@ -818,12 +1139,16 @@ mod tests {
     use super::{NormalizedSpellCast, normalize_spell_cast};
     use crate::client::builder;
     use crate::client::types::{
-        ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent,
+        ActiveCharacterConfirmation, BusyOperationKind, ClientCommand, ClientViewEvent, WireEvent,
     };
     use crate::client::{Client, ClientState};
     use holtburger_common::{CharacterOption, CharacterOptions1, ConfirmationType, Guid};
     use holtburger_world::WorldState;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
+    use holtburger_world::state::{
+        FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
+        FellowshipMemberState, FellowshipState,
+    };
     use std::collections::HashMap;
     use std::sync::Arc;
 
@@ -995,6 +1320,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn request_initial_view_state_projects_cached_fellowship_state() {
+        let mut client = build_test_client();
+        client.world.fellowship = Some(FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x5000_0001),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: true,
+            members: vec![FellowshipMemberState {
+                guid: Guid(0x5000_0001),
+                name: "Player".to_string(),
+                level: 12,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 180,
+                max_stamina: 150,
+                max_mana: 120,
+                current_health: 170,
+                current_stamina: 140,
+                current_mana: 110,
+                share_loot: true,
+            }],
+            departed_members: vec![FellowshipDepartedMemberState {
+                guid: Guid(0x5000_0044),
+                departed_timestamp: 1_712_345_678,
+            }],
+            locks: vec![FellowshipLockEntryState {
+                name: "Leader Lock".to_string(),
+                lock: FellowshipLockState {
+                    unknown_1: 1,
+                    unknown_2: 2,
+                    unknown_3: 3,
+                    timestamp: 4,
+                    sequence: 5,
+                },
+            }],
+        });
+        let mut events = client.subscribe_client_view_events();
+
+        client
+            .handle_command(ClientCommand::RequestInitialViewState)
+            .await
+            .unwrap();
+
+        let mut saw_fellowship = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::FellowshipStateUpdated { fellowship: Some(fellowship) }
+                    if fellowship.name == "Raid Bus"
+                        && fellowship.members.len() == 1
+                        && fellowship.departed_members.len() == 1
+                        && fellowship.locks.len() == 1
+            ) {
+                saw_fellowship = true;
+                break;
+            }
+        }
+
+        assert!(saw_fellowship);
+    }
+
+    #[tokio::test]
     async fn respond_to_confirmation_uses_active_confirmation_state() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
@@ -1025,6 +1414,146 @@ mod tests {
         }
 
         assert!(saw_clear);
+    }
+
+    #[tokio::test]
+    async fn invite_to_party_resolves_player_name_to_guid() {
+        let mut client = build_test_client();
+        client
+            .world
+            .entities
+            .insert(holtburger_world::entity::Entity::new(
+                Guid(0x5000_0042),
+                "Bestie".to_string(),
+                holtburger_common::position::WorldPosition::default(),
+            ));
+
+        client
+            .handle_command(ClientCommand::InviteToParty {
+                player: "bestie".to_string(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn show_party_status_logs_cached_fellowship_summary() {
+        let mut client = build_test_client();
+        client.world.player.guid = Guid(0x5000_0001);
+        client.world.fellowship = Some(FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x5000_0001),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: true,
+            members: vec![
+                FellowshipMemberState {
+                    guid: Guid(0x5000_0001),
+                    name: "Player".to_string(),
+                    level: 12,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 180,
+                    max_stamina: 150,
+                    max_mana: 120,
+                    current_health: 170,
+                    current_stamina: 140,
+                    current_mana: 110,
+                    share_loot: true,
+                },
+                FellowshipMemberState {
+                    guid: Guid(0x5000_0032),
+                    name: "Bravo".to_string(),
+                    level: 18,
+                    cached_cp: 0,
+                    cached_luminance: 0,
+                    max_health: 220,
+                    max_stamina: 160,
+                    max_mana: 140,
+                    current_health: 215,
+                    current_stamina: 150,
+                    current_mana: 130,
+                    share_loot: true,
+                },
+            ],
+            departed_members: vec![FellowshipDepartedMemberState {
+                guid: Guid(0x5000_0044),
+                departed_timestamp: 1_712_345_678,
+            }],
+            locks: vec![FellowshipLockEntryState {
+                name: "Leader Lock".to_string(),
+                lock: FellowshipLockState {
+                    unknown_1: 1,
+                    unknown_2: 2,
+                    unknown_3: 3,
+                    timestamp: 4,
+                    sequence: 5,
+                },
+            }],
+        });
+        let mut wire_events = client.subscribe_wire_events();
+
+        client
+            .handle_command(ClientCommand::ShowPartyStatus)
+            .await
+            .unwrap();
+
+        let mut log_lines = Vec::new();
+        while let Ok(event) = wire_events.try_recv() {
+            if let WireEvent::LogMessage(line) = event {
+                log_lines.push(line);
+            }
+        }
+
+        assert!(
+            log_lines
+                .iter()
+                .any(|line| line == "Party: Raid Bus | Leader: Player | Members: 2")
+        );
+        assert!(
+            log_lines
+                .iter()
+                .any(|line| line == "Sharing: XP on | Even off | Open on | Locked on")
+        );
+        assert!(log_lines.iter().any(|line| {
+            line == "- Player [leader] [you] L12 H 170/180 S 140/150 M 110/120 Loot on"
+        }));
+        assert!(
+            log_lines
+                .iter()
+                .any(|line| line == "Departed members tracked: 1")
+        );
+        assert!(log_lines.iter().any(|line| line == "Locks: Leader Lock"));
+    }
+
+    #[tokio::test]
+    async fn set_fellowship_updates_subscribed_sends_update_request_in_world() {
+        let mut client = build_test_client();
+
+        client
+            .handle_command(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.session.bytes_out > 0);
+    }
+
+    #[tokio::test]
+    async fn set_fellowship_updates_subscribed_is_ignored_outside_world() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+
+        client
+            .handle_command(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true })
+            .await
+            .unwrap();
+
+        assert_eq!(client.session.game_action_sequence, 0);
+        assert_eq!(client.session.bytes_out, 0);
     }
 
     #[tokio::test]

@@ -149,17 +149,23 @@ impl GameState {
             ClientViewEvent::LogMessage(_)
             | ClientViewEvent::ServerMessage { .. }
             | ClientViewEvent::Chat { .. }
+            | ClientViewEvent::FellowshipActivity { .. }
+            | ClientViewEvent::ChannelMessage { .. }
+            | ClientViewEvent::Tell { .. }
             | ClientViewEvent::Emote { .. }
             | ClientViewEvent::PingResponse
             | ClientViewEvent::BootAccount(_)
             | ClientViewEvent::NetPulse { .. }
             | ClientViewEvent::Disconnected => {
-                self.chat.handle_event(event);
+                self.chat
+                    .handle_event(event, self.data.character_name.as_deref());
             }
             ClientViewEvent::CombatFeedback(feedback) => {
                 result.merge(self.handle_combat_feedback(&feedback));
-                self.chat
-                    .handle_event(ClientViewEvent::CombatFeedback(feedback));
+                self.chat.handle_event(
+                    ClientViewEvent::CombatFeedback(feedback),
+                    self.data.character_name.as_deref(),
+                );
                 self.sync_sticky_melee_pursuit(&mut result);
                 result.needs_redraw = true;
             }
@@ -291,6 +297,10 @@ impl GameState {
                     self.refresh_vendor_item_context_if_visible(item.guid);
                     result.needs_redraw = true;
                 }
+            }
+            ClientViewEvent::FellowshipStateUpdated { fellowship } => {
+                self.data.party = fellowship;
+                result.needs_redraw = true;
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
                 let partner_guid = trade.as_ref().map(|t| t.partner_side.guid);
@@ -3719,6 +3729,42 @@ mod tests {
                 options2: holtburger_common::CharacterOptions2::HEAR_GENERAL_CHAT,
             })
         ));
+    }
+
+    #[test]
+    fn projected_fellowship_state_updates_game_data() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        let fellowship = holtburger_world::state::FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x50000001),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            members: vec![holtburger_world::state::FellowshipMemberState {
+                guid: Guid(0x50000001),
+                name: "Player".to_string(),
+                level: 42,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 200,
+                max_stamina: 180,
+                max_mana: 160,
+                current_health: 190,
+                current_stamina: 170,
+                current_mana: 150,
+                share_loot: true,
+            }],
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        };
+
+        let result = state.handle_view_event(ClientViewEvent::FellowshipStateUpdated {
+            fellowship: Some(fellowship.clone()),
+        });
+
+        assert!(result.needs_redraw);
+        assert_eq!(state.data.party, Some(fellowship));
     }
 
     #[test]

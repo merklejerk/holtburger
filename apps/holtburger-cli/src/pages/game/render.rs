@@ -26,12 +26,27 @@ fn confirmation_title(confirmation_type: ConfirmationType) -> &'static str {
     }
 }
 
+fn confirmation_body_text(confirmation: &ActiveCharacterConfirmation) -> String {
+    match confirmation.confirmation_type {
+        ConfirmationType::Fellowship if !confirmation.text.trim().is_empty() => {
+            format!(
+                "{} invited you to join their fellowship.",
+                confirmation.text.trim()
+            )
+        }
+        _ => confirmation.text.clone(),
+    }
+}
+
 fn render_confirmation_overlay(
     f: &mut Frame,
     area: Rect,
     confirmation: &ActiveCharacterConfirmation,
 ) {
-    let text = format!("{}\n\n[Enter] Accept    [Esc] Decline", confirmation.text);
+    let text = format!(
+        "{}\n\n[Enter] Accept    [Esc] Decline",
+        confirmation_body_text(confirmation)
+    );
     render_modal_card(
         f,
         area,
@@ -199,6 +214,59 @@ mod tests {
         assert!(rendered.contains("Chance of success is 75%. Continue?"));
         assert!(rendered.contains("[Enter] Accept"));
         assert!(rendered.contains("[Esc] Decline"));
+    }
+
+    #[test]
+    fn fellowship_confirmation_body_expands_inviter_name() {
+        let text = confirmation_body_text(&ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::Fellowship,
+            context: 99,
+            text: "Bestie".to_string(),
+        });
+
+        assert_eq!(text, "Bestie invited you to join their fellowship.");
+    }
+
+    #[test]
+    fn fellowship_confirmation_overlay_renders_contextual_prompt() {
+        let area = Rect::new(0, 0, 120, 40);
+        let backend = TestBackend::new(area.width, area.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal should initialize");
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.data = GameData::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::Fellowship,
+            context: 12,
+            text: "Bestie".to_string(),
+        });
+
+        let logon_retry = RetryState::new(5);
+        let enter_retry = RetryState::new(5);
+        let net_stats = NetStats::default();
+        let ctx = RenderContext {
+            account_name: "account",
+            client_state: &ClientState::InWorld,
+            net_stats: &net_stats,
+            is_modal_active: false,
+            logon_retry: &logon_retry,
+            enter_retry: &enter_retry,
+            server_time: None,
+        };
+
+        terminal
+            .draw(|frame| state.render(frame, area, &ctx))
+            .expect("game page should render");
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+
+        assert!(rendered.contains("Bestie invited you to join their fellowship."));
+        assert!(!rendered.contains("Chance of success is 75%. Continue?"));
     }
 
     #[test]

@@ -408,13 +408,17 @@ impl EntityProjectionSystem {
         tracked.last_derived_at = now;
 
         if should_snap {
-            tracked.tracking_state = TrackingState::AuthoritativeOnly;
-            tracked.public_state.projected_pose = pos;
-            tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+            tracked.snap_projected_pose(
+                pos,
+                TrackingState::AuthoritativeOnly,
+                ProjectionMode::AuthoritativeOnly,
+            );
             tracked.inputs.interpolation = None;
         } else {
-            tracked.tracking_state = TrackingState::Projecting;
-            tracked.public_state.projection_mode = ProjectionMode::InterpolatingPosition;
+            tracked.set_projection_state(
+                TrackingState::Projecting,
+                ProjectionMode::InterpolatingPosition,
+            );
             tracked.inputs.interpolation = Some(PositionInterpolation {
                 start_pose: tracked.public_state.projected_pose,
                 started_at: now,
@@ -437,17 +441,21 @@ impl EntityProjectionSystem {
         }
         tracked.inputs.last_authoritative_update = now;
         tracked.inputs.interpolation = None;
-        tracked.tracking_state = TrackingState::AuthoritativeOnly;
         tracked.sync_public_inputs();
-        tracked.public_state.projected_pose = pose;
-        tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+        tracked.snap_projected_pose(
+            pose,
+            TrackingState::AuthoritativeOnly,
+            ProjectionMode::AuthoritativeOnly,
+        );
         tracked.last_derived_at = now;
     }
 
     fn suspend_tracking_state(tracked: &mut TrackedEntityProjection, now: Instant) {
-        tracked.public_state.projected_pose = tracked.inputs.authoritative_pose;
-        tracked.tracking_state = TrackingState::Suspended;
-        tracked.public_state.projection_mode = ProjectionMode::Suspended;
+        tracked.snap_projected_pose(
+            tracked.inputs.authoritative_pose,
+            TrackingState::Suspended,
+            ProjectionMode::Suspended,
+        );
         tracked.inputs.interpolation = None;
         tracked.last_derived_at = now;
     }
@@ -465,7 +473,7 @@ impl EntityProjectionSystem {
         tracked.sync_public_inputs();
 
         if tracked.tracking_state == TrackingState::Suspended {
-            tracked.public_state.projection_mode = ProjectionMode::Suspended;
+            tracked.set_projection_state(TrackingState::Suspended, ProjectionMode::Suspended);
             return;
         }
 
@@ -494,18 +502,17 @@ impl EntityProjectionSystem {
 
         let simulated_heading = Self::advance_heading_projection(tracked, dt);
         if simulated_heading {
-            tracked.tracking_state = TrackingState::Projecting;
             mode = ProjectionMode::SimulatingMotionState;
         } else {
             tracked.public_state.projected_pose.rotation = authoritative_pose.rotation;
-            tracked.tracking_state = if mode == ProjectionMode::AuthoritativeOnly {
-                TrackingState::AuthoritativeOnly
-            } else {
-                TrackingState::Projecting
-            };
         }
 
-        tracked.public_state.projection_mode = mode;
+        let tracking_state = if mode == ProjectionMode::AuthoritativeOnly {
+            TrackingState::AuthoritativeOnly
+        } else {
+            TrackingState::Projecting
+        };
+        tracked.set_projection_state(tracking_state, mode);
     }
 
     fn advance_interpolation(tracked: &mut TrackedEntityProjection, now: Instant) -> bool {
@@ -530,11 +537,15 @@ impl EntityProjectionSystem {
 
         if progress >= 1.0 {
             tracked.inputs.interpolation = None;
-            tracked.tracking_state = TrackingState::AuthoritativeOnly;
-            tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+            tracked.set_projection_state(
+                TrackingState::AuthoritativeOnly,
+                ProjectionMode::AuthoritativeOnly,
+            );
         } else {
-            tracked.tracking_state = TrackingState::Projecting;
-            tracked.public_state.projection_mode = ProjectionMode::InterpolatingPosition;
+            tracked.set_projection_state(
+                TrackingState::Projecting,
+                ProjectionMode::InterpolatingPosition,
+            );
         }
 
         true
@@ -656,6 +667,25 @@ impl TrackedEntityProjection {
         self.public_state.omega = self.inputs.omega;
         self.public_state.motion_state = self.inputs.motion_state;
         self.public_state.last_authoritative_update = self.inputs.last_authoritative_update;
+    }
+
+    fn set_projection_state(
+        &mut self,
+        tracking_state: TrackingState,
+        projection_mode: ProjectionMode,
+    ) {
+        self.tracking_state = tracking_state;
+        self.public_state.projection_mode = projection_mode;
+    }
+
+    fn snap_projected_pose(
+        &mut self,
+        pose: WorldPosition,
+        tracking_state: TrackingState,
+        projection_mode: ProjectionMode,
+    ) {
+        self.public_state.projected_pose = pose;
+        self.set_projection_state(tracking_state, projection_mode);
     }
 }
 

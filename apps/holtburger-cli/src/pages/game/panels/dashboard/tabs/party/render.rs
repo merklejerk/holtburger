@@ -103,11 +103,7 @@ pub fn render_party_tab(
 
     let members = tab.visible_members(data);
     let content_len = members.len();
-    let selected_index = if content_len == 0 {
-        0
-    } else {
-        tab.selected_index.min(content_len - 1)
-    };
+    let selected_index = tab.clamped_selected_index_for_len(content_len).unwrap_or(0);
 
     let items: Vec<ListItem<'static>> = members
         .iter()

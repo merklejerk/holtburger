@@ -2814,6 +2814,7 @@ mod tests {
                 forward_command: Some(InterpretedMotionCommand::DEAD),
                 sidestep_command: None,
                 turn_command: None,
+                ..Default::default()
             }),
         });
 
@@ -2847,6 +2848,7 @@ mod tests {
             forward_command: Some(InterpretedMotionCommand::DEAD),
             sidestep_command: None,
             turn_command: None,
+            ..Default::default()
         });
         state.data.entities.insert(target_guid, target);
 

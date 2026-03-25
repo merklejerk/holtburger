@@ -95,6 +95,10 @@ pub struct SalvagingState {
 }
 
 impl GameState {
+    pub(super) fn mark_fellowship_invite_accepted(&mut self) {
+        self.runtime.open_party_tab_on_next_fellowship_update = true;
+    }
+
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
         Self::with_chat_log(guid, name, world_name, None)
     }
@@ -299,7 +303,17 @@ impl GameState {
                 }
             }
             ClientViewEvent::FellowshipStateUpdated { fellowship } => {
+                let should_open_party_tab =
+                    fellowship.is_some() && self.runtime.open_party_tab_on_next_fellowship_update;
+
+                self.runtime.open_party_tab_on_next_fellowship_update = false;
+
                 self.data.party = fellowship;
+                if should_open_party_tab {
+                    result.actions.push(AppAction::UiAction {
+                        action: AppUiAction::SetDashboardActiveTab(DashboardTab::Party),
+                    });
+                }
                 result.needs_redraw = true;
             }
             ClientViewEvent::TradeStateUpdated { trade } => {
@@ -1684,6 +1698,7 @@ pub struct ViewState {
 #[derive(Debug, Clone, Default)]
 struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
+    open_party_tab_on_next_fellowship_update: bool,
     navigation: NavigationAutomation,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
@@ -1728,11 +1743,14 @@ impl ViewState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use holtburger_common::ConfirmationType;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
+    use holtburger_core::ActiveCharacterConfirmation;
     use holtburger_core::client::navigation::StickyMeleeSyncInput;
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
@@ -3764,7 +3782,69 @@ mod tests {
         });
 
         assert!(result.needs_redraw);
+        assert!(result.actions.is_empty());
         assert_eq!(state.data.party, Some(fellowship));
+    }
+
+    #[test]
+    fn accepted_fellowship_invite_opens_party_tab_on_next_state_update() {
+        let mut state = GameState::new(Guid(0x50000001), "Player".to_string(), "World".to_string());
+        state.view.active_confirmation = Some(ActiveCharacterConfirmation {
+            confirmation_type: ConfirmationType::Fellowship,
+            context: 42,
+            text: "Leader".to_string(),
+        });
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let accept_result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(accept_result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::RespondToConfirmation { accepted: true }
+            )
+        }));
+
+        let fellowship = holtburger_world::state::FellowshipState {
+            name: "Raid Bus".to_string(),
+            leader_guid: Guid(0x50000002),
+            share_xp: true,
+            even_share: false,
+            open: true,
+            is_locked: false,
+            members: vec![holtburger_world::state::FellowshipMemberState {
+                guid: Guid(0x50000001),
+                name: "Player".to_string(),
+                level: 42,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 200,
+                max_stamina: 180,
+                max_mana: 160,
+                current_health: 190,
+                current_stamina: 170,
+                current_mana: 150,
+                share_loot: true,
+            }],
+            departed_members: Vec::new(),
+            locks: Vec::new(),
+        };
+
+        let result = state.handle_view_event(ClientViewEvent::FellowshipStateUpdated {
+            fellowship: Some(fellowship.clone()),
+        });
+
+        assert!(result.needs_redraw);
+        assert!(result.actions.iter().any(|action| {
+            matches!(
+                action,
+                AppAction::UiAction {
+                    action: AppUiAction::SetDashboardActiveTab(DashboardTab::Party)
+                }
+            )
+        }));
+        assert_eq!(state.data.party, Some(fellowship));
+        assert!(!state.runtime.open_party_tab_on_next_fellowship_update);
     }
 
     #[test]

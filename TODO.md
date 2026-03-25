@@ -225,6 +225,7 @@
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] Harden reconnect.
 - [ ] Interpolate entity motion properties.
+- [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

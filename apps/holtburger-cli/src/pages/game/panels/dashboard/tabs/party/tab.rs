@@ -26,6 +26,10 @@ pub struct PartyTab {
 }
 
 impl PartyTab {
+    pub(crate) fn clamped_selected_index_for_len(&self, len: usize) -> Option<usize> {
+        (len > 0).then_some(self.selected_index.min(len - 1))
+    }
+
     pub(crate) fn visible_members<'a>(&self, data: &'a GameData) -> Vec<PartyListEntry<'a>> {
         let Some(party) = data.party.as_ref() else {
             return Vec::new();
@@ -97,9 +101,9 @@ impl PartyTab {
     }
 
     fn selected_member<'a>(&self, data: &'a GameData) -> Option<PartyListEntry<'a>> {
-        self.visible_members(data)
-            .into_iter()
-            .nth(self.selected_index)
+        let members = self.visible_members(data);
+        let selected_index = self.clamped_selected_index_for_len(members.len())?;
+        members.into_iter().nth(selected_index)
     }
 
     fn is_party_leader(&self, data: &GameData) -> bool {
@@ -370,6 +374,43 @@ mod tests {
 
         assert!(!has_label(&verbs, "Leave"));
         assert!(!has_label(&verbs, "Kick"));
+    }
+
+    #[test]
+    fn selected_member_clamps_when_party_list_shrinks() {
+        let player_guid = Guid(0x50000001);
+        let member_guid = Guid(0x50000002);
+        let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
+        data.party = Some(party_state(player_guid, member_guid));
+
+        let mut tab = PartyTab::default();
+        select_member(&mut tab, &data, "Bestie");
+
+        data.party = Some(FellowshipState {
+            members: vec![FellowshipMemberState {
+                guid: player_guid,
+                name: "Player".to_string(),
+                level: 275,
+                cached_cp: 0,
+                cached_luminance: 0,
+                max_health: 300,
+                max_stamina: 250,
+                max_mana: 200,
+                current_health: 300,
+                current_stamina: 250,
+                current_mana: 200,
+                share_loot: true,
+            }],
+            ..party_state(player_guid, member_guid)
+        });
+
+        let selected = tab
+            .selected_member(&data)
+            .expect("selection should clamp to remaining member");
+        let verbs = tab.get_verbs(&data, &ViewState::default(), &None);
+
+        assert_eq!(selected.member.name, "Player");
+        assert!(has_label(&verbs, "Leave"));
     }
 
     #[test]

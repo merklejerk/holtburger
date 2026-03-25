@@ -192,6 +192,21 @@ Because `iter_projected_entities()` currently returns references to stored `Proj
 - No downstream consumer changes are required.
 - The code clearly distinguishes authoritative inputs from derived output state.
 
+### Phase 1 Implementation Notes
+- Split tracked projection state in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) into explicit `ProjectionInputs` plus cached `ProjectedEntityState`, replacing the previous shape where authoritative inputs and derived output were intermingled in one struct.
+- Added an internal `TrackingState` enum to distinguish lifecycle intent from the public `ProjectionMode` surface without changing any consumer-facing APIs.
+- Reworked event handlers and derivation helpers so velocity, omega, motion snapshot, authoritative pose, and interpolation live under tracked inputs, while cached public state is synchronized explicitly through one internal copy step.
+- Preserved the current public surface and downstream behavior: `handle_view_event(...)`, `tick(...)`, `projected_pose(...)`, `authoritative_pose(...)`, `spatial_sample(...)`, `spatial_sample_or_authoritative(...)`, and `iter_projected_entities()` did not change shape.
+
+### Verification
+- `cargo test -p holtburger-core --lib` passed after the internal projection-state split.
+- `cargo test -p holtburger-cli --lib` passed without downstream code changes.
+
+### Decisions Confirmed By Phase 1
+- The public API does not need to change to separate tracked authoritative inputs from cached projected output.
+- Internal lifecycle state and public render/debug mode should remain separate concepts.
+- The projection cache can be refactored internally while preserving same-turn reads required by current CLI consumers.
+
 ## Phase 2: Normalize Event Ingestion And Bootstrap Policy
 
 ### Deliverables
@@ -272,7 +287,7 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: encode lifecycle and input separation
+- [x] Phase 1: encode lifecycle and input separation
 - [ ] Phase 2: normalize event ingestion and bootstrap policy
 - [ ] Phase 3: centralize derivation and reset semantics
 - [ ] Phase 4: add lifecycle tests and doc updates
@@ -285,9 +300,10 @@ Mitigation:
 - Treat internal `TrackingState` and public `ProjectionMode` as separate concepts; do not collapse lifecycle state into the public render/debug mode surface.
 - Keep the hardened system cache-backed because existing public iteration returns references to stored projected state.
 - Any authoritative snapshot event (`EntitySpawned`, `EntityReplaced`, `EntityIdentified`, authoritative pose updates, and forced reposition) is a valid resume point from suspension unless implementation evidence proves a stricter rule is necessary.
+- Phase 1 confirmed that the tracked-input split can land without changing CLI consumers or widening projection accessors.
 
 ### Verification Log
-- Pending implementation.
+- Phase 1: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after separating tracked authoritative inputs from cached public state and introducing explicit internal lifecycle state.
 
 ### Open Questions
 - Should first authoritative bootstrap from `EntityMoved` be permanently documented as part of the public projection contract, or remain an internal policy detail?

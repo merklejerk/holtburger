@@ -120,11 +120,29 @@ pub struct EntityProjectionSystem {
     entities: HashMap<Guid, TrackedEntityProjection>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TrackingState {
+    AuthoritativeOnly,
+    Projecting,
+    Suspended,
+}
+
 #[derive(Debug, Clone)]
 struct TrackedEntityProjection {
+    tracking_state: TrackingState,
+    inputs: ProjectionInputs,
     public_state: ProjectedEntityState,
+    last_derived_at: Instant,
+}
+
+#[derive(Debug, Clone)]
+struct ProjectionInputs {
+    authoritative_pose: WorldPosition,
+    last_authoritative_update: Instant,
+    velocity: Vector3,
+    omega: Vector3,
+    motion_state: Option<EntityMotionSnapshot>,
     interpolation: Option<PositionInterpolation>,
-    last_simulated_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -158,36 +176,42 @@ impl EntityProjectionSystem {
                 omega,
             } => {
                 if let Some(tracked) = self.entities.get_mut(guid) {
-                    tracked.public_state.velocity = *velocity;
-                    tracked.public_state.omega = *omega;
+                    tracked.inputs.velocity = *velocity;
+                    tracked.inputs.omega = *omega;
+                    tracked.sync_public_inputs();
                 }
             }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
                 if let Some(tracked) = self.entities.get_mut(guid) {
-                    tracked.public_state.motion_state = *snapshot;
-                    if tracked.public_state.projection_mode == ProjectionMode::Suspended {
+                    tracked.inputs.motion_state = *snapshot;
+                    tracked.sync_public_inputs();
+                    if tracked.tracking_state == TrackingState::Suspended {
+                        tracked.tracking_state = TrackingState::AuthoritativeOnly;
                         tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
                     }
                 }
             }
             ClientViewEvent::ForcedReposition { guid, pos, .. } => {
                 let tracked = self.ensure_entity(*guid, *pos, now);
-                tracked.public_state.authoritative_pose = *pos;
+                tracked.inputs.authoritative_pose = *pos;
+                tracked.inputs.velocity = Vector3::zero();
+                tracked.inputs.omega = Vector3::zero();
+                tracked.inputs.motion_state = None;
+                tracked.inputs.last_authoritative_update = now;
+                tracked.inputs.interpolation = None;
+                tracked.tracking_state = TrackingState::AuthoritativeOnly;
+                tracked.sync_public_inputs();
                 tracked.public_state.projected_pose = *pos;
-                tracked.public_state.velocity = Vector3::zero();
-                tracked.public_state.omega = Vector3::zero();
-                tracked.public_state.motion_state = None;
-                tracked.public_state.last_authoritative_update = now;
                 tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
-                tracked.interpolation = None;
-                tracked.last_simulated_at = now;
+                tracked.last_derived_at = now;
             }
             ClientViewEvent::TeleportStarted { .. } => {
                 for tracked in self.entities.values_mut() {
-                    tracked.public_state.projected_pose = tracked.public_state.authoritative_pose;
+                    tracked.public_state.projected_pose = tracked.inputs.authoritative_pose;
+                    tracked.tracking_state = TrackingState::Suspended;
                     tracked.public_state.projection_mode = ProjectionMode::Suspended;
-                    tracked.interpolation = None;
-                    tracked.last_simulated_at = now;
+                    tracked.inputs.interpolation = None;
+                    tracked.last_derived_at = now;
                 }
             }
             ClientViewEvent::EntityDespawned { guid } => {
@@ -272,15 +296,17 @@ impl EntityProjectionSystem {
 
     fn upsert_from_entity(&mut self, entity: &Entity, now: Instant) {
         let tracked = self.ensure_entity(entity.guid, entity.position, now);
-        tracked.public_state.authoritative_pose = entity.position;
+        tracked.inputs.authoritative_pose = entity.position;
+        tracked.inputs.velocity = entity.velocity;
+        tracked.inputs.omega = entity.omega;
+        tracked.inputs.motion_state = entity.motion_snapshot;
+        tracked.inputs.last_authoritative_update = now;
+        tracked.inputs.interpolation = None;
+        tracked.tracking_state = TrackingState::AuthoritativeOnly;
+        tracked.sync_public_inputs();
         tracked.public_state.projected_pose = entity.position;
-        tracked.public_state.velocity = entity.velocity;
-        tracked.public_state.omega = entity.omega;
-        tracked.public_state.motion_state = entity.motion_snapshot;
         tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
-        tracked.public_state.last_authoritative_update = now;
-        tracked.interpolation = None;
-        tracked.last_simulated_at = now;
+        tracked.last_derived_at = now;
     }
 
     fn handle_entity_moved(&mut self, guid: Guid, pos: WorldPosition, now: Instant) {
@@ -297,17 +323,20 @@ impl EntityProjectionSystem {
             snap_heading,
         ) || max_interp == Duration::ZERO;
 
-        tracked.public_state.authoritative_pose = pos;
-        tracked.public_state.last_authoritative_update = now;
-        tracked.last_simulated_at = now;
+        tracked.inputs.authoritative_pose = pos;
+        tracked.inputs.last_authoritative_update = now;
+        tracked.sync_public_inputs();
+        tracked.last_derived_at = now;
 
         if should_snap {
+            tracked.tracking_state = TrackingState::AuthoritativeOnly;
             tracked.public_state.projected_pose = pos;
             tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
-            tracked.interpolation = None;
+            tracked.inputs.interpolation = None;
         } else {
+            tracked.tracking_state = TrackingState::Projecting;
             tracked.public_state.projection_mode = ProjectionMode::InterpolatingPosition;
-            tracked.interpolation = Some(PositionInterpolation {
+            tracked.inputs.interpolation = Some(PositionInterpolation {
                 start_pose: tracked.public_state.projected_pose,
                 started_at: now,
                 duration: max_interp,
@@ -321,11 +350,14 @@ impl EntityProjectionSystem {
         config: ProjectionConfig,
     ) {
         let dt = now
-            .checked_duration_since(tracked.last_simulated_at)
+            .checked_duration_since(tracked.last_derived_at)
             .unwrap_or_default();
-        tracked.last_simulated_at = now;
+        tracked.last_derived_at = now;
 
-        if tracked.public_state.projection_mode == ProjectionMode::Suspended {
+        tracked.sync_public_inputs();
+
+        if tracked.tracking_state == TrackingState::Suspended {
+            tracked.public_state.projection_mode = ProjectionMode::Suspended;
             return;
         }
 
@@ -334,19 +366,19 @@ impl EntityProjectionSystem {
         }
 
         let mut mode = ProjectionMode::AuthoritativeOnly;
-        let authoritative_pose = tracked.public_state.authoritative_pose;
+        let authoritative_pose = tracked.inputs.authoritative_pose;
         tracked.public_state.projected_pose.landblock_id = authoritative_pose.landblock_id;
 
         let elapsed_since_authoritative = now
-            .checked_duration_since(tracked.public_state.last_authoritative_update)
+            .checked_duration_since(tracked.inputs.last_authoritative_update)
             .unwrap_or_default()
             .min(config.max_dead_reckon);
 
-        if tracked.public_state.velocity.length_squared() > EPSILON
+        if tracked.inputs.velocity.length_squared() > EPSILON
             && elapsed_since_authoritative > Duration::ZERO
         {
             tracked.public_state.projected_pose.coords = authoritative_pose.coords
-                + tracked.public_state.velocity * elapsed_since_authoritative.as_secs_f32();
+                + tracked.inputs.velocity * elapsed_since_authoritative.as_secs_f32();
             mode = ProjectionMode::SimulatingVelocity;
         } else {
             tracked.public_state.projected_pose.coords = authoritative_pose.coords;
@@ -354,16 +386,22 @@ impl EntityProjectionSystem {
 
         let simulated_heading = Self::advance_heading_projection(tracked, dt);
         if simulated_heading {
+            tracked.tracking_state = TrackingState::Projecting;
             mode = ProjectionMode::SimulatingMotionState;
         } else {
             tracked.public_state.projected_pose.rotation = authoritative_pose.rotation;
+            tracked.tracking_state = if mode == ProjectionMode::AuthoritativeOnly {
+                TrackingState::AuthoritativeOnly
+            } else {
+                TrackingState::Projecting
+            };
         }
 
         tracked.public_state.projection_mode = mode;
     }
 
     fn advance_interpolation(tracked: &mut TrackedEntityProjection, now: Instant) -> bool {
-        let Some(interpolation) = tracked.interpolation else {
+        let Some(interpolation) = tracked.inputs.interpolation else {
             return false;
         };
 
@@ -378,14 +416,16 @@ impl EntityProjectionSystem {
 
         tracked.public_state.projected_pose = interpolate_pose(
             interpolation.start_pose,
-            tracked.public_state.authoritative_pose,
+            tracked.inputs.authoritative_pose,
             progress,
         );
 
         if progress >= 1.0 {
-            tracked.interpolation = None;
+            tracked.inputs.interpolation = None;
+            tracked.tracking_state = TrackingState::AuthoritativeOnly;
             tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
         } else {
+            tracked.tracking_state = TrackingState::Projecting;
             tracked.public_state.projection_mode = ProjectionMode::InterpolatingPosition;
         }
 
@@ -398,7 +438,7 @@ impl EntityProjectionSystem {
             return false;
         }
 
-        if let Some(snapshot) = &mut tracked.public_state.motion_state {
+        if let Some(snapshot) = &mut tracked.inputs.motion_state {
             if let Some(directive) = snapshot.directive {
                 let advanced = match directive {
                     EntityMotionDirective::TurnToHeading {
@@ -463,11 +503,11 @@ impl EntityProjectionSystem {
             }
         }
 
-        if tracked.public_state.omega.length_squared() > EPSILON {
+        if tracked.inputs.omega.length_squared() > EPSILON {
             let heading = tracked.public_state.projected_pose.rotation.to_heading();
             tracked.public_state.projected_pose.rotation =
                 Quaternion::from_heading(normalize_heading(
-                    heading + (tracked.public_state.omega.z * dt_secs),
+                    heading + (tracked.inputs.omega.z * dt_secs),
                 ));
             return true;
         }
@@ -479,6 +519,15 @@ impl EntityProjectionSystem {
 impl TrackedEntityProjection {
     fn new(guid: Guid, authoritative_pose: WorldPosition, now: Instant) -> Self {
         Self {
+            tracking_state: TrackingState::AuthoritativeOnly,
+            inputs: ProjectionInputs {
+                authoritative_pose,
+                last_authoritative_update: now,
+                velocity: Vector3::zero(),
+                omega: Vector3::zero(),
+                motion_state: None,
+                interpolation: None,
+            },
             public_state: ProjectedEntityState {
                 guid,
                 authoritative_pose,
@@ -489,9 +538,16 @@ impl TrackedEntityProjection {
                 projection_mode: ProjectionMode::AuthoritativeOnly,
                 last_authoritative_update: now,
             },
-            interpolation: None,
-            last_simulated_at: now,
+            last_derived_at: now,
         }
+    }
+
+    fn sync_public_inputs(&mut self) {
+        self.public_state.authoritative_pose = self.inputs.authoritative_pose;
+        self.public_state.velocity = self.inputs.velocity;
+        self.public_state.omega = self.inputs.omega;
+        self.public_state.motion_state = self.inputs.motion_state;
+        self.public_state.last_authoritative_update = self.inputs.last_authoritative_update;
     }
 }
 

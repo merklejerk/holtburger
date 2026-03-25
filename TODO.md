@@ -222,6 +222,7 @@
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] `holtburger-core` abuses the shit out of WireEvents.
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

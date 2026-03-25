@@ -77,8 +77,12 @@ impl GameState {
             height: chat_area.height.saturating_sub(2),
         };
 
+        let context_len = self
+            .live_context_buffer()
+            .map(|content| content.len())
+            .unwrap_or_else(|| self.context_buffer_len());
         let ctx_h = main_chunks_vec[2].height.saturating_sub(2) as usize;
-        let max_ctx_scroll = self.context_buffer_len().saturating_sub(ctx_h);
+        let max_ctx_scroll = context_len.saturating_sub(ctx_h);
         self.view.context_scroll_offset = self.view.context_scroll_offset.min(max_ctx_scroll);
 
         self.chat.update_layout(chat_inner);
@@ -122,9 +126,13 @@ impl GameState {
         );
 
         // Context Pane
+        let live_context = self.live_context_buffer();
+        let context_buffer = live_context
+            .as_deref()
+            .unwrap_or_else(|| self.context_buffer());
         render_context_pane(
             f,
-            self.context_buffer(),
+            context_buffer,
             &self.view.context_view,
             self.view.context_scroll_offset,
             self.view.focused_pane == FocusedPane::Context,

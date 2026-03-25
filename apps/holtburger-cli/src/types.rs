@@ -271,6 +271,7 @@ pub enum DashboardTab {
     Spells,
     Equip,
     Trade,
+    Party,
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]

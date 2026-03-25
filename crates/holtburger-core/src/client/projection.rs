@@ -152,6 +152,40 @@ struct PositionInterpolation {
     duration: Duration,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum ProjectionInputEvent {
+    Snapshot {
+        guid: Guid,
+        pose: WorldPosition,
+        velocity: Vector3,
+        omega: Vector3,
+        motion_state: Option<EntityMotionSnapshot>,
+    },
+    AuthoritativePose {
+        guid: Guid,
+        pose: WorldPosition,
+        bootstrap: bool,
+    },
+    Kinematics {
+        guid: Guid,
+        velocity: Vector3,
+        omega: Vector3,
+    },
+    MotionState {
+        guid: Guid,
+        snapshot: Option<EntityMotionSnapshot>,
+    },
+    Reset {
+        guid: Guid,
+        pose: WorldPosition,
+        clear_kinematics: bool,
+    },
+    SuspendAll,
+    Despawn {
+        guid: Guid,
+    },
+}
+
 impl EntityProjectionSystem {
     pub fn new(config: ProjectionConfig) -> Self {
         Self {
@@ -161,63 +195,46 @@ impl EntityProjectionSystem {
     }
 
     pub fn handle_view_event(&mut self, event: &ClientViewEvent, now: Instant) {
-        match event {
+        let input = match event {
             ClientViewEvent::EntitySpawned { entity }
             | ClientViewEvent::EntityReplaced { entity }
-            | ClientViewEvent::EntityIdentified { entity } => {
-                self.upsert_from_entity(entity, now);
-            }
-            ClientViewEvent::EntityMoved { guid, pos } => {
-                self.handle_entity_moved(*guid, *pos, now);
-            }
+            | ClientViewEvent::EntityIdentified { entity } => Some(ProjectionInputEvent::Snapshot {
+                guid: entity.guid,
+                pose: entity.position,
+                velocity: entity.velocity,
+                omega: entity.omega,
+                motion_state: entity.motion_snapshot,
+            }),
+            ClientViewEvent::EntityMoved { guid, pos } => Some(ProjectionInputEvent::AuthoritativePose {
+                guid: *guid,
+                pose: *pos,
+                bootstrap: !self.entities.contains_key(guid),
+            }),
             ClientViewEvent::EntityKinematicsUpdated {
                 guid,
                 velocity,
                 omega,
-            } => {
-                if let Some(tracked) = self.entities.get_mut(guid) {
-                    tracked.inputs.velocity = *velocity;
-                    tracked.inputs.omega = *omega;
-                    tracked.sync_public_inputs();
-                }
-            }
-            ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
-                if let Some(tracked) = self.entities.get_mut(guid) {
-                    tracked.inputs.motion_state = *snapshot;
-                    tracked.sync_public_inputs();
-                    if tracked.tracking_state == TrackingState::Suspended {
-                        tracked.tracking_state = TrackingState::AuthoritativeOnly;
-                        tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
-                    }
-                }
-            }
-            ClientViewEvent::ForcedReposition { guid, pos, .. } => {
-                let tracked = self.ensure_entity(*guid, *pos, now);
-                tracked.inputs.authoritative_pose = *pos;
-                tracked.inputs.velocity = Vector3::zero();
-                tracked.inputs.omega = Vector3::zero();
-                tracked.inputs.motion_state = None;
-                tracked.inputs.last_authoritative_update = now;
-                tracked.inputs.interpolation = None;
-                tracked.tracking_state = TrackingState::AuthoritativeOnly;
-                tracked.sync_public_inputs();
-                tracked.public_state.projected_pose = *pos;
-                tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
-                tracked.last_derived_at = now;
-            }
-            ClientViewEvent::TeleportStarted { .. } => {
-                for tracked in self.entities.values_mut() {
-                    tracked.public_state.projected_pose = tracked.inputs.authoritative_pose;
-                    tracked.tracking_state = TrackingState::Suspended;
-                    tracked.public_state.projection_mode = ProjectionMode::Suspended;
-                    tracked.inputs.interpolation = None;
-                    tracked.last_derived_at = now;
-                }
-            }
-            ClientViewEvent::EntityDespawned { guid } => {
-                self.entities.remove(guid);
-            }
-            _ => {}
+            } => Some(ProjectionInputEvent::Kinematics {
+                guid: *guid,
+                velocity: *velocity,
+                omega: *omega,
+            }),
+            ClientViewEvent::EntityMotionUpdated { guid, snapshot } => Some(ProjectionInputEvent::MotionState {
+                guid: *guid,
+                snapshot: *snapshot,
+            }),
+            ClientViewEvent::ForcedReposition { guid, pos, .. } => Some(ProjectionInputEvent::Reset {
+                guid: *guid,
+                pose: *pos,
+                clear_kinematics: true,
+            }),
+            ClientViewEvent::TeleportStarted { .. } => Some(ProjectionInputEvent::SuspendAll),
+            ClientViewEvent::EntityDespawned { guid } => Some(ProjectionInputEvent::Despawn { guid: *guid }),
+            _ => None,
+        };
+
+        if let Some(input) = input {
+            self.apply_projection_input(input, now);
         }
     }
 
@@ -294,19 +311,114 @@ impl EntityProjectionSystem {
             .or_insert_with(|| TrackedEntityProjection::new(guid, authoritative_pose, now))
     }
 
-    fn upsert_from_entity(&mut self, entity: &Entity, now: Instant) {
-        let tracked = self.ensure_entity(entity.guid, entity.position, now);
-        tracked.inputs.authoritative_pose = entity.position;
-        tracked.inputs.velocity = entity.velocity;
-        tracked.inputs.omega = entity.omega;
-        tracked.inputs.motion_state = entity.motion_snapshot;
+    fn apply_projection_input(&mut self, input: ProjectionInputEvent, now: Instant) {
+        match input {
+            ProjectionInputEvent::Snapshot {
+                guid,
+                pose,
+                velocity,
+                omega,
+                motion_state,
+            } => self.apply_authoritative_snapshot(guid, pose, velocity, omega, motion_state, now),
+            ProjectionInputEvent::AuthoritativePose {
+                guid,
+                pose,
+                bootstrap,
+            } => self.apply_authoritative_pose(guid, pose, bootstrap, now),
+            ProjectionInputEvent::Kinematics {
+                guid,
+                velocity,
+                omega,
+            } => {
+                if let Some(tracked) = self.entities.get_mut(&guid) {
+                    tracked.inputs.velocity = velocity;
+                    tracked.inputs.omega = omega;
+                    tracked.sync_public_inputs();
+                }
+            }
+            ProjectionInputEvent::MotionState { guid, snapshot } => {
+                if let Some(tracked) = self.entities.get_mut(&guid) {
+                    tracked.inputs.motion_state = snapshot;
+                    tracked.sync_public_inputs();
+                    if tracked.tracking_state == TrackingState::Suspended {
+                        tracked.tracking_state = TrackingState::AuthoritativeOnly;
+                        tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+                    }
+                }
+            }
+            ProjectionInputEvent::Reset {
+                guid,
+                pose,
+                clear_kinematics,
+            } => {
+                let tracked = self.ensure_entity(guid, pose, now);
+                tracked.inputs.authoritative_pose = pose;
+                if clear_kinematics {
+                    tracked.inputs.velocity = Vector3::zero();
+                    tracked.inputs.omega = Vector3::zero();
+                    tracked.inputs.motion_state = None;
+                }
+                tracked.inputs.last_authoritative_update = now;
+                tracked.inputs.interpolation = None;
+                tracked.tracking_state = TrackingState::AuthoritativeOnly;
+                tracked.sync_public_inputs();
+                tracked.public_state.projected_pose = pose;
+                tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+                tracked.last_derived_at = now;
+            }
+            ProjectionInputEvent::SuspendAll => {
+                for tracked in self.entities.values_mut() {
+                    tracked.public_state.projected_pose = tracked.inputs.authoritative_pose;
+                    tracked.tracking_state = TrackingState::Suspended;
+                    tracked.public_state.projection_mode = ProjectionMode::Suspended;
+                    tracked.inputs.interpolation = None;
+                    tracked.last_derived_at = now;
+                }
+            }
+            ProjectionInputEvent::Despawn { guid } => {
+                self.entities.remove(&guid);
+            }
+        }
+    }
+
+    fn apply_authoritative_snapshot(
+        &mut self,
+        guid: Guid,
+        pose: WorldPosition,
+        velocity: Vector3,
+        omega: Vector3,
+        motion_state: Option<EntityMotionSnapshot>,
+        now: Instant,
+    ) {
+        let tracked = self.ensure_entity(guid, pose, now);
+        tracked.inputs.authoritative_pose = pose;
+        tracked.inputs.velocity = velocity;
+        tracked.inputs.omega = omega;
+        tracked.inputs.motion_state = motion_state;
         tracked.inputs.last_authoritative_update = now;
         tracked.inputs.interpolation = None;
         tracked.tracking_state = TrackingState::AuthoritativeOnly;
         tracked.sync_public_inputs();
-        tracked.public_state.projected_pose = entity.position;
+        tracked.public_state.projected_pose = pose;
         tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
         tracked.last_derived_at = now;
+    }
+
+    fn apply_authoritative_pose(&mut self, guid: Guid, pos: WorldPosition, bootstrap: bool, now: Instant) {
+        if bootstrap {
+            let tracked = self.ensure_entity(guid, pos, now);
+            tracked.inputs.authoritative_pose = pos;
+            tracked.inputs.last_authoritative_update = now;
+            tracked.inputs.interpolation = None;
+            tracked.tracking_state = TrackingState::AuthoritativeOnly;
+            tracked.sync_public_inputs();
+            tracked.public_state.projected_pose = pos;
+            tracked.public_state.projection_mode = ProjectionMode::AuthoritativeOnly;
+            tracked.last_derived_at = now;
+            return;
+        }
+
+        self.handle_entity_moved(guid, pos, now);
     }
 
     fn handle_entity_moved(&mut self, guid: Guid, pos: WorldPosition, now: Instant) {
@@ -846,8 +958,31 @@ mod tests {
     }
 
     #[test]
-    fn entity_moved_interpolates_from_current_simulated_pose() {
+    fn first_authoritative_move_bootstraps_without_interpolation() {
         let guid = Guid(0x5000_0008);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig {
+            max_position_interp: Duration::from_millis(200),
+            ..ProjectionConfig::default()
+        });
+
+        system.handle_view_event(
+            &ClientViewEvent::EntityMoved {
+                guid,
+                pos: make_position(3.0, 4.0, 0.5),
+            },
+            start,
+        );
+
+        let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(projected.projection_mode, ProjectionMode::AuthoritativeOnly);
+        assert_eq!(projected.authoritative_pose, make_position(3.0, 4.0, 0.5));
+        assert_eq!(projected.projected_pose, make_position(3.0, 4.0, 0.5));
+    }
+
+    #[test]
+    fn entity_moved_interpolates_from_current_simulated_pose() {
+        let guid = Guid(0x5000_0009);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig {
             max_position_interp: Duration::from_millis(200),
@@ -879,7 +1014,7 @@ mod tests {
 
     #[test]
     fn partial_kinematics_updates_do_not_create_projection_entries() {
-        let guid = Guid(0x5000_0009);
+        let guid = Guid(0x5000_000A);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
 
@@ -898,7 +1033,7 @@ mod tests {
 
     #[test]
     fn partial_motion_updates_do_not_create_projection_entries() {
-        let guid = Guid(0x5000_000A);
+        let guid = Guid(0x5000_000B);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
 
@@ -928,8 +1063,8 @@ mod tests {
             max_position_interp: Duration::from_millis(200),
             ..ProjectionConfig::default()
         });
-        let first_guid = Guid(0x5000_000B);
-        let second_guid = Guid(0x5000_000C);
+        let first_guid = Guid(0x5000_000C);
+        let second_guid = Guid(0x5000_000D);
 
         system.handle_view_event(
             &ClientViewEvent::EntitySpawned {

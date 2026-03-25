@@ -222,6 +222,21 @@ Because `iter_projected_entities()` currently returns references to stored `Proj
 - Existing CLI integration remains unchanged.
 - `spatial_sample(...)` and `spatial_sample_or_authoritative(...)` remain coherent immediately after `handle_view_event(...)`, not only after the next `tick(...)`.
 
+### Phase 2 Implementation Notes
+- Added an internal `ProjectionInputEvent` normalization layer in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) so `handle_view_event(...)` now translates `ClientViewEvent`s into a smaller projection-specific vocabulary before mutating tracked state.
+- Made authoritative bootstrap explicit for `EntityMoved`: first-seen authoritative pose events now create a tracked entry in `AuthoritativeOnly` mode and snap projected state immediately instead of transiently reporting interpolation.
+- Kept delta-only kinematics and motion events non-bootstrapping under the normalized ingest path, preserving the earlier hardening fix while making the rule structural instead of branch-local.
+- Preserved same-turn consumer reads by updating cached projection state synchronously during authoritative ingest instead of deferring that coherence until the next `tick(...)`.
+
+### Verification
+- `cargo test -p holtburger-core --lib` passed after the normalized ingest refactor and bootstrap-policy change.
+- `cargo test -p holtburger-cli --lib` passed without downstream consumer changes.
+
+### Decisions Confirmed By Phase 2
+- A small internal normalization layer is enough; Phase 2 did not require changing `ClientViewEvent` or widening the public projection API.
+- First authoritative `EntityMoved` should be treated as a bootstrap event with snap semantics, not a degenerate interpolation.
+- Same-turn projection reads can remain coherent without abandoning the cache-backed model.
+
 ## Phase 3: Centralize Derivation And Reset Semantics
 
 ### Deliverables
@@ -288,7 +303,7 @@ Mitigation:
 
 ### Task Checklist
 - [x] Phase 1: encode lifecycle and input separation
-- [ ] Phase 2: normalize event ingestion and bootstrap policy
+- [x] Phase 2: normalize event ingestion and bootstrap policy
 - [ ] Phase 3: centralize derivation and reset semantics
 - [ ] Phase 4: add lifecycle tests and doc updates
 
@@ -301,9 +316,11 @@ Mitigation:
 - Keep the hardened system cache-backed because existing public iteration returns references to stored projected state.
 - Any authoritative snapshot event (`EntitySpawned`, `EntityReplaced`, `EntityIdentified`, authoritative pose updates, and forced reposition) is a valid resume point from suspension unless implementation evidence proves a stricter rule is necessary.
 - Phase 1 confirmed that the tracked-input split can land without changing CLI consumers or widening projection accessors.
+- Phase 2 confirmed that normalized projection ingest can remain internal and lightweight while still making bootstrap policy explicit.
 
 ### Verification Log
 - Phase 1: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after separating tracked authoritative inputs from cached public state and introducing explicit internal lifecycle state.
+- Phase 2: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after adding internal projection-input normalization and explicit bootstrap handling for first authoritative `EntityMoved` updates.
 
 ### Open Questions
 - Should first authoritative bootstrap from `EntityMoved` be permanently documented as part of the public projection contract, or remain an internal policy detail?

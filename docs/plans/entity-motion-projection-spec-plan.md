@@ -589,6 +589,9 @@ Completed.
 
 ## Phase 2: Expose Kinematics And Motion Inputs Through Core
 
+### Status
+Completed.
+
 ### Deliverables
 - Stop dropping `WorldEvent::EntityVectorUpdated` in [crates/holtburger-core/src/client/mod.rs](../../crates/holtburger-core/src/client/mod.rs).
 - Add `ClientViewEvent::EntityKinematicsUpdated` in [crates/holtburger-core/src/client/types.rs](../../crates/holtburger-core/src/client/types.rs).
@@ -599,6 +602,22 @@ Completed.
 - A consumer can build a projection cache from `ClientViewEvent` alone.
 - No consumer needs direct access to world internals to project motion.
 - `ClientViewEvent` covers `EntityVectorUpdated` and does not force consumers to scrape `Entity` replacements just to keep kinematics current.
+
+### Phase 2 Implementation Notes
+- Added `ClientViewEvent::EntityKinematicsUpdated { guid, velocity, omega }` in [crates/holtburger-core/src/client/types.rs](../../crates/holtburger-core/src/client/types.rs) as the authoritative client-view counterpart to `WorldEvent::EntityVectorUpdated`.
+- Updated [crates/holtburger-core/src/client/mod.rs](../../crates/holtburger-core/src/client/mod.rs) so `handle_world_event()` now projects `WorldEvent::EntityVectorUpdated` instead of dropping it.
+- Preserved the existing event projection paths for `EntityMoved`, `EntityMotionUpdated`, spawn, replace, and despawn. Phase 2 only closed the missing kinematics gap; it did not change motion semantics.
+- Updated [apps/holtburger-cli/src/pages/game/state.rs](../../apps/holtburger-cli/src/pages/game/state.rs) to mirror `EntityKinematicsUpdated` into cached entity `velocity` and `omega` so frontend entity mirrors stay authoritative enough for debug and future projection consumers.
+
+### Phase 2 Validation
+- Added a core regression test in [crates/holtburger-core/src/client/mod.rs](../../crates/holtburger-core/src/client/mod.rs) proving `WorldEvent::EntityVectorUpdated` projects to `ClientViewEvent::EntityKinematicsUpdated`.
+- Added a CLI regression test in [apps/holtburger-cli/src/pages/game/state.rs](../../apps/holtburger-cli/src/pages/game/state.rs) proving the cached entity mirror ingests kinematics updates and requests redraw.
+- `cargo test -p holtburger-core --lib` passed with 101 tests.
+- `cargo test -p holtburger-cli --lib` passed with 163 tests.
+
+### Decisions Confirmed By Phase 2
+- The client-view stream can now serve as the sole authoritative input surface for later projection work; no direct world scraping is required just to keep kinematics current.
+- Consumers that maintain mirrored entity caches, including the current CLI state, should ingest kinematics updates directly instead of waiting for a later full entity replacement. That keeps debug state truthful and avoids creating a second hidden dependency on world internals.
 
 ## Phase 3: Implement Shared Projection System In Core
 

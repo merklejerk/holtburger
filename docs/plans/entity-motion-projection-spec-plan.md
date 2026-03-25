@@ -822,13 +822,31 @@ That keeps the current automation-distance gate authoritative while still lettin
 ## Phase 5: Validate 3D-Client-Oriented Consumer Ergonomics
 
 ### Deliverables
-- Add examples or harness coverage showing batch scene updates from `iter_projected_entities()`.
+- Add examples or coverage showing batch scene updates from `iter_projected_entities()`.
 - Verify the API is suitable for a future graphical client without requiring a frame-event firehose.
 - Refine config knobs only after testing real consumer needs.
 
 ### Acceptance Criteria
 - A future 3D client can render from projected poses while leaving gameplay and authority queries untouched.
 - The projection API remains pull-based and explicit about authority.
+
+### Phase 5 Implementation Notes
+- Added renderer-oriented module docs to [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) showing the intended pattern: feed `ClientViewEvent`s into `EntityProjectionSystem`, tick from frame time, and batch-read `iter_projected_entities()` for scene updates.
+- Added iterator regression coverage in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) that exercises a mixed scene batch with one interpolating entity and one dead-reckoned entity, proving a renderer can update visual transforms from one pull-based pass while still retaining authoritative poses alongside projected poses.
+- Documented the same consumer boundary in [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) so future clients have a crate-level reference, not just inline API docs.
+- Follow-up review fixes tightened projection lifecycle behavior in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs): delta-only kinematics and motion events no longer invent tracked entities, forced reposition now clears stale linear and angular velocity, and authoritative move handling now advances projection state to `now` before choosing a new interpolation baseline.
+- Added regression coverage in [crates/holtburger-core/src/client/projection.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/projection.rs) for forced-reposition reset, no-phantom projection entries from partial deltas, and interpolation baselines when authoritative moves arrive between projection ticks.
+
+### Verification
+- `cargo test -p holtburger-core --lib` passed after adding renderer-oriented docs and batch iterator coverage.
+- `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after the follow-up lifecycle fixes and regression additions.
+
+### Decisions Confirmed By Phase 5
+- The existing pull-based API is already sufficient for future renderers; Phase 5 did not need a harness or a frame-event firehose to prove consumer ergonomics.
+- `iter_projected_entities()` is the right batch boundary for scene updates because each item carries both `projected_pose` and `authoritative_pose`, keeping render and authority concerns explicit in one pass.
+- No additional convenience helpers or config knobs were justified by this validation pass.
+- Delta events should never bootstrap projection state on their own. Projection ownership starts from authoritative entity snapshots or authoritative position events, not from vector or motion deltas.
+- Projection lifecycle rules must be single-sourced. Advancing tracked state in both the render tick and authoritative move handling avoids stale interpolation baselines and keeps correction behavior predictable.
 
 ## Risks And Mitigations
 
@@ -876,7 +894,7 @@ Mitigation:
 - [x] Phase 2: expose kinematics through core view events
 - [x] Phase 3: implement `EntityProjectionSystem`
 - [x] Phase 4: adopt projection system in CLI debug or render paths
-- [ ] Phase 5: validate 3D-client consumer ergonomics
+- [x] Phase 5: validate 3D-client consumer ergonomics
 
 ### Decisions Log
 - Keep `Entity.position` authoritative; do not rename it to `stable_position`.
@@ -890,7 +908,12 @@ Mitigation:
 - Do not add a generic `projected_pose_or_authoritative(guid)` helper. Prefer explicit `projected_pose`, `authoritative_pose`, and typed `spatial_sample` access so consumers must choose the trust boundary deliberately.
 
 ### Verification Log
-- Pending implementation.
+- Phase 1: `cargo test -p holtburger-world --lib` and `cargo test -p holtburger-cli --lib` passed after retaining richer authoritative motion inputs.
+- Phase 2: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after forwarding kinematics through the core view stream.
+- Phase 3: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after adding `EntityProjectionSystem` coverage for interpolation, dead reckoning, turn simulation, corrections, and cleanup.
+- Phase 4: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after CLI adoption, maintain-range smoothing integration, and the later render-time-only debug refresh adjustment.
+- Phase 5: `cargo test -p holtburger-core --lib` passed after adding renderer-oriented projection docs and iterator coverage for batch scene updates.
+- Phase 5 follow-up review fixes: `cargo test -p holtburger-core --lib` and `cargo test -p holtburger-cli --lib` passed after tightening projection lifecycle behavior around forced reposition, authoritative move baselines, and delta-only event handling.
 
 ### Deferred Follow-Ups
 - After the first projection pass lands, measure whether retaining `MoveToPosition` or `MoveToObject` directives improves remote-entity fidelity enough to justify the added world-state complexity.

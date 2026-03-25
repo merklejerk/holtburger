@@ -63,6 +63,8 @@ The same split applies to entity motion coming back from the server:
 2. `holtburger-core` projects those snapshots into client-view events for frontends that want to render or inspect motion.
 3. Shared gameplay decisions such as combat-target viability should consume world-derived semantics, not re-derive meaning from raw motion updates inside each frontend.
 
+Render-oriented consumers should keep that boundary explicit: drive an `EntityProjectionSystem` from `ClientViewEvent`s, tick it from frame time, and batch-read projected transforms from `iter_projected_entities()` while leaving gameplay legality and authority checks on the world mirror.
+
 That boundary keeps 3D-client rendering needs compatible with shared combat logic: frontends can observe motion directly, but they should not become the authority for interpreting death motion or similar gameplay signals.
 
 The current kernel lives under [src/client/controllers/mod.rs](src/client/controllers/mod.rs). After extracting real movement and combat controllers, it has been refined down to the proven shared surface and currently standardizes only:

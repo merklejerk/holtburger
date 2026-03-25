@@ -1,6 +1,7 @@
 use super::*;
 use crate::pages::game::data::CuratedCharacterOption;
 use crate::types::ChatMessageKind;
+use holtburger_core::client::types::ChatChannelKind;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
     match raw {
@@ -10,7 +11,113 @@ fn parse_option_value(raw: &str) -> Option<bool> {
     }
 }
 
+fn parse_targeted_chat_command<'a>(
+    command: &'a str,
+    aliases: &[&str],
+) -> Option<(&'a str, &'a str)> {
+    let (verb, rest) = command.split_once(char::is_whitespace)?;
+    if !aliases.contains(&verb) {
+        return None;
+    }
+
+    let rest = rest.trim_start();
+    let (target, message) = rest.split_once(char::is_whitespace)?;
+    let message = message.trim_start();
+
+    if target.is_empty() || message.is_empty() {
+        return None;
+    }
+
+    Some((target, message))
+}
+
+fn parse_message_only_command<'a>(command: &'a str, aliases: &[&str]) -> Option<&'a str> {
+    let (verb, rest) = command.split_once(char::is_whitespace)?;
+    if !aliases.contains(&verb) {
+        return None;
+    }
+
+    let message = rest.trim_start();
+    if message.is_empty() {
+        return None;
+    }
+
+    Some(message)
+}
+
+fn parse_optional_message_command<'a>(command: &'a str, aliases: &[&str]) -> Option<&'a str> {
+    for alias in aliases {
+        if command == *alias {
+            return Some("");
+        }
+
+        let Some(rest) = command.strip_prefix(alias) else {
+            continue;
+        };
+
+        let Some(first) = rest.chars().next() else {
+            return Some("");
+        };
+
+        if !first.is_whitespace() {
+            continue;
+        }
+
+        return Some(rest.trim());
+    }
+
+    None
+}
+
+fn parse_single_argument_command<'a>(command: &'a str, aliases: &[&str]) -> Option<&'a str> {
+    let (verb, rest) = command.split_once(char::is_whitespace)?;
+    if !aliases.contains(&verb) {
+        return None;
+    }
+
+    let argument = rest.trim();
+    if argument.is_empty() || argument.contains(char::is_whitespace) {
+        return None;
+    }
+
+    Some(argument)
+}
+
+fn parse_help_topic<'a>(command: &'a str, aliases: &[&str]) -> Option<Option<&'a str>> {
+    for alias in aliases {
+        if command == *alias {
+            return Some(None);
+        }
+
+        let Some(rest) = command.strip_prefix(alias) else {
+            continue;
+        };
+
+        let Some(first) = rest.chars().next() else {
+            return Some(None);
+        };
+
+        if !first.is_whitespace() {
+            continue;
+        }
+
+        let topic = rest.trim();
+        return Some(if topic.is_empty() { None } else { Some(topic) });
+    }
+
+    None
+}
+
 impl GameState {
+    fn default_party_name(&self) -> String {
+        self.data
+            .character_name
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .map(|name| format!("{}'s Fellowship", name.trim()))
+            .unwrap_or_else(|| "My Fellowship".to_string())
+    }
+
     fn finish_input_command_submission(&mut self, command: &str) {
         self.chat_input.input_history.push(command.to_string());
         self.chat_input.history_index = None;
@@ -41,6 +148,151 @@ impl GameState {
             ChatMessageKind::Warning,
             "Player option state has not been loaded yet.".to_string(),
         );
+    }
+
+    fn log_command_usage(&mut self, usage: &str) {
+        self.chat.log(ChatMessageKind::System, usage.to_string());
+    }
+
+    fn log_command_help_overview(&mut self) {
+        self.chat.log(
+            ChatMessageKind::System,
+            "Available commands: /?, /help, /quit, /exit, /clear, /combat, /ls, /lifestone, /hq, /rip, /pkl, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /leave, /uninvite, /options"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Chat: /tell <NAME> <MSG>, /reply <MSG>, /g <MSG>, /p <MSG>, :<MSG>".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Party: /party, /p <MSG>, /create-party [NAME], /invite <PLAYER>, /leave, /uninvite <PLAYER>"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Options: /options list, /options get <name>, /options set <name> <on|off>, /options toggle <name>"
+                .to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Use /help <COMMAND> for detailed help on a specific command.".to_string(),
+        );
+        self.chat.log(
+            ChatMessageKind::System,
+            "Shortcuts: Tab/Shift+Tab (Cycle Panel Focus), 0-9 (Dashboard Tabs), a-z (Verbs), ` (Combat Toggle)".to_string(),
+        );
+    }
+
+    fn command_help_lines(&self, raw_topic: &str) -> Option<Vec<String>> {
+        let topic = raw_topic
+            .trim()
+            .trim_start_matches('/')
+            .to_ascii_lowercase();
+
+        let lines = match topic.as_str() {
+            "?" | "help" => vec![
+                "Usage: /help [COMMAND] or /? [COMMAND]".to_string(),
+                "Show the general command list or detailed help for a specific command."
+                    .to_string(),
+                "Examples: /help party, /? create-party, /help options".to_string(),
+            ],
+            "tell" | "t" => vec![
+                "Usage: /tell <NAME> <MSG>".to_string(),
+                "Send a private message to a specific player.".to_string(),
+                "Alias: /t <NAME> <MSG>".to_string(),
+                "Example: /tell Bestie meet at subway".to_string(),
+            ],
+            "reply" | "r" => vec![
+                "Usage: /reply <MSG>".to_string(),
+                "Reply to the most recent incoming tell.".to_string(),
+                "Alias: /r <MSG>".to_string(),
+            ],
+            "guild" | "g" => vec![
+                "Usage: /g <MSG>".to_string(),
+                "Send a message to allegiance chat.".to_string(),
+                "Alias: /guild <MSG>".to_string(),
+            ],
+            "party" | "p" => vec![
+                "Usage: /party".to_string(),
+                "Show the current party status summary.".to_string(),
+                "Usage: /p <MSG>".to_string(),
+                "Send a message to party chat.".to_string(),
+                "Aliases: /party <MSG>, /p <MSG>".to_string(),
+            ],
+            "create-party" | "createparty" | "party-create" | "partycreate" => vec![
+                "Usage: /create-party [NAME]".to_string(),
+                "Create a new party.".to_string(),
+                "If NAME is omitted, the TUI generates a default like '<player>'s Fellowship'."
+                    .to_string(),
+                "Aliases: /createparty, /party-create, /partycreate".to_string(),
+            ],
+            "invite" => vec![
+                "Usage: /invite <PLAYER>".to_string(),
+                "Invite a nearby or known player to your party.".to_string(),
+            ],
+            "leave" => vec![
+                "Usage: /leave".to_string(),
+                "Leave your current party.".to_string(),
+            ],
+            "uninvite" => vec![
+                "Usage: /uninvite <PLAYER>".to_string(),
+                "Dismiss a player from your party.".to_string(),
+            ],
+            "options" => vec![
+                "Usage: /options [list|get <name>|set <name> <on|off>|toggle <name>]".to_string(),
+                "Inspect and change curated character options exposed by the TUI.".to_string(),
+                "Examples: /options list, /options get trade-chat, /options toggle share-xp"
+                    .to_string(),
+            ],
+            "quit" | "exit" => vec![
+                "Usage: /quit".to_string(),
+                "Exit the client.".to_string(),
+                "Alias: /exit".to_string(),
+            ],
+            "clear" => vec![
+                "Usage: /clear".to_string(),
+                "Clear the chat log and current input line.".to_string(),
+            ],
+            "combat" => vec![
+                "Usage: /combat".to_string(),
+                "Toggle combat mode.".to_string(),
+            ],
+            "ls" | "lifestone" => vec![
+                "Usage: /ls".to_string(),
+                "Recall to your lifestone.".to_string(),
+                "Alias: /lifestone".to_string(),
+            ],
+            "hq" => vec![
+                "Usage: /hq".to_string(),
+                "Recall to allegiance housing.".to_string(),
+            ],
+            "rip" => vec![
+                "Usage: /rip".to_string(),
+                "Kill your character.".to_string(),
+            ],
+            "pkl" => vec!["Usage: /pkl".to_string(), "Enter PK Lite mode.".to_string()],
+            _ => return None,
+        };
+
+        Some(lines)
+    }
+
+    fn log_command_help_topic(&mut self, topic: &str) {
+        let Some(lines) = self.command_help_lines(topic) else {
+            self.chat.log(
+                ChatMessageKind::Error,
+                format!(
+                    "Unknown help topic '{}'. Use /help to see available commands.",
+                    topic
+                ),
+            );
+            return;
+        };
+
+        for line in lines {
+            self.chat.log(ChatMessageKind::System, line);
+        }
     }
 
     fn log_option_state(&mut self, option: CuratedCharacterOption, enabled: bool) {
@@ -161,6 +413,137 @@ impl GameState {
     pub(super) fn handle_slash_command(&mut self, command: &str) -> UpdateResult {
         let mut result = UpdateResult::new();
 
+        if let Some((target, message)) = parse_targeted_chat_command(command, &["/tell", "/t"]) {
+            result.commands.push(ClientCommand::Tell {
+                target: target.to_string(),
+                message: message.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/tell" || command == "/t" {
+            self.log_command_usage("Usage: /tell <NAME> <MSG>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(message) = parse_message_only_command(command, &["/reply", "/r"]) {
+            let Some(target) = self.chat.last_incoming_tell_sender.clone() else {
+                self.chat.log(
+                    ChatMessageKind::Warning,
+                    "No incoming tell to reply to yet.".to_string(),
+                );
+                return result.with_redraw(true);
+            };
+
+            result.commands.push(ClientCommand::Tell {
+                target,
+                message: message.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/reply" || command == "/r" {
+            self.log_command_usage("Usage: /reply <MSG>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(message) = parse_message_only_command(command, &["/g", "/guild"]) {
+            result.commands.push(ClientCommand::ChannelMessage {
+                channel: ChatChannelKind::Allegiance,
+                message: message.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/g" || command == "/guild" {
+            self.log_command_usage("Usage: /g <MSG>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(message) = parse_message_only_command(command, &["/p", "/party"]) {
+            result.commands.push(ClientCommand::ChannelMessage {
+                channel: ChatChannelKind::Fellowship,
+                message: message.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/party" {
+            result.commands.push(ClientCommand::ShowPartyStatus);
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/p" {
+            self.log_command_usage("Usage: /p <MSG> or /party");
+            return result.with_redraw(true);
+        }
+
+        if let Some(name) = parse_optional_message_command(
+            command,
+            &[
+                "/create-party",
+                "/createparty",
+                "/party-create",
+                "/partycreate",
+            ],
+        ) {
+            result.commands.push(ClientCommand::CreateParty {
+                name: if name.is_empty() {
+                    self.default_party_name()
+                } else {
+                    name.to_string()
+                },
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if let Some(player) = parse_single_argument_command(command, &["/invite"]) {
+            result.commands.push(ClientCommand::InviteToParty {
+                player: player.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/invite" {
+            self.log_command_usage("Usage: /invite <PLAYER>");
+            return result.with_redraw(true);
+        }
+
+        if command == "/leave" {
+            result.commands.push(ClientCommand::LeaveParty);
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if let Some(player) = parse_single_argument_command(command, &["/uninvite"]) {
+            result.commands.push(ClientCommand::UninviteFromParty {
+                player: player.to_string(),
+            });
+            self.finish_input_command_submission(command);
+            return result.with_redraw(true);
+        }
+
+        if command == "/uninvite" {
+            self.log_command_usage("Usage: /uninvite <PLAYER>");
+            return result.with_redraw(true);
+        }
+
+        if let Some(topic) = parse_help_topic(command, &["/?", "/help"]) {
+            match topic {
+                Some(topic) => self.log_command_help_topic(topic),
+                None => self.log_command_help_overview(),
+            }
+            self.chat_input.input.clear();
+            return result.with_redraw(true);
+        }
+
         match command {
             "/quit" | "/exit" => {
                 result.commands.push(ClientCommand::Quit);
@@ -180,22 +563,24 @@ impl GameState {
                 self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
-            "/help" => {
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Available commands: /quit, /exit, /clear, /help, /combat, /options"
-                        .to_string(),
-                );
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Options: /options list, /options get <name>, /options set <name> <on|off>, /options toggle <name>"
-                        .to_string(),
-                );
-                self.chat.log(
-                    ChatMessageKind::System,
-                    "Shortcuts: 1-4 (Tabs), Tab (Cycle Focus), a/u/d/p/s/b (Actions)".to_string(),
-                );
-                self.chat_input.input.clear();
+            "/ls" | "/lifestone" => {
+                result.commands.push(ClientCommand::RecallLifestone);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/hq" => {
+                result.commands.push(ClientCommand::RecallAllegianceHousing);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/rip" => {
+                result.commands.push(ClientCommand::Suicide);
+                self.finish_input_command_submission(command);
+                result.with_redraw(true)
+            }
+            "/pkl" => {
+                result.commands.push(ClientCommand::EnterPkLite);
+                self.finish_input_command_submission(command);
                 result.with_redraw(true)
             }
             _ if command.starts_with("/options") => self.handle_options_command(command),
@@ -238,6 +623,309 @@ mod tests {
                 .iter()
                 .any(|message| message.text.contains("/options list"))
         );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text.contains(":<MSG>"))
+        );
+        assert!(state.chat.messages.iter().any(|message| {
+            message.text == "Use /help <COMMAND> for detailed help on a specific command."
+        }));
+    }
+
+    #[test]
+    fn help_command_for_specific_topic_logs_detailed_help() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/help create-party");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| { message.text == "Usage: /create-party [NAME]" })
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| { message.text.contains("TUI generates a default") })
+        );
+    }
+
+    #[test]
+    fn question_mark_help_alias_supports_specific_topic() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/? /party");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Usage: /party")
+        );
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Usage: /p <MSG>")
+        );
+    }
+
+    #[test]
+    fn help_command_for_unknown_topic_logs_error() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/help bogus");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(state.chat.messages.iter().any(|message| {
+            message.text == "Unknown help topic 'bogus'. Use /help to see available commands."
+        }));
+    }
+
+    #[test]
+    fn tell_command_dispatches_tell_client_command() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/tell Bestie hi there");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Tell { target, message }) if target == "Bestie" && message == "hi there"
+        ));
+    }
+
+    #[test]
+    fn reply_command_uses_last_incoming_tell_sender() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.chat.last_incoming_tell_sender = Some("Bestie".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/reply back at you");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::Tell { target, message }) if target == "Bestie" && message == "back at you"
+        ));
+    }
+
+    #[test]
+    fn reply_without_last_incoming_tell_logs_warning() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/r hi");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| { message.text == "No incoming tell to reply to yet." })
+        );
+    }
+
+    #[test]
+    fn guild_command_dispatches_allegiance_broadcast_message() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state
+            .chat_input
+            .input
+            .set_text("/g assemble at the mansion");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::ChannelMessage { channel, message })
+                if *channel == ChatChannelKind::Allegiance
+                    && message == "assemble at the mansion"
+        ));
+    }
+
+    #[test]
+    fn party_command_dispatches_fellowship_channel_message() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/party buff check");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::ChannelMessage { channel, message })
+                if *channel == ChatChannelKind::Fellowship && message == "buff check"
+        ));
+    }
+
+    #[test]
+    fn bare_party_command_dispatches_show_party_status() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/party");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::ShowPartyStatus)
+        ));
+    }
+
+    #[test]
+    fn bare_short_party_command_logs_usage() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/p");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(result.commands.is_empty());
+        assert!(
+            state
+                .chat
+                .messages
+                .iter()
+                .any(|message| message.text == "Usage: /p <MSG> or /party")
+        );
+    }
+
+    #[test]
+    fn create_party_command_dispatches_create_party() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/create-party Raid Bus");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::CreateParty { name }) if name == "Raid Bus"
+        ));
+    }
+
+    #[test]
+    fn bare_create_party_command_uses_default_party_name() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/create-party");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::CreateParty { name }) if name == "Player's Fellowship"
+        ));
+    }
+
+    #[test]
+    fn create_party_command_with_blank_name_uses_default_party_name() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/create-party   ");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::CreateParty { name }) if name == "Player's Fellowship"
+        ));
+    }
+
+    #[test]
+    fn invite_command_dispatches_invite_to_party() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/invite Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::InviteToParty { player }) if player == "Bestie"
+        ));
+    }
+
+    #[test]
+    fn leave_command_dispatches_leave_party() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/leave");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::LeaveParty)
+        ));
+    }
+
+    #[test]
+    fn uninvite_command_dispatches_uninvite_from_party() {
+        let player_guid = Guid(0x50000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.view.focused_pane = FocusedPane::Input;
+        state.chat_input.input.set_text("/uninvite Bestie");
+        state.update_layout(ratatui::layout::Rect::new(0, 0, 120, 80));
+
+        let result = state.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            result.commands.first(),
+            Some(ClientCommand::UninviteFromParty { player }) if player == "Bestie"
+        ));
     }
 
     #[test]

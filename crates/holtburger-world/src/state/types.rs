@@ -17,6 +17,7 @@ use crate::entity::{Entity, EntityManager};
 use crate::player::PlayerState;
 use crate::spatial::SpatialScene;
 use crate::spell::{SpellCatalog, SpellInfo};
+use crate::state::fellowship::FellowshipState;
 use crate::state::liveness::EntityLifecycleStore;
 use crate::state::trade::TradeState;
 use crate::stats;
@@ -50,6 +51,7 @@ pub struct WorldState {
     pub spell_catalog: Arc<SpellCatalog>,
     pub scene: SpatialScene,
     pub vendor: Option<VendorState>,
+    pub fellowship: Option<FellowshipState>,
     pub trade: Option<TradeState>,
     pub open_containers: std::collections::HashSet<Guid>,
     pub(crate) entity_lifecycle: EntityLifecycleStore,
@@ -205,6 +207,7 @@ impl WorldState {
             spell_catalog: Arc::new(spell_table.into()),
             scene: SpatialScene::new(),
             vendor: None,
+            fellowship: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
             entity_lifecycle: EntityLifecycleStore::default(),
@@ -223,6 +226,7 @@ impl WorldState {
             spell_catalog: Arc::new(SpellCatalog::default()),
             scene: SpatialScene::new(),
             vendor: None,
+            fellowship: None,
             trade: None,
             open_containers: std::collections::HashSet::new(),
             entity_lifecycle: EntityLifecycleStore::default(),

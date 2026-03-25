@@ -13,6 +13,7 @@ use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContext;
 use holtburger_world::entity::Entity;
 use holtburger_world::spell::SpellCatalog;
+use holtburger_world::state::FellowshipState;
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
@@ -24,9 +25,13 @@ const OPENED_CONTAINER_HISTORY_LIMIT: usize = 256;
 pub enum CuratedCharacterOption {
     CraftSuccessDialog,
     AutoAcceptFellowshipRequests,
+    IgnoreAllegianceRequests,
     IgnoreFellowshipRequests,
     IgnoreTradeRequests,
     AllowItemGive,
+    ShareXp,
+    ShareLoot,
+    AcceptLootPermit,
     AllegianceChat,
     GeneralChat,
     TradeChat,
@@ -36,12 +41,16 @@ pub enum CuratedCharacterOption {
 }
 
 impl CuratedCharacterOption {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 15] = [
         Self::CraftSuccessDialog,
         Self::AutoAcceptFellowshipRequests,
+        Self::IgnoreAllegianceRequests,
         Self::IgnoreFellowshipRequests,
         Self::IgnoreTradeRequests,
         Self::AllowItemGive,
+        Self::ShareXp,
+        Self::ShareLoot,
+        Self::AcceptLootPermit,
         Self::AllegianceChat,
         Self::GeneralChat,
         Self::TradeChat,
@@ -56,11 +65,19 @@ impl CuratedCharacterOption {
             "auto-accept-fellowship" | "auto-fellowship" => {
                 Some(Self::AutoAcceptFellowshipRequests)
             }
+            "ignore-allegiance" | "ignore-allegiance-requests" => {
+                Some(Self::IgnoreAllegianceRequests)
+            }
             "ignore-fellowship" | "ignore-fellowship-requests" => {
                 Some(Self::IgnoreFellowshipRequests)
             }
             "ignore-trade" | "ignore-trade-requests" => Some(Self::IgnoreTradeRequests),
             "allow-item-give" | "allow-give" => Some(Self::AllowItemGive),
+            "share-xp" | "share-fellowship-xp" => Some(Self::ShareXp),
+            "share-loot" | "share-fellowship-loot" => Some(Self::ShareLoot),
+            "accept-loot-permit" | "accept-loot-permits" | "accept-corpse-looting" => {
+                Some(Self::AcceptLootPermit)
+            }
             "allegiance-chat" => Some(Self::AllegianceChat),
             "general-chat" => Some(Self::GeneralChat),
             "trade-chat" => Some(Self::TradeChat),
@@ -75,9 +92,13 @@ impl CuratedCharacterOption {
         match self {
             Self::CraftSuccessDialog => "craft-success-dialog",
             Self::AutoAcceptFellowshipRequests => "auto-accept-fellowship",
+            Self::IgnoreAllegianceRequests => "ignore-allegiance",
             Self::IgnoreFellowshipRequests => "ignore-fellowship",
             Self::IgnoreTradeRequests => "ignore-trade",
             Self::AllowItemGive => "allow-item-give",
+            Self::ShareXp => "share-xp",
+            Self::ShareLoot => "share-loot",
+            Self::AcceptLootPermit => "accept-loot-permit",
             Self::AllegianceChat => "allegiance-chat",
             Self::GeneralChat => "general-chat",
             Self::TradeChat => "trade-chat",
@@ -91,9 +112,13 @@ impl CuratedCharacterOption {
         match self {
             Self::CraftSuccessDialog => "Show crafting success chance confirmations",
             Self::AutoAcceptFellowshipRequests => "Automatically accept fellowship requests",
+            Self::IgnoreAllegianceRequests => "Ignore incoming allegiance requests",
             Self::IgnoreFellowshipRequests => "Ignore incoming fellowship requests",
             Self::IgnoreTradeRequests => "Ignore incoming trade requests",
             Self::AllowItemGive => "Let other players hand you items",
+            Self::ShareXp => "Share fellowship XP and luminance when leading",
+            Self::ShareLoot => "Enable fellowship loot sharing when leading",
+            Self::AcceptLootPermit => "Accept corpse looting permission grants",
             Self::AllegianceChat => "Listen to allegiance chat",
             Self::GeneralChat => "Listen to general chat",
             Self::TradeChat => "Listen to trade chat",
@@ -109,9 +134,13 @@ impl CuratedCharacterOption {
             Self::AutoAcceptFellowshipRequests => {
                 CharacterOption::AutomaticallyAcceptFellowshipRequests
             }
+            Self::IgnoreAllegianceRequests => CharacterOption::IgnoreAllegianceRequests,
             Self::IgnoreFellowshipRequests => CharacterOption::IgnoreFellowshipRequests,
             Self::IgnoreTradeRequests => CharacterOption::IgnoreAllTradeRequests,
             Self::AllowItemGive => CharacterOption::LetOtherPlayersGiveYouItems,
+            Self::ShareXp => CharacterOption::ShareFellowshipExpAndLuminance,
+            Self::ShareLoot => CharacterOption::ShareFellowshipLoot,
+            Self::AcceptLootPermit => CharacterOption::AcceptCorpseLootingPermissions,
             Self::AllegianceChat => CharacterOption::ListenToAllegianceChat,
             Self::GeneralChat => CharacterOption::ListenToGeneralChat,
             Self::TradeChat => CharacterOption::ListenToTradeChat,
@@ -129,6 +158,9 @@ impl CuratedCharacterOption {
             Self::AutoAcceptFellowshipRequests => options
                 .options1
                 .contains(CharacterOptions1::AUTO_ACCEPT_FELLOW_REQUEST),
+            Self::IgnoreAllegianceRequests => options
+                .options1
+                .contains(CharacterOptions1::IGNORE_ALLEGIANCE_REQUESTS),
             Self::IgnoreFellowshipRequests => options
                 .options1
                 .contains(CharacterOptions1::IGNORE_FELLOWSHIP_REQUESTS),
@@ -136,6 +168,15 @@ impl CuratedCharacterOption {
                 .options1
                 .contains(CharacterOptions1::IGNORE_TRADE_REQUESTS),
             Self::AllowItemGive => options.options1.contains(CharacterOptions1::ALLOW_GIVE),
+            Self::ShareXp => options
+                .options1
+                .contains(CharacterOptions1::FELLOWSHIP_SHARE_XP),
+            Self::ShareLoot => options
+                .options1
+                .contains(CharacterOptions1::FELLOWSHIP_SHARE_LOOT),
+            Self::AcceptLootPermit => options
+                .options1
+                .contains(CharacterOptions1::ACCEPT_LOOT_PERMITS),
             Self::AllegianceChat => options
                 .options1
                 .contains(CharacterOptions1::HEAR_ALLEGIANCE_CHAT),
@@ -261,6 +302,8 @@ pub struct GameData {
     pub equipment: HashMap<Guid, EquipMask>,
     /// Current active trade with another player.
     pub trade: Option<holtburger_world::state::TradeState>,
+    /// Current fellowship or party state projected from the core client.
+    pub party: Option<FellowshipState>,
     /// Currently open containers in the world.
     pub open_containers: HashSet<Guid>,
     /// Recently opened world containers retained for nearby-tab labeling.
@@ -295,6 +338,7 @@ impl Default for GameData {
             inventory: HashSet::new(),
             equipment: HashMap::new(),
             trade: None,
+            party: None,
             open_containers: HashSet::new(),
             opened_container_history: VecDeque::new(),
             opened_container_history_set: HashSet::new(),
@@ -518,6 +562,14 @@ mod tests {
             Some(CuratedCharacterOption::CraftSuccessDialog)
         );
         assert_eq!(
+            CuratedCharacterOption::parse("ignore-allegiance-requests"),
+            Some(CuratedCharacterOption::IgnoreAllegianceRequests)
+        );
+        assert_eq!(
+            CuratedCharacterOption::parse("share-fellowship-loot"),
+            Some(CuratedCharacterOption::ShareLoot)
+        );
+        assert_eq!(
             CuratedCharacterOption::parse("ignore-trade-requests"),
             Some(CuratedCharacterOption::IgnoreTradeRequests)
         );
@@ -528,7 +580,11 @@ mod tests {
     fn curated_option_enabled_uses_projected_masks() {
         let data = GameData {
             player_options: Some(PlayerCharacterOptions {
-                options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG,
+                options1: CharacterOptions1::USE_CRAFT_SUCCESS_DIALOG
+                    | CharacterOptions1::IGNORE_ALLEGIANCE_REQUESTS
+                    | CharacterOptions1::FELLOWSHIP_SHARE_XP
+                    | CharacterOptions1::FELLOWSHIP_SHARE_LOOT
+                    | CharacterOptions1::ACCEPT_LOOT_PERMITS,
                 options2: CharacterOptions2::HEAR_TRADE_CHAT,
             }),
             ..Default::default()
@@ -540,6 +596,22 @@ mod tests {
         );
         assert_eq!(
             data.curated_option_enabled(CuratedCharacterOption::TradeChat),
+            Some(true)
+        );
+        assert_eq!(
+            data.curated_option_enabled(CuratedCharacterOption::IgnoreAllegianceRequests),
+            Some(true)
+        );
+        assert_eq!(
+            data.curated_option_enabled(CuratedCharacterOption::ShareXp),
+            Some(true)
+        );
+        assert_eq!(
+            data.curated_option_enabled(CuratedCharacterOption::ShareLoot),
+            Some(true)
+        );
+        assert_eq!(
+            data.curated_option_enabled(CuratedCharacterOption::AcceptLootPermit),
             Some(true)
         );
         assert_eq!(

@@ -2,6 +2,7 @@ pub mod character;
 pub mod chat;
 pub mod combat;
 pub mod effects;
+pub mod fellowship;
 pub mod game_action;
 pub mod game_event;
 pub mod game_message;

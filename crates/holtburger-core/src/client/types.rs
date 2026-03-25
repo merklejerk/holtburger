@@ -10,10 +10,15 @@ use holtburger_protocol::messages::combat::{
 use holtburger_protocol::messages::inventory::types::EquipMask;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
-use holtburger_protocol::messages::{CharacterEntry, GameMessage, ViewContentsEventItem};
+use holtburger_protocol::messages::{
+    CharacterEntry, ChatChannel, ChatChannelId, GameMessage, SetTurbineChatChannelsEventData,
+    TurbineChatChannel, TurbineChatChannelId, TurbineChatDispatchType, TurbineChatType,
+    TurbineChatTypeId, ViewContentsEventItem,
+};
+use holtburger_world::FellowshipActivity;
 use holtburger_world::entity::{Entity, EntityMotionSnapshot};
 use holtburger_world::spell::SpellCatalog;
-use holtburger_world::state::TradeState;
+use holtburger_world::state::{FellowshipState, TradeState};
 use holtburger_world::stats::{
     Attribute, AttributeType, CharacterLevelInfo, Resistances, Skill, SkillType, Vital, VitalType,
 };
@@ -23,6 +28,107 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub use holtburger_world::WorldEvent;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChatChannelKind {
+    Fellowship,
+    Allegiance,
+    Vassals,
+    Patron,
+    Monarch,
+    CoVassals,
+    General,
+    Trade,
+    Lfg,
+    Roleplay,
+    Society,
+    Olthoi,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChatChannelSource {
+    Legacy {
+        channel: ChatChannelId,
+    },
+    Turbine {
+        room_id: TurbineChatChannelId,
+        chat_type: TurbineChatTypeId,
+        dispatch_type: TurbineChatDispatchType,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChatChannelInfo {
+    pub kind: ChatChannelKind,
+    pub source: ChatChannelSource,
+}
+
+impl ChatChannelInfo {
+    pub fn legacy(channel: ChatChannelId) -> Self {
+        let kind = match channel {
+            ChatChannelId::Known(ChatChannel::Fellow)
+            | ChatChannelId::Known(ChatChannel::FellowBroadcast) => ChatChannelKind::Fellowship,
+            ChatChannelId::Known(ChatChannel::AllegianceBroadcast) => ChatChannelKind::Allegiance,
+            ChatChannelId::Known(ChatChannel::Vassals) => ChatChannelKind::Vassals,
+            ChatChannelId::Known(ChatChannel::Patron) => ChatChannelKind::Patron,
+            ChatChannelId::Known(ChatChannel::Monarch) => ChatChannelKind::Monarch,
+            ChatChannelId::Known(ChatChannel::CoVassals) => ChatChannelKind::CoVassals,
+            _ => ChatChannelKind::Unknown,
+        };
+
+        Self {
+            kind,
+            source: ChatChannelSource::Legacy { channel },
+        }
+    }
+
+    pub fn turbine(
+        room_id: TurbineChatChannelId,
+        chat_type: TurbineChatTypeId,
+        dispatch_type: TurbineChatDispatchType,
+    ) -> Self {
+        Self {
+            kind: chat_kind_from_turbine(chat_type, room_id),
+            source: ChatChannelSource::Turbine {
+                room_id,
+                chat_type,
+                dispatch_type,
+            },
+        }
+    }
+}
+
+fn chat_kind_from_turbine(
+    chat_type: TurbineChatTypeId,
+    room_id: TurbineChatChannelId,
+) -> ChatChannelKind {
+    match chat_type.known() {
+        Some(TurbineChatType::Allegiance) => ChatChannelKind::Allegiance,
+        Some(TurbineChatType::General) => ChatChannelKind::General,
+        Some(TurbineChatType::Trade) => ChatChannelKind::Trade,
+        Some(TurbineChatType::Lfg) => ChatChannelKind::Lfg,
+        Some(TurbineChatType::Roleplay) => ChatChannelKind::Roleplay,
+        Some(TurbineChatType::Society)
+        | Some(TurbineChatType::SocietyCelHan)
+        | Some(TurbineChatType::SocietyEldWeb)
+        | Some(TurbineChatType::SocietyRadBlo) => ChatChannelKind::Society,
+        Some(TurbineChatType::Olthoi) => ChatChannelKind::Olthoi,
+        Some(TurbineChatType::Undef) | None => match room_id.known() {
+            Some(TurbineChatChannel::Allegiance) => ChatChannelKind::Allegiance,
+            Some(TurbineChatChannel::General) => ChatChannelKind::General,
+            Some(TurbineChatChannel::Trade) => ChatChannelKind::Trade,
+            Some(TurbineChatChannel::Lfg) => ChatChannelKind::Lfg,
+            Some(TurbineChatChannel::Roleplay) => ChatChannelKind::Roleplay,
+            Some(TurbineChatChannel::Society)
+            | Some(TurbineChatChannel::SocietyCelestialHand)
+            | Some(TurbineChatChannel::SocietyEldrytchWeb)
+            | Some(TurbineChatChannel::SocietyRadiantBlood) => ChatChannelKind::Society,
+            Some(TurbineChatChannel::Olthoi) => ChatChannelKind::Olthoi,
+            None => ChatChannelKind::Unknown,
+        },
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TargetSlot {
@@ -90,6 +196,15 @@ pub enum WireEvent {
     BootAccount(String),
     GameMessage(Box<GameMessage>),
     Chat {
+        sender: String,
+        message: String,
+    },
+    ChannelMessage {
+        channel: ChatChannelInfo,
+        sender: String,
+        message: String,
+    },
+    Tell {
         sender: String,
         message: String,
     },
@@ -272,6 +387,12 @@ pub enum ClientViewEvent {
         vendor: Option<VendorState>,
     },
     VendorItemIdentified(Box<holtburger_world::vendor::CoreVendorItem>),
+    FellowshipStateUpdated {
+        fellowship: Option<FellowshipState>,
+    },
+    FellowshipActivity {
+        activity: FellowshipActivity,
+    },
     TradeStateUpdated {
         trade: Option<TradeState>,
     },
@@ -286,6 +407,15 @@ pub enum ClientViewEvent {
         chat_type: u32,
     },
     Chat {
+        sender: String,
+        message: String,
+    },
+    ChannelMessage {
+        channel: ChatChannelInfo,
+        sender: String,
+        message: String,
+    },
+    Tell {
         sender: String,
         message: String,
     },
@@ -327,8 +457,20 @@ pub enum ClientCommand {
         target: String,
         message: String,
     },
+    ChannelMessage {
+        channel: ChatChannelKind,
+        message: String,
+    },
+    Emote(String),
+    RecallLifestone,
+    RecallAllegianceHousing,
+    Suicide,
+    EnterPkLite,
     Ping,
     RequestInitialViewState,
+    SetFellowshipUpdatesSubscribed {
+        enabled: bool,
+    },
     Identify(Guid),
     QueryHealth(Guid),
     Use(Guid),
@@ -396,6 +538,17 @@ pub enum ClientCommand {
     AddToTrade {
         item: Guid,
     },
+    CreateParty {
+        name: String,
+    },
+    ShowPartyStatus,
+    InviteToParty {
+        player: String,
+    },
+    LeaveParty,
+    UninviteFromParty {
+        player: String,
+    },
     CloseContainer(Guid),
     UseWithTarget {
         item: Guid,
@@ -433,6 +586,23 @@ pub enum ClientCommand {
     CancelAttack,
     QueryEntityDebugInfo(Guid),
     Quit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TurbineChatState {
+    pub enabled: bool,
+    pub channels: Option<SetTurbineChatChannelsEventData>,
+    pub next_context_id: u32,
+}
+
+impl Default for TurbineChatState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            channels: None,
+            next_context_id: 1,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

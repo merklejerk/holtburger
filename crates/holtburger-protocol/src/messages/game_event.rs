@@ -1,5 +1,7 @@
 pub use crate::messages::chat::events::*;
+pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::events::*;
+pub use crate::messages::fellowship::events::*;
 pub use crate::messages::inventory::events::*;
 pub use crate::messages::magic::events::*;
 pub use crate::messages::misc::events::*;
@@ -30,6 +32,7 @@ pub enum GameEvent {
     WieldObject(Box<WieldObjectEventData>),
     Tell(Box<TellEventData>),
     ChannelBroadcast(Box<ChannelBroadcastEventData>),
+    SetTurbineChatChannels(Box<SetTurbineChatChannelsEventData>),
     PopupString(Box<PopupStringEventData>),
     CommunicationTransientString(Box<CommunicationTransientStringEventData>),
     StartGame,
@@ -60,6 +63,9 @@ pub enum GameEvent {
     CharacterConfirmationDone(Box<CharacterConfirmationDoneEventData>),
     CloseGroundContainer(Box<CloseGroundContainerEventData>),
     UpdateHealth(Box<UpdateHealthEventData>),
+    FellowshipFullUpdate(Box<FellowshipFullUpdateEventData>),
+    FellowshipDisband,
+    FellowshipUpdateFellow(Box<FellowshipUpdateFellowEventData>),
     RegisterTrade(Box<RegisterTradeEventData>),
     OpenTrade(Box<OpenTradeEventData>),
     CloseTrade(Box<CloseTradeEventData>),
@@ -70,6 +76,10 @@ pub enum GameEvent {
     TradeFailure(Box<TradeFailureEventData>),
     ClearTradeAcceptance,
     ApproachVendor(Box<ApproachVendorEventData>),
+    FellowshipQuit(Box<FellowshipQuitEventData>),
+    FellowshipDismiss(Box<FellowshipDismissEventData>),
+    FellowshipFellowUpdateDone,
+    FellowshipFellowStatsDone,
     Unknown(u32, Vec<u8>),
 }
 
@@ -113,6 +123,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::ChannelBroadcast => GameEvent::ChannelBroadcast(Box::new(
                     ChannelBroadcastEventData::unpack(data, offset)?,
                 )),
+                GameEventOpcode::SetTurbineChatChannels => GameEvent::SetTurbineChatChannels(
+                    Box::new(SetTurbineChatChannelsEventData::unpack(data, offset)?),
+                ),
                 GameEventOpcode::PopupString => {
                     GameEvent::PopupString(Box::new(PopupStringEventData::unpack(data, offset)?))
                 }
@@ -231,6 +244,13 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::UpdateHealth => {
                     GameEvent::UpdateHealth(Box::new(UpdateHealthEventData::unpack(data, offset)?))
                 }
+                GameEventOpcode::FellowshipFullUpdate => GameEvent::FellowshipFullUpdate(Box::new(
+                    FellowshipFullUpdateEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::FellowshipDisband => GameEvent::FellowshipDisband,
+                GameEventOpcode::FellowshipUpdateFellow => GameEvent::FellowshipUpdateFellow(
+                    Box::new(FellowshipUpdateFellowEventData::unpack(data, offset)?),
+                ),
                 GameEventOpcode::RegisterTrade => GameEvent::RegisterTrade(Box::new(
                     RegisterTradeEventData::unpack(data, offset)?,
                 )),
@@ -259,6 +279,16 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::ApproachVendor => GameEvent::ApproachVendor(Box::new(
                     ApproachVendorEventData::unpack(data, offset)?,
                 )),
+                GameEventOpcode::FellowshipQuit => GameEvent::FellowshipQuit(Box::new(
+                    FellowshipQuitEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::FellowshipDismiss => GameEvent::FellowshipDismiss(Box::new(
+                    FellowshipDismissEventData::unpack(data, offset)?,
+                )),
+                GameEventOpcode::FellowshipFellowUpdateDone => {
+                    GameEvent::FellowshipFellowUpdateDone
+                }
+                GameEventOpcode::FellowshipFellowStatsDone => GameEvent::FellowshipFellowStatsDone,
             },
             None => {
                 log::warn!(
@@ -324,6 +354,11 @@ impl ProtocolPack for GameEventMessage {
             }
             GameEvent::ChannelBroadcast(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ChannelBroadcast as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::SetTurbineChatChannels(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::SetTurbineChatChannels as u32)
                     .unwrap();
                 data.pack(buf);
             }
@@ -481,6 +516,20 @@ impl ProtocolPack for GameEventMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameEvent::FellowshipFullUpdate(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipFullUpdate as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::FellowshipDisband => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipDisband as u32)
+                    .unwrap();
+            }
+            GameEvent::FellowshipUpdateFellow(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipUpdateFellow as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameEvent::RegisterTrade(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::RegisterTrade as u32)
                     .unwrap();
@@ -529,6 +578,24 @@ impl ProtocolPack for GameEventMessage {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::ApproachVendor as u32)
                     .unwrap();
                 data.pack(buf);
+            }
+            GameEvent::FellowshipQuit(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipQuit as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::FellowshipDismiss(data) => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipDismiss as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::FellowshipFellowUpdateDone => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipFellowUpdateDone as u32)
+                    .unwrap();
+            }
+            GameEvent::FellowshipFellowStatsDone => {
+                buf.write_u32::<LittleEndian>(GameEventOpcode::FellowshipFellowStatsDone as u32)
+                    .unwrap();
             }
             GameEvent::Unknown(opcode, data) => {
                 buf.write_u32::<LittleEndian>(*opcode).unwrap();

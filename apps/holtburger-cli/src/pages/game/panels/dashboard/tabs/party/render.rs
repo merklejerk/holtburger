@@ -91,7 +91,7 @@ pub fn render_party_tab(
     } else {
         String::new()
     };
-    
+
     let summary = Paragraph::new(Line::from(vec![
         Span::styled("Party: ", Style::default().fg(theme::SUMMARY_FG)),
         Span::raw(format!("{}  ", party_name)),
@@ -124,8 +124,14 @@ pub fn render_party_tab(
                     format!("{} ({})", entry.member.name, entry.member.level),
                 )),
                 Span::styled(
-                    format!("{:>3}/{:<3}", entry.member.current_health, entry.member.max_health),
-                    Style::default().fg(vital_color(entry.member.current_health, entry.member.max_health)),
+                    format!(
+                        "{:>3}/{:<3}",
+                        entry.member.current_health, entry.member.max_health
+                    ),
+                    Style::default().fg(vital_color(
+                        entry.member.current_health,
+                        entry.member.max_health,
+                    )),
                 ),
                 Span::raw("  S "),
                 Span::styled(
@@ -133,12 +139,21 @@ pub fn render_party_tab(
                         "{:>3}/{:<3}",
                         entry.member.current_stamina, entry.member.max_stamina
                     ),
-                    Style::default().fg(vital_color(entry.member.current_stamina, entry.member.max_stamina)),
+                    Style::default().fg(vital_color(
+                        entry.member.current_stamina,
+                        entry.member.max_stamina,
+                    )),
                 ),
                 Span::raw("  M "),
                 Span::styled(
-                    format!("{:>3}/{:<3}", entry.member.current_mana, entry.member.max_mana),
-                    Style::default().fg(vital_color(entry.member.current_mana, entry.member.max_mana)),
+                    format!(
+                        "{:>3}/{:<3}",
+                        entry.member.current_mana, entry.member.max_mana
+                    ),
+                    Style::default().fg(vital_color(
+                        entry.member.current_mana,
+                        entry.member.max_mana,
+                    )),
                 ),
                 Span::raw(distance_suffix),
             ]);

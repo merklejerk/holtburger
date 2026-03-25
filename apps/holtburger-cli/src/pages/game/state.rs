@@ -303,8 +303,8 @@ impl GameState {
                 }
             }
             ClientViewEvent::FellowshipStateUpdated { fellowship } => {
-                let should_open_party_tab = fellowship.is_some()
-                    && self.runtime.open_party_tab_on_next_fellowship_update;
+                let should_open_party_tab =
+                    fellowship.is_some() && self.runtime.open_party_tab_on_next_fellowship_update;
 
                 self.runtime.open_party_tab_on_next_fellowship_update = false;
 
@@ -1750,8 +1750,8 @@ mod tests {
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::client::navigation::StickyMeleeSyncInput;
     use holtburger_core::ActiveCharacterConfirmation;
+    use holtburger_core::client::navigation::StickyMeleeSyncInput;
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};

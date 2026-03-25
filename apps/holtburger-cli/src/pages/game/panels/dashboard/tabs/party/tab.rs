@@ -7,9 +7,7 @@ use ratatui::layout::Rect;
 
 use super::render::render_party_tab;
 use crate::pages::game::{GameData, ViewState};
-use crate::types::{
-    AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb,
-};
+use crate::types::{AppAction, InspectTarget, Interaction, TabController, UpdateResult, Verb};
 
 #[derive(Debug, Clone)]
 pub struct PartyListEntry<'a> {
@@ -76,7 +74,8 @@ impl PartyTab {
 
         let player_pos = data.player_pos?;
         let entity = data.entities.get(&guid)?;
-        (entity.position.landblock_id != Guid::NULL).then(|| entity.position.distance_to(&player_pos))
+        (entity.position.landblock_id != Guid::NULL)
+            .then(|| entity.position.distance_to(&player_pos))
     }
 
     fn is_member_nearby(&self, data: &GameData, guid: Guid) -> bool {
@@ -98,11 +97,15 @@ impl PartyTab {
     }
 
     fn selected_member<'a>(&self, data: &'a GameData) -> Option<PartyListEntry<'a>> {
-        self.visible_members(data).into_iter().nth(self.selected_index)
+        self.visible_members(data)
+            .into_iter()
+            .nth(self.selected_index)
     }
 
     fn is_party_leader(&self, data: &GameData) -> bool {
-        data.party.as_ref().is_some_and(|party| Some(party.leader_guid) == data.player_guid)
+        data.party
+            .as_ref()
+            .is_some_and(|party| Some(party.leader_guid) == data.player_guid)
     }
 
     fn item_count(&self, data: &GameData, _view: &ViewState) -> usize {
@@ -119,7 +122,7 @@ impl TabController for PartyTab {
         &self,
         data: &GameData,
         _view: &ViewState,
-        interaction: &Option<Interaction>,
+        _interaction: &Option<Interaction>,
     ) -> Vec<Verb> {
         let Some(selected) = self.selected_member(data) else {
             return Vec::new();
@@ -319,8 +322,10 @@ mod tests {
         let mut data = GameData::new(player_guid, "Player".to_string(), "World".to_string());
         data.player_pos = Some(world_pos(0.0));
         data.party = Some(party_state(player_guid, nearby_guid));
-        data.entities
-            .insert(nearby_guid, Entity::new(nearby_guid, "Bestie".to_string(), world_pos(3.0)));
+        data.entities.insert(
+            nearby_guid,
+            Entity::new(nearby_guid, "Bestie".to_string(), world_pos(3.0)),
+        );
 
         let mut tab = PartyTab::default();
         select_member(&mut tab, &data, "Bestie");
@@ -448,7 +453,10 @@ mod tests {
         let mut tab = PartyTab::default();
         select_member(&mut tab, &data, "Bestie");
 
-        assert!(tab.selected_member(&data).is_some_and(|entry| !entry.nearby));
+        assert!(
+            tab.selected_member(&data)
+                .is_some_and(|entry| !entry.nearby)
+        );
         assert!(!has_label(
             &tab.get_verbs(&data, &ViewState::default(), &None),
             "Approach"

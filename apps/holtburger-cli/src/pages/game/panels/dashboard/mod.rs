@@ -1,7 +1,7 @@
 pub mod tabs;
 
 pub use self::tabs::{
-	CharacterTab, EquipTab, InventoryTab, NearbyTab, PartyTab, SpellsTab, TradeTab,
+    CharacterTab, EquipTab, InventoryTab, NearbyTab, PartyTab, SpellsTab, TradeTab,
 };
 
 pub mod assess;

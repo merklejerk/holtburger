@@ -1018,8 +1018,59 @@ mod tests {
     }
 
     #[test]
-    fn entity_moved_interpolates_from_current_simulated_pose() {
+    fn authoritative_snapshot_resumes_suspended_projection() {
         let guid = Guid(0x5000_000A);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
+        let entity = make_entity(guid, make_position(1.0, 2.0, 0.25));
+
+        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::TeleportStarted { sequence: 7 },
+            start + Duration::from_millis(10),
+        );
+
+        let mut resumed_entity = make_entity(guid, make_position(8.0, 9.0, 1.0));
+        resumed_entity.velocity = Vector3::new(1.0, 0.0, 0.0);
+        system.handle_view_event(
+            &ClientViewEvent::EntityIdentified {
+                entity: Box::new(resumed_entity),
+            },
+            start + Duration::from_millis(20),
+        );
+
+        let resumed = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(resumed.projection_mode, ProjectionMode::AuthoritativeOnly);
+        assert_eq!(resumed.projected_pose, make_position(8.0, 9.0, 1.0));
+        assert_eq!(resumed.velocity, Vector3::new(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn same_turn_spatial_sample_is_coherent_after_authoritative_move() {
+        let guid = Guid(0x5000_000B);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig {
+            max_position_interp: Duration::from_millis(200),
+            ..ProjectionConfig::default()
+        });
+
+        system.handle_view_event(
+            &ClientViewEvent::EntityMoved {
+                guid,
+                pos: make_position(4.0, 5.0, 0.75),
+            },
+            start,
+        );
+
+        let sample = system.spatial_sample(guid).expect("sample should exist");
+        assert_eq!(sample.projection_mode, ProjectionMode::AuthoritativeOnly);
+        assert_eq!(sample.authoritative_pose, make_position(4.0, 5.0, 0.75));
+        assert_eq!(sample.projected_pose, make_position(4.0, 5.0, 0.75));
+    }
+
+    #[test]
+    fn entity_moved_interpolates_from_current_simulated_pose() {
+        let guid = Guid(0x5000_000C);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig {
             max_position_interp: Duration::from_millis(200),
@@ -1051,7 +1102,7 @@ mod tests {
 
     #[test]
     fn partial_kinematics_updates_do_not_create_projection_entries() {
-        let guid = Guid(0x5000_000B);
+        let guid = Guid(0x5000_000D);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
 
@@ -1070,7 +1121,7 @@ mod tests {
 
     #[test]
     fn partial_motion_updates_do_not_create_projection_entries() {
-        let guid = Guid(0x5000_000C);
+        let guid = Guid(0x5000_000E);
         let start = Instant::now();
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
 
@@ -1100,8 +1151,8 @@ mod tests {
             max_position_interp: Duration::from_millis(200),
             ..ProjectionConfig::default()
         });
-        let first_guid = Guid(0x5000_000D);
-        let second_guid = Guid(0x5000_000E);
+        let first_guid = Guid(0x5000_000F);
+        let second_guid = Guid(0x5000_0010);
 
         system.handle_view_event(
             &ClientViewEvent::EntitySpawned {

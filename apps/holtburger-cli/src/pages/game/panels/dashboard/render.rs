@@ -29,6 +29,7 @@ pub fn render_dashboard_pane(
     let bottom_tabs = [
         (DashboardTab::Equip, "5", "Equip"),
         (DashboardTab::Trade, "6", "Trade"),
+        (DashboardTab::Party, "7", "Party"),
     ];
 
     let create_tab_line = |tabs: &[(DashboardTab, &str, &str)],

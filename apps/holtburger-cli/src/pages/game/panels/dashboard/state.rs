@@ -1,4 +1,6 @@
-use super::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
+use super::tabs::{
+    CharacterTab, EquipTab, InventoryTab, NearbyTab, PartyTab, SpellsTab, TradeTab,
+};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{AppUiAction, DashboardTab, TabController, UpdateResult, VerbInputState};
 use crossterm::event::{KeyCode, KeyEvent};
@@ -12,6 +14,7 @@ pub struct DashboardState {
     pub spells: SpellsTab,
     pub equip: EquipTab,
     pub trade: TradeTab,
+    pub party: PartyTab,
     pub last_height: usize,
 }
 
@@ -28,6 +31,7 @@ impl DashboardState {
             DashboardTab::Spells => &mut self.spells,
             DashboardTab::Equip => &mut self.equip,
             DashboardTab::Trade => &mut self.trade,
+            DashboardTab::Party => &mut self.party,
         }
     }
 
@@ -39,6 +43,7 @@ impl DashboardState {
             DashboardTab::Spells => &self.spells,
             DashboardTab::Equip => &self.equip,
             DashboardTab::Trade => &self.trade,
+            DashboardTab::Party => &self.party,
         }
     }
 
@@ -85,6 +90,10 @@ impl DashboardState {
                 self.active_tab = DashboardTab::Trade;
                 Some(UpdateResult::redraw())
             }
+            KeyCode::Char('7') => {
+                self.active_tab = DashboardTab::Party;
+                Some(UpdateResult::redraw())
+            }
             _ => None,
         }
     }
@@ -118,6 +127,9 @@ impl DashboardState {
             result.merge(tab_result);
         }
         if let Some(tab_result) = self.trade.handle_ui_action(&action, data, view) {
+            result.merge(tab_result);
+        }
+        if let Some(tab_result) = self.party.handle_ui_action(&action, data, view) {
             result.merge(tab_result);
         }
 

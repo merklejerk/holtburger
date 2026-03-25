@@ -195,6 +195,15 @@ fn test_dispatch_emote_text() {
 }
 
 #[test]
+fn test_dispatch_turbine_chat() {
+    let fixture = hex::decode(
+        "DEF700005E000000010000000100000001000000B5000B0001000000B5000B00000000003E000000020000000541006C006900630065000B680065006C006C006F00200077006F0072006C0064000C000000010000500000000002000000",
+    )
+    .unwrap();
+    assert_dispatch_match(&fixture, |msg| matches!(msg, GameMessage::TurbineChat(_)));
+}
+
+#[test]
 fn test_dispatch_soul_emote() {
     assert_dispatch_match(test_fixtures::SOUL_EMOTE, |msg| {
         matches!(msg, GameMessage::SoulEmote(_))

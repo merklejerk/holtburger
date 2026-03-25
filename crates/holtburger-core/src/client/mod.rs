@@ -14,6 +14,7 @@ mod messages;
 mod movement;
 pub mod movement_types;
 pub mod navigation;
+pub mod projection;
 pub mod types;
 use auth::AuthState;
 pub use builder::ClientBuilder;

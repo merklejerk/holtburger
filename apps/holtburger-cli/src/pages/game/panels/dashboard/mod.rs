@@ -1,6 +1,8 @@
 pub mod tabs;
 
-pub use self::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, SpellsTab, TradeTab};
+pub use self::tabs::{
+    CharacterTab, EquipTab, InventoryTab, NearbyTab, PartyTab, SpellsTab, TradeTab,
+};
 
 pub mod assess;
 pub mod debug;

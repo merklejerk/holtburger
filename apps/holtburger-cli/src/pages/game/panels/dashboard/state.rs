@@ -1,6 +1,4 @@
-use super::tabs::{
-    CharacterTab, EquipTab, InventoryTab, NearbyTab, PartyTab, SpellsTab, TradeTab,
-};
+use super::tabs::{CharacterTab, EquipTab, InventoryTab, NearbyTab, PartyTab, SpellsTab, TradeTab};
 use crate::pages::game::{GameData, ViewState};
 use crate::types::{AppUiAction, DashboardTab, TabController, UpdateResult, VerbInputState};
 use crossterm::event::{KeyCode, KeyEvent};

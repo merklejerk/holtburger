@@ -1,6 +1,7 @@
 mod commands;
 
 use crossterm::event::{KeyCode, KeyEvent, MouseEvent};
+use holtburger_common::ConfirmationType;
 use holtburger_core::ClientCommand;
 use holtburger_protocol::messages::combat::CombatMode;
 
@@ -386,7 +387,7 @@ impl GameState {
     }
 
     fn handle_confirmation_input(&mut self, key: KeyEvent) -> Option<UpdateResult> {
-        self.view.active_confirmation.as_ref()?;
+        let confirmation = self.view.active_confirmation.as_ref()?;
 
         let accepted = match key.code {
             KeyCode::Enter => Some(true),
@@ -399,6 +400,9 @@ impl GameState {
             result
                 .commands
                 .push(ClientCommand::RespondToConfirmation { accepted });
+            if accepted && confirmation.confirmation_type == ConfirmationType::Fellowship {
+                self.mark_fellowship_invite_accepted();
+            }
             self.view.active_confirmation = None;
             result.needs_redraw = true;
         }

@@ -210,6 +210,7 @@
 - [x] Picked up items appear as wielded in nearby tab until you assess or debug them.
 - [x] Filter verb to vendor tab.
 - [x] Sometimes player can appear to get stuck in a nonautonomous loop when using an item that's impossible to reach (above). Not sure if this only manifests in other people's clients. Seems like if I restart the viewing client, the player just disappears entirely and are nowhere on the map!
+- [x] Fellowship tab (vitals HUDs).
 - [~] Slash commands:
     - [x] `/ls`, `/rip`, `/t[ell] <to> <msg>`, `/r[eply] <msg>`, `/p[arty] <msg>`, `/g[uild] <msg>`
     - [x] `/party` - get info on current party
@@ -218,10 +219,13 @@
     - [x] `/? COMMAND` - targeted command help doc
     - [~] `/swear`, `/leave`, `/unswear <VASSAL>`.
     - [ ] `/permit <player>`, `/unpermit <player>`, `/permits` - corpse looting options
-- [ ] Fellowship tab (vitals HUDs).
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
+- [ ] `holtburger-core` abuses the shit out of WireEvents.
+- [ ] Harden reconnect.
+- [ ] Interpolate entity motion properties.
+- [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

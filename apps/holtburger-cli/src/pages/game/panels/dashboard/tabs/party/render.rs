@@ -1,12 +1,50 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 
 use super::tab::PartyTab;
 use crate::pages::game::{GameData, ViewState};
 use crate::theme;
+
+fn format_badge(entry: &super::tab::PartyListEntry<'_>) -> String {
+    if entry.is_leader {
+        "👑".to_string()
+    } else {
+        "👤".to_string()
+    }
+}
+
+fn format_distance_suffix(entry: &super::tab::PartyListEntry<'_>) -> String {
+    match (entry.distance_m, entry.is_self, entry.nearby) {
+        (Some(distance), false, _) => format!("  [{distance:.1}m]"),
+        (Some(_), true, _) => String::new(),
+        _ => String::new(),
+    }
+}
+
+fn vital_fraction(current: u32, max: u32) -> f32 {
+    if max == 0 {
+        return 0.0;
+    }
+
+    (current as f32 / max as f32).clamp(0.0, 1.0)
+}
+
+fn vital_color(current: u32, max: u32) -> Color {
+    let fraction = vital_fraction(current, max);
+
+    if fraction <= 0.25 {
+        Color::Red
+    } else if fraction <= 0.5 {
+        Color::Yellow
+    } else if fraction <= 0.75 {
+        Color::LightYellow
+    } else {
+        Color::LightGreen
+    }
+}
 
 pub fn render_party_tab(
     tab: &mut PartyTab,
@@ -37,22 +75,29 @@ pub fn render_party_tab(
         .map(|member| member.name.as_str())
         .unwrap_or("Unknown");
 
+    let mut settings_indicators = Vec::new();
+    if party.share_xp {
+        settings_indicators.push("XP Sharing");
+    }
+    if party.is_locked {
+        settings_indicators.push("Locked");
+    }
+    if party.open {
+        settings_indicators.push("Open");
+    }
+
+    let settings_content = if !settings_indicators.is_empty() {
+        format!("[{}]", settings_indicators.join(", "))
+    } else {
+        String::new()
+    };
+    
     let summary = Paragraph::new(Line::from(vec![
         Span::styled("Party: ", Style::default().fg(theme::SUMMARY_FG)),
         Span::raw(format!("{}  ", party_name)),
         Span::styled("Leader: ", Style::default().fg(theme::SUMMARY_FG)),
         Span::raw(format!("{}  ", leader_name)),
-        Span::styled("Flags: ", Style::default().fg(theme::SUMMARY_FG)),
-        Span::styled(
-            format!(
-                "{} {} {} {}",
-                if party.share_xp { "✨XP" } else { "🚫XP" },
-                if party.even_share { "⚖EVEN" } else { "↕FREE" },
-                if party.open { "🚪OPEN" } else { "🚪CLOSED" },
-                if party.is_locked { "🔒LOCKED" } else { "🔓UNLOCKED" }
-            ),
-            Style::default().add_modifier(Modifier::BOLD),
-        ),
+        Span::raw(settings_content),
     ]));
     f.render_widget(summary, chunks[0]);
 
@@ -69,20 +114,36 @@ pub fn render_party_tab(
         .enumerate()
         .map(|(index, entry)| {
             let item_style = theme::list_item_style(index == selected_index);
-            let text = format!(
-                "[{}] {:<20} L{:>3}  H {:>3}/{:<3}  S {:>3}/{:<3}  M {:>3}/{:<3}{}",
-                entry.badges,
-                entry.member.name,
-                entry.member.level,
-                entry.member.current_health,
-                entry.member.max_health,
-                entry.member.current_stamina,
-                entry.member.max_stamina,
-                entry.member.current_mana,
-                entry.member.max_mana,
-                entry.distance_suffix,
-            );
-            ListItem::new(text).style(item_style)
+            let badge = format_badge(entry);
+            let distance_suffix = format_distance_suffix(entry);
+
+            let line = Line::from(vec![
+                Span::raw(format!(
+                    "[{}] {:<16}  H ",
+                    badge,
+                    format!("{} ({})", entry.member.name, entry.member.level),
+                )),
+                Span::styled(
+                    format!("{:>3}/{:<3}", entry.member.current_health, entry.member.max_health),
+                    Style::default().fg(vital_color(entry.member.current_health, entry.member.max_health)),
+                ),
+                Span::raw("  S "),
+                Span::styled(
+                    format!(
+                        "{:>3}/{:<3}",
+                        entry.member.current_stamina, entry.member.max_stamina
+                    ),
+                    Style::default().fg(vital_color(entry.member.current_stamina, entry.member.max_stamina)),
+                ),
+                Span::raw("  M "),
+                Span::styled(
+                    format!("{:>3}/{:<3}", entry.member.current_mana, entry.member.max_mana),
+                    Style::default().fg(vital_color(entry.member.current_mana, entry.member.max_mana)),
+                ),
+                Span::raw(distance_suffix),
+            ]);
+
+            ListItem::new(line).style(item_style)
         })
         .collect();
 
@@ -96,4 +157,23 @@ pub fn render_party_tab(
     f.render_stateful_widget(list, chunks[1], list_state);
     let offset = list_state.offset();
     crate::components::scroll::render_scrollbar(f, chunks[1], content_len, offset);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vital_color_uses_expected_breakpoints() {
+        assert_eq!(vital_color(100, 100), Color::LightGreen);
+        assert_eq!(vital_color(75, 100), Color::LightYellow);
+        assert_eq!(vital_color(50, 100), Color::Yellow);
+        assert_eq!(vital_color(25, 100), Color::Red);
+        assert_eq!(vital_color(0, 0), Color::Red);
+    }
+
+    #[test]
+    fn vital_fraction_clamps_overfilled_values() {
+        assert_eq!(vital_fraction(150, 100), 1.0);
+    }
 }

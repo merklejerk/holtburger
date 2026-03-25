@@ -83,6 +83,17 @@ impl WorldPosition {
         (x, y)
     }
 
+    pub fn landblock_chebyshev_distance_to(&self, other: &Self) -> Option<u8> {
+        if self.landblock_id == Guid::NULL || other.landblock_id == Guid::NULL {
+            return None;
+        }
+
+        let (self_x, self_y) = self.landblock_coords();
+        let (other_x, other_y) = other.landblock_coords();
+
+        Some(self_x.abs_diff(other_x).max(self_y.abs_diff(other_y)))
+    }
+
     pub fn cell_coords(&self) -> (u8, u8) {
         if self.is_indoors() {
             return (0, 0); // Indoor cells don't have a 2d grid layout in the same way
@@ -243,6 +254,54 @@ mod tests {
         };
         let d2 = p3.distance_to(&p4);
         assert!((d2 - 192.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_landblock_chebyshev_distance_to_adjacent_block() {
+        let p1 = WorldPosition {
+            landblock_id: Guid(0x01010000),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        let p2 = WorldPosition {
+            landblock_id: Guid(0x02020000),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(p1.landblock_chebyshev_distance_to(&p2), Some(1));
+    }
+
+    #[test]
+    fn test_landblock_chebyshev_distance_to_two_blocks_away() {
+        let p1 = WorldPosition {
+            landblock_id: Guid(0x01010000),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        let p2 = WorldPosition {
+            landblock_id: Guid(0x03010000),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(p1.landblock_chebyshev_distance_to(&p2), Some(2));
+    }
+
+    #[test]
+    fn test_landblock_chebyshev_distance_to_returns_none_for_null_landblock() {
+        let p1 = WorldPosition {
+            landblock_id: Guid::NULL,
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        let p2 = WorldPosition {
+            landblock_id: Guid(0x01010000),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+
+        assert_eq!(p1.landblock_chebyshev_distance_to(&p2), None);
     }
 
     #[test]

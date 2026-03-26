@@ -134,10 +134,12 @@ impl ChatState {
             | ClientViewEvent::NetPulse { .. }
             | ClientViewEvent::Disconnected => {}
             ClientViewEvent::BootAccount(reason) => {
-                self.log(
-                    ChatMessageKind::Error,
-                    format!("Booted from server: {}", reason),
-                );
+                let message = if reason.trim().is_empty() {
+                    "Disconnected: Booted from server.".to_string()
+                } else {
+                    format!("Disconnected: Booted from server: {}", reason)
+                };
+                self.log(ChatMessageKind::Error, message);
             }
             _ => {}
         }

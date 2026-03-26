@@ -2,10 +2,10 @@ use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
 use holtburger_common::Guid;
-use holtburger_core::{ClientState, RetryState};
+use holtburger_core::ClientState;
 
 use crate::pages::game::layout::NET_PULSE_HISTORY_SIZE;
-use crate::types::{ChatMessageKind, Modal, Page};
+use crate::types::{ChatMessageKind, Page};
 
 use crate::pages::game::GameState;
 
@@ -35,27 +35,26 @@ pub struct AppState {
     pub character_preference: Option<String>,
     pub chat_log: Option<Mutex<File>>,
     pub page: Page,
-    pub modal: Option<Modal>,
-    pub logon_retry: RetryState,
-    pub enter_retry: RetryState,
     pub client_state: ClientState,
     pub net_stats: NetStats,
     pub world_name: String,
     pub server_time: Option<(f64, Instant)>,
     pub verbosity: u8,
+    pub quit_on_disconnect: bool,
+    pub disconnect_reason: Option<String>,
+    pub pending_exit_message: Option<String>,
 }
 
 pub struct RenderContext<'a> {
     pub account_name: &'a str,
     pub client_state: &'a ClientState,
     pub net_stats: &'a NetStats,
-    pub is_modal_active: bool,
-    pub logon_retry: &'a RetryState,
-    pub enter_retry: &'a RetryState,
     pub server_time: Option<(f64, Instant)>,
 }
 
 impl AppState {
+    pub const DEFAULT_DISCONNECT_MESSAGE: &str = "Lost connection to server.";
+
     pub fn current_server_time(&self) -> f64 {
         match self.server_time {
             Some((server_val, local_then)) => {
@@ -169,6 +168,49 @@ impl AppState {
         for (kind, msg) in logs {
             self.log(kind, msg);
         }
+    }
+
+    pub fn clear_disconnect_reason(&mut self) {
+        self.disconnect_reason = None;
+    }
+
+    pub fn remember_disconnect_reason(&mut self, reason: impl Into<String>) {
+        let reason = reason.into();
+        if reason.trim().is_empty() {
+            return;
+        }
+
+        self.disconnect_reason = Some(reason);
+    }
+
+    pub fn current_disconnect_message(&self) -> String {
+        self.disconnect_reason
+            .clone()
+            .unwrap_or_else(|| Self::DEFAULT_DISCONNECT_MESSAGE.to_string())
+    }
+
+    pub fn current_disconnect_chat_message(&self) -> String {
+        format!("Disconnected: {}", self.current_disconnect_message())
+    }
+
+    pub fn should_exit_on_disconnect(&self) -> bool {
+        self.quit_on_disconnect || self.game_option().is_none()
+    }
+
+    pub fn request_disconnect_exit(&mut self) {
+        if !self.should_exit_on_disconnect() || self.pending_exit_message.is_some() {
+            return;
+        }
+
+        self.pending_exit_message = Some(self.current_disconnect_message());
+    }
+
+    pub fn has_pending_exit(&self) -> bool {
+        self.pending_exit_message.is_some()
+    }
+
+    pub fn take_pending_exit_message(&mut self) -> Option<String> {
+        self.pending_exit_message.take()
     }
 }
 

@@ -12,6 +12,8 @@ use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
 use std::time::Instant;
 
+const APPROACH_SLOWDOWN_HORIZON_SECS: f32 = 0.25;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ApproachTargetInput {
     Tick {
@@ -53,6 +55,19 @@ impl ApproachTargetController {
 
     pub fn arrival_distance(&self) -> f32 {
         self.arrival_distance
+    }
+
+    fn capped_move_speed(
+        distance_to_target: f32,
+        effective_arrival_distance: f32,
+        move_speed: f32,
+    ) -> f32 {
+        let requested_speed = move_speed.max(0.0);
+        let remaining_distance = (distance_to_target - effective_arrival_distance).max(0.0);
+        let max_speed_for_remaining_distance =
+            remaining_distance / (RUN_ANIM_SPEED * APPROACH_SLOWDOWN_HORIZON_SECS);
+
+        requested_speed.min(max_speed_for_remaining_distance.max(0.0))
     }
 
     fn predicted_velocity_toward(
@@ -122,8 +137,14 @@ impl Controller for ApproachTargetController {
                         ));
                 }
 
+                let capped_move_speed = Self::capped_move_speed(
+                    distance_to_target,
+                    effective_arrival_distance,
+                    move_speed,
+                );
+
                 let prediction =
-                    Self::predicted_velocity_toward(player_position, target_position, move_speed)
+                    Self::predicted_velocity_toward(player_position, target_position, capped_move_speed)
                         .map(MovementPrediction::WorldVelocity)
                         .unwrap_or(MovementPrediction::FromHeading);
 
@@ -131,7 +152,7 @@ impl Controller for ApproachTargetController {
                     ApproachTargetEffect::Movement(MovementPrimitive::Drive {
                         intent: DriveIntent {
                             heading: player_position.heading_to(&target_position),
-                            speed: move_speed.max(0.0),
+                            speed: capped_move_speed,
                         },
                         prediction,
                     }),
@@ -434,5 +455,31 @@ mod tests {
                 ApproachTargetEffect::Finished(ApproachTargetFinishReason::Arrived),
             ]
         );
+    }
+
+    #[test]
+    fn slows_down_when_close_to_arrival_shell() {
+        let now = Instant::now();
+        let mut controller = ApproachTargetController::new(0.5);
+
+        let update = controller.handle(&ApproachTargetInput::Tick {
+            now,
+            player_position: position(0.0),
+            target_position: Some(position(1.6)),
+            target_use_radius: None,
+            move_speed: 4.5,
+        });
+
+        assert_eq!(update.status, ControllerStatus::Active);
+        assert!(matches!(
+            update.effects.as_slice(),
+            [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
+                intent: DriveIntent { speed, .. },
+                prediction: MovementPrediction::WorldVelocity(predicted_velocity),
+            })] if (speed - 1.1).abs() <= 1e-6
+                && (predicted_velocity.x - 4.4).abs() <= 1e-6
+                && predicted_velocity.y.abs() <= 1e-6
+                && predicted_velocity.z.abs() <= 1e-6
+        ));
     }
 }

@@ -7,7 +7,7 @@ use holtburger_core::client::movement_types::{
     MovementPacketMetadata, MovementPrimitive, MovementRequest,
 };
 use holtburger_core::client::navigation::{
-    ApproachSyncInput, NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
+    NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
     ResolvedNavigationTarget,
 };
 use holtburger_core::client::types::ClientCommand;

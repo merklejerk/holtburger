@@ -24,6 +24,7 @@ pub enum MaintainRangeInput {
         target_guid: Guid,
         player_position: WorldPosition,
         target: Option<MaintainRangeSpatialInput>,
+        target_use_radius: Option<f32>,
     },
     Suspend {
         clear_latch: bool,
@@ -115,6 +116,7 @@ impl Controller for MaintainRangeController {
                 target_guid,
                 player_position,
                 target,
+                target_use_radius,
             } => {
                 self.reset_for_target_change(target_guid);
 
@@ -132,7 +134,11 @@ impl Controller for MaintainRangeController {
                 };
 
                 let distance = player_position.distance_to(&target_position);
-                if distance <= self.config.arrival_distance {
+                let effective_arrival_distance = self
+                    .config
+                    .arrival_distance
+                    .max(target_use_radius.unwrap_or(0.0).max(0.0));
+                if distance <= effective_arrival_distance {
                     self.latched_target = Some(target_guid);
                     self.last_reissue_at = None;
                     let mut update = ControllerUpdate::new(ControllerStatus::Paused);
@@ -223,6 +229,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
+            target_use_radius: None,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -247,6 +254,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
+            target_use_radius: None,
         });
 
         let paused = controller.handle(&MaintainRangeInput::Tick {
@@ -254,6 +262,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
+            target_use_radius: None,
         });
 
         assert_eq!(paused.status, ControllerStatus::Paused);
@@ -272,6 +281,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
+            target_use_radius: None,
         });
 
         let _ = controller.handle(&MaintainRangeInput::Tick {
@@ -279,6 +289,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
+            target_use_radius: None,
         });
 
         let update = controller.handle(&MaintainRangeInput::Tick {
@@ -286,6 +297,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(6.0),
+            target_use_radius: None,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -310,6 +322,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
+            target_use_radius: None,
         });
 
         let update = controller.handle(&MaintainRangeInput::Tick {
@@ -317,6 +330,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(20.0),
+            target_use_radius: None,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -341,6 +355,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
+            target_use_radius: None,
         });
 
         let update = controller.handle(&MaintainRangeInput::Suspend { clear_latch: true });
@@ -367,6 +382,7 @@ mod tests {
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: target(0.5, 1.5, ProjectionMode::SimulatingVelocity),
+            target_use_radius: None,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -377,5 +393,29 @@ mod tests {
                 arrival_distance: 0.6,
             }]
         );
+    }
+
+    #[test]
+    fn target_use_radius_extends_effective_arrival_distance() {
+        let now = Instant::now();
+        let mut controller = MaintainRangeController::new(MaintainRangeConfig {
+            arrival_distance: 0.01,
+            acquire_distance: 4.0,
+            repeat_distance: 16.0,
+            reissue_interval: Duration::from_millis(250),
+        });
+
+        let update = controller.handle(&MaintainRangeInput::Tick {
+            now,
+            target_guid: Guid(0x1234),
+            player_position: position(0.0),
+            target: authoritative_target(0.5),
+            target_use_radius: Some(0.6),
+        });
+
+        assert_eq!(update.status, ControllerStatus::Paused);
+        assert!(update.effects.is_empty());
+        assert_eq!(controller.latched_target_guid(), Some(Guid(0x1234)));
+        assert!(!controller.is_pursuing());
     }
 }

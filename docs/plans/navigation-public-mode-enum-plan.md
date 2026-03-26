@@ -112,6 +112,8 @@ This keeps public-mode exclusivity in the type system while still allowing follo
 - `navigation_mode()` becomes a direct match on `active` and no longer derives public mode by merging independent `Option`s.
 - Public-mode exclusivity no longer relies on a global assert across separate fields.
 
+Status: Completed.
+
 ### Phase 2: Localize Per-Mode Sync And Transition Logic
 
 #### Deliverables
@@ -129,6 +131,8 @@ This keeps public-mode exclusivity in the type system while still allowing follo
 - Direct approach is no longer represented as a globally shared controller that may also be borrowed by follow or sticky melee.
 - `clear_navigation()` becomes a direct transition to `Idle` plus any required stop/cancel side effects.
 
+Status: Completed.
+
 ### Phase 3: Preserve Forced-Reposition And Teleport Semantics
 
 #### Deliverables
@@ -143,6 +147,8 @@ This keeps public-mode exclusivity in the type system while still allowing follo
 - Forced reposition still leaves paused sticky melee and follow observable through `navigation_mode()` and sticky helper readers where they are today.
 - Teleport start still clears sticky melee latch and pursuit.
 - Forced reposition and teleport preserve current direct-approach cancellation semantics.
+
+Status: Completed.
 
 ### Phase 4: Tighten Variant-Local Invariants And Regression Coverage
 
@@ -162,6 +168,8 @@ This keeps public-mode exclusivity in the type system while still allowing follo
 - Tests prove invalid multi-mode combinations are no longer representable via the public API.
 - Variant-local assertions catch inconsistent internal state without rebuilding the old cross-field exclusivity check.
 - Existing navigation tests continue to pass after updates for the new representation.
+
+Status: Completed.
 
 ## Risks & Mitigations
 
@@ -207,27 +215,33 @@ Mitigation:
 
 ### Task Checklist
 
-- [ ] Add `ActiveNavigation` and variant state structs.
-- [ ] Replace top-level controller slots on `NavigationAutomation`.
-- [ ] Rework `navigation_mode` and sticky helper readers.
-- [ ] Rework explicit activation APIs to replace `active` directly.
-- [ ] Rework reconciliation to tick the current variant or replace it.
-- [ ] Rework forced reposition and teleport handling through variant-local state.
-- [ ] Delete obsolete ownership enums/helpers.
-- [ ] Add transition regression tests.
-- [ ] Run targeted core navigation tests.
-- [ ] Run targeted CLI game-state tests that cover sticky/follow interaction behavior.
+- [x] Add `ActiveNavigation` and variant state structs.
+- [x] Replace top-level controller slots on `NavigationAutomation`.
+- [x] Rework `navigation_mode` and sticky helper readers.
+- [x] Rework explicit activation APIs to replace `active` directly.
+- [x] Rework reconciliation to tick the current variant or replace it.
+- [x] Rework forced reposition and teleport handling through variant-local state.
+- [x] Delete obsolete ownership enums/helpers.
+- [x] Add transition regression tests.
+- [x] Run targeted core navigation tests.
+- [x] Run targeted CLI game-state tests that cover sticky/follow interaction behavior.
 
 ### Decisions Log
 
 - Decided: suspended or in-range follow/sticky should remain as active variants with retained maintain-range state; collapsing them to `Idle` would break current `navigation_mode()` and sticky helper semantics used by the CLI.
-- Pending: whether `pursuit: Option<ApproachTargetController>` is sufficient or whether an explicit `PursuitState` enum improves clarity for suspended vs inactive states.
+- Decided: direct approach remains a dedicated `ActiveNavigation::Approach` variant, while follow and sticky melee own optional pursuit controllers locally rather than sharing a global approach slot.
+- Decided: `pursuit: Option<ApproachTargetController>` is sufficient for this refactor; a richer pursuit sub-enum was not needed to preserve current semantics.
+- Decided: `MaintainRangeController::Tick` now carries `target_use_radius` so effective arrival semantics survive reduced follow distance without relying on a larger raw follow radius.
+- Decided: the CLI follow interaction test should use a target position inside `FOLLOW_DISTANCE`; the previous `0.5m` fixture no longer matched the committed `FOLLOW_DISTANCE = 0.01` policy.
 
 ### Verification Log
 
-- Pending implementation.
+- Phase 1: `cargo test -p holtburger-core navigation -- --nocapture` passed after restoring repeated direct-approach idempotence in the new enum-backed state.
+- Controller semantics: `cargo test -p holtburger-core maintain_range -- --nocapture` passed after adding target-use-radius arrival handling.
+- Core navigation semantics: `cargo test -p holtburger-core navigation -- --nocapture` passed with explicit sticky-to-approach and sticky-to-follow replacement regressions.
+- CLI semantics: `cargo test -p holtburger-cli -- --nocapture` passed after aligning the follow interaction test with the current reduced follow distance policy.
 
 ### Open Questions
 
 - Should direct approach cancellation on missing `player_position` remain a silent clear, or should this refactor tighten that behavior while touching the state machine?
-- Should follow and sticky melee continue sharing a small stateless pursuit-start/apply helper, or should those paths be fully split for clarity?
+- Should follow and sticky melee continue sharing a small stateless pursuit-start/apply helper, or should those paths be fully split for clarity in a later cleanup pass?

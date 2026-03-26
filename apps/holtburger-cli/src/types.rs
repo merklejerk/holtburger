@@ -13,7 +13,6 @@ use holtburger_world::stats::{AttributeType, SkillType, VitalType};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use std::borrow::Cow;
-use std::time::Instant;
 
 pub const SCROLL_STEP: usize = 3;
 
@@ -226,11 +225,6 @@ pub enum StatType {
 pub enum InspectTarget {
     Entity(Guid),
     VendorItem(Guid),
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Modal {
-    Retry { message: String, end_time: Instant },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

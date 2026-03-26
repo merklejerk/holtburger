@@ -8,18 +8,6 @@ impl AppState {
     pub(super) fn handle_key_press(&mut self, key: KeyEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
 
-        // Modal blocks all input except Quit
-        if self.modal.is_some() {
-            if let KeyCode::Char('q') | KeyCode::Char('Q') = key.code
-                && key
-                    .modifiers
-                    .contains(crossterm::event::KeyModifiers::CONTROL)
-            {
-                result.commands.push(ClientCommand::Quit);
-            }
-            return result;
-        }
-
         // Global shortcut: Ctrl-Q to Quit
         if let KeyCode::Char('q') | KeyCode::Char('Q') = key.code
             && key
@@ -46,10 +34,6 @@ impl AppState {
 
     pub(super) fn handle_mouse_event(&mut self, mouse: MouseEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
-
-        if self.modal.is_some() {
-            return result;
-        }
 
         // --- Delegation to Active Page ---
         let mut page_result = self.page.handle_mouse(mouse);

@@ -11,10 +11,11 @@ use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
-use holtburger_core::{ClientBuilder, ClientCommand, ClientState, RetryState};
+use holtburger_core::{ClientBuilder, ClientCommand, ClientState};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
+use std::process::ExitCode;
 use std::sync::Mutex;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -154,6 +155,12 @@ struct Args {
     debug_verbosity: u8,
     #[arg(short, long)]
     dats: Option<String>,
+    #[arg(
+        short = 'Q',
+        long = "auto-quit",
+        help = "Exit the TUI immediately when the client disconnects"
+    )]
+    quit_on_disconnect: bool,
     #[arg(long, action = clap::ArgAction::Help)]
     help: Option<bool>,
     #[arg(long, action = clap::ArgAction::Version)]
@@ -161,7 +168,17 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> ExitCode {
+    match run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{}", error);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn run() -> Result<()> {
     let args = Args::parse();
 
     let (host, port) = if let Some(server) = &args.server {
@@ -286,14 +303,14 @@ async fn main() -> Result<()> {
         character_preference: args.character.clone(),
         chat_log,
         page: Page::Selection(SelectionState::default()),
-        modal: None,
-        logon_retry: RetryState::new(5),
-        enter_retry: RetryState::new(5),
         client_state: ClientState::Connected,
         verbosity: args.verbose,
         net_stats: NetStats::default(),
         world_name: String::new(),
         server_time: None,
+        quit_on_disconnect: args.quit_on_disconnect,
+        disconnect_reason: None,
+        pending_exit_message: None,
     };
 
     if args.verbose > 0 {
@@ -303,9 +320,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    let client_task_handle = tokio::spawn(async move {
-        let _ = client.run().await;
-    });
+    let mut client_task_handle = Some(tokio::spawn(async move { client.run().await }));
 
     let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
     let _ = server_cmd_tx.send(ClientCommand::Login(args.password.clone()));
@@ -332,6 +347,38 @@ async fn main() -> Result<()> {
     loop {
         let mut should_quit = false;
 
+        if client_task_handle
+            .as_ref()
+            .is_some_and(|handle| handle.is_finished())
+        {
+            let handle = client_task_handle
+                .take()
+                .expect("finished client task should still be present");
+            let client_result = match handle.await {
+                Ok(result) => result,
+                Err(error) => Err(anyhow::anyhow!("Client task failed: {}", error)),
+            };
+
+            if let Err(error) = client_result {
+                let message = error.to_string();
+                if app_state.disconnect_reason.is_none() {
+                    app_state.remember_disconnect_reason(message.clone());
+                }
+
+                if app_state.should_exit_on_disconnect() {
+                    app_state.request_disconnect_exit();
+                    should_quit |= app_state.has_pending_exit();
+                } else {
+                    app_state.client_state = ClientState::Disconnected;
+                    app_state.log(
+                        ChatMessageKind::Error,
+                        app_state.current_disconnect_chat_message(),
+                    );
+                    needs_redraw = true;
+                }
+            }
+        }
+
         // 1. Process Logger Events
         while let Ok(log) = local_log_rx.try_recv() {
             let res = app_state.handle_app_action(holtburger_cli::types::AppAction::Log {
@@ -345,6 +392,7 @@ async fn main() -> Result<()> {
         while let Ok(event) = server_event_rx.try_recv() {
             let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
             update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+            should_quit |= app_state.has_pending_exit();
         }
 
         // 3. Poll Input (Short timeout, drain batch)
@@ -382,7 +430,12 @@ async fn main() -> Result<()> {
         if last_tick.elapsed() >= tick_rate {
             let res = app_state.handle_app_event(AppEvent::Tick(elapsed));
             update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+            should_quit |= app_state.has_pending_exit();
             last_tick = Instant::now();
+        }
+
+        if should_quit {
+            break;
         }
 
         // 4. Draw (If needed and frame budget allows)
@@ -406,7 +459,23 @@ async fn main() -> Result<()> {
     )?;
     terminal.show_cursor()?;
 
-    let _ = client_task_handle.await;
+    let pending_exit_message = app_state.take_pending_exit_message();
+    if let Some(message) = pending_exit_message {
+        if let Some(handle) = client_task_handle.take() {
+            handle.abort();
+        }
+        anyhow::bail!(message);
+    }
+
+    if let Some(handle) = client_task_handle {
+        let client_result = match handle.await {
+            Ok(result) => result,
+            Err(error) => Err(anyhow::anyhow!("Client task failed: {}", error)),
+        };
+
+        client_result?;
+    }
+
     Ok(())
 }
 
@@ -458,5 +527,13 @@ mod tests {
         assert_eq!(tui_level_filter(0), log::LevelFilter::Error);
         assert!(level_enabled(log::LevelFilter::Error, log::Level::Error));
         assert!(!level_enabled(log::LevelFilter::Error, log::Level::Warn));
+    }
+
+    #[test]
+    fn quit_on_disconnect_flag_parses() {
+        let args = Args::try_parse_from(["tui", "--account", "acct", "--auto-quit"])
+            .expect("auto-quit args should parse");
+
+        assert!(args.quit_on_disconnect);
     }
 }

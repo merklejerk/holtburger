@@ -1,5 +1,3 @@
-use crate::state::AppState;
-use crate::types::Modal;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -31,12 +29,6 @@ impl<'a> ModalCardSpec<'a> {
 }
 
 impl ModalPalette {
-    pub const RETRY: Self = Self {
-        border: Color::Red,
-        background: Color::Black,
-        foreground: Color::White,
-    };
-
     pub const CONFIRMATION: Self = Self {
         border: Color::Yellow,
         background: Color::Black,
@@ -101,25 +93,6 @@ pub fn render_modal_card(f: &mut Frame, area: Rect, spec: ModalCardSpec<'_>) {
         );
 
     f.render_widget(paragraph, area);
-}
-
-pub fn render_modal(f: &mut Frame, state: &AppState, area: Rect) {
-    if let Some(modal) = &state.modal {
-        match modal {
-            Modal::Retry { message, end_time } => {
-                let remaining = end_time
-                    .saturating_duration_since(std::time::Instant::now())
-                    .as_secs();
-                let text = format!("{}\n\nRetrying in {} seconds...", message, remaining);
-
-                render_modal_card(
-                    f,
-                    area,
-                    ModalCardSpec::new(" Connection Lost ", &text, ModalPalette::RETRY),
-                );
-            }
-        }
-    }
 }
 
 #[cfg(test)]

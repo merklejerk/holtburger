@@ -3,6 +3,8 @@ use crate::client::projection::EntitySpatialSample;
 use holtburger_common::position::WorldPosition;
 use std::time::{Duration, Instant};
 
+const MAINTAIN_RANGE_RESTART_MARGIN_M: f32 = 0.25;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MaintainRangeConfig {
     pub arrival_distance: f32,
@@ -80,6 +82,10 @@ impl MaintainRangeController {
         self.config.arrival_distance
     }
 
+    fn restart_distance(effective_arrival_distance: f32) -> f32 {
+        effective_arrival_distance + MAINTAIN_RANGE_RESTART_MARGIN_M
+    }
+
     fn stop_and_finish(
         &mut self,
         reason: MaintainRangeFinishReason,
@@ -134,6 +140,7 @@ impl Controller for MaintainRangeController {
                     .config
                     .arrival_distance
                     .max(target_use_radius.unwrap_or(0.0).max(0.0));
+                let restart_distance = Self::restart_distance(effective_arrival_distance);
                 if distance <= effective_arrival_distance {
                     self.has_latched_target = true;
                     self.last_reissue_at = None;
@@ -143,6 +150,10 @@ impl Controller for MaintainRangeController {
                     }
                     self.pursuing = false;
                     return update;
+                }
+
+                if self.has_latched_target && !self.pursuing && distance < restart_distance {
+                    return ControllerUpdate::new(ControllerStatus::Paused);
                 }
 
                 if distance > max_follow_distance {
@@ -162,7 +173,7 @@ impl Controller for MaintainRangeController {
                     self.last_reissue_at = Some(now);
                     return ControllerUpdate::new(ControllerStatus::Active).with_effect(
                         MaintainRangeEffect::StartApproach {
-                            arrival_distance: self.config.arrival_distance,
+                            arrival_distance: effective_arrival_distance,
                         },
                     );
                 }
@@ -305,6 +316,75 @@ mod tests {
     }
 
     #[test]
+    fn small_near_field_drift_does_not_immediately_restart_paused_pursuit() {
+        let now = Instant::now();
+        let mut controller = controller();
+
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+            now,
+            player_position: position(0.0),
+            target: authoritative_target(1.5),
+            target_use_radius: None,
+        }));
+
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+            now: now + Duration::from_millis(16),
+            player_position: position(0.0),
+            target: authoritative_target(0.5),
+            target_use_radius: None,
+        }));
+
+        let held = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+            now: now + Duration::from_millis(32),
+            player_position: position(0.0),
+            target: authoritative_target(0.7),
+            target_use_radius: None,
+        }));
+
+        assert_eq!(held.status, ControllerStatus::Paused);
+        assert!(held.effects.is_empty());
+        assert!(controller.has_latched_target());
+        assert!(!controller.is_pursuing());
+    }
+
+    #[test]
+    fn paused_pursuit_restarts_once_target_exits_hysteresis_band() {
+        let now = Instant::now();
+        let mut controller = controller();
+
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+            now,
+            player_position: position(0.0),
+            target: authoritative_target(1.5),
+            target_use_radius: None,
+        }));
+
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+            now: now + Duration::from_millis(16),
+            player_position: position(0.0),
+            target: authoritative_target(0.5),
+            target_use_radius: None,
+        }));
+
+        let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+            now: now + Duration::from_millis(32),
+            player_position: position(0.0),
+            target: authoritative_target(0.9),
+            target_use_radius: None,
+        }));
+
+        assert_eq!(update.status, ControllerStatus::Active);
+        assert_eq!(
+            update.effects,
+            vec![MaintainRangeEffect::StartApproach {
+                arrival_distance: 0.6
+            }]
+        );
+        assert!(controller.has_latched_target());
+        assert!(controller.is_pursuing());
+    }
+
+    #[test]
     fn clears_when_target_moves_beyond_repeat_distance() {
         let now = Instant::now();
         let mut controller = controller();
@@ -403,5 +483,33 @@ mod tests {
         assert!(update.effects.is_empty());
         assert!(controller.has_latched_target());
         assert!(!controller.is_pursuing());
+    }
+
+    #[test]
+    fn pursuit_uses_effective_arrival_distance_from_target_use_radius() {
+        let now = Instant::now();
+        let mut controller = MaintainRangeController::new(MaintainRangeConfig {
+            arrival_distance: 0.01,
+            acquire_distance: 4.0,
+            repeat_distance: 16.0,
+            reissue_interval: Duration::from_millis(250),
+        });
+
+        let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
+            now,
+            player_position: position(0.0),
+            target: authoritative_target(1.5),
+            target_use_radius: Some(0.6),
+        }));
+
+        assert_eq!(update.status, ControllerStatus::Active);
+        assert_eq!(
+            update.effects,
+            vec![MaintainRangeEffect::StartApproach {
+                arrival_distance: 0.6
+            }]
+        );
+        assert!(controller.has_latched_target());
+        assert!(controller.is_pursuing());
     }
 }

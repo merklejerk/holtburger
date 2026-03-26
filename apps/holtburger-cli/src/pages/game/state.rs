@@ -1360,7 +1360,7 @@ impl GameState {
         self.reconcile_navigation(
             NavigationIntent::Follow {
                 target: target_guid,
-                arrival_distance: GENERIC_APPROACH_DISTANCE,
+                arrival_distance: FOLLOW_DISTANCE,
             },
             Some(target_guid),
             now,

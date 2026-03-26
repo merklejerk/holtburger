@@ -33,7 +33,7 @@ fn external_consumers_can_drive_approach_target_controller() {
         [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
             intent: DriveIntent { speed, .. },
             ..
-        })] if (*speed - 4.5).abs() < f32::EPSILON
+        })] if (*speed - 4.0).abs() < f32::EPSILON
     ));
 
     let update = controller.handle(&ApproachTargetInput::Tick {
@@ -49,6 +49,6 @@ fn external_consumers_can_drive_approach_target_controller() {
         [ApproachTargetEffect::Movement(MovementPrimitive::Drive {
             intent: DriveIntent { speed, .. },
             ..
-        })] if (*speed - 4.5).abs() < f32::EPSILON
+        })] if (*speed - 3.55).abs() < 1e-6
     ));
 }

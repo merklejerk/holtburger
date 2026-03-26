@@ -55,7 +55,6 @@ impl AppState {
                     selected_character_index: 0,
                     character_preference: self.character_preference.take(),
                 });
-                self.logon_retry.reset();
             }
             ClientViewEvent::PlayerEntered { guid, name } => {
                 if let Page::Game(game) = &mut self.page {
@@ -78,42 +77,40 @@ impl AppState {
             ClientViewEvent::StatusUpdate { state } => {
                 let was_in_world = self.client_state == ClientState::InWorld;
                 self.client_state = state.clone();
-                if self.client_state == ClientState::InWorld {
-                    self.logon_retry.reset();
-                    self.enter_retry.reset();
-
-                    if !was_in_world {
-                        result
-                            .commands
-                            .push(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true });
+                match self.client_state {
+                    ClientState::Disconnected => {
+                        self.request_disconnect_exit();
+                        if !self.should_exit_on_disconnect() && self.disconnect_reason.is_some() {
+                            self.log(
+                                ChatMessageKind::Error,
+                                self.current_disconnect_chat_message(),
+                            );
+                        }
                     }
+                    _ => {
+                        self.clear_disconnect_reason();
+                    }
+                }
+
+                if self.client_state == ClientState::InWorld && !was_in_world {
+                    result
+                        .commands
+                        .push(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true });
                 }
             }
             ClientViewEvent::ErrorRaised {
                 reason, message, ..
             } => {
-                if let ErrorReason::Character(error) = reason {
-                    if *error == CharacterError::Logon {
-                        self.logon_retry.schedule();
-                        self.log(
-                            ChatMessageKind::Warning,
-                            format!(
-                                "* Retrying login (attempt {}/{})...",
-                                self.logon_retry.attempts, self.logon_retry.max_attempts
-                            ),
-                        );
-                        return result;
-                    } else if *error == CharacterError::EnterGameCharacterInWorld {
-                        self.enter_retry.schedule();
-                        self.log(
-                            ChatMessageKind::Warning,
-                            format!(
-                                "* Retrying enter world (attempt {}/{})...",
-                                self.enter_retry.attempts, self.enter_retry.max_attempts
-                            ),
-                        );
-                        return result;
-                    }
+                if let ErrorReason::Character(error) = reason
+                    && matches!(
+                        error,
+                        CharacterError::Logon | CharacterError::EnterGameCharacterInWorld
+                    )
+                {
+                    self.remember_disconnect_reason(message.clone());
+                    self.request_disconnect_exit();
+                    self.log(ChatMessageKind::Error, format!("[!] {}", message));
+                    return result;
                 }
 
                 let chat_kind = match reason {
@@ -123,6 +120,20 @@ impl AppState {
                     ErrorReason::Transport(_) => ChatMessageKind::Warning,
                 };
                 self.log(chat_kind, format!("[!] {}", message));
+            }
+            ClientViewEvent::BootAccount(reason) => {
+                let message = if reason.trim().is_empty() {
+                    "Booted from server.".to_string()
+                } else {
+                    format!("Booted from server: {}", reason)
+                };
+                self.remember_disconnect_reason(message);
+
+                if matches!(self.client_state, ClientState::Disconnected)
+                    && self.should_exit_on_disconnect()
+                {
+                    self.pending_exit_message = Some(self.current_disconnect_message());
+                }
             }
             _ => {}
         }
@@ -198,15 +209,18 @@ impl AppState {
             }
             ClientViewEvent::Disconnected => {
                 self.client_state = ClientState::Disconnected;
+                self.request_disconnect_exit();
                 self.log(
                     ChatMessageKind::Error,
-                    "Lost connection to server.".to_string(),
+                    self.current_disconnect_chat_message(),
                 );
                 // For now, staying on the Game page lets the user see the error,
                 // but we could also transition back to selection.
                 result.merge(self.page.handle_view_event(ClientViewEvent::Disconnected));
             }
-            ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ErrorRaised { .. } => {
+            ClientViewEvent::StatusUpdate { .. }
+            | ClientViewEvent::ErrorRaised { .. }
+            | ClientViewEvent::BootAccount(_) => {
                 result.merge(self.handle_client_status_event(&event));
                 result.merge(self.page.handle_view_event(event));
             }
@@ -237,7 +251,6 @@ mod tests {
     use super::*;
     use crate::state::NetStats;
     use crate::types::Page;
-    use holtburger_core::RetryState;
 
     fn build_test_app_state(client_state: ClientState) -> AppState {
         AppState {
@@ -246,14 +259,14 @@ mod tests {
             character_preference: None,
             chat_log: None,
             page: Page::Selection(SelectionState::default()),
-            modal: None,
-            logon_retry: RetryState::new(5),
-            enter_retry: RetryState::new(5),
             client_state,
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
             verbosity: 0,
+            quit_on_disconnect: false,
+            disconnect_reason: None,
+            pending_exit_message: None,
         }
     }
 
@@ -282,5 +295,102 @@ mod tests {
         });
 
         assert!(result.commands.is_empty());
+    }
+
+    #[test]
+    fn boot_account_reason_is_used_for_disconnect_exit() {
+        let mut app_state = build_test_app_state(ClientState::InWorld);
+        app_state.quit_on_disconnect = true;
+        let _ = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
+            state: ClientState::Disconnected,
+        });
+        let _ = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
+            "Server maintenance".to_string(),
+        ));
+
+        assert_eq!(
+            app_state.take_pending_exit_message().as_deref(),
+            Some("Booted from server: Server maintenance")
+        );
+    }
+
+    #[test]
+    fn post_world_logon_error_becomes_disconnect_exit_instead_of_retry() {
+        let mut app_state = build_test_app_state(ClientState::InWorld);
+        app_state.quit_on_disconnect = true;
+        app_state.page = Page::Game(Box::new(crate::pages::game::GameState::new(
+            holtburger_common::Guid(0x50000001),
+            "Player".to_string(),
+            "World".to_string(),
+        )));
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::ErrorRaised {
+            source: holtburger_core::client::types::ErrorSource::Wire,
+            reason: ErrorReason::Character(CharacterError::Logon),
+            message: "Character error: Logon".to_string(),
+        });
+
+        assert!(result.commands.is_empty());
+        assert_eq!(
+            app_state.take_pending_exit_message().as_deref(),
+            Some("Character error: Logon")
+        );
+    }
+
+    #[test]
+    fn pre_world_logon_error_exits_without_retry() {
+        let mut app_state = build_test_app_state(ClientState::Connected);
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::ErrorRaised {
+            source: holtburger_core::client::types::ErrorSource::Wire,
+            reason: ErrorReason::Character(CharacterError::Logon),
+            message: "Character error: Logon".to_string(),
+        });
+
+        assert!(result.commands.is_empty());
+        assert_eq!(
+            app_state.take_pending_exit_message().as_deref(),
+            Some("Character error: Logon")
+        );
+    }
+
+    #[test]
+    fn post_world_disconnect_stays_open_without_quit_flag() {
+        let mut app_state = build_test_app_state(ClientState::InWorld);
+        app_state.page = Page::Game(Box::new(crate::pages::game::GameState::new(
+            holtburger_common::Guid(0x50000001),
+            "Player".to_string(),
+            "World".to_string(),
+        )));
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
+            state: ClientState::Disconnected,
+        });
+
+        assert!(result.commands.is_empty());
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
+            "Server maintenance".to_string(),
+        ));
+
+        assert!(result.commands.is_empty());
+        assert!(app_state.take_pending_exit_message().is_none());
+        assert_eq!(
+            app_state.disconnect_reason.as_deref(),
+            Some("Booted from server: Server maintenance")
+        );
+
+        let game = app_state
+            .game_option()
+            .expect("game page should remain active after disconnect");
+        let last_message = game
+            .chat
+            .messages
+            .last()
+            .expect("boot reason should be logged to chat");
+        assert_eq!(
+            last_message.text,
+            "Disconnected: Booted from server: Server maintenance"
+        );
     }
 }

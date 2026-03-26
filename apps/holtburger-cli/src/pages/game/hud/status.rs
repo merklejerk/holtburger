@@ -1,7 +1,6 @@
 use crate::pages::game::hud::vitals::render_vitals;
 use crate::pages::game::{GameData, ViewState};
 use holtburger_common::time::*;
-use holtburger_core::RetryState;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -23,8 +22,6 @@ pub fn render_status_bar(
     f: &mut Frame,
     data: &GameData,
     view: &ViewState,
-    logon_retry: &RetryState,
-    enter_retry: &RetryState,
     server_time: Option<(f64, Instant)>,
     area: Rect,
 ) {
@@ -34,23 +31,13 @@ pub fn render_status_bar(
         .split(area);
 
     render_vitals(f, data, view, chunks[0]);
-    render_status_panel(
-        f,
-        data,
-        view,
-        logon_retry,
-        enter_retry,
-        server_time,
-        chunks[1],
-    );
+    render_status_panel(f, data, view, server_time, chunks[1]);
 }
 
 fn render_status_panel(
     f: &mut Frame,
     data: &GameData,
     _view: &ViewState,
-    logon_retry: &RetryState,
-    enter_retry: &RetryState,
     server_time: Option<(f64, Instant)>,
     area: Rect,
 ) {
@@ -67,14 +54,13 @@ fn render_status_panel(
         .split(inner_status_area);
 
     // 1. Coords + Compass
-    let retry_info = get_retry_info(logon_retry, enter_retry);
     let pos_info = data
         .player_pos
         .as_ref()
         .map(|pos| pos.to_world_coords().to_string_with_precision(2))
         .unwrap_or_else(|| "0.00N, 0.00E".to_string());
     let compass_str = get_compass_str(data);
-    let pos_compass_str = format!("{} 🧭 {} > {}", retry_info, pos_info, compass_str);
+    let pos_compass_str = format!("🧭 {} > {}", pos_info, compass_str);
     f.render_widget(
         Paragraph::new(pos_compass_str).alignment(ratatui::layout::Alignment::Left),
         status_layout[0],
@@ -86,35 +72,6 @@ fn render_status_panel(
         Paragraph::new(time_str).alignment(ratatui::layout::Alignment::Right),
         status_layout[1],
     );
-}
-
-fn get_retry_info(logon: &RetryState, enter: &RetryState) -> String {
-    let mut retry_info = String::new();
-    let now = std::time::Instant::now();
-
-    if logon.active {
-        let secs = logon
-            .next_time
-            .map(|t| t.saturating_duration_since(now).as_secs())
-            .unwrap_or(0);
-        retry_info.push_str(&format!(
-            "[Logon:{}/{} {}s] ",
-            logon.attempts, logon.max_attempts, secs
-        ));
-    }
-
-    if enter.active {
-        let secs = enter
-            .next_time
-            .map(|t| t.saturating_duration_since(now).as_secs())
-            .unwrap_or(0);
-        retry_info.push_str(&format!(
-            "[Enter:{}/{} {}s] ",
-            enter.attempts, enter.max_attempts, secs
-        ));
-    }
-
-    retry_info
 }
 
 fn get_compass_str(data: &GameData) -> String {

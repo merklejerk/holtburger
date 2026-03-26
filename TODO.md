@@ -227,6 +227,7 @@
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
 - [ ] Asset pipeline.
+- [ ] isn't it strange that `get_run_rate` lives in cli?
 
 ### Critical
 - [x] The individual fields in `Entity` are supposed to be stored in property maps!

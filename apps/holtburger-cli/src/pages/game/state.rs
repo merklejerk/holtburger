@@ -3393,7 +3393,7 @@ mod tests {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
-                coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
+                coords: holtburger_common::Vector3::new(FOLLOW_DISTANCE * 0.5, 0.0, 0.0),
                 ..WorldPosition::default()
             },
         });

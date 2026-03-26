@@ -219,12 +219,12 @@
     - [x] `/? COMMAND` - targeted command help doc
     - [~] `/swear`, `/leave`, `/unswear <VASSAL>`.
     - [ ] `/permit <player>`, `/unpermit <player>`, `/permits` - corpse looting options
+- [x] Interpolate entity motion properties.
 - [ ] Character creation
 - [ ] Some equipment swapping jank going on.
 - [ ] Slash-commands should use `AppAction`s.
 - [ ] `holtburger-core` abuses the shit out of WireEvents.
 - [ ] Harden reconnect.
-- [ ] Interpolate entity motion properties.
 - [ ] Fix OOB movement causing unpredictable entity updates + potentially getting stuck?
 - [ ] Asset pipeline.
 

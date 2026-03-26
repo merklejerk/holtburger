@@ -11,14 +11,36 @@ use holtburger_cli::pages::selection::SelectionState;
 use holtburger_cli::state::AppState;
 use holtburger_cli::state::NetStats;
 use holtburger_cli::types::{AppEvent, ChatMessageKind, Page};
-use holtburger_core::{ClientBuilder, ClientCommand, ClientState};
+use holtburger_core::{ClientBuilder, ClientCommand, ClientState, ClientViewEvent, ErrorReason};
+use holtburger_protocol::errors::CharacterError;
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs::File;
 use std::io::{self, Write};
 use std::process::ExitCode;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+
+const PRE_WORLD_RETRY_DELAY: Duration = Duration::from_secs(3);
+
+struct BootstrappedClient {
+    server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
+    server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
+    client_task_handle: tokio::task::JoinHandle<Result<()>>,
+    initial_events: Vec<ClientViewEvent>,
+}
+
+enum BootstrapOutcome {
+    Ready(BootstrappedClient),
+    Retry { message: String },
+    Fatal { message: String },
+}
+
+enum BootstrapEventOutcome {
+    Ready { initial_events: Vec<ClientViewEvent> },
+    Retry { message: String },
+    Fatal { message: String },
+}
 
 struct CapturedLog {
     kind: ChatMessageKind,
@@ -167,6 +189,239 @@ struct Args {
     version: Option<bool>,
 }
 
+fn is_retryable_pre_world_character_error(error: CharacterError) -> bool {
+    matches!(
+        error,
+        CharacterError::Logon
+            | CharacterError::ServerDown1
+            | CharacterError::ServerCrash1
+            | CharacterError::ServerCrash2
+            | CharacterError::EnterGameCharacterInWorld
+            | CharacterError::EnterGameCharacterInWorldServer
+            | CharacterError::EnterGameStartServerDown
+            | CharacterError::EnterGameCharacterLocked
+            | CharacterError::LogonServerFull
+    )
+}
+
+fn classify_pre_world_error(reason: &ErrorReason, message: String) -> BootstrapEventOutcome {
+    match reason {
+        ErrorReason::Character(error) if is_retryable_pre_world_character_error(*error) => {
+            BootstrapEventOutcome::Retry { message }
+        }
+        ErrorReason::Character(_) | ErrorReason::General(_) | ErrorReason::Weenie(_, _) => {
+            BootstrapEventOutcome::Fatal { message }
+        }
+        ErrorReason::Transport(_) => BootstrapEventOutcome::Fatal { message },
+    }
+}
+
+fn format_boot_account_message(reason: &str) -> String {
+    if reason.trim().is_empty() {
+        "Booted from server.".to_string()
+    } else {
+        format!("Booted from server: {}", reason)
+    }
+}
+
+fn clear_captured_logs(local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>) {
+    while local_log_rx.try_recv().is_ok() {}
+}
+
+fn apply_capture_path(client: &mut holtburger_core::Client, capture: Option<&String>) {
+    let Some(mut capture_path) = capture.cloned() else {
+        return;
+    };
+
+    let caps_dir = std::path::Path::new("caps");
+    if !caps_dir.exists() {
+        let _ = std::fs::create_dir_all(caps_dir);
+    }
+
+    let path = std::path::Path::new(&capture_path);
+    if path.parent() == Some(std::path::Path::new("")) {
+        capture_path = format!("caps/{}", capture_path);
+    }
+
+    let _ = client.session.set_capture(&capture_path);
+}
+
+fn bootstrap_ready_events(
+    latest_status: &Option<ClientState>,
+    latest_world_name: &Option<String>,
+    characters: Vec<holtburger_protocol::messages::CharacterEntry>,
+) -> Vec<ClientViewEvent> {
+    let mut initial_events = Vec::new();
+
+    if let Some(state) = latest_status.clone() {
+        initial_events.push(ClientViewEvent::StatusUpdate { state });
+    }
+
+    if let Some(name) = latest_world_name.clone() {
+        initial_events.push(ClientViewEvent::WorldNameUpdated(name));
+    }
+
+    initial_events.push(ClientViewEvent::CharacterList(characters));
+    initial_events
+}
+
+fn process_bootstrap_event(
+    event: ClientViewEvent,
+    latest_status: &mut Option<ClientState>,
+    latest_world_name: &mut Option<String>,
+) -> Option<BootstrapEventOutcome> {
+    match event {
+        ClientViewEvent::StatusUpdate { state } => {
+            *latest_status = Some(state);
+            None
+        }
+        ClientViewEvent::WorldNameUpdated(name) => {
+            *latest_world_name = Some(name);
+            None
+        }
+        ClientViewEvent::CharacterList(characters) => Some(BootstrapEventOutcome::Ready {
+            initial_events: bootstrap_ready_events(latest_status, latest_world_name, characters),
+        }),
+        ClientViewEvent::ErrorRaised {
+            reason, message, ..
+        } => Some(classify_pre_world_error(&reason, message)),
+        ClientViewEvent::BootAccount(reason) => Some(BootstrapEventOutcome::Fatal {
+            message: format_boot_account_message(&reason),
+        }),
+        ClientViewEvent::Disconnected => Some(BootstrapEventOutcome::Fatal {
+            message: AppState::DEFAULT_DISCONNECT_MESSAGE.to_string(),
+        }),
+        _ => None,
+    }
+}
+
+fn finalize_bootstrap_outcome(
+    outcome: BootstrapEventOutcome,
+    server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
+    server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
+    client_task_handle: tokio::task::JoinHandle<Result<()>>,
+) -> BootstrapOutcome {
+    match outcome {
+        BootstrapEventOutcome::Ready { initial_events } => {
+            BootstrapOutcome::Ready(BootstrappedClient {
+                server_cmd_tx,
+                server_event_rx,
+                client_task_handle,
+                initial_events,
+            })
+        }
+        BootstrapEventOutcome::Retry { message } => BootstrapOutcome::Retry { message },
+        BootstrapEventOutcome::Fatal { message } => BootstrapOutcome::Fatal { message },
+    }
+}
+
+async fn bootstrap_once(
+    args: &Args,
+    host: &str,
+    port: u16,
+    dats_path: &std::path::Path,
+) -> Result<BootstrapOutcome> {
+    let mut client = ClientBuilder::new(args.account.clone())
+        .server(host.to_string(), port)
+        .dats_path(dats_path.to_path_buf())
+        .connect()
+        .await?;
+
+    apply_capture_path(&mut client, args.capture.as_ref());
+
+    let (server_cmd_tx, server_cmd_rx) = mpsc::unbounded_channel();
+    client.set_command_rx(server_cmd_rx);
+    let mut server_event_rx = client.subscribe_client_view_events();
+    let mut client_task_handle = tokio::spawn(async move { client.run().await });
+
+    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
+    let _ = server_cmd_tx.send(ClientCommand::Login(args.password.clone()));
+
+    let mut latest_status = Some(ClientState::Connected);
+    let mut latest_world_name = None;
+
+    loop {
+        tokio::select! {
+            result = &mut client_task_handle => {
+                let client_result = match result {
+                    Ok(inner) => inner,
+                    Err(error) => Err(anyhow::anyhow!("Client task failed: {}", error)),
+                };
+
+                while let Ok(event) = server_event_rx.try_recv() {
+                    if let Some(outcome) = process_bootstrap_event(event, &mut latest_status, &mut latest_world_name) {
+                        return Ok(finalize_bootstrap_outcome(
+                            outcome,
+                            server_cmd_tx,
+                            server_event_rx,
+                            client_task_handle,
+                        ));
+                    }
+                }
+
+                return Ok(match client_result {
+                    Ok(()) => BootstrapOutcome::Fatal {
+                        message: "Disconnected before receiving character list.".to_string(),
+                    },
+                    Err(error) => BootstrapOutcome::Fatal {
+                        message: error.to_string(),
+                    },
+                });
+            }
+            event = server_event_rx.recv() => {
+                match event {
+                    Ok(event) => {
+                        if let Some(outcome) = process_bootstrap_event(event, &mut latest_status, &mut latest_world_name) {
+                            return Ok(finalize_bootstrap_outcome(
+                                outcome,
+                                server_cmd_tx,
+                                server_event_rx,
+                                client_task_handle,
+                            ));
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        return Ok(BootstrapOutcome::Fatal {
+                            message: "Client event stream closed before receiving character list.".to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn bootstrap_client(
+    args: &Args,
+    host: &str,
+    port: u16,
+    dats_path: &std::path::Path,
+    local_log_rx: &mut mpsc::UnboundedReceiver<CapturedLog>,
+) -> Result<BootstrappedClient> {
+    let mut attempt = 1usize;
+
+    loop {
+        println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
+
+        match bootstrap_once(args, host, port, dats_path).await? {
+            BootstrapOutcome::Ready(ready) => return Ok(ready),
+            BootstrapOutcome::Retry { message } => {
+                eprintln!(
+                    "{} Retrying in {} seconds (attempt {}).",
+                    message,
+                    PRE_WORLD_RETRY_DELAY.as_secs(),
+                    attempt + 1
+                );
+                clear_captured_logs(local_log_rx);
+                tokio::time::sleep(PRE_WORLD_RETRY_DELAY).await;
+                attempt += 1;
+            }
+            BootstrapOutcome::Fatal { message } => anyhow::bail!(message),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     match run().await {
@@ -220,7 +475,6 @@ async fn run() -> Result<()> {
         });
 
     let (local_log_tx, mut local_log_rx) = mpsc::unbounded_channel::<CapturedLog>();
-    let (server_cmd_tx, server_cmd_rx) = mpsc::unbounded_channel();
 
     let chat_log = if let Some(path) = &args.log {
         match File::create(path) {
@@ -262,34 +516,18 @@ async fn run() -> Result<()> {
         log::set_max_level(max_level_filter(tui_level_filter(args.verbose), file_level));
     }
 
-    println!("Initializing HoltBurger client (parsing DAT files & connecting)...");
-    let mut client = match ClientBuilder::new(args.account.clone())
-        .server(host.clone(), port)
-        .dats_path(dats_path.clone())
-        .connect()
-        .await
-    {
-        Ok(c) => c,
+    let BootstrappedClient {
+        server_cmd_tx,
+        mut server_event_rx,
+        client_task_handle,
+        initial_events,
+    } = match bootstrap_client(&args, &host, port, &dats_path, &mut local_log_rx).await {
+        Ok(ready) => ready,
         Err(e) => {
             eprintln!("Failed to initialize client: {}", e);
             return Ok(());
         }
     };
-
-    if let Some(mut capture_path) = args.capture.clone() {
-        let caps_dir = std::path::Path::new("caps");
-        if !caps_dir.exists() {
-            let _ = std::fs::create_dir_all(caps_dir);
-        }
-        let path = std::path::Path::new(&capture_path);
-        if path.parent() == Some(std::path::Path::new("")) {
-            capture_path = format!("caps/{}", capture_path);
-        }
-        let _ = client.session.set_capture(&capture_path);
-    }
-
-    client.set_command_rx(server_cmd_rx);
-    let mut server_event_rx = client.subscribe_client_view_events();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -320,10 +558,7 @@ async fn run() -> Result<()> {
         );
     }
 
-    let mut client_task_handle = Some(tokio::spawn(async move { client.run().await }));
-
-    let _ = server_cmd_tx.send(ClientCommand::RequestInitialViewState);
-    let _ = server_cmd_tx.send(ClientCommand::Login(args.password.clone()));
+    let mut client_task_handle = Some(client_task_handle);
 
     let mut last_tick = Instant::now();
     let tick_rate = std::time::Duration::from_millis(100);
@@ -343,6 +578,15 @@ async fn run() -> Result<()> {
             let _ = server_cmd_tx.send(cmd);
         }
     };
+
+    for event in initial_events {
+        let res = app_state.handle_app_event(AppEvent::ReceivedViewEvent(event));
+        let mut should_quit = false;
+        update_state(res, &mut needs_redraw, &server_cmd_tx, &mut should_quit);
+        if should_quit {
+            break;
+        }
+    }
 
     loop {
         let mut should_quit = false;
@@ -483,6 +727,7 @@ async fn run() -> Result<()> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use holtburger_core::client::types::ErrorSource;
 
     #[test]
     fn debug_verbosity_requires_debug_log() {
@@ -535,5 +780,46 @@ mod tests {
             .expect("auto-quit args should parse");
 
         assert!(args.quit_on_disconnect);
+    }
+
+    #[test]
+    fn retryable_pre_world_character_errors_are_classified_for_retry() {
+        let outcome = process_bootstrap_event(
+            ClientViewEvent::ErrorRaised {
+                source: ErrorSource::Wire,
+                reason: ErrorReason::Character(CharacterError::LogonServerFull),
+                message: "Character error: LogonServerFull".to_string(),
+            },
+            &mut Some(ClientState::Connected),
+            &mut None,
+        );
+
+        assert!(matches!(
+            outcome,
+            Some(BootstrapEventOutcome::Retry { .. })
+        ));
+    }
+
+    #[test]
+    fn fatal_pre_world_character_errors_do_not_retry() {
+        let outcome = process_bootstrap_event(
+            ClientViewEvent::ErrorRaised {
+                source: ErrorSource::Wire,
+                reason: ErrorReason::Character(CharacterError::AccountInvalid),
+                message: "Character error: AccountInvalid".to_string(),
+            },
+            &mut Some(ClientState::Connected),
+            &mut None,
+        );
+
+        assert!(matches!(
+            outcome,
+            Some(BootstrapEventOutcome::Fatal { .. })
+        ));
+    }
+
+    #[test]
+    fn boot_account_message_uses_default_when_reason_empty() {
+        assert_eq!(format_boot_account_message(""), "Booted from server.");
     }
 }

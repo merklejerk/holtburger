@@ -1259,10 +1259,7 @@ impl GameState {
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
-        let move_speed = self
-            .data
-            .get_run_rate()
-            .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
+        let move_speed = self.data.player_run_rate().unwrap_or(DEFAULT_APPROACH_RUN_RATE);
         let metadata = self.current_movement_metadata();
 
         NavigationSyncInput {

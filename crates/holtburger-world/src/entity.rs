@@ -86,15 +86,22 @@ impl EntityMotionSnapshot {
                 .turn_speed
                 .and_then(OrderedMotionSpeed::from_f32);
         } else if let MovementTypeData::TurnToHeading(turn) = &data.data {
-            snapshot.directive = Some(EntityMotionDirective::TurnToHeading {
-                desired_heading: OrderedMotionSpeed::from_f32(turn.params.desired_heading)?,
-                speed: OrderedMotionSpeed::from_f32(turn.params.speed)?,
-            });
-        } else if let MovementTypeData::TurnToObject(turn) = &data.data {
+            let desired_heading = OrderedMotionSpeed::from_f32(turn.params.desired_heading);
+            let speed = OrderedMotionSpeed::from_f32(turn.params.speed);
+
+            if let (Some(desired_heading), Some(speed)) = (desired_heading, speed) {
+                snapshot.directive = Some(EntityMotionDirective::TurnToHeading {
+                    desired_heading,
+                    speed,
+                });
+            }
+        } else if let MovementTypeData::TurnToObject(turn) = &data.data
+            && let Some(speed) = OrderedMotionSpeed::from_f32(turn.params.speed)
+        {
             snapshot.directive = Some(EntityMotionDirective::TurnToObject {
                 target: turn.target,
                 desired_heading: OrderedMotionSpeed::from_f32(turn.desired_heading),
-                speed: OrderedMotionSpeed::from_f32(turn.params.speed)?,
+                speed,
             });
         }
 
@@ -113,6 +120,68 @@ impl EntityMotionSnapshot {
     pub fn indicates_death_motion(self) -> bool {
         self.forward_command
             .is_some_and(InterpretedMotionCommand::is_dead)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EntityMotionSnapshot, MotionStance, MovementEventData, MovementTypeData};
+    use holtburger_common::Guid;
+    use holtburger_protocol::messages::MovementType;
+    use holtburger_protocol::messages::movement::messages::motion::{
+        TurnToHeading, TurnToObject, TurnToParameters,
+    };
+
+    #[test]
+    fn turn_to_heading_with_non_finite_directive_preserves_other_snapshot_fields() {
+        let snapshot = EntityMotionSnapshot::from_movement_event(&MovementEventData {
+            guid: Guid(0x60000001),
+            object_instance_sequence: 1,
+            movement_sequence: 2,
+            server_control_sequence: 3,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToHeading,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::TurnToHeading(TurnToHeading {
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: 1.5,
+                    desired_heading: f32::NAN,
+                },
+            }),
+        })
+        .expect("expected current style to keep snapshot populated");
+
+        assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
+        assert_eq!(snapshot.directive, None);
+    }
+
+    #[test]
+    fn turn_to_object_with_non_finite_speed_preserves_other_snapshot_fields() {
+        let snapshot = EntityMotionSnapshot::from_movement_event(&MovementEventData {
+            guid: Guid(0x60000001),
+            object_instance_sequence: 1,
+            movement_sequence: 2,
+            server_control_sequence: 3,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target: Guid(0x70000001),
+                desired_heading: 0.25,
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: f32::NAN,
+                    desired_heading: 0.25,
+                },
+            }),
+        })
+        .expect("expected current style to keep snapshot populated");
+
+        assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
+        assert_eq!(snapshot.directive, None);
     }
 }
 

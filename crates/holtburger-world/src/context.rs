@@ -825,6 +825,7 @@ mod tests {
             forward_command: Some(InterpretedMotionCommand::DEAD),
             sidestep_command: None,
             turn_command: None,
+            ..Default::default()
         });
         world.entities.insert(target_guid, target);
 

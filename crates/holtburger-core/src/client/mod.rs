@@ -14,6 +14,7 @@ mod messages;
 mod movement;
 pub mod movement_types;
 pub mod navigation;
+pub mod projection;
 pub mod types;
 use auth::AuthState;
 pub use builder::ClientBuilder;
@@ -537,6 +538,19 @@ impl Client {
                         pos: *pos,
                     });
             }
+            WorldEvent::EntityVectorUpdated {
+                guid,
+                velocity,
+                omega,
+            } => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::EntityKinematicsUpdated {
+                        guid: *guid,
+                        velocity: *velocity,
+                        omega: *omega,
+                    });
+            }
             WorldEvent::EntityMotionUpdated { guid, snapshot } => {
                 let _ = self
                     .client_view_event_tx
@@ -565,7 +579,7 @@ impl Client {
                         sequence: *sequence,
                     });
             }
-            WorldEvent::EntityStateUpdated { .. } | WorldEvent::EntityVectorUpdated { .. } => {}
+            WorldEvent::EntityStateUpdated { .. } => {}
             WorldEvent::ServerTimeUpdate(time) => {
                 let _ = self
                     .client_view_event_tx
@@ -874,5 +888,37 @@ mod tests {
         }
 
         assert!(saw_activity);
+    }
+
+    #[test]
+    fn entity_vector_updates_project_to_client_view_kinematics() {
+        let client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        let guid = Guid(0x5000_0001);
+        let velocity = Vector3::new(1.0, 2.0, 3.0);
+        let omega = Vector3::new(0.0, 0.0, 4.0);
+
+        client.handle_world_event(&WorldEvent::EntityVectorUpdated {
+            guid,
+            velocity,
+            omega,
+        });
+
+        let mut saw_kinematics = false;
+        while let Ok(event) = events.try_recv() {
+            if matches!(
+                event,
+                ClientViewEvent::EntityKinematicsUpdated {
+                    guid: event_guid,
+                    velocity: event_velocity,
+                    omega: event_omega,
+                } if event_guid == guid && event_velocity == velocity && event_omega == omega
+            ) {
+                saw_kinematics = true;
+                break;
+            }
+        }
+
+        assert!(saw_kinematics);
     }
 }

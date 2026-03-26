@@ -16,8 +16,7 @@ fn position(x: f32) -> WorldPosition {
 #[test]
 fn external_consumers_can_drive_approach_target_controller() {
     let now = std::time::Instant::now();
-    let mut controller =
-        ApproachTargetController::new(holtburger_common::Guid(0x1234), 1.0, position(0.0), now);
+    let mut controller = ApproachTargetController::new(1.0);
 
     let update = controller.handle(&ApproachTargetInput::Tick {
         now,
@@ -28,7 +27,6 @@ fn external_consumers_can_drive_approach_target_controller() {
     });
 
     assert_eq!(update.status, ControllerStatus::Active);
-    assert_eq!(controller.target_guid(), holtburger_common::Guid(0x1234));
     assert_eq!(controller.arrival_distance(), 1.0);
     assert!(matches!(
         update.effects.as_slice(),

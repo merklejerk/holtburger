@@ -1,5 +1,4 @@
 use holtburger_common::Guid;
-use holtburger_core::ClientViewEvent;
 use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
@@ -8,12 +7,14 @@ use holtburger_core::client::movement_types::{
     MovementPacketMetadata, MovementPrimitive, MovementRequest,
 };
 use holtburger_core::client::navigation::{
-    ApproachSyncInput, NavigationAutomation, NavigationIntent, NavigationMode,
+    NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
+    ResolvedNavigationTarget,
 };
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
 };
+use holtburger_core::{ClientViewEvent, EntityProjectionSystem};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -50,6 +51,7 @@ pub struct GameState {
 }
 
 const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
+const FOLLOW_DISTANCE: f32 = 0.01;
 const DEFAULT_APPROACH_RUN_RATE: f32 = 4.5;
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
 
@@ -147,8 +149,21 @@ impl GameState {
         self.render_state.context_buffer.len()
     }
 
+    pub(super) fn live_context_buffer(&self) -> Option<Vec<Line<'static>>> {
+        match self.view.context_view {
+            ContextView::Debug(InspectTarget::Entity(_)) => Some(build_context_panel_content(
+                &self.data,
+                &self.view,
+                Some(&self.runtime.projection),
+            )),
+            _ => None,
+        }
+    }
+
     pub fn handle_view_event(&mut self, event: ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
+        let now = Instant::now();
+        self.runtime.projection.handle_view_event(&event, now);
         match event {
             ClientViewEvent::LogMessage(_)
             | ClientViewEvent::ServerMessage { .. }
@@ -204,20 +219,22 @@ impl GameState {
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
+                self.refresh_entity_context_if_visible(entity_ref.guid);
                 if self.update_inventory_and_equipment(entity_ref) {
                     result.needs_redraw = true;
                 }
-                self.sync_weapon_swap_controller(Instant::now(), &mut result);
+                self.sync_weapon_swap_controller(now, &mut result);
             }
             ClientViewEvent::EntityReplaced { entity } => {
                 let entity_ref = entity.as_ref();
                 self.data
                     .entities
                     .insert(entity_ref.guid, entity_ref.clone());
+                self.refresh_entity_context_if_visible(entity_ref.guid);
                 if self.update_inventory_and_equipment(entity_ref) {
                     result.needs_redraw = true;
                 }
-                self.sync_weapon_swap_controller(Instant::now(), &mut result);
+                self.sync_weapon_swap_controller(now, &mut result);
             }
             ClientViewEvent::EntityPropertiesUpdated { guid, mut updates } => {
                 let mut needs_update = false;
@@ -228,10 +245,11 @@ impl GameState {
                     needs_update = true;
                 }
                 if needs_update && let Some(entity) = self.data.entities.get(&guid).cloned() {
+                    self.refresh_entity_context_if_visible(guid);
                     if self.update_inventory_and_equipment(&entity) {
                         result.needs_redraw = true;
                     }
-                    self.sync_weapon_swap_controller(Instant::now(), &mut result);
+                    self.sync_weapon_swap_controller(now, &mut result);
                 }
             }
             ClientViewEvent::EntityMoved { guid, pos } => {
@@ -242,18 +260,32 @@ impl GameState {
                         self.data.player_pos = Some(pos);
                     }
                 }
+                self.refresh_entity_context_if_visible(guid);
                 if !is_player_move {
-                    self.sync_approach_target(Instant::now(), &mut result);
-                    self.sync_follow_target(Instant::now(), &mut result);
+                    self.sync_approach_target(now, &mut result);
+                    self.sync_follow_target(now, &mut result);
                     self.sync_sticky_melee_pursuit(&mut result);
                 }
                 result.needs_redraw = true;
             }
+            ClientViewEvent::EntityKinematicsUpdated {
+                guid,
+                velocity,
+                omega,
+            } => {
+                if let Some(entity) = self.data.entities.get_mut(&guid) {
+                    entity.velocity = velocity;
+                    entity.omega = omega;
+                    self.refresh_entity_context_if_visible(guid);
+                    result.needs_redraw = true;
+                }
+            }
             ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
                 if let Some(entity) = self.data.entities.get_mut(&guid) {
                     entity.motion_snapshot = snapshot;
-                    self.sync_approach_target(Instant::now(), &mut result);
-                    self.sync_follow_target(Instant::now(), &mut result);
+                    self.refresh_entity_context_if_visible(guid);
+                    self.sync_approach_target(now, &mut result);
+                    self.sync_follow_target(now, &mut result);
                     self.sync_sticky_melee_pursuit(&mut result);
                     result.needs_redraw = true;
                 }
@@ -271,8 +303,9 @@ impl GameState {
             }
             ClientViewEvent::EntityDespawned { guid } => {
                 result.merge(self.handle_entity_removed(guid));
-                self.sync_approach_target(Instant::now(), &mut result);
-                self.sync_follow_target(Instant::now(), &mut result);
+                self.runtime.projection.reset_entity(guid);
+                self.sync_approach_target(now, &mut result);
+                self.sync_follow_target(now, &mut result);
                 self.sync_sticky_melee_pursuit(&mut result);
             }
             ClientViewEvent::VendorStateUpdated { vendor } => {
@@ -338,7 +371,7 @@ impl GameState {
                     result.needs_redraw = true;
                 }
                 self.handle_entity_identified(entity_ref);
-                self.sync_weapon_swap_controller(Instant::now(), &mut result);
+                self.sync_weapon_swap_controller(now, &mut result);
                 result.needs_redraw = true;
             }
             ClientViewEvent::NoClipUpdated { .. } => {
@@ -430,7 +463,7 @@ impl GameState {
                 }
             }
             AppAction::Follow { guid } => {
-                self.start_follow_target(guid, GENERIC_APPROACH_DISTANCE, &mut result);
+                self.start_follow_target(guid, FOLLOW_DISTANCE, &mut result);
                 if matches!(
                     self.runtime.navigation.navigation_mode(),
                     Some(NavigationMode::Follow { .. })
@@ -777,7 +810,9 @@ impl GameState {
 
     pub fn handle_tick(&mut self, elapsed: f64) -> UpdateResult {
         let mut result = UpdateResult::new();
-        self.sync_inventory_notification_arming(Instant::now());
+        let now = Instant::now();
+        self.sync_inventory_notification_arming(now);
+        self.runtime.projection.tick(now);
 
         // Proactive enchantment purge
         let old_count = self.data.player_enchantments.len();
@@ -799,11 +834,11 @@ impl GameState {
             }
         }
 
-        self.refresh_stale_attack_sequence(Instant::now(), &mut result);
-        self.sync_weapon_swap_controller(Instant::now(), &mut result);
+        self.refresh_stale_attack_sequence(now, &mut result);
+        self.sync_weapon_swap_controller(now, &mut result);
 
-        self.sync_approach_target(Instant::now(), &mut result);
-        self.sync_follow_target(Instant::now(), &mut result);
+        self.sync_approach_target(now, &mut result);
+        self.sync_follow_target(now, &mut result);
         self.sync_sticky_melee_pursuit(&mut result);
 
         result
@@ -814,7 +849,8 @@ impl GameState {
             self.render_state.context_buffer.clear();
             return;
         }
-        let content = build_context_panel_content(&self.data, &self.view);
+        let content =
+            build_context_panel_content(&self.data, &self.view, Some(&self.runtime.projection));
         self.render_state.context_buffer = content;
     }
 
@@ -1209,20 +1245,38 @@ impl GameState {
         );
     }
 
-    fn navigation_sync_input(&self, now: Instant, target_guid: Option<Guid>) -> ApproachSyncInput {
+    fn navigation_sync_input(
+        &self,
+        now: Instant,
+        target_guid: Option<Guid>,
+    ) -> NavigationSyncInput {
         let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
-        ApproachSyncInput {
+        let target_sample = target_entity.map(|entity| {
+            self.runtime
+                .projection
+                .spatial_sample_or_authoritative(entity)
+        });
+        let target_use_radius = target_entity
+            .and_then(|entity| entity.use_radius())
+            .map(|radius| radius as f32);
+        let move_speed = self
+            .data
+            .get_run_rate()
+            .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
+        let metadata = self.current_movement_metadata();
+
+        NavigationSyncInput {
             now,
             player_position: self.data.player_pos,
-            target_position: target_entity.map(|entity| entity.position),
-            target_use_radius: target_entity
-                .and_then(|entity| entity.use_radius())
-                .map(|radius| radius as f32),
-            move_speed: self
-                .data
-                .get_run_rate()
-                .unwrap_or(DEFAULT_APPROACH_RUN_RATE),
-            metadata: self.current_movement_metadata(),
+            target: target_guid
+                .zip(target_sample)
+                .map(|(guid, sample)| ResolvedNavigationTarget {
+                    guid,
+                    sample,
+                    use_radius: target_use_radius,
+                }),
+            move_speed,
+            metadata,
         }
     }
 
@@ -1671,6 +1725,16 @@ impl GameState {
     pub(crate) fn current_movement_metadata(&self) -> MovementPacketMetadata {
         MovementPacketMetadata::default()
     }
+
+    fn refresh_entity_context_if_visible(&mut self, guid: Guid) {
+        if matches!(
+            self.view.context_view,
+            ContextView::Assess(InspectTarget::Entity(target_guid))
+                if target_guid == guid
+        ) {
+            self.refresh_context_buffer();
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1700,6 +1764,7 @@ struct GameRuntimeState {
     last_trade_initiation: Option<(Instant, Guid)>,
     open_party_tab_on_next_fellowship_update: bool,
     navigation: NavigationAutomation,
+    projection: EntityProjectionSystem,
     combat_automation: Option<CombatAutomationController>,
     weapon_swap: WeaponSwapController,
     inventory_notifications: InventoryNotificationState,
@@ -1745,13 +1810,14 @@ mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use holtburger_common::ConfirmationType;
+    use holtburger_common::Vector3;
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::ActiveCharacterConfirmation;
-    use holtburger_core::client::navigation::StickyMeleeSyncInput;
+    use holtburger_core::client::navigation::{ApproachSyncInput, StickyMeleeSyncInput};
+    use holtburger_core::{ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode};
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
@@ -1785,7 +1851,27 @@ mod tests {
                 target,
                 arrival_distance,
             },
-            input,
+            NavigationSyncInput {
+                now: input.now,
+                player_position: input.player_position,
+                target: input
+                    .target_position
+                    .map(|target_position| ResolvedNavigationTarget {
+                        guid: target,
+                        sample: EntitySpatialSample {
+                            guid: target,
+                            authoritative_pose: target_position,
+                            projected_pose: target_position,
+                            velocity: Vector3::zero(),
+                            omega: Vector3::zero(),
+                            motion_state: None,
+                            projection_mode: ProjectionMode::AuthoritativeOnly,
+                        },
+                        use_radius: input.target_use_radius,
+                    }),
+                move_speed: input.move_speed,
+                metadata: input.metadata,
+            },
         );
     }
 
@@ -1796,11 +1882,16 @@ mod tests {
                 combat_mode: input.combat_mode,
                 attack_sequence_active: input.attack_sequence_active,
             },
-            ApproachSyncInput {
+            NavigationSyncInput {
                 now: input.now,
                 player_position: input.player_position,
-                target_position: input.target_position,
-                target_use_radius: input.target_use_radius,
+                target: input.target_guid.zip(input.target).map(|(guid, target)| {
+                    ResolvedNavigationTarget {
+                        guid,
+                        sample: target,
+                        use_radius: input.target_use_radius,
+                    }
+                }),
                 move_speed: input.move_speed,
                 metadata: input.metadata,
             },
@@ -2342,6 +2433,35 @@ mod tests {
     }
 
     #[test]
+    fn entity_kinematics_event_updates_cached_entity_state_and_requests_redraw() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+
+        state.data.entities.insert(
+            target_guid,
+            Entity::new(target_guid, "Drudge".to_string(), WorldPosition::default()),
+        );
+
+        let velocity = holtburger_common::Vector3::new(1.0, 2.0, 3.0);
+        let omega = holtburger_common::Vector3::new(0.0, 0.0, 4.0);
+        let result = state.handle_view_event(ClientViewEvent::EntityKinematicsUpdated {
+            guid: target_guid,
+            velocity,
+            omega,
+        });
+
+        assert!(result.needs_redraw);
+        let entity = state
+            .data
+            .entities
+            .get(&target_guid)
+            .expect("target entity should exist");
+        assert_eq!(entity.velocity, velocity);
+        assert_eq!(entity.omega, omega);
+    }
+
+    #[test]
     fn combat_feedback_updates_auto_attack_runtime_state() {
         let player_guid = Guid(0x50000001);
         let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
@@ -2814,6 +2934,7 @@ mod tests {
                 forward_command: Some(InterpretedMotionCommand::DEAD),
                 sidestep_command: None,
                 turn_command: None,
+                ..Default::default()
             }),
         });
 
@@ -2847,6 +2968,7 @@ mod tests {
             forward_command: Some(InterpretedMotionCommand::DEAD),
             sidestep_command: None,
             turn_command: None,
+            ..Default::default()
         });
         state.data.entities.insert(target_guid, target);
 
@@ -3009,6 +3131,13 @@ mod tests {
         );
 
         let player_position = state.data.player_pos;
+        let target_sample = state.runtime.projection.spatial_sample_or_authoritative(
+            state
+                .data
+                .entities
+                .get(&target_guid)
+                .expect("target entity should exist"),
+        );
         seed_sticky_melee(
             &mut state,
             StickyMeleeSyncInput {
@@ -3017,7 +3146,7 @@ mod tests {
                 attack_sequence_active: true,
                 target_guid: Some(target_guid),
                 player_position,
-                target_position: Some(target_position),
+                target: Some(target_sample),
                 target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,
                 metadata: MovementPacketMetadata::default(),
@@ -3256,7 +3385,7 @@ mod tests {
             guid: target_guid,
             pos: WorldPosition {
                 landblock_id: Guid(0x01000000),
-                coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
+                coords: holtburger_common::Vector3::new(FOLLOW_DISTANCE * 0.5, 0.0, 0.0),
                 ..WorldPosition::default()
             },
         });
@@ -3682,10 +3811,22 @@ mod tests {
                 attack_sequence_active: true,
                 target_guid: Some(target_guid),
                 player_position,
-                target_position: Some(WorldPosition {
-                    landblock_id: Guid(0x01000000),
-                    coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
-                    ..WorldPosition::default()
+                target: Some(holtburger_core::EntitySpatialSample {
+                    guid: target_guid,
+                    authoritative_pose: WorldPosition {
+                        landblock_id: Guid(0x01000000),
+                        coords: holtburger_common::Vector3::new(0.5, 0.0, 0.0),
+                        ..WorldPosition::default()
+                    },
+                    projected_pose: WorldPosition {
+                        landblock_id: Guid(0x01000000),
+                        coords: holtburger_common::Vector3::new(1.5, 0.0, 0.0),
+                        ..WorldPosition::default()
+                    },
+                    velocity: holtburger_common::Vector3::zero(),
+                    omega: holtburger_common::Vector3::zero(),
+                    motion_state: None,
+                    projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
                 }),
                 target_use_radius: None,
                 move_speed: DEFAULT_APPROACH_RUN_RATE,

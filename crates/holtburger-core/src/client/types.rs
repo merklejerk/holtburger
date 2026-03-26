@@ -356,6 +356,11 @@ pub enum ClientViewEvent {
         guid: Guid,
         pos: holtburger_common::position::WorldPosition,
     },
+    EntityKinematicsUpdated {
+        guid: Guid,
+        velocity: holtburger_common::math::Vector3,
+        omega: holtburger_common::math::Vector3,
+    },
     EntityMotionUpdated {
         guid: Guid,
         snapshot: Option<EntityMotionSnapshot>,

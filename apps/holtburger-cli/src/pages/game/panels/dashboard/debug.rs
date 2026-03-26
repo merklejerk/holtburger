@@ -6,6 +6,7 @@ use holtburger_common::Guid;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
+use holtburger_core::EntitySpatialSample;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;
@@ -26,6 +27,7 @@ pub fn get_debug_info(
     data: &GameData,
     view: Option<&ViewState>,
     target: InspectTarget,
+    projected_sample: Option<EntitySpatialSample>,
     name_lookup: impl Fn(Guid) -> Option<String>,
     spell_lookup: Option<&SpellCatalog>,
     player_info: Option<PlayerDebugInfo>,
@@ -127,6 +129,20 @@ pub fn get_debug_info(
                 "Pos:    {}",
                 e.position.to_world_coords()
             )));
+            if let Some(projected_sample) = projected_sample {
+                lines.push(Line::from(format!(
+                    "PPos:   {}",
+                    projected_sample.projected_pose.to_world_coords()
+                )));
+                lines.push(Line::from(format!(
+                    "PMode:  {:?}",
+                    projected_sample.projection_mode
+                )));
+                lines.push(Line::from(format!(
+                    "PCoords: {:?}",
+                    projected_sample.projected_pose.coords
+                )));
+            }
             lines.push(Line::from(format!(
                 "LB:     {:08X}",
                 e.position.landblock_id

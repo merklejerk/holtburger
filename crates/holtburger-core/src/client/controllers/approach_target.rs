@@ -8,7 +8,6 @@ use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate}
 use crate::client::movement_types::{
     DriveIntent, MovementPrediction, MovementPrimitive, RUN_ANIM_SPEED,
 };
-use holtburger_common::Guid;
 use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
 use std::time::Instant;
@@ -44,25 +43,12 @@ pub enum ApproachTargetEffect {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ApproachTargetController {
-    target_guid: Guid,
     arrival_distance: f32,
 }
 
 impl ApproachTargetController {
-    pub fn new(
-        target_guid: Guid,
-        arrival_distance: f32,
-        _player_position: WorldPosition,
-        _now: Instant,
-    ) -> Self {
-        Self {
-            target_guid,
-            arrival_distance,
-        }
-    }
-
-    pub fn target_guid(&self) -> Guid {
-        self.target_guid
+    pub fn new(arrival_distance: f32) -> Self {
+        Self { arrival_distance }
     }
 
     pub fn arrival_distance(&self) -> f32 {
@@ -158,6 +144,7 @@ impl Controller for ApproachTargetController {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::Guid;
     use holtburger_common::Vector3;
 
     fn position(x: f32) -> WorldPosition {
@@ -170,7 +157,7 @@ mod tests {
     #[test]
     fn completes_when_arrival_distance_is_reached() {
         let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::Tick {
             now,
@@ -193,7 +180,7 @@ mod tests {
     #[test]
     fn remains_active_when_local_position_does_not_change() {
         let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let mut controller = ApproachTargetController::new(1.0);
 
         let _ = controller.handle(&ApproachTargetInput::Tick {
             now,
@@ -237,7 +224,7 @@ mod tests {
             coords: Vector3::new(10.0, 10.0, 0.0),
             rotation: Default::default(),
         };
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, player_position, now);
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::Tick {
             now,
@@ -262,8 +249,8 @@ mod tests {
 
     #[test]
     fn forced_reposition_finishes_and_stops_movement() {
-        let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let _now = Instant::now();
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::ForcedReposition);
 
@@ -279,8 +266,8 @@ mod tests {
 
     #[test]
     fn teleport_start_finishes_and_stops_movement() {
-        let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let _now = Instant::now();
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::TeleportStarted);
 
@@ -296,8 +283,8 @@ mod tests {
 
     #[test]
     fn cancel_finishes_and_stops_movement() {
-        let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let _now = Instant::now();
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::Cancel);
 
@@ -314,7 +301,7 @@ mod tests {
     #[test]
     fn first_tick_emits_drive_intent() {
         let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::Tick {
             now,
@@ -340,7 +327,7 @@ mod tests {
     #[test]
     fn steady_state_ticks_keep_emitting_drive_intent() {
         let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let mut controller = ApproachTargetController::new(1.0);
 
         let _ = controller.handle(&ApproachTargetInput::Tick {
             now,
@@ -384,7 +371,7 @@ mod tests {
             coords: Vector3::new(0.0, 10.0, 10.0),
             rotation: Default::default(),
         };
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, player_position, now);
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::Tick {
             now,
@@ -406,7 +393,7 @@ mod tests {
     #[test]
     fn target_unavailable_finishes_and_stops_movement() {
         let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 1.0, position(0.0), now);
+        let mut controller = ApproachTargetController::new(1.0);
 
         let update = controller.handle(&ApproachTargetInput::Tick {
             now,
@@ -429,7 +416,7 @@ mod tests {
     #[test]
     fn target_use_radius_counts_toward_arrival_completion() {
         let now = Instant::now();
-        let mut controller = ApproachTargetController::new(Guid(0x1234), 0.6, position(0.0), now);
+        let mut controller = ApproachTargetController::new(0.6);
 
         let update = controller.handle(&ApproachTargetInput::Tick {
             now,

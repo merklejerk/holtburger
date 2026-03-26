@@ -23,6 +23,36 @@ pub struct EntityMotionSnapshot {
     pub forward_command: Option<InterpretedMotionCommand>,
     pub sidestep_command: Option<InterpretedMotionCommand>,
     pub turn_command: Option<InterpretedMotionCommand>,
+    pub forward_speed: Option<OrderedMotionSpeed>,
+    pub sidestep_speed: Option<OrderedMotionSpeed>,
+    pub turn_speed: Option<OrderedMotionSpeed>,
+    pub directive: Option<EntityMotionDirective>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct OrderedMotionSpeed(u32);
+
+impl OrderedMotionSpeed {
+    pub fn from_f32(value: f32) -> Option<Self> {
+        value.is_finite().then_some(Self(value.to_bits()))
+    }
+
+    pub const fn to_f32(self) -> f32 {
+        f32::from_bits(self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityMotionDirective {
+    TurnToHeading {
+        desired_heading: OrderedMotionSpeed,
+        speed: OrderedMotionSpeed,
+    },
+    TurnToObject {
+        target: Guid,
+        desired_heading: Option<OrderedMotionSpeed>,
+        speed: OrderedMotionSpeed,
+    },
 }
 
 impl EntityMotionSnapshot {
@@ -43,18 +73,115 @@ impl EntityMotionSnapshot {
             snapshot.forward_command = invalid.state.forward_command;
             snapshot.sidestep_command = invalid.state.sidestep_command;
             snapshot.turn_command = invalid.state.turn_command;
+            snapshot.forward_speed = invalid
+                .state
+                .forward_speed
+                .and_then(OrderedMotionSpeed::from_f32);
+            snapshot.sidestep_speed = invalid
+                .state
+                .sidestep_speed
+                .and_then(OrderedMotionSpeed::from_f32);
+            snapshot.turn_speed = invalid
+                .state
+                .turn_speed
+                .and_then(OrderedMotionSpeed::from_f32);
+        } else if let MovementTypeData::TurnToHeading(turn) = &data.data {
+            let desired_heading = OrderedMotionSpeed::from_f32(turn.params.desired_heading);
+            let speed = OrderedMotionSpeed::from_f32(turn.params.speed);
+
+            if let (Some(desired_heading), Some(speed)) = (desired_heading, speed) {
+                snapshot.directive = Some(EntityMotionDirective::TurnToHeading {
+                    desired_heading,
+                    speed,
+                });
+            }
+        } else if let MovementTypeData::TurnToObject(turn) = &data.data
+            && let Some(speed) = OrderedMotionSpeed::from_f32(turn.params.speed)
+        {
+            snapshot.directive = Some(EntityMotionDirective::TurnToObject {
+                target: turn.target,
+                desired_heading: OrderedMotionSpeed::from_f32(turn.desired_heading),
+                speed,
+            });
         }
 
-        (snapshot.current_style.is_some()
+        let has_data = snapshot.current_style.is_some()
             || snapshot.forward_command.is_some()
             || snapshot.sidestep_command.is_some()
-            || snapshot.turn_command.is_some())
-        .then_some(snapshot)
+            || snapshot.turn_command.is_some()
+            || snapshot.forward_speed.is_some()
+            || snapshot.sidestep_speed.is_some()
+            || snapshot.turn_speed.is_some()
+            || snapshot.directive.is_some();
+
+        has_data.then_some(snapshot)
     }
 
     pub fn indicates_death_motion(self) -> bool {
         self.forward_command
             .is_some_and(InterpretedMotionCommand::is_dead)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EntityMotionSnapshot, MotionStance, MovementEventData, MovementTypeData};
+    use holtburger_common::Guid;
+    use holtburger_protocol::messages::MovementType;
+    use holtburger_protocol::messages::movement::messages::motion::{
+        TurnToHeading, TurnToObject, TurnToParameters,
+    };
+
+    #[test]
+    fn turn_to_heading_with_non_finite_directive_preserves_other_snapshot_fields() {
+        let snapshot = EntityMotionSnapshot::from_movement_event(&MovementEventData {
+            guid: Guid(0x60000001),
+            object_instance_sequence: 1,
+            movement_sequence: 2,
+            server_control_sequence: 3,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToHeading,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::TurnToHeading(TurnToHeading {
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: 1.5,
+                    desired_heading: f32::NAN,
+                },
+            }),
+        })
+        .expect("expected current style to keep snapshot populated");
+
+        assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
+        assert_eq!(snapshot.directive, None);
+    }
+
+    #[test]
+    fn turn_to_object_with_non_finite_speed_preserves_other_snapshot_fields() {
+        let snapshot = EntityMotionSnapshot::from_movement_event(&MovementEventData {
+            guid: Guid(0x60000001),
+            object_instance_sequence: 1,
+            movement_sequence: 2,
+            server_control_sequence: 3,
+            is_autonomous: false,
+            movement_type: MovementType::TurnToObject,
+            motion_flags: 0,
+            current_style: MotionStance::NonCombat.interpreted(),
+            data: MovementTypeData::TurnToObject(TurnToObject {
+                target: Guid(0x70000001),
+                desired_heading: 0.25,
+                params: TurnToParameters {
+                    movement_parameters: 0,
+                    speed: f32::NAN,
+                    desired_heading: 0.25,
+                },
+            }),
+        })
+        .expect("expected current style to keep snapshot populated");
+
+        assert_eq!(snapshot.current_style, Some(MotionStance::NonCombat));
+        assert_eq!(snapshot.directive, None);
     }
 }
 

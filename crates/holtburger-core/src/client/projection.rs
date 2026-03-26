@@ -70,6 +70,7 @@ pub struct ProjectedEntityState {
     pub projected_pose: WorldPosition,
     pub velocity: Vector3,
     pub omega: Vector3,
+    /// Latest authoritative motion snapshot from the world layer.
     pub motion_state: Option<EntityMotionSnapshot>,
     pub projection_mode: ProjectionMode,
     pub last_authoritative_update: Instant,
@@ -82,6 +83,7 @@ pub struct EntitySpatialSample {
     pub projected_pose: WorldPosition,
     pub velocity: Vector3,
     pub omega: Vector3,
+    /// Latest authoritative motion snapshot from the world layer.
     pub motion_state: Option<EntityMotionSnapshot>,
     pub projection_mode: ProjectionMode,
 }
@@ -132,6 +134,7 @@ enum TrackingState {
 struct TrackedEntityProjection {
     tracking_state: TrackingState,
     inputs: ProjectionInputs,
+    simulated_turn: Option<EntityMotionDirective>,
     public_state: ProjectedEntityState,
     last_derived_at: Instant,
 }
@@ -353,6 +356,7 @@ impl EntityProjectionSystem {
             ProjectionInputEvent::MotionState { guid, snapshot } => {
                 if let Some(tracked) = self.entities.get_mut(&guid) {
                     tracked.inputs.motion_state = snapshot;
+                    tracked.simulated_turn = simulated_turn_directive(snapshot);
                     tracked.sync_public_inputs();
                 }
             }
@@ -389,6 +393,7 @@ impl EntityProjectionSystem {
         tracked.inputs.velocity = velocity;
         tracked.inputs.omega = omega;
         tracked.inputs.motion_state = motion_state;
+        tracked.simulated_turn = simulated_turn_directive(motion_state);
         tracked.sync_public_inputs();
     }
 
@@ -458,6 +463,7 @@ impl EntityProjectionSystem {
             tracked.inputs.velocity = Vector3::zero();
             tracked.inputs.omega = Vector3::zero();
             tracked.inputs.motion_state = None;
+            tracked.simulated_turn = None;
         }
         tracked.inputs.last_authoritative_update = now;
         tracked.inputs.interpolation = None;
@@ -580,68 +586,47 @@ impl EntityProjectionSystem {
             return false;
         }
 
-        if let Some(snapshot) = &mut tracked.inputs.motion_state {
-            if let Some(directive) = snapshot.directive {
-                let advanced = match directive {
-                    EntityMotionDirective::TurnToHeading {
-                        desired_heading,
-                        speed,
-                    } => advance_turn_toward_heading(
-                        &mut tracked.public_state.projected_pose,
-                        desired_heading.to_f32(),
-                        speed.to_f32(),
-                        dt_secs,
-                    ),
-                    EntityMotionDirective::TurnToObject {
-                        desired_heading: Some(desired_heading),
-                        speed,
-                        ..
-                    } => advance_turn_toward_heading(
-                        &mut tracked.public_state.projected_pose,
-                        desired_heading.to_f32(),
-                        speed.to_f32(),
-                        dt_secs,
-                    ),
-                    EntityMotionDirective::TurnToObject {
-                        desired_heading: None,
-                        ..
-                    } => false,
-                };
+        if let Some(directive) = tracked.simulated_turn {
+            let advanced = match directive {
+                EntityMotionDirective::TurnToHeading {
+                    desired_heading,
+                    speed,
+                } => advance_turn_toward_heading(
+                    &mut tracked.public_state.projected_pose,
+                    desired_heading.to_f32(),
+                    speed.to_f32(),
+                    dt_secs,
+                ),
+                EntityMotionDirective::TurnToObject {
+                    desired_heading: Some(desired_heading),
+                    speed,
+                    ..
+                } => advance_turn_toward_heading(
+                    &mut tracked.public_state.projected_pose,
+                    desired_heading.to_f32(),
+                    speed.to_f32(),
+                    dt_secs,
+                ),
+                EntityMotionDirective::TurnToObject {
+                    desired_heading: None,
+                    ..
+                } => false,
+            };
 
-                if advanced {
-                    let desired_heading = match directive {
-                        EntityMotionDirective::TurnToHeading {
-                            desired_heading, ..
-                        } => Some(desired_heading.to_f32()),
-                        EntityMotionDirective::TurnToObject {
-                            desired_heading, ..
-                        } => desired_heading.map(|heading| heading.to_f32()),
-                    };
-
-                    if desired_heading.is_some_and(|heading| {
-                        signed_heading_delta(
-                            tracked.public_state.projected_pose.rotation.to_heading(),
-                            heading,
-                        )
-                        .abs()
-                            <= EPSILON
-                    }) {
-                        snapshot.directive = None;
-                    }
-
-                    return true;
-                }
-            }
-
-            if let (Some(command), Some(speed)) = (snapshot.turn_command, snapshot.turn_speed)
-                && let Some(direction) = turn_direction(command)
-            {
-                let heading = tracked.public_state.projected_pose.rotation.to_heading();
-                tracked.public_state.projected_pose.rotation = Quaternion::from_heading(
-                    normalize_heading(heading + (direction * speed.to_f32().abs() * dt_secs)),
-                );
+            if advanced {
                 return true;
             }
+        }
+
+        if let Some(snapshot) = tracked.inputs.motion_state
+            && let (Some(command), Some(speed)) = (snapshot.turn_command, snapshot.turn_speed)
+            && let Some(direction) = turn_direction(command)
+        {
+            let heading = tracked.public_state.projected_pose.rotation.to_heading();
+            tracked.public_state.projected_pose.rotation = Quaternion::from_heading(
+                normalize_heading(heading + (direction * speed.to_f32().abs() * dt_secs)),
+            );
+            return true;
         }
 
         if tracked.inputs.omega.length_squared() > EPSILON {
@@ -668,6 +653,7 @@ impl TrackedEntityProjection {
                 motion_state: None,
                 interpolation: None,
             },
+            simulated_turn: None,
             public_state: ProjectedEntityState {
                 guid,
                 authoritative_pose,
@@ -721,6 +707,30 @@ impl From<&ProjectedEntityState> for EntitySpatialSample {
             motion_state: value.motion_state,
             projection_mode: value.projection_mode,
         }
+    }
+}
+
+fn simulated_turn_directive(
+    snapshot: Option<EntityMotionSnapshot>,
+) -> Option<EntityMotionDirective> {
+    match snapshot.and_then(|snapshot| snapshot.directive) {
+        Some(EntityMotionDirective::TurnToHeading {
+            desired_heading,
+            speed,
+        }) => Some(EntityMotionDirective::TurnToHeading {
+            desired_heading,
+            speed,
+        }),
+        Some(EntityMotionDirective::TurnToObject {
+            target,
+            desired_heading: Some(desired_heading),
+            speed,
+        }) => Some(EntityMotionDirective::TurnToObject {
+            target,
+            desired_heading: Some(desired_heading),
+            speed,
+        }),
+        _ => None,
     }
 }
 
@@ -1018,6 +1028,57 @@ mod tests {
         system.tick(start + Duration::from_secs(1));
 
         let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(
+            projected.projection_mode,
+            ProjectionMode::SimulatingMotionState
+        );
+        assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn completed_turn_projection_keeps_authoritative_directive_visible() {
+        let guid = Guid(0x5000_000D);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
+        let directive = EntityMotionDirective::TurnToHeading {
+            desired_heading: holtburger_world::entity::OrderedMotionSpeed::from_f32(1.0)
+                .expect("heading should encode"),
+            speed: holtburger_world::entity::OrderedMotionSpeed::from_f32(1.0)
+                .expect("speed should encode"),
+        };
+        let mut entity = make_entity(guid, make_position(0.0, 0.0, 0.0));
+        entity.motion_snapshot = Some(EntityMotionSnapshot {
+            directive: Some(directive),
+            ..Default::default()
+        });
+
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
+
+        system.tick(start + Duration::from_secs(1));
+
+        let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(
+            projected
+                .motion_state
+                .and_then(|snapshot| snapshot.directive),
+            Some(directive)
+        );
+        assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
+
+        system.tick(start + Duration::from_secs(2));
+
+        let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(
+            projected
+                .motion_state
+                .and_then(|snapshot| snapshot.directive),
+            Some(directive)
+        );
         assert_eq!(
             projected.projection_mode,
             ProjectionMode::SimulatingMotionState

@@ -128,6 +128,12 @@ impl AppState {
                     format!("Booted from server: {}", reason)
                 };
                 self.remember_disconnect_reason(message);
+
+                if matches!(self.client_state, ClientState::Disconnected)
+                    && self.should_exit_on_disconnect()
+                {
+                    self.pending_exit_message = Some(self.current_disconnect_message());
+                }
             }
             _ => {}
         }
@@ -295,13 +301,12 @@ mod tests {
     fn boot_account_reason_is_used_for_disconnect_exit() {
         let mut app_state = build_test_app_state(ClientState::InWorld);
         app_state.quit_on_disconnect = true;
-
-        let _ = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
-            "Server maintenance".to_string(),
-        ));
         let _ = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
             state: ClientState::Disconnected,
         });
+        let _ = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
+            "Server maintenance".to_string(),
+        ));
 
         assert_eq!(
             app_state.take_pending_exit_message().as_deref(),
@@ -358,20 +363,34 @@ mod tests {
             "World".to_string(),
         )));
 
-        let result = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
-            "Server maintenance".to_string(),
-        ));
-        assert!(result.commands.is_empty());
-
         let result = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
             state: ClientState::Disconnected,
         });
+
+        assert!(result.commands.is_empty());
+
+        let result = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
+            "Server maintenance".to_string(),
+        ));
 
         assert!(result.commands.is_empty());
         assert!(app_state.take_pending_exit_message().is_none());
         assert_eq!(
             app_state.disconnect_reason.as_deref(),
             Some("Booted from server: Server maintenance")
+        );
+
+        let game = app_state
+            .game_option()
+            .expect("game page should remain active after disconnect");
+        let last_message = game
+            .chat
+            .messages
+            .last()
+            .expect("boot reason should be logged to chat");
+        assert_eq!(
+            last_message.text,
+            "Disconnected: Booted from server: Server maintenance"
         );
     }
 }

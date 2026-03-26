@@ -1816,7 +1816,7 @@ mod tests {
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::client::navigation::StickyMeleeSyncInput;
+    use holtburger_core::client::navigation::{ApproachSyncInput, StickyMeleeSyncInput};
     use holtburger_core::{ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode};
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};

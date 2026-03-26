@@ -293,10 +293,23 @@ impl GameState {
             ClientViewEvent::PlayerGroundedUpdated { grounded } => {
                 self.data.player_grounded = Some(grounded);
             }
-            ClientViewEvent::ForcedReposition { guid, .. } => {
-                if Some(guid) == self.data.player_guid {
-                    self.handle_forced_reposition(&mut result);
+            ClientViewEvent::ForcedReposition { guid, pos, .. } => {
+                let is_player_move = Some(guid) == self.data.player_guid;
+                if let Some(entity) = self.data.entities.get_mut(&guid) {
+                    entity.position = pos;
+                    if is_player_move {
+                        self.data.player_pos = Some(pos);
+                    }
                 }
+                self.refresh_entity_context_if_visible(guid);
+                if is_player_move {
+                    self.handle_forced_reposition(&mut result);
+                } else {
+                    self.sync_approach_target(now, &mut result);
+                    self.sync_follow_target(now, &mut result);
+                    self.sync_sticky_melee_pursuit(&mut result);
+                }
+                result.needs_redraw = true;
             }
             ClientViewEvent::TeleportStarted { .. } => {
                 self.handle_teleport_start(&mut result);
@@ -3333,6 +3346,60 @@ mod tests {
             state.runtime.navigation.navigation_mode(),
             Some(NavigationMode::Follow { .. })
         ));
+        assert_eq!(
+            state.view.active_interaction,
+            Some(Interaction::Following { target_guid })
+        );
+    }
+
+    #[test]
+    fn remote_forced_reposition_updates_target_position_and_restarts_follow_when_out_of_range() {
+        let player_guid = Guid(0x50000001);
+        let target_guid = Guid(0x60000001);
+        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
+        state.data.player_pos = Some(WorldPosition {
+            landblock_id: Guid(0x01000000),
+            ..WorldPosition::default()
+        });
+
+        state.data.entities.insert(
+            target_guid,
+            creature_entity(
+                target_guid,
+                "Drudge",
+                WorldPosition {
+                    landblock_id: Guid(0x01000000),
+                    coords: holtburger_common::Vector3::new(FOLLOW_DISTANCE * 0.5, 0.0, 0.0),
+                    ..WorldPosition::default()
+                },
+            ),
+        );
+
+        let _ = state
+            .handle_action(AppAction::Follow { guid: target_guid })
+            .unwrap();
+
+        let result = state.handle_view_event(ClientViewEvent::ForcedReposition {
+            guid: target_guid,
+            pos: WorldPosition {
+                landblock_id: Guid(0x01000000),
+                coords: holtburger_common::Vector3::new(6.0, 0.0, 0.0),
+                ..WorldPosition::default()
+            },
+            sequence: 42,
+        });
+
+        assert_eq!(state.data.entities.get(&target_guid).unwrap().position.coords.x, 6.0);
+        assert!(result.commands.iter().any(|command| {
+            matches!(
+                command,
+                ClientCommand::ExecuteMovement(MovementRequest {
+                    primitive:
+                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
+                    ..
+                })
+            )
+        }));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })

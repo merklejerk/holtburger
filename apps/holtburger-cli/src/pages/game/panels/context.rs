@@ -95,7 +95,9 @@ pub fn build_context_panel_content(
 
             if resolve_inspectable_target(data, view, target).is_some() {
                 let projected_sample = match target {
-                    InspectTarget::Entity(guid) => projection.and_then(|projection| projection.spatial_sample(guid)),
+                    InspectTarget::Entity(guid) => {
+                        projection.and_then(|projection| projection.spatial_sample(guid))
+                    }
                     InspectTarget::VendorItem(_) => None,
                 };
                 return debug::get_debug_info(

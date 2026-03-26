@@ -18,17 +18,24 @@ pub struct MaintainRangeSpatialInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MaintainRangeTickInput {
+    pub now: Instant,
+    pub target_guid: Guid,
+    pub player_position: WorldPosition,
+    pub target: Option<MaintainRangeSpatialInput>,
+    pub target_use_radius: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum MaintainRangeInput {
-    Tick {
-        now: Instant,
-        target_guid: Guid,
-        player_position: WorldPosition,
-        target: Option<MaintainRangeSpatialInput>,
-        target_use_radius: Option<f32>,
-    },
-    Suspend {
-        clear_latch: bool,
-    },
+    Tick(Box<MaintainRangeTickInput>),
+    Suspend { clear_latch: bool },
+}
+
+impl MaintainRangeInput {
+    pub(crate) fn tick(input: MaintainRangeTickInput) -> Self {
+        Self::Tick(Box::new(input))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,17 +114,19 @@ impl Controller for MaintainRangeController {
     type Effect = MaintainRangeEffect;
 
     fn handle(&mut self, input: &Self::Input) -> ControllerUpdate<Self::Effect> {
-        match *input {
+        match input {
             MaintainRangeInput::Suspend { clear_latch } => {
-                self.stop_and_finish(MaintainRangeFinishReason::Suspended, clear_latch)
+                self.stop_and_finish(MaintainRangeFinishReason::Suspended, *clear_latch)
             }
-            MaintainRangeInput::Tick {
-                now,
-                target_guid,
-                player_position,
-                target,
-                target_use_radius,
-            } => {
+            MaintainRangeInput::Tick(tick) => {
+                let MaintainRangeTickInput {
+                    now,
+                    target_guid,
+                    player_position,
+                    target,
+                    target_use_radius,
+                } = **tick;
+
                 self.reset_for_target_change(target_guid);
 
                 let Some(target) = target else {
@@ -201,7 +210,11 @@ mod tests {
         })
     }
 
-    fn target(authoritative_x: f32, projected_x: f32, mode: ProjectionMode) -> Option<MaintainRangeSpatialInput> {
+    fn target(
+        authoritative_x: f32,
+        projected_x: f32,
+        mode: ProjectionMode,
+    ) -> Option<MaintainRangeSpatialInput> {
         Some(MaintainRangeSpatialInput {
             target: EntitySpatialSample {
                 guid: Guid(0x1234),
@@ -224,13 +237,13 @@ mod tests {
         let now = Instant::now();
         let mut controller = controller();
 
-        let update = controller.handle(&MaintainRangeInput::Tick {
+        let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
-        });
+        }));
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
@@ -249,21 +262,21 @@ mod tests {
         let now = Instant::now();
         let mut controller = controller();
 
-        let _ = controller.handle(&MaintainRangeInput::Tick {
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
-        });
+        }));
 
-        let paused = controller.handle(&MaintainRangeInput::Tick {
+        let paused = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(16),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
             target_use_radius: None,
-        });
+        }));
 
         assert_eq!(paused.status, ControllerStatus::Paused);
         assert_eq!(paused.effects, vec![MaintainRangeEffect::Stop]);
@@ -276,29 +289,29 @@ mod tests {
         let now = Instant::now();
         let mut controller = controller();
 
-        let _ = controller.handle(&MaintainRangeInput::Tick {
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
-        });
+        }));
 
-        let _ = controller.handle(&MaintainRangeInput::Tick {
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(16),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
             target_use_radius: None,
-        });
+        }));
 
-        let update = controller.handle(&MaintainRangeInput::Tick {
+        let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(32),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(6.0),
             target_use_radius: None,
-        });
+        }));
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
@@ -317,21 +330,21 @@ mod tests {
         let now = Instant::now();
         let mut controller = controller();
 
-        let _ = controller.handle(&MaintainRangeInput::Tick {
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
-        });
+        }));
 
-        let update = controller.handle(&MaintainRangeInput::Tick {
+        let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(16),
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(20.0),
             target_use_radius: None,
-        });
+        }));
 
         assert_eq!(update.status, ControllerStatus::Completed);
         assert_eq!(
@@ -350,13 +363,13 @@ mod tests {
         let now = Instant::now();
         let mut controller = controller();
 
-        let _ = controller.handle(&MaintainRangeInput::Tick {
+        let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
-        });
+        }));
 
         let update = controller.handle(&MaintainRangeInput::Suspend { clear_latch: true });
 
@@ -377,13 +390,13 @@ mod tests {
         let now = Instant::now();
         let mut controller = controller();
 
-        let update = controller.handle(&MaintainRangeInput::Tick {
+        let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: target(0.5, 1.5, ProjectionMode::SimulatingVelocity),
             target_use_radius: None,
-        });
+        }));
 
         assert_eq!(update.status, ControllerStatus::Active);
         assert_eq!(
@@ -405,13 +418,13 @@ mod tests {
             reissue_interval: Duration::from_millis(250),
         });
 
-        let update = controller.handle(&MaintainRangeInput::Tick {
+        let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
             target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
             target_use_radius: Some(0.6),
-        });
+        }));
 
         assert_eq!(update.status, ControllerStatus::Paused);
         assert!(update.effects.is_empty());

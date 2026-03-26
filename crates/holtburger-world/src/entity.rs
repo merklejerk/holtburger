@@ -6,6 +6,7 @@ use holtburger_common::properties::{
     PropertyInt, PropertyString, PropertyUpdate, WeenieHeaderFlag, WeenieHeaderFlag2,
     WorldObjectProperties, WorldObjectPropertyAccessorsMut,
 };
+use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::movement::{
     InterpretedMotionCommand, MotionStance, MovementEventData, MovementTypeData,
@@ -224,6 +225,19 @@ pub struct Entity {
     pub resist_color: Option<u16>,
 }
 
+const OBJECT_POSITION_SEQUENCE_INDEX: usize = 0;
+const OBJECT_TELEPORT_SEQUENCE_INDEX: usize = 4;
+const OBJECT_SERVER_CONTROL_SEQUENCE_INDEX: usize = 5;
+const OBJECT_FORCE_POSITION_SEQUENCE_INDEX: usize = 6;
+const OBJECT_INSTANCE_SEQUENCE_INDEX: usize = 8;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityPositionSyncOutcome {
+    Rejected,
+    Moved,
+    Reset { sequence: u16 },
+}
+
 impl HasProperties for Entity {
     fn properties(&self) -> &WorldObjectProperties {
         &self.properties
@@ -237,6 +251,68 @@ impl HasPropertiesMut for Entity {
 }
 
 impl Entity {
+    pub fn should_accept_server_position_sequences(
+        &self,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+    ) -> bool {
+        let current_teleport_sequence = self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX];
+        let current_force_position_sequence = self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX];
+
+        if is_newer_u16(current_teleport_sequence, teleport_sequence) {
+            return false;
+        }
+
+        if teleport_sequence == current_teleport_sequence
+            && is_newer_u16(current_force_position_sequence, force_position_sequence)
+        {
+            return false;
+        }
+
+        true
+    }
+
+    pub fn apply_server_position_update(
+        &mut self,
+        position: WorldPosition,
+        instance_sequence: u16,
+        position_sequence: Option<u16>,
+        teleport_sequence: u16,
+        force_position_sequence: u16,
+        server_control_sequence: Option<u16>,
+    ) -> EntityPositionSyncOutcome {
+        if !self.should_accept_server_position_sequences(teleport_sequence, force_position_sequence)
+        {
+            return EntityPositionSyncOutcome::Rejected;
+        }
+
+        let old_teleport_sequence = self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX];
+        let old_force_position_sequence = self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX];
+
+        self.position = position;
+        self.sequences[OBJECT_INSTANCE_SEQUENCE_INDEX] = instance_sequence;
+        if let Some(position_sequence) = position_sequence {
+            self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
+        }
+        self.sequences[OBJECT_TELEPORT_SEQUENCE_INDEX] = teleport_sequence;
+        self.sequences[OBJECT_FORCE_POSITION_SEQUENCE_INDEX] = force_position_sequence;
+        if let Some(server_control_sequence) = server_control_sequence {
+            self.sequences[OBJECT_SERVER_CONTROL_SEQUENCE_INDEX] = server_control_sequence;
+        }
+
+        let reset_required = position_sequence.is_none()
+            || is_newer_u16(teleport_sequence, old_teleport_sequence)
+            || is_newer_u16(force_position_sequence, old_force_position_sequence);
+
+        if reset_required {
+            EntityPositionSyncOutcome::Reset {
+                sequence: force_position_sequence,
+            }
+        } else {
+            EntityPositionSyncOutcome::Moved
+        }
+    }
+
     pub fn set_property(&mut self, update: PropertyUpdate) {
         self.properties.apply(update);
     }

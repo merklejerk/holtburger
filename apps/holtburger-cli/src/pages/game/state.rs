@@ -7,8 +7,8 @@ use holtburger_core::client::movement_types::{
     MovementPacketMetadata, MovementPrimitive, MovementRequest,
 };
 use holtburger_core::client::navigation::{
-    ApproachSyncInput, MaintainedTargetSyncInput, NavigationAutomation, NavigationIntent,
-    NavigationMode, NavigationSyncInput,
+    ApproachSyncInput, NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
+    ResolvedNavigationTarget,
 };
 use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
@@ -1266,23 +1266,17 @@ impl GameState {
         let metadata = self.current_movement_metadata();
 
         NavigationSyncInput {
-            approach: ApproachSyncInput {
-                now,
-                player_position: self.data.player_pos,
-                target_position: target_entity.map(|entity| entity.position),
-                target_use_radius,
-                move_speed,
-                metadata,
-            },
-            maintained_target: MaintainedTargetSyncInput {
-                now,
-                player_position: self.data.player_pos,
-                target_guid,
-                target: target_sample,
-                target_use_radius,
-                move_speed,
-                metadata,
-            },
+            now,
+            player_position: self.data.player_pos,
+            target: target_guid
+                .zip(target_sample)
+                .map(|(guid, sample)| ResolvedNavigationTarget {
+                    guid,
+                    sample,
+                    use_radius: target_use_radius,
+                }),
+            move_speed,
+            metadata,
         }
     }
 
@@ -1309,8 +1303,7 @@ impl GameState {
         let update = self.runtime.navigation.activate_approach(
             target,
             arrival_distance,
-            self.navigation_sync_input(Instant::now(), Some(target))
-                .approach,
+            self.navigation_sync_input(Instant::now(), Some(target)),
         );
         result.commands.extend(update.commands);
     }
@@ -1324,8 +1317,7 @@ impl GameState {
         let update = self.runtime.navigation.activate_follow(
             target,
             arrival_distance,
-            self.navigation_sync_input(Instant::now(), Some(target))
-                .maintained_target,
+            self.navigation_sync_input(Instant::now(), Some(target)),
         );
         result.commands.extend(update.commands);
     }
@@ -1860,14 +1852,13 @@ mod tests {
                 arrival_distance,
             },
             NavigationSyncInput {
-                approach: input,
-                maintained_target: MaintainedTargetSyncInput {
-                    now: input.now,
-                    player_position: input.player_position,
-                    target_guid: Some(target),
-                    target: input
-                        .target_position
-                        .map(|target_position| EntitySpatialSample {
+                now: input.now,
+                player_position: input.player_position,
+                target: input
+                    .target_position
+                    .map(|target_position| ResolvedNavigationTarget {
+                        guid: target,
+                        sample: EntitySpatialSample {
                             guid: target,
                             authoritative_pose: target_position,
                             projected_pose: target_position,
@@ -1875,11 +1866,11 @@ mod tests {
                             omega: Vector3::zero(),
                             motion_state: None,
                             projection_mode: ProjectionMode::AuthoritativeOnly,
-                        }),
-                    target_use_radius: input.target_use_radius,
-                    move_speed: input.move_speed,
-                    metadata: input.metadata,
-                },
+                        },
+                        use_radius: input.target_use_radius,
+                    }),
+                move_speed: input.move_speed,
+                metadata: input.metadata,
             },
         );
     }
@@ -1892,23 +1883,17 @@ mod tests {
                 attack_sequence_active: input.attack_sequence_active,
             },
             NavigationSyncInput {
-                approach: ApproachSyncInput {
-                    now: input.now,
-                    player_position: input.player_position,
-                    target_position: input.target.map(|target| target.authoritative_pose),
-                    target_use_radius: input.target_use_radius,
-                    move_speed: input.move_speed,
-                    metadata: input.metadata,
-                },
-                maintained_target: MaintainedTargetSyncInput {
-                    now: input.now,
-                    player_position: input.player_position,
-                    target_guid: input.target_guid,
-                    target: input.target,
-                    target_use_radius: input.target_use_radius,
-                    move_speed: input.move_speed,
-                    metadata: input.metadata,
-                },
+                now: input.now,
+                player_position: input.player_position,
+                target: input.target_guid.zip(input.target).map(|(guid, target)| {
+                    ResolvedNavigationTarget {
+                        guid,
+                        sample: target,
+                        use_radius: input.target_use_radius,
+                    }
+                }),
+                move_speed: input.move_speed,
+                metadata: input.metadata,
             },
         );
     }

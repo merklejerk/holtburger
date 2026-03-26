@@ -1,6 +1,5 @@
 use crate::client::controllers::{Controller, ControllerStatus, ControllerUpdate};
 use crate::client::projection::EntitySpatialSample;
-use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 use std::time::{Duration, Instant};
 
@@ -20,7 +19,6 @@ pub struct MaintainRangeSpatialInput {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MaintainRangeTickInput {
     pub now: Instant,
-    pub target_guid: Guid,
     pub player_position: WorldPosition,
     pub target: Option<MaintainRangeSpatialInput>,
     pub target_use_radius: Option<f32>,
@@ -47,7 +45,7 @@ pub enum MaintainRangeFinishReason {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MaintainRangeEffect {
-    StartApproach { target: Guid, arrival_distance: f32 },
+    StartApproach { arrival_distance: f32 },
     Stop,
     Finished(MaintainRangeFinishReason),
 }
@@ -55,7 +53,7 @@ pub enum MaintainRangeEffect {
 #[derive(Debug, Clone)]
 pub struct MaintainRangeController {
     config: MaintainRangeConfig,
-    latched_target: Option<Guid>,
+    has_latched_target: bool,
     pursuing: bool,
     last_reissue_at: Option<Instant>,
 }
@@ -64,14 +62,14 @@ impl MaintainRangeController {
     pub fn new(config: MaintainRangeConfig) -> Self {
         Self {
             config,
-            latched_target: None,
+            has_latched_target: false,
             pursuing: false,
             last_reissue_at: None,
         }
     }
 
-    pub fn latched_target_guid(&self) -> Option<Guid> {
-        self.latched_target
+    pub fn has_latched_target(&self) -> bool {
+        self.has_latched_target
     }
 
     pub fn is_pursuing(&self) -> bool {
@@ -80,14 +78,6 @@ impl MaintainRangeController {
 
     pub fn arrival_distance(&self) -> f32 {
         self.config.arrival_distance
-    }
-
-    fn reset_for_target_change(&mut self, target_guid: Guid) {
-        if self.latched_target != Some(target_guid) {
-            self.latched_target = None;
-            self.pursuing = false;
-            self.last_reissue_at = None;
-        }
     }
 
     fn stop_and_finish(
@@ -100,7 +90,7 @@ impl MaintainRangeController {
             update.push_effect(MaintainRangeEffect::Stop);
         }
         if clear_latch {
-            self.latched_target = None;
+            self.has_latched_target = false;
         }
         self.pursuing = false;
         self.last_reissue_at = None;
@@ -121,13 +111,10 @@ impl Controller for MaintainRangeController {
             MaintainRangeInput::Tick(tick) => {
                 let MaintainRangeTickInput {
                     now,
-                    target_guid,
                     player_position,
                     target,
                     target_use_radius,
                 } = **tick;
-
-                self.reset_for_target_change(target_guid);
 
                 let Some(target) = target else {
                     return self
@@ -136,7 +123,7 @@ impl Controller for MaintainRangeController {
 
                 let target_position = target.target.projected_pose;
 
-                let max_follow_distance = if self.latched_target == Some(target_guid) {
+                let max_follow_distance = if self.has_latched_target {
                     self.config.repeat_distance
                 } else {
                     self.config.acquire_distance
@@ -148,7 +135,7 @@ impl Controller for MaintainRangeController {
                     .arrival_distance
                     .max(target_use_radius.unwrap_or(0.0).max(0.0));
                 if distance <= effective_arrival_distance {
-                    self.latched_target = Some(target_guid);
+                    self.has_latched_target = true;
                     self.last_reissue_at = None;
                     let mut update = ControllerUpdate::new(ControllerStatus::Paused);
                     if self.pursuing {
@@ -163,19 +150,18 @@ impl Controller for MaintainRangeController {
                         .stop_and_finish(MaintainRangeFinishReason::OutsideFollowDistance, true);
                 }
 
-                let should_issue = self.latched_target != Some(target_guid)
+                let should_issue = !self.has_latched_target
                     || self.last_reissue_at.is_none_or(|last_reissue| {
                         now.duration_since(last_reissue) >= self.config.reissue_interval
                     });
 
-                self.latched_target = Some(target_guid);
+                self.has_latched_target = true;
 
                 if should_issue {
                     self.pursuing = true;
                     self.last_reissue_at = Some(now);
                     return ControllerUpdate::new(ControllerStatus::Active).with_effect(
                         MaintainRangeEffect::StartApproach {
-                            target: target_guid,
                             arrival_distance: self.config.arrival_distance,
                         },
                     );
@@ -192,6 +178,7 @@ impl Controller for MaintainRangeController {
 mod tests {
     use super::*;
     use crate::client::projection::ProjectionMode;
+    use holtburger_common::Guid;
     use holtburger_common::Vector3;
 
     fn position(x: f32) -> WorldPosition {
@@ -239,7 +226,6 @@ mod tests {
 
         let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
@@ -249,11 +235,10 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![MaintainRangeEffect::StartApproach {
-                target: Guid(0x1234),
-                arrival_distance: 0.6,
+                arrival_distance: 0.6
             }]
         );
-        assert_eq!(controller.latched_target_guid(), Some(Guid(0x1234)));
+        assert!(controller.has_latched_target());
         assert!(controller.is_pursuing());
     }
 
@@ -264,7 +249,6 @@ mod tests {
 
         let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
@@ -272,7 +256,6 @@ mod tests {
 
         let paused = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(16),
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
             target_use_radius: None,
@@ -280,7 +263,7 @@ mod tests {
 
         assert_eq!(paused.status, ControllerStatus::Paused);
         assert_eq!(paused.effects, vec![MaintainRangeEffect::Stop]);
-        assert_eq!(controller.latched_target_guid(), Some(Guid(0x1234)));
+        assert!(controller.has_latched_target());
         assert!(!controller.is_pursuing());
     }
 
@@ -291,7 +274,6 @@ mod tests {
 
         let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
@@ -299,7 +281,6 @@ mod tests {
 
         let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(16),
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
             target_use_radius: None,
@@ -307,7 +288,6 @@ mod tests {
 
         let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(32),
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(6.0),
             target_use_radius: None,
@@ -317,11 +297,10 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![MaintainRangeEffect::StartApproach {
-                target: Guid(0x1234),
-                arrival_distance: 0.6,
+                arrival_distance: 0.6
             }]
         );
-        assert_eq!(controller.latched_target_guid(), Some(Guid(0x1234)));
+        assert!(controller.has_latched_target());
         assert!(controller.is_pursuing());
     }
 
@@ -332,7 +311,6 @@ mod tests {
 
         let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
@@ -340,7 +318,6 @@ mod tests {
 
         let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: now + Duration::from_millis(16),
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(20.0),
             target_use_radius: None,
@@ -354,7 +331,7 @@ mod tests {
                 MaintainRangeEffect::Finished(MaintainRangeFinishReason::OutsideFollowDistance),
             ]
         );
-        assert_eq!(controller.latched_target_guid(), None);
+        assert!(!controller.has_latched_target());
         assert!(!controller.is_pursuing());
     }
 
@@ -365,7 +342,6 @@ mod tests {
 
         let _ = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(1.5),
             target_use_radius: None,
@@ -381,7 +357,7 @@ mod tests {
                 MaintainRangeEffect::Finished(MaintainRangeFinishReason::Suspended),
             ]
         );
-        assert_eq!(controller.latched_target_guid(), None);
+        assert!(!controller.has_latched_target());
         assert!(!controller.is_pursuing());
     }
 
@@ -392,7 +368,6 @@ mod tests {
 
         let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: target(0.5, 1.5, ProjectionMode::SimulatingVelocity),
             target_use_radius: None,
@@ -402,8 +377,7 @@ mod tests {
         assert_eq!(
             update.effects,
             vec![MaintainRangeEffect::StartApproach {
-                target: Guid(0x1234),
-                arrival_distance: 0.6,
+                arrival_distance: 0.6
             }]
         );
     }
@@ -420,7 +394,6 @@ mod tests {
 
         let update = controller.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now,
-            target_guid: Guid(0x1234),
             player_position: position(0.0),
             target: authoritative_target(0.5),
             target_use_radius: Some(0.6),
@@ -428,7 +401,7 @@ mod tests {
 
         assert_eq!(update.status, ControllerStatus::Paused);
         assert!(update.effects.is_empty());
-        assert_eq!(controller.latched_target_guid(), Some(Guid(0x1234)));
+        assert!(controller.has_latched_target());
         assert!(!controller.is_pursuing());
     }
 }

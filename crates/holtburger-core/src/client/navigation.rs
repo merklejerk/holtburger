@@ -928,7 +928,7 @@ impl NavigationAutomation {
                         ApproachSyncInput {
                             now: input.now,
                             player_position: input.player_position,
-                            target_position: input.target.map(|target| target.authoritative_pose),
+                            target_position: input.target.map(|target| target.projected_pose),
                             target_use_radius: input.target_use_radius,
                             move_speed: input.move_speed,
                             metadata: input.metadata,
@@ -1582,6 +1582,42 @@ mod tests {
             drive_heading(&refreshed).expect("follow reissue should refresh drive heading");
 
         assert_ne!(initial_heading, refreshed_heading);
+    }
+
+    #[test]
+    fn follow_pursuit_uses_projected_target_pose_for_drive_heading() {
+        let now = Instant::now();
+        let mut automation = NavigationAutomation::default();
+
+        let result = automation.reconcile_navigation(
+            NavigationIntent::Follow {
+                target: Guid(0x1234),
+                arrival_distance: 1.0,
+            },
+            NavigationSyncInput {
+                approach: approach_input(now, Some(position_xy(0.0, 0.0)), Some(position_xy(5.0, 0.0))),
+                maintained_target: MaintainedTargetSyncInput {
+                    now,
+                    player_position: Some(position_xy(0.0, 0.0)),
+                    target_guid: Some(Guid(0x1234)),
+                    target: Some(EntitySpatialSample {
+                        guid: Guid(0x1234),
+                        authoritative_pose: position_xy(5.0, 0.0),
+                        projected_pose: position_xy(0.0, 5.0),
+                        velocity: Vector3::zero(),
+                        omega: Vector3::zero(),
+                        motion_state: None,
+                        projection_mode: crate::client::projection::ProjectionMode::SimulatingVelocity,
+                    }),
+                    target_use_radius: None,
+                    move_speed: 4.5,
+                    metadata: MovementPacketMetadata::default(),
+                },
+            },
+        );
+
+        let heading = drive_heading(&result).expect("follow should drive toward projected target pose");
+        assert!((heading - (std::f32::consts::PI / 2.0)).abs() < 1e-4);
     }
 
     #[test]

@@ -43,6 +43,7 @@
 
 use crate::client::types::ClientViewEvent;
 use holtburger_common::math::Quaternion;
+use holtburger_common::position::METERS_PER_LANDBLOCK;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
@@ -512,8 +513,11 @@ impl EntityProjectionSystem {
         if tracked.inputs.velocity.length_squared() > EPSILON
             && elapsed_since_authoritative > Duration::ZERO
         {
-            tracked.public_state.projected_pose.coords = authoritative_pose.coords
-                + tracked.inputs.velocity * elapsed_since_authoritative.as_secs_f32();
+            tracked.public_state.projected_pose = project_pose_by_velocity(
+                authoritative_pose,
+                tracked.inputs.velocity,
+                elapsed_since_authoritative.as_secs_f32(),
+            );
             mode = ProjectionMode::SimulatingVelocity;
         } else {
             tracked.public_state.projected_pose.coords = authoritative_pose.coords;
@@ -760,6 +764,33 @@ fn interpolate_pose(start: WorldPosition, end: WorldPosition, progress: f32) -> 
     }
 }
 
+fn project_pose_by_velocity(
+    authoritative_pose: WorldPosition,
+    velocity: Vector3,
+    dt_secs: f32,
+) -> WorldPosition {
+    if dt_secs <= 0.0 {
+        return authoritative_pose;
+    }
+
+    let projected_global = authoritative_pose.global_coords() + (velocity * dt_secs);
+    let landblock_x =
+        (projected_global.x.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
+    let landblock_y =
+        (projected_global.y.div_euclid(METERS_PER_LANDBLOCK) as i32).clamp(0, 255) as u32;
+    let low_word = authoritative_pose.landblock_id.0 & 0xFFFF;
+
+    WorldPosition {
+        landblock_id: Guid((landblock_x << 24) | (landblock_y << 16) | low_word),
+        coords: Vector3::new(
+            projected_global.x.rem_euclid(METERS_PER_LANDBLOCK),
+            projected_global.y.rem_euclid(METERS_PER_LANDBLOCK),
+            projected_global.z,
+        ),
+        rotation: authoritative_pose.rotation,
+    }
+}
+
 fn advance_turn_toward_heading(
     pose: &mut WorldPosition,
     desired_heading: f32,
@@ -888,6 +919,46 @@ mod tests {
             ProjectionMode::SimulatingVelocity
         );
         assert!((projected.projected_pose.coords.x - 10.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn velocity_dead_reckoning_crosses_landblock_boundaries_in_global_space() {
+        let guid = Guid(0x5000_1002);
+        let start = Instant::now();
+        let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
+        let entity = make_entity(
+            guid,
+            WorldPosition {
+                landblock_id: Guid(0x0102_0000),
+                coords: Vector3::new(191.8, 20.0, 0.0),
+                rotation: Quaternion::identity(),
+            },
+        );
+
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
+        system.handle_view_event(
+            &ClientViewEvent::EntityKinematicsUpdated {
+                guid,
+                velocity: Vector3::new(2.0, 0.0, 0.0),
+                omega: Vector3::zero(),
+            },
+            start,
+        );
+        system.tick(start + Duration::from_millis(250));
+
+        let projected = system.projected_entity(guid).expect("entity should exist");
+        assert_eq!(
+            projected.projection_mode,
+            ProjectionMode::SimulatingVelocity
+        );
+        assert_eq!(projected.projected_pose.landblock_id, Guid(0x0202_0000));
+        assert!((projected.projected_pose.coords.x - 0.3).abs() < 1e-4);
+        assert!((projected.projected_pose.coords.y - 20.0).abs() < 1e-4);
     }
 
     #[test]

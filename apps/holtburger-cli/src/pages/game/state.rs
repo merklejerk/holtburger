@@ -51,6 +51,7 @@ pub struct GameState {
 }
 
 const GENERIC_APPROACH_DISTANCE: f32 = 1.0;
+const FOLLOW_DISTANCE: f32 = 0.01;
 const DEFAULT_APPROACH_RUN_RATE: f32 = 4.5;
 const INVENTORY_NOTIFICATION_ARM_DELAY: Duration = Duration::from_millis(250);
 
@@ -462,7 +463,7 @@ impl GameState {
                 }
             }
             AppAction::Follow { guid } => {
-                self.start_follow_target(guid, GENERIC_APPROACH_DISTANCE, &mut result);
+                self.start_follow_target(guid, FOLLOW_DISTANCE, &mut result);
                 if matches!(
                     self.runtime.navigation.navigation_mode(),
                     Some(NavigationMode::Follow { .. })

@@ -742,7 +742,11 @@ fn test_update_motion_retains_interpreted_motion_speeds() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(guid, "Drudge".to_string(), WorldPosition::default()));
+    state.add_entity(Entity::new(
+        guid,
+        "Drudge".to_string(),
+        WorldPosition::default(),
+    ));
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -778,12 +782,15 @@ fn test_update_motion_retains_interpreted_motion_speeds() {
         .and_then(|entity| entity.motion_snapshot)
         .expect("expected motion snapshot to be cached");
 
-    assert_eq!(snapshot.forward_command, Some(InterpretedMotionCommand::RUN_FORWARD));
     assert_eq!(
-        snapshot.forward_speed,
-        OrderedMotionSpeed::from_f32(3.5)
+        snapshot.forward_command,
+        Some(InterpretedMotionCommand::RUN_FORWARD)
     );
-    assert_eq!(snapshot.turn_command, Some(InterpretedMotionCommand::TURN_RIGHT));
+    assert_eq!(snapshot.forward_speed, OrderedMotionSpeed::from_f32(3.5));
+    assert_eq!(
+        snapshot.turn_command,
+        Some(InterpretedMotionCommand::TURN_RIGHT)
+    );
     assert_eq!(snapshot.turn_speed, OrderedMotionSpeed::from_f32(1.25));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -799,7 +806,11 @@ fn test_update_motion_retains_turn_to_heading_directive() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x60000001);
 
-    state.add_entity(Entity::new(guid, "Drudge".to_string(), WorldPosition::default()));
+    state.add_entity(Entity::new(
+        guid,
+        "Drudge".to_string(),
+        WorldPosition::default(),
+    ));
 
     let msg = GameMessage::UpdateMotion(Box::new(MovementEventData {
         guid,
@@ -812,11 +823,12 @@ fn test_update_motion_retains_turn_to_heading_directive() {
         current_style: MotionStance::NonCombat.interpreted(),
         data: MovementTypeData::TurnToHeading(
             holtburger_protocol::messages::movement::messages::motion::TurnToHeading {
-                params: holtburger_protocol::messages::movement::messages::motion::TurnToParameters {
-                    movement_parameters: 0,
-                    speed: 1.5,
-                    desired_heading: 0.75,
-                },
+                params:
+                    holtburger_protocol::messages::movement::messages::motion::TurnToParameters {
+                        movement_parameters: 0,
+                        speed: 1.5,
+                        desired_heading: 0.75,
+                    },
             },
         ),
     }));
@@ -832,8 +844,7 @@ fn test_update_motion_retains_turn_to_heading_directive() {
     assert_eq!(
         snapshot.directive,
         Some(EntityMotionDirective::TurnToHeading {
-            desired_heading: OrderedMotionSpeed::from_f32(0.75)
-                .expect("finite desired heading"),
+            desired_heading: OrderedMotionSpeed::from_f32(0.75).expect("finite desired heading"),
             speed: OrderedMotionSpeed::from_f32(1.5).expect("finite speed"),
         })
     );

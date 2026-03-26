@@ -3,10 +3,10 @@ use crate::pages::game::GameData;
 use crate::pages::game::ViewState;
 use crate::types::InspectTarget;
 use holtburger_common::Guid;
-use holtburger_core::EntitySpatialSample;
 use holtburger_common::properties::{
     EnchantmentTypeFlags, PropertyFloat, PropertyInt, WorldObjectExt,
 };
+use holtburger_core::EntitySpatialSample;
 use holtburger_protocol::messages::magic::Enchantment;
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::inspect::InspectableObject;

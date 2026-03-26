@@ -198,18 +198,22 @@ impl EntityProjectionSystem {
         let input = match event {
             ClientViewEvent::EntitySpawned { entity }
             | ClientViewEvent::EntityReplaced { entity }
-            | ClientViewEvent::EntityIdentified { entity } => Some(ProjectionInputEvent::Snapshot {
-                guid: entity.guid,
-                pose: entity.position,
-                velocity: entity.velocity,
-                omega: entity.omega,
-                motion_state: entity.motion_snapshot,
-            }),
-            ClientViewEvent::EntityMoved { guid, pos } => Some(ProjectionInputEvent::AuthoritativePose {
-                guid: *guid,
-                pose: *pos,
-                bootstrap: !self.entities.contains_key(guid),
-            }),
+            | ClientViewEvent::EntityIdentified { entity } => {
+                Some(ProjectionInputEvent::Snapshot {
+                    guid: entity.guid,
+                    pose: entity.position,
+                    velocity: entity.velocity,
+                    omega: entity.omega,
+                    motion_state: entity.motion_snapshot,
+                })
+            }
+            ClientViewEvent::EntityMoved { guid, pos } => {
+                Some(ProjectionInputEvent::AuthoritativePose {
+                    guid: *guid,
+                    pose: *pos,
+                    bootstrap: !self.entities.contains_key(guid),
+                })
+            }
             ClientViewEvent::EntityKinematicsUpdated {
                 guid,
                 velocity,
@@ -219,17 +223,23 @@ impl EntityProjectionSystem {
                 velocity: *velocity,
                 omega: *omega,
             }),
-            ClientViewEvent::EntityMotionUpdated { guid, snapshot } => Some(ProjectionInputEvent::MotionState {
-                guid: *guid,
-                snapshot: *snapshot,
-            }),
-            ClientViewEvent::ForcedReposition { guid, pos, .. } => Some(ProjectionInputEvent::Reset {
-                guid: *guid,
-                pose: *pos,
-                clear_kinematics: true,
-            }),
+            ClientViewEvent::EntityMotionUpdated { guid, snapshot } => {
+                Some(ProjectionInputEvent::MotionState {
+                    guid: *guid,
+                    snapshot: *snapshot,
+                })
+            }
+            ClientViewEvent::ForcedReposition { guid, pos, .. } => {
+                Some(ProjectionInputEvent::Reset {
+                    guid: *guid,
+                    pose: *pos,
+                    clear_kinematics: true,
+                })
+            }
             ClientViewEvent::TeleportStarted { .. } => Some(ProjectionInputEvent::SuspendAll),
-            ClientViewEvent::EntityDespawned { guid } => Some(ProjectionInputEvent::Despawn { guid: *guid }),
+            ClientViewEvent::EntityDespawned { guid } => {
+                Some(ProjectionInputEvent::Despawn { guid: *guid })
+            }
             _ => None,
         };
 
@@ -254,7 +264,9 @@ impl EntityProjectionSystem {
     }
 
     pub fn projected_entity(&self, guid: Guid) -> Option<&ProjectedEntityState> {
-        self.entities.get(&guid).map(|tracked| &tracked.public_state)
+        self.entities
+            .get(&guid)
+            .map(|tracked| &tracked.public_state)
     }
 
     pub fn spatial_sample(&self, guid: Guid) -> Option<EntitySpatialSample> {
@@ -284,7 +296,8 @@ impl EntityProjectionSystem {
     }
 
     pub fn projected_pose(&self, guid: Guid) -> Option<WorldPosition> {
-        self.projected_entity(guid).map(|entity| entity.projected_pose)
+        self.projected_entity(guid)
+            .map(|entity| entity.projected_pose)
     }
 
     pub fn authoritative_pose(&self, guid: Guid) -> Option<WorldPosition> {
@@ -378,7 +391,13 @@ impl EntityProjectionSystem {
         tracked.sync_public_inputs();
     }
 
-    fn apply_authoritative_pose(&mut self, guid: Guid, pos: WorldPosition, bootstrap: bool, now: Instant) {
+    fn apply_authoritative_pose(
+        &mut self,
+        guid: Guid,
+        pos: WorldPosition,
+        bootstrap: bool,
+        now: Instant,
+    ) {
         if bootstrap {
             let tracked = self.ensure_entity(guid, pos, now);
             Self::reset_tracking_state(tracked, pos, now, false);
@@ -587,9 +606,9 @@ impl EntityProjectionSystem {
 
                 if advanced {
                     let desired_heading = match directive {
-                        EntityMotionDirective::TurnToHeading { desired_heading, .. } => {
-                            Some(desired_heading.to_f32())
-                        }
+                        EntityMotionDirective::TurnToHeading {
+                            desired_heading, ..
+                        } => Some(desired_heading.to_f32()),
                         EntityMotionDirective::TurnToObject {
                             desired_heading, ..
                         } => desired_heading.map(|heading| heading.to_f32()),
@@ -614,20 +633,18 @@ impl EntityProjectionSystem {
                 && let Some(direction) = turn_direction(command)
             {
                 let heading = tracked.public_state.projected_pose.rotation.to_heading();
-                tracked.public_state.projected_pose.rotation =
-                    Quaternion::from_heading(normalize_heading(
-                        heading + (direction * speed.to_f32().abs() * dt_secs),
-                    ));
+                tracked.public_state.projected_pose.rotation = Quaternion::from_heading(
+                    normalize_heading(heading + (direction * speed.to_f32().abs() * dt_secs)),
+                );
                 return true;
             }
         }
 
         if tracked.inputs.omega.length_squared() > EPSILON {
             let heading = tracked.public_state.projected_pose.rotation.to_heading();
-            tracked.public_state.projected_pose.rotation =
-                Quaternion::from_heading(normalize_heading(
-                    heading + (tracked.inputs.omega.z * dt_secs),
-                ));
+            tracked.public_state.projected_pose.rotation = Quaternion::from_heading(
+                normalize_heading(heading + (tracked.inputs.omega.z * dt_secs)),
+            );
             return true;
         }
 
@@ -732,7 +749,9 @@ fn interpolate_pose(start: WorldPosition, end: WorldPosition, progress: f32) -> 
 
     let start_heading = start.rotation.to_heading();
     let end_heading = end.rotation.to_heading();
-    let heading = normalize_heading(start_heading + (signed_heading_delta(start_heading, end_heading) * progress));
+    let heading = normalize_heading(
+        start_heading + (signed_heading_delta(start_heading, end_heading) * progress),
+    );
 
     WorldPosition {
         landblock_id: end.landblock_id,
@@ -796,7 +815,7 @@ mod tests {
 
     fn make_position(x: f32, y: f32, heading_rad: f32) -> WorldPosition {
         WorldPosition {
-            landblock_id: Guid(0x01_02_0000),
+            landblock_id: Guid(0x0102_0000),
             coords: Vector3::new(x, y, 0.0),
             rotation: Quaternion::from_heading(heading_rad),
         }
@@ -816,7 +835,12 @@ mod tests {
         });
         let entity = make_entity(guid, make_position(0.0, 0.0, 0.0));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.handle_view_event(
             &ClientViewEvent::EntityMoved {
                 guid,
@@ -827,7 +851,10 @@ mod tests {
         system.tick(start + Duration::from_millis(100));
 
         let projected = system.projected_entity(guid).expect("entity should exist");
-        assert_eq!(projected.projection_mode, ProjectionMode::InterpolatingPosition);
+        assert_eq!(
+            projected.projection_mode,
+            ProjectionMode::InterpolatingPosition
+        );
         assert!((projected.projected_pose.coords.x - 1.0).abs() < 1e-4);
         assert!((projected.projected_pose.rotation.to_heading() - 0.25).abs() < 1e-4);
     }
@@ -839,7 +866,12 @@ mod tests {
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
         let entity = make_entity(guid, make_position(10.0, 20.0, 0.0));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.handle_view_event(
             &ClientViewEvent::EntityKinematicsUpdated {
                 guid,
@@ -851,7 +883,10 @@ mod tests {
         system.tick(start + Duration::from_millis(250));
 
         let projected = system.projected_entity(guid).expect("entity should exist");
-        assert_eq!(projected.projection_mode, ProjectionMode::SimulatingVelocity);
+        assert_eq!(
+            projected.projection_mode,
+            ProjectionMode::SimulatingVelocity
+        );
         assert!((projected.projected_pose.coords.x - 10.5).abs() < 1e-4);
     }
 
@@ -871,11 +906,19 @@ mod tests {
             ..Default::default()
         });
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.tick(start + Duration::from_secs(1));
 
         let projected = system.projected_entity(guid).expect("entity should exist");
-        assert_eq!(projected.projection_mode, ProjectionMode::SimulatingMotionState);
+        assert_eq!(
+            projected.projection_mode,
+            ProjectionMode::SimulatingMotionState
+        );
         assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
     }
 
@@ -895,11 +938,19 @@ mod tests {
             ..Default::default()
         });
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.tick(start + Duration::from_secs(1));
 
         let projected = system.projected_entity(guid).expect("entity should exist");
-        assert_eq!(projected.projection_mode, ProjectionMode::SimulatingMotionState);
+        assert_eq!(
+            projected.projection_mode,
+            ProjectionMode::SimulatingMotionState
+        );
         assert!((projected.projected_pose.rotation.to_heading() - 1.0).abs() < 1e-4);
     }
 
@@ -913,7 +964,12 @@ mod tests {
         });
         let entity = make_entity(guid, make_position(0.0, 0.0, 0.0));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.handle_view_event(
             &ClientViewEvent::EntityMoved {
                 guid,
@@ -934,14 +990,24 @@ mod tests {
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
         let entity = make_entity(guid, make_position(0.0, 0.0, 0.0));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         assert!(system.projected_entity(guid).is_some());
 
         system.handle_view_event(&ClientViewEvent::EntityDespawned { guid }, start);
         assert!(system.projected_entity(guid).is_none());
 
         let entity = make_entity(guid, make_position(1.0, 0.0, 0.0));
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         assert!(system.projected_entity(guid).is_some());
 
         system.clear();
@@ -956,7 +1022,12 @@ mod tests {
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
         let entity = make_entity(guid, make_position(10.0, 20.0, 0.5));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.handle_view_event(
             &ClientViewEvent::EntityKinematicsUpdated {
                 guid,
@@ -1013,8 +1084,16 @@ mod tests {
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
         let entity = make_entity(guid, make_position(1.0, 2.0, 0.25));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
-        system.handle_view_event(&ClientViewEvent::TeleportStarted { sequence: 7 }, start + Duration::from_millis(10));
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
+        system.handle_view_event(
+            &ClientViewEvent::TeleportStarted { sequence: 7 },
+            start + Duration::from_millis(10),
+        );
 
         system.handle_view_event(
             &ClientViewEvent::EntityMotionUpdated {
@@ -1054,7 +1133,12 @@ mod tests {
         let mut system = EntityProjectionSystem::new(ProjectionConfig::default());
         let entity = make_entity(guid, make_position(1.0, 2.0, 0.25));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.handle_view_event(
             &ClientViewEvent::TeleportStarted { sequence: 7 },
             start + Duration::from_millis(10),
@@ -1108,7 +1192,12 @@ mod tests {
         });
         let entity = make_entity(guid, make_position(0.0, 0.0, 0.0));
 
-        system.handle_view_event(&ClientViewEvent::EntitySpawned { entity: Box::new(entity) }, start);
+        system.handle_view_event(
+            &ClientViewEvent::EntitySpawned {
+                entity: Box::new(entity),
+            },
+            start,
+        );
         system.handle_view_event(
             &ClientViewEvent::EntityKinematicsUpdated {
                 guid,
@@ -1126,7 +1215,10 @@ mod tests {
         );
 
         let projected = system.projected_entity(guid).expect("entity should exist");
-        assert_eq!(projected.projection_mode, ProjectionMode::InterpolatingPosition);
+        assert_eq!(
+            projected.projection_mode,
+            ProjectionMode::InterpolatingPosition
+        );
         assert!((projected.projected_pose.coords.x - 0.2).abs() < 1e-4);
     }
 

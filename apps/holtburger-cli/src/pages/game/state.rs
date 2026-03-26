@@ -1,5 +1,4 @@
 use holtburger_common::Guid;
-use holtburger_core::{ClientViewEvent, EntityProjectionSystem};
 use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
@@ -15,6 +14,7 @@ use holtburger_core::client::types::ClientCommand;
 use holtburger_core::client::types::{
     ActiveCharacterConfirmation, BusyOperationKind, CombatFeedback,
 };
+use holtburger_core::{ClientViewEvent, EntityProjectionSystem};
 use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::CombatMode;
 use holtburger_protocol::messages::trade::actions::ItemProfileActionData;
@@ -849,7 +849,8 @@ impl GameState {
             self.render_state.context_buffer.clear();
             return;
         }
-        let content = build_context_panel_content(&self.data, &self.view, Some(&self.runtime.projection));
+        let content =
+            build_context_panel_content(&self.data, &self.view, Some(&self.runtime.projection));
         self.render_state.context_buffer = content;
     }
 
@@ -1244,7 +1245,11 @@ impl GameState {
         );
     }
 
-    fn navigation_sync_input(&self, now: Instant, target_guid: Option<Guid>) -> NavigationSyncInput {
+    fn navigation_sync_input(
+        &self,
+        now: Instant,
+        target_guid: Option<Guid>,
+    ) -> NavigationSyncInput {
         let target_entity = target_guid.and_then(|guid| self.data.entities.get(&guid));
         let target_sample = target_entity.map(|entity| {
             self.runtime
@@ -1304,7 +1309,8 @@ impl GameState {
         let update = self.runtime.navigation.activate_approach(
             target,
             arrival_distance,
-            self.navigation_sync_input(Instant::now(), Some(target)).approach,
+            self.navigation_sync_input(Instant::now(), Some(target))
+                .approach,
         );
         result.commands.extend(update.commands);
     }
@@ -1318,7 +1324,8 @@ impl GameState {
         let update = self.runtime.navigation.activate_follow(
             target,
             arrival_distance,
-            self.navigation_sync_input(Instant::now(), Some(target)).maintained_target,
+            self.navigation_sync_input(Instant::now(), Some(target))
+                .maintained_target,
         );
         result.commands.extend(update.commands);
     }
@@ -1817,10 +1824,8 @@ mod tests {
         ItemType, PropertyBool, PropertyInstanceId, PropertyInt, PropertyString,
         WorldObjectProperties, WorldObjectPropertyAccessorsMut,
     };
-    use holtburger_core::{
-        ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode,
-    };
     use holtburger_core::client::navigation::StickyMeleeSyncInput;
+    use holtburger_core::{ActiveCharacterConfirmation, EntitySpatialSample, ProjectionMode};
     use holtburger_protocol::messages::combat::AttackHeight;
     use holtburger_protocol::messages::object::types::{CreatureProfile, CreatureProfileFlags};
     use holtburger_world::vendor::{CoreVendorItem, VendorState};
@@ -1860,15 +1865,17 @@ mod tests {
                     now: input.now,
                     player_position: input.player_position,
                     target_guid: Some(target),
-                    target: input.target_position.map(|target_position| EntitySpatialSample {
-                        guid: target,
-                        authoritative_pose: target_position,
-                        projected_pose: target_position,
-                        velocity: Vector3::zero(),
-                        omega: Vector3::zero(),
-                        motion_state: None,
-                        projection_mode: ProjectionMode::AuthoritativeOnly,
-                    }),
+                    target: input
+                        .target_position
+                        .map(|target_position| EntitySpatialSample {
+                            guid: target,
+                            authoritative_pose: target_position,
+                            projected_pose: target_position,
+                            velocity: Vector3::zero(),
+                            omega: Vector3::zero(),
+                            motion_state: None,
+                            projection_mode: ProjectionMode::AuthoritativeOnly,
+                        }),
                     target_use_radius: input.target_use_radius,
                     move_speed: input.move_speed,
                     metadata: input.metadata,

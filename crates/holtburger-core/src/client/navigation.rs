@@ -10,12 +10,14 @@
 //! own navigation policy while still reusing lower-level movement and packet
 //! machinery from core.
 
+use crate::client::controllers::maintain_range::{
+    MaintainRangeSpatialInput, MaintainRangeTickInput,
+};
 use crate::client::controllers::{
     ApproachTargetController, ApproachTargetEffect, ApproachTargetFinishReason,
     ApproachTargetInput, Controller, MaintainRangeConfig, MaintainRangeController,
     MaintainRangeEffect, MaintainRangeFinishReason, MaintainRangeInput,
 };
-use crate::client::controllers::maintain_range::MaintainRangeSpatialInput;
 use crate::client::movement_types::{MovementPacketMetadata, MovementPrimitive, MovementRequest};
 use crate::client::projection::EntitySpatialSample;
 use crate::client::types::ClientCommand;
@@ -233,13 +235,11 @@ impl NavigationAutomation {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Idle => NavigationUpdate::default(),
-            ActiveNavigation::Approach(mut state) => {
-                Self::finish_direct_approach(
-                    &mut state.controller,
-                    ApproachTargetInput::Cancel,
-                    metadata,
-                )
-            }
+            ActiveNavigation::Approach(mut state) => Self::finish_direct_approach(
+                &mut state.controller,
+                ApproachTargetInput::Cancel,
+                metadata,
+            ),
             ActiveNavigation::Follow(mut state) => Self::suspend_maintained_state(
                 &mut state.maintain,
                 &mut state.pursuit,
@@ -277,7 +277,11 @@ impl NavigationAutomation {
                     self.sync_approach_target(input.approach)
                 } else {
                     let mut result = self.clear_navigation(input.approach.metadata);
-                    result.extend(self.start_approach_target(target, arrival_distance, input.approach));
+                    result.extend(self.start_approach_target(
+                        target,
+                        arrival_distance,
+                        input.approach,
+                    ));
                     result
                 }
             }
@@ -299,7 +303,11 @@ impl NavigationAutomation {
                     }
                 } else {
                     let mut result = self.clear_navigation(input.maintained_target.metadata);
-                    result.extend(self.start_follow_target(target, arrival_distance, input.maintained_target));
+                    result.extend(self.start_follow_target(
+                        target,
+                        arrival_distance,
+                        input.maintained_target,
+                    ));
                     result
                 }
             }
@@ -848,13 +856,13 @@ impl NavigationAutomation {
             .map(|_| target)
         });
 
-        let update = maintain.handle(&MaintainRangeInput::Tick {
+        let update = maintain.handle(&MaintainRangeInput::tick(MaintainRangeTickInput {
             now: input.now,
             target_guid,
             player_position,
             target: target.map(|target| MaintainRangeSpatialInput { target }),
             target_use_radius: input.target_use_radius,
-        });
+        }));
 
         let completed = update.is_terminal();
         let result = Self::apply_maintained_effects(
@@ -972,7 +980,11 @@ impl NavigationAutomation {
                 target.0,
                 arrival_distance
             );
-            return Self::sync_pursuit_controller(pursuit, input, automation_target_distance_limit_m);
+            return Self::sync_pursuit_controller(
+                pursuit,
+                input,
+                automation_target_distance_limit_m,
+            );
         }
 
         let Some(player_position) = input.player_position else {
@@ -1474,7 +1486,10 @@ mod tests {
 
         assert!(matches!(
             automation.navigation_mode(),
-            Some(NavigationMode::Approach { target: Guid(0x5678), .. })
+            Some(NavigationMode::Approach {
+                target: Guid(0x5678),
+                ..
+            })
         ));
         assert_eq!(automation.sticky_latched_target_guid(), None);
         assert!(!automation.sticky_is_pursuing());
@@ -1542,7 +1557,10 @@ mod tests {
 
         assert!(matches!(
             automation.navigation_mode(),
-            Some(NavigationMode::Follow { target: Guid(0x5678), .. })
+            Some(NavigationMode::Follow {
+                target: Guid(0x5678),
+                ..
+            })
         ));
         assert_eq!(automation.sticky_latched_target_guid(), None);
         assert!(!automation.sticky_is_pursuing());
@@ -1561,7 +1579,11 @@ mod tests {
                 target: Guid(0x1234),
                 arrival_distance: 1.0,
             },
-            sync_input(now, Some(position_xy(0.0, 0.0)), Some(position_xy(5.0, 0.0))),
+            sync_input(
+                now,
+                Some(position_xy(0.0, 0.0)),
+                Some(position_xy(5.0, 0.0)),
+            ),
         );
 
         let initial_heading = drive_heading(&first).expect("initial follow should drive");
@@ -1595,7 +1617,11 @@ mod tests {
                 arrival_distance: 1.0,
             },
             NavigationSyncInput {
-                approach: approach_input(now, Some(position_xy(0.0, 0.0)), Some(position_xy(5.0, 0.0))),
+                approach: approach_input(
+                    now,
+                    Some(position_xy(0.0, 0.0)),
+                    Some(position_xy(5.0, 0.0)),
+                ),
                 maintained_target: MaintainedTargetSyncInput {
                     now,
                     player_position: Some(position_xy(0.0, 0.0)),
@@ -1607,7 +1633,8 @@ mod tests {
                         velocity: Vector3::zero(),
                         omega: Vector3::zero(),
                         motion_state: None,
-                        projection_mode: crate::client::projection::ProjectionMode::SimulatingVelocity,
+                        projection_mode:
+                            crate::client::projection::ProjectionMode::SimulatingVelocity,
                     }),
                     target_use_radius: None,
                     move_speed: 4.5,
@@ -1616,7 +1643,8 @@ mod tests {
             },
         );
 
-        let heading = drive_heading(&result).expect("follow should drive toward projected target pose");
+        let heading =
+            drive_heading(&result).expect("follow should drive toward projected target pose");
         assert!((heading - (std::f32::consts::PI / 2.0)).abs() < 1e-4);
     }
 

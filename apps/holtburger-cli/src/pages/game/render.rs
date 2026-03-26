@@ -96,15 +96,7 @@ impl GameState {
         self.set_layout_cache(main_chunks_vec.clone(), dynamic_chunk, layout_mode);
 
         // Status Area
-        render_status_bar(
-            f,
-            &self.data,
-            &self.view,
-            ctx.logon_retry,
-            ctx.enter_retry,
-            ctx.server_time,
-            chunks[0],
-        );
+        render_status_bar(f, &self.data, &self.view, ctx.server_time, chunks[0]);
 
         let main_chunks = &main_chunks_vec;
 
@@ -176,7 +168,7 @@ mod tests {
     use crate::pages::game::GameData;
     use crate::state::{NetStats, RenderContext};
     use holtburger_common::Guid;
-    use holtburger_core::{ActiveCharacterConfirmation, ClientState, RetryState};
+    use holtburger_core::{ActiveCharacterConfirmation, ClientState};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -193,16 +185,11 @@ mod tests {
             text: "Chance of success is 75%. Continue?".to_string(),
         });
 
-        let logon_retry = RetryState::new(5);
-        let enter_retry = RetryState::new(5);
         let net_stats = NetStats::default();
         let ctx = RenderContext {
             account_name: "account",
             client_state: &ClientState::InWorld,
             net_stats: &net_stats,
-            is_modal_active: false,
-            logon_retry: &logon_retry,
-            enter_retry: &enter_retry,
             server_time: None,
         };
 
@@ -248,16 +235,11 @@ mod tests {
             text: "Bestie".to_string(),
         });
 
-        let logon_retry = RetryState::new(5);
-        let enter_retry = RetryState::new(5);
         let net_stats = NetStats::default();
         let ctx = RenderContext {
             account_name: "account",
             client_state: &ClientState::InWorld,
             net_stats: &net_stats,
-            is_modal_active: false,
-            logon_retry: &logon_retry,
-            enter_retry: &enter_retry,
             server_time: None,
         };
 

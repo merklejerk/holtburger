@@ -67,7 +67,7 @@ mod tests {
     use crate::state::NetStats;
     use crate::types::Page;
     use holtburger_common::Guid;
-    use holtburger_core::{ClientState, RetryState};
+    use holtburger_core::ClientState;
     use std::fs::File;
     use std::sync::Mutex;
 
@@ -90,14 +90,14 @@ mod tests {
             character_preference: None,
             chat_log,
             page: Page::Selection(SelectionState::default()),
-            modal: None,
-            logon_retry: RetryState::new(5),
-            enter_retry: RetryState::new(5),
             client_state: ClientState::Connected,
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
             verbosity: 0,
+            quit_on_disconnect: false,
+            disconnect_reason: None,
+            pending_exit_message: None,
         };
 
         let _ = app_state.handle_app_action(AppAction::TransitionToGame {

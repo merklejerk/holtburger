@@ -2,6 +2,9 @@ use crate::guid::Guid;
 use crate::math::{Quaternion, Vector3};
 use serde::{Deserialize, Serialize};
 
+pub const METERS_PER_LANDBLOCK: f32 = 192.0;
+pub const METERS_PER_MAP_DEGREE: f32 = 240.0;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 pub struct WorldPosition {
     pub landblock_id: Guid,
@@ -63,8 +66,8 @@ impl WorldPosition {
         let (landblock_x, landblock_y) = self.landblock_coords();
 
         Vector3::new(
-            (landblock_x as f32 * 192.0) + self.coords.x,
-            (landblock_y as f32 * 192.0) + self.coords.y,
+            (landblock_x as f32 * METERS_PER_LANDBLOCK) + self.coords.x,
+            (landblock_y as f32 * METERS_PER_LANDBLOCK) + self.coords.y,
             self.coords.z,
         )
     }
@@ -123,15 +126,15 @@ impl WorldPosition {
         // The local coords (self.coords.x/y) in an outdoor WorldPosition are 0-192.
         // They are relative to the landblock origin, NOT the cell origin.
 
-        let total_x_meters = (lb_x as f32 * 192.0) + self.coords.x;
-        let total_y_meters = (lb_y as f32 * 192.0) + self.coords.y;
+        let total_x_meters = (lb_x as f32 * METERS_PER_LANDBLOCK) + self.coords.x;
+        let total_y_meters = (lb_y as f32 * METERS_PER_LANDBLOCK) + self.coords.y;
 
         // Formula from ACE (PositionExtensions.GetMapCoords):
         // 1 map unit = 240 meters
         // mapCoords = globalPos / 240.0
         // mapCoords -= 102.0
-        let lon = (total_x_meters / 240.0) - 102.0;
-        let lat = (total_y_meters / 240.0) - 102.0;
+        let lon = (total_x_meters / METERS_PER_MAP_DEGREE) - 102.0;
+        let lat = (total_y_meters / METERS_PER_MAP_DEGREE) - 102.0;
 
         WorldCoordinates::Outdoor {
             lat,

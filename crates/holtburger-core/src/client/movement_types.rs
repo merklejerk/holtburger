@@ -72,32 +72,13 @@ impl From<MovementPrimitive> for MovementRequest {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DriveIntent {
-    pub heading: f32,
-    pub speed: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum MovementPrediction {
-    #[default]
-    FromHeading,
-    WorldVelocity(Vector3),
-}
-
-impl MovementPrediction {
-    pub fn resolve_velocity(self, heading: f32, speed: f32) -> Vector3 {
-        match self {
-            Self::FromHeading => planar_velocity_for_heading(heading, speed),
-            Self::WorldVelocity(velocity) => velocity,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MovementPrimitive {
     Drive {
-        intent: DriveIntent,
-        prediction: MovementPrediction,
+        heading: f32,
+        speed: f32,
+    },
+    DriveVelocity {
+        velocity: Vector3,
     },
     SnapFacing {
         heading: f32,
@@ -108,9 +89,8 @@ pub enum MovementPrimitive {
 impl MovementPrimitive {
     pub fn desired_velocity(&self) -> Option<Vector3> {
         match *self {
-            Self::Drive { intent, prediction } => {
-                Some(prediction.resolve_velocity(intent.heading, intent.speed))
-            }
+            Self::Drive { heading, speed } => Some(planar_velocity_for_heading(heading, speed)),
+            Self::DriveVelocity { velocity, .. } => Some(velocity),
             Self::SnapFacing { .. } => Some(Vector3::zero()),
             Self::Stop => Some(Vector3::zero()),
         }
@@ -124,18 +104,12 @@ mod tests {
     #[test]
     fn drive_velocity_matches_ac_heading_convention() {
         let west = MovementPrimitive::Drive {
-            intent: DriveIntent {
-                heading: 0.0,
-                speed: 2.0,
-            },
-            prediction: MovementPrediction::FromHeading,
+            heading: 0.0,
+            speed: 2.0,
         };
         let north = MovementPrimitive::Drive {
-            intent: DriveIntent {
-                heading: 90.0f32.to_radians(),
-                speed: 2.0,
-            },
-            prediction: MovementPrediction::FromHeading,
+            heading: 90.0f32.to_radians(),
+            speed: 2.0,
         };
 
         assert_eq!(west.desired_velocity(), Some(Vector3::new(-8.0, 0.0, 0.0)));
@@ -181,12 +155,8 @@ mod tests {
 
     #[test]
     fn drive_velocity_prefers_predicted_velocity_override() {
-        let primitive = MovementPrimitive::Drive {
-            intent: DriveIntent {
-                heading: 0.0,
-                speed: 2.0,
-            },
-            prediction: MovementPrediction::WorldVelocity(Vector3::new(1.0, 2.0, 3.0)),
+        let primitive = MovementPrimitive::DriveVelocity {
+            velocity: Vector3::new(1.0, 2.0, 3.0),
         };
 
         assert_eq!(

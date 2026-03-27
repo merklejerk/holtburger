@@ -1,7 +1,7 @@
 use crate::client::WireEvent;
 use crate::client::movement_types::{
-    DriveIntent, MotionStyle, MovementPacketMetadata, MovementPrediction, MovementPrimitive,
-    MovementRequest,
+    MotionStyle, MovementPacketMetadata, MovementPrimitive, MovementRequest,
+    RUN_ANIM_SPEED, planar_velocity_for_heading,
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
@@ -13,8 +13,12 @@ use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 use holtburger_world::{WorldEvent, WorldState};
 use std::f32::consts::{PI, TAU};
+use std::time::{Duration, Instant};
 /// Maximum distance (in meters) to allow an automated server-controlled teleport.
 const AUTO_MOVE_DISTANCE_LIMIT: f32 = 500.0;
+const SERVER_RUN_SPEED: f32 = 4.5;
+const SERVER_PULSE_PERIOD: Duration = Duration::from_millis(200);
+const MIN_SERVER_RUN_DUTY_CYCLE: f32 = 0.15;
 const WALK_FORWARD_MOTION_COMMAND: u32 = 0x4500_0005;
 const TURN_RIGHT_MOTION_COMMAND: u32 = 0x6500_000d;
 const TURN_LEFT_MOTION_COMMAND: u32 = 0x6500_000e;
@@ -257,17 +261,22 @@ pub(super) struct MovementSystem {
     local_motion: Option<LocalMotionIntent>,
     server_motion_active: bool,
     last_server_drive_intent: Option<ServerDriveIntent>,
+    server_pulse_cycle_started_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct LocalMotionIntent {
-    drive: DriveIntent,
-    prediction: MovementPrediction,
+    kind: LocalMotionKind,
+    desired_heading: Option<f32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum LocalMotionKind {
+    Ground { speed: f32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ServerDriveIntent {
-    speed: f32,
     turn_command: Option<u32>,
     motion_style: MotionStyle,
 }
@@ -275,14 +284,42 @@ struct ServerDriveIntent {
 fn server_drive_intent(
     current_heading: f32,
     desired_heading: f32,
-    speed: f32,
     motion_style: MotionStyle,
 ) -> ServerDriveIntent {
     ServerDriveIntent {
-        speed: speed.max(0.0),
         turn_command: turn_motion_command(current_heading, desired_heading),
         motion_style,
     }
+}
+
+fn drive_intent_from_velocity(velocity: Vector3) -> Option<(f32, f32)> {
+    let planar_speed = velocity.x.hypot(velocity.y);
+    if planar_speed <= 1e-6 {
+        return None;
+    }
+
+    Some((
+        normalize_heading(velocity.y.atan2(-velocity.x)),
+        planar_speed / RUN_ANIM_SPEED,
+    ))
+}
+
+fn local_ground_motion_from_server_drive(
+    server_drive: Option<(f32, f32)>,
+    should_run_server_drive: bool,
+) -> Option<LocalMotionIntent> {
+    let (desired_heading, _) = server_drive?;
+
+    Some(LocalMotionIntent {
+        kind: LocalMotionKind::Ground {
+            speed: if should_run_server_drive {
+                SERVER_RUN_SPEED
+            } else {
+                0.0
+            },
+        },
+        desired_heading: should_run_server_drive.then_some(desired_heading),
+    })
 }
 
 impl MovementSystem {
@@ -292,6 +329,7 @@ impl MovementSystem {
             local_motion: None,
             server_motion_active: false,
             last_server_drive_intent: None,
+            server_pulse_cycle_started_at: None,
         }
     }
 
@@ -323,7 +361,6 @@ impl MovementSystem {
         &self,
         current_heading: f32,
         desired_heading: f32,
-        speed: f32,
         motion_style: MotionStyle,
     ) -> bool {
         if !self.server_motion_active {
@@ -334,7 +371,6 @@ impl MovementSystem {
             != Some(server_drive_intent(
                 current_heading,
                 desired_heading,
-                speed,
                 motion_style,
             ))
     }
@@ -353,11 +389,53 @@ impl MovementSystem {
         self.last_server_drive_intent = None;
     }
 
+    fn reset_server_pulse_schedule(&mut self) {
+        self.server_pulse_cycle_started_at = None;
+    }
+
+    fn should_actuate_server_run(&mut self, now: Instant, desired_speed: f32) -> bool {
+        let normalized_speed = (desired_speed.max(0.0) / SERVER_RUN_SPEED).clamp(0.0, 1.0);
+
+        if normalized_speed <= 1e-6 {
+            self.reset_server_pulse_schedule();
+            return false;
+        }
+
+        if normalized_speed >= 1.0 - 1e-6 {
+            self.reset_server_pulse_schedule();
+            return true;
+        }
+
+        let duty_cycle = normalized_speed.max(MIN_SERVER_RUN_DUTY_CYCLE);
+        let cycle_start = self.server_pulse_cycle_started_at.get_or_insert(now);
+        let elapsed = now.saturating_duration_since(*cycle_start);
+
+        if elapsed >= SERVER_PULSE_PERIOD {
+            let period_secs = SERVER_PULSE_PERIOD.as_secs_f32();
+            let completed_periods = (elapsed.as_secs_f32() / period_secs).floor();
+            *cycle_start += SERVER_PULSE_PERIOD.mul_f32(completed_periods);
+        }
+
+        now.saturating_duration_since(*cycle_start)
+            < SERVER_PULSE_PERIOD.mul_f32(duty_cycle)
+    }
+
     pub(super) async fn execute_movement_request(
         &mut self,
         request: MovementRequest,
         world: &mut WorldState,
         session: &mut Session,
+    ) -> Result<Vec<WorldEvent>> {
+        self.execute_movement_request_at(request, world, session, Instant::now())
+            .await
+    }
+
+    async fn execute_movement_request_at(
+        &mut self,
+        request: MovementRequest,
+        world: &mut WorldState,
+        session: &mut Session,
+        now: Instant,
     ) -> Result<Vec<WorldEvent>> {
         let primitive = request.primitive;
         if let MovementPrimitive::SnapFacing { heading } = primitive {
@@ -367,39 +445,62 @@ impl MovementSystem {
         }
 
         let current_heading = world.player.position.rotation.to_heading();
+        let server_drive = match primitive {
+            MovementPrimitive::Drive { heading, speed } => Some((heading, speed)),
+            MovementPrimitive::DriveVelocity { velocity } => drive_intent_from_velocity(velocity),
+            _ => None,
+        };
+        let should_run_server_drive = match server_drive {
+            Some((_, speed)) => self.should_actuate_server_run(now, speed),
+            None => {
+                self.reset_server_pulse_schedule();
+                false
+            }
+        };
         let had_active_local_motion = self.local_motion.is_some();
-        let state_events = self.apply_movement_primitive(primitive, world);
+        let state_events = self.apply_movement_primitive(
+            primitive,
+            server_drive,
+            should_run_server_drive,
+            world,
+        );
 
         match primitive {
-            MovementPrimitive::Drive { intent, .. }
-                if self.should_send_drive_pulse(
-                    current_heading,
-                    intent.heading,
-                    intent.speed,
-                    request.metadata.motion_style,
-                ) =>
-            {
-                Self::send_drive_pulse(
-                    world,
-                    session,
-                    current_heading,
-                    intent.heading,
-                    intent.speed,
-                    request.metadata,
-                )
-                .await?;
-                self.note_server_drive_sent(server_drive_intent(
-                    current_heading,
-                    intent.heading,
-                    intent.speed,
-                    request.metadata.motion_style,
-                ));
-            }
             MovementPrimitive::Stop if self.should_send_stop_pulse() => {
                 Self::send_stop_pulse(world, session, request.metadata).await?;
                 if had_active_local_motion {
                     Self::send_autonomous_position_sync(world, session, request.metadata).await?;
                 }
+                self.note_server_motion_cleared();
+                self.reset_server_pulse_schedule();
+            }
+            _ if server_drive.is_some_and(|(heading, _)| {
+                should_run_server_drive
+                    && self.should_send_drive_pulse(
+                        current_heading,
+                        heading,
+                        request.metadata.motion_style,
+                    )
+            }) =>
+            {
+                let (heading, _) = server_drive.expect("guarded above");
+                Self::send_drive_pulse(
+                    world,
+                    session,
+                    current_heading,
+                    heading,
+                    SERVER_RUN_SPEED,
+                    request.metadata,
+                )
+                .await?;
+                self.note_server_drive_sent(server_drive_intent(
+                    current_heading,
+                    heading,
+                    request.metadata.motion_style,
+                ));
+            }
+            _ if !should_run_server_drive && self.should_send_stop_pulse() => {
+                Self::send_stop_pulse(world, session, request.metadata).await?;
                 self.note_server_motion_cleared();
             }
             _ => {}
@@ -427,7 +528,9 @@ impl MovementSystem {
         let mut world_events = world.set_player_position(next_pos);
 
         if let Some(intent) = &mut self.local_motion {
-            intent.drive.heading = normalized_heading;
+            if matches!(intent.kind, LocalMotionKind::Ground { .. }) {
+                intent.desired_heading = Some(normalized_heading);
+            }
             world_events.extend(self.sync_local_motion_vectors(world));
         }
 
@@ -439,17 +542,14 @@ impl MovementSystem {
     fn apply_movement_primitive(
         &mut self,
         primitive: MovementPrimitive,
+        server_drive: Option<(f32, f32)>,
+        should_run_server_drive: bool,
         world: &mut WorldState,
     ) -> Vec<WorldEvent> {
         match primitive {
-            MovementPrimitive::Drive { intent, prediction } => {
-                self.local_motion = Some(LocalMotionIntent {
-                    drive: DriveIntent {
-                        heading: normalize_heading(intent.heading),
-                        speed: intent.speed.max(0.0),
-                    },
-                    prediction,
-                });
+            MovementPrimitive::Drive { .. } | MovementPrimitive::DriveVelocity { .. } => {
+                self.local_motion =
+                    local_ground_motion_from_server_drive(server_drive, should_run_server_drive);
                 self.sync_local_motion_vectors(world)
             }
             MovementPrimitive::SnapFacing { heading } => {
@@ -458,7 +558,9 @@ impl MovementSystem {
                 let mut events = world.set_player_position(next_pos);
 
                 if let Some(intent) = &mut self.local_motion {
-                    intent.drive.heading = normalize_heading(heading);
+                    if matches!(intent.kind, LocalMotionKind::Ground { .. }) {
+                        intent.desired_heading = Some(normalize_heading(heading));
+                    }
                     events.extend(self.sync_local_motion_vectors(world));
                 }
 
@@ -477,14 +579,20 @@ impl MovementSystem {
         };
 
         let current_heading = world.player.position.rotation.to_heading();
-        let heading_delta = signed_heading_delta(current_heading, intent.drive.heading);
-        // When the caller supplied a world-space prediction vector, preserve it exactly,
-        // including any vertical component. Otherwise we derive planar motion from the
-        // current facing while the player is still turning toward the requested heading.
-        let velocity = intent
-            .prediction
-            .resolve_velocity(current_heading, intent.drive.speed);
-        let omega = if heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+        let desired_heading = intent.desired_heading.unwrap_or(current_heading);
+        let heading_delta = signed_heading_delta(current_heading, desired_heading);
+        let speed = match intent.kind {
+            LocalMotionKind::Ground { speed } => speed,
+        };
+        let velocity = if speed <= 1e-6 {
+            Vector3::zero()
+        } else {
+            planar_velocity_for_heading(current_heading, speed)
+        };
+        let omega = if speed <= 1e-6
+            || intent.desired_heading.is_none()
+            || heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD
+        {
             Vector3::zero()
         } else {
             Vector3::new(
@@ -516,14 +624,23 @@ impl MovementSystem {
         }
 
         let current_heading = world.player.position.rotation.to_heading();
-        let heading_delta = signed_heading_delta(current_heading, intent.drive.heading);
+        let desired_heading = intent.desired_heading.unwrap_or(current_heading);
+        let heading_delta = signed_heading_delta(current_heading, desired_heading);
         let max_turn_step = LOCAL_TURN_RATE_RAD_PER_SEC * dt;
         let applied_turn = heading_delta.clamp(-max_turn_step, max_turn_step);
         let next_heading = normalize_heading(current_heading + applied_turn);
-        let velocity = intent
-            .prediction
-            .resolve_velocity(next_heading, intent.drive.speed);
-        let omega = if heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD {
+        let speed = match intent.kind {
+            LocalMotionKind::Ground { speed } => speed,
+        };
+        let velocity = if speed <= 1e-6 {
+            Vector3::zero()
+        } else {
+            planar_velocity_for_heading(next_heading, speed)
+        };
+        let omega = if speed <= 1e-6
+            || intent.desired_heading.is_none()
+            || heading_delta.abs() <= TURN_COMMAND_THRESHOLD_RAD
+        {
             Vector3::zero()
         } else {
             Vector3::new(
@@ -972,21 +1089,20 @@ mod tests {
         let mut movement = MovementSystem::new();
         movement.apply_movement_primitive(
             MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: 180.0_f32.to_radians(),
-                    speed: 1.0,
-                },
-                prediction: MovementPrediction::FromHeading,
+                heading: 180.0_f32.to_radians(),
+                speed: 1.0,
             },
+            Some((180.0_f32.to_radians(), 1.0)),
+            true,
             &mut world,
         );
 
         let events = movement.advance_local_motion_prediction(0.5, &mut world);
 
         assert!(
-            events.iter().any(|event| matches!(event, WorldEvent::EntityMoved { guid, pos } if *guid == player_guid && (pos.coords.x - 12.0).abs() < 1e-5 && (pos.coords.y - 20.0).abs() < 1e-5))
+            events.iter().any(|event| matches!(event, WorldEvent::EntityMoved { guid, pos } if *guid == player_guid && (pos.coords.x - 19.0).abs() < 1e-5 && (pos.coords.y - 20.0).abs() < 1e-5))
         );
-        assert!((world.player.position.coords.x - 12.0).abs() < 1e-5);
+        assert!((world.player.position.coords.x - 19.0).abs() < 1e-5);
         assert!((world.player.position.coords.y - 20.0).abs() < 1e-5);
     }
 
@@ -1029,12 +1145,11 @@ mod tests {
         let mut movement = MovementSystem::new();
         let events = movement.apply_movement_primitive(
             MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: 180.0_f32.to_radians(),
-                    speed: 1.0,
-                },
-                prediction: MovementPrediction::FromHeading,
+                heading: 180.0_f32.to_radians(),
+                speed: 1.0,
             },
+            Some((180.0_f32.to_radians(), 1.0)),
+            true,
             &mut world,
         );
 
@@ -1053,7 +1168,7 @@ mod tests {
     }
 
     #[test]
-    fn local_motion_prediction_uses_world_space_predicted_velocity_when_provided() {
+    fn local_motion_prediction_uses_discretized_run_velocity_for_server_drive() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         world.player.guid = player_guid;
@@ -1069,13 +1184,11 @@ mod tests {
         ));
         let mut movement = MovementSystem::new();
         movement.apply_movement_primitive(
-            MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: 90.0_f32.to_radians(),
-                    speed: 1.0,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(0.0, 2.0, 3.0)),
+            MovementPrimitive::DriveVelocity {
+                velocity: Vector3::new(0.0, 2.0, 3.0),
             },
+            Some((90.0_f32.to_radians(), 0.5)),
+            true,
             &mut world,
         );
 
@@ -1085,13 +1198,53 @@ mod tests {
             event,
             WorldEvent::EntityMoved { guid, pos }
                 if *guid == player_guid
-                && (pos.coords.y - 21.0).abs() < 1e-5
-                && (pos.coords.z - 1.5).abs() < 1e-5
+                && (pos.coords.y - 29.0).abs() < 1e-5
+                && (pos.coords.z - 0.0).abs() < 1e-5
+        )));
+        assert!((world.player.position.rotation.w - 1.0).abs() < 1e-5);
+        assert!(world.player.position.rotation.x.abs() < 1e-5);
+        assert!(world.player.position.rotation.y.abs() < 1e-5);
+        assert!(world.player.position.rotation.z.abs() < 1e-5);
+    }
+
+    #[test]
+    fn apply_drive_velocity_uses_discretized_planar_run_velocity() {
+        let mut world = WorldState::synthetic();
+        let player_guid = Guid(0x50000123);
+        world.player.guid = player_guid;
+        world.player.position = WorldPosition {
+            landblock_id: Guid(0x12340000),
+            coords: Vector3::new(10.0, 20.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        world.entities.insert(Entity::new(
+            player_guid,
+            "Player".to_string(),
+            world.player.position,
+        ));
+
+        let mut movement = MovementSystem::new();
+        let events = movement.apply_movement_primitive(
+            MovementPrimitive::DriveVelocity {
+                velocity: Vector3::new(0.0, 2.0, 3.0),
+            },
+            Some((90.0_f32.to_radians(), 0.5)),
+            true,
+            &mut world,
+        );
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
+                if *guid == player_guid
+                    && velocity.x.abs() < 1e-5
+                    && (velocity.y - 18.0).abs() < 1e-5
+                    && velocity.z.abs() < 1e-5
         )));
     }
 
     #[test]
-    fn apply_drive_preserves_vertical_prediction_in_entity_velocity() {
+    fn off_phase_discretized_drive_zeroes_local_velocity_and_turn_rate() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
         world.player.guid = player_guid;
@@ -1109,19 +1262,20 @@ mod tests {
         let mut movement = MovementSystem::new();
         let events = movement.apply_movement_primitive(
             MovementPrimitive::Drive {
-                intent: DriveIntent {
-                    heading: 90.0_f32.to_radians(),
-                    speed: 1.0,
-                },
-                prediction: MovementPrediction::WorldVelocity(Vector3::new(0.0, 2.0, 3.0)),
+                heading: 180.0_f32.to_radians(),
+                speed: 1.0,
             },
+            Some((180.0_f32.to_radians(), 1.0)),
+            false,
             &mut world,
         );
 
         assert!(events.iter().any(|event| matches!(
             event,
-            WorldEvent::EntityVectorUpdated { guid, velocity, .. }
-                if *guid == player_guid && (velocity.z - 3.0).abs() < 1e-5
+            WorldEvent::EntityVectorUpdated { guid, velocity, omega }
+                if *guid == player_guid
+                    && velocity.length_squared() <= 1e-6
+                    && omega.length_squared() <= 1e-6
         )));
     }
 
@@ -1131,7 +1285,6 @@ mod tests {
         movement.note_server_drive_sent(server_drive_intent(
             0.0,
             std::f32::consts::PI,
-            4.5,
             MotionStyle::PreserveServer,
         ));
 
@@ -1144,7 +1297,6 @@ mod tests {
         movement.note_server_drive_sent(server_drive_intent(
             0.0,
             std::f32::consts::PI,
-            4.5,
             MotionStyle::PreserveServer,
         ));
 
@@ -1160,15 +1312,29 @@ mod tests {
         movement.note_server_drive_sent(server_drive_intent(
             0.0,
             std::f32::consts::PI,
-            4.5,
             MotionStyle::PreserveServer,
         ));
 
         assert!(!movement.should_send_drive_pulse(
             0.0,
             std::f32::consts::PI,
-            4.5,
             MotionStyle::PreserveServer,
+        ));
+    }
+
+    #[test]
+    fn partial_speed_requests_are_quantized_into_run_pulses_over_time() {
+        let mut movement = MovementSystem::new();
+        let now = Instant::now();
+
+        assert!(movement.should_actuate_server_run(now, SERVER_RUN_SPEED * 0.25));
+        assert!(!movement.should_actuate_server_run(
+            now + Duration::from_millis(100),
+            SERVER_RUN_SPEED * 0.25,
+        ));
+        assert!(movement.should_actuate_server_run(
+            now + Duration::from_millis(220),
+            SERVER_RUN_SPEED * 0.25,
         ));
     }
 
@@ -1278,18 +1444,15 @@ mod tests {
 
         movement
             .execute_movement_request(
-                MovementRequest::new(MovementPrimitive::Drive {
-                    intent: DriveIntent {
-                        heading: 90.0_f32.to_radians(),
-                        speed: 1.0,
-                    },
-                    prediction: MovementPrediction::WorldVelocity(Vector3::new(0.0, 4.0, 0.0)),
+                MovementRequest::new(MovementPrimitive::DriveVelocity {
+                    velocity: Vector3::new(0.0, 4.0, 0.0),
                 }),
                 &mut world,
                 &mut session,
             )
             .await
             .expect("drive request should succeed");
+
 
         entity.velocity = Vector3::new(0.0, 4.0, 0.0);
         world.entities.insert(entity);
@@ -1327,7 +1490,6 @@ mod tests {
         movement.note_server_drive_sent(server_drive_intent(
             0.0,
             std::f32::consts::PI,
-            4.5,
             MotionStyle::PreserveServer,
         ));
 
@@ -1341,6 +1503,59 @@ mod tests {
             .expect("stop request should succeed");
 
         assert_eq!(session.packet_sequence, 2);
+    }
+
+    #[tokio::test]
+    async fn partial_drive_requests_toggle_between_run_and_stop_pulses() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::from_heading(90.0_f32.to_radians()),
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let start = Instant::now();
+        let request = MovementRequest::new(MovementPrimitive::Drive {
+            heading: 90.0_f32.to_radians(),
+            speed: SERVER_RUN_SPEED * 0.25,
+        });
+
+        movement
+            .execute_movement_request_at(request, &mut world, &mut session, start)
+            .await
+            .expect("initial pulsed drive should send a run pulse");
+        assert_eq!(session.packet_sequence, 2);
+
+        movement
+            .execute_movement_request_at(
+                request,
+                &mut world,
+                &mut session,
+                start + Duration::from_millis(100),
+            )
+            .await
+            .expect("off-phase pulsed drive should send a stop pulse");
+        assert_eq!(session.packet_sequence, 3);
+
+        movement
+            .execute_movement_request_at(
+                request,
+                &mut world,
+                &mut session,
+                start + Duration::from_millis(220),
+            )
+            .await
+            .expect("next pulse window should resume running");
+        assert_eq!(session.packet_sequence, 4);
     }
 
     #[tokio::test]

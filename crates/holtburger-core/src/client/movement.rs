@@ -292,8 +292,14 @@ enum QueuedMovementCommand {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MovementKinematics {
+    /// Client-side approximation derived from the current actuator model.
+    /// This is useful for navigation pulse planning, not an authoritative server guarantee.
     pub run_speed_mps: f32,
+    /// Client-side approximation derived from the current actuator model.
+    /// This is useful for navigation pulse planning, not an authoritative server guarantee.
     pub walk_speed_mps: f32,
+    /// Local turn rate used by client-side prediction while aligning heading.
+    /// This is a protocol-shaped approximation, not an authoritative server guarantee.
     pub turn_rate_rad_per_sec: f32,
 }
 
@@ -359,6 +365,10 @@ impl MovementSystem {
         }
     }
 
+    /// Returns movement-planning constants derived from the current actuator model.
+    /// These values are kept near movement execution so navigation does not hard-code
+    /// locomotion math, but callers should treat them as approximations rather than
+    /// authoritative server guarantees.
     pub fn kinematics(&self) -> MovementKinematics {
         MovementKinematics {
             run_speed_mps: RUN_ANIM_SPEED * SERVER_RUN_SPEED,
@@ -367,6 +377,8 @@ impl MovementSystem {
         }
     }
 
+    /// Estimates the pulse duration needed to cover a planar distance for the given control.
+    /// This is planning math based on the current client actuator model, not a server guarantee.
     pub fn estimate_duration_for_distance(
         &self,
         control: MovementControl,
@@ -380,6 +392,8 @@ impl MovementSystem {
         }
     }
 
+    /// Estimates planar displacement for a control held for the given duration.
+    /// This is planning math based on the current client actuator model, not a server guarantee.
     pub fn estimate_displacement(&self, control: MovementControl, duration: Duration) -> f32 {
         self.control_speed_mps(control) * duration.as_secs_f32().max(0.0)
     }
@@ -1463,6 +1477,46 @@ mod tests {
     }
 
     #[test]
+    fn kinematics_expose_run_walk_and_turn_planning_constants() {
+        let movement = MovementSystem::new();
+        let kinematics = movement.kinematics();
+
+        assert!((kinematics.run_speed_mps - (RUN_ANIM_SPEED * SERVER_RUN_SPEED)).abs() < 1e-5);
+        assert!((kinematics.walk_speed_mps - RUN_ANIM_SPEED).abs() < 1e-5);
+        assert!((kinematics.turn_rate_rad_per_sec - LOCAL_TURN_RATE_RAD_PER_SEC).abs() < 1e-5);
+    }
+
+    #[test]
+    fn duration_and_displacement_helpers_share_one_run_vocabulary() {
+        let movement = MovementSystem::new();
+        let control = MovementControl::Run {
+            heading: 90.0_f32.to_radians(),
+        };
+        let distance = 9.0;
+
+        let duration = movement.estimate_duration_for_distance(control, distance);
+        let displacement = movement.estimate_displacement(control, duration);
+
+        assert!((duration.as_secs_f32() - 0.5).abs() < 1e-5);
+        assert!((displacement - distance).abs() < 1e-4);
+    }
+
+    #[test]
+    fn turn_controls_have_zero_displacement_and_duration_helpers() {
+        let movement = MovementSystem::new();
+        let control = MovementControl::TurnLeft;
+
+        assert_eq!(
+            movement.estimate_duration_for_distance(control, 5.0),
+            Duration::ZERO
+        );
+        assert_eq!(
+            movement.estimate_displacement(control, Duration::from_secs(1)),
+            0.0
+        );
+    }
+
+    #[test]
     fn off_phase_discretized_drive_zeroes_local_velocity_and_turn_rate() {
         let mut world = WorldState::synthetic();
         let player_guid = Guid(0x50000123);
@@ -1775,6 +1829,160 @@ mod tests {
             )
             .await
             .expect("next pulse window should resume running");
+        assert_eq!(session.packet_sequence, 4);
+    }
+
+    #[tokio::test]
+    async fn held_run_input_ticks_once_for_wire_and_keeps_local_vectors_consistent() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::identity(),
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let start = Instant::now();
+
+        movement.enqueue_input(
+            MovementInput::Hold {
+                control: MovementControl::Run {
+                    heading: 90.0_f32.to_radians(),
+                },
+            },
+            start,
+        );
+
+        movement
+            .tick(start, &mut world, &mut session)
+            .await
+            .expect("held run input should start moving");
+
+        let player = world
+            .entities
+            .get(guid)
+            .expect("synthetic player entity should exist");
+        assert!(player.velocity.x.abs() < 1e-5);
+        assert!((player.velocity.y - 18.0).abs() < 1e-5);
+        assert_eq!(session.packet_sequence, 2);
+
+        movement
+            .tick(start + Duration::from_millis(30), &mut world, &mut session)
+            .await
+            .expect("steady held run should not resend unchanged drive intent");
+
+        let player = world
+            .entities
+            .get(guid)
+            .expect("synthetic player entity should exist");
+        assert!(player.velocity.x.abs() < 1e-5);
+        assert!((player.velocity.y - 18.0).abs() < 1e-5);
+        assert_eq!(session.packet_sequence, 2);
+    }
+
+    #[tokio::test]
+    async fn pulsed_run_input_expires_on_tick_and_sends_stop_transition() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::identity(),
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let start = Instant::now();
+
+        movement.enqueue_input(
+            MovementInput::Pulse {
+                control: MovementControl::Run {
+                    heading: 90.0_f32.to_radians(),
+                },
+                duration: Duration::from_millis(50),
+            },
+            start,
+        );
+
+        movement
+            .tick(start, &mut world, &mut session)
+            .await
+            .expect("pulse should start movement");
+        assert_eq!(session.packet_sequence, 2);
+
+        movement
+            .tick(start + Duration::from_millis(60), &mut world, &mut session)
+            .await
+            .expect("expired pulse should stop movement on the next tick");
+
+        let player = world
+            .entities
+            .get(guid)
+            .expect("synthetic player entity should exist");
+        assert!(player.velocity.length_squared() <= 1e-6);
+        assert!(player.omega.length_squared() <= 1e-6);
+        assert_eq!(session.packet_sequence, 4);
+    }
+
+    #[tokio::test]
+    async fn stop_input_clears_held_run_and_sends_stop_transition() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let position = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(12.0, -4.0, 1.5),
+            rotation: Quaternion::identity(),
+        };
+
+        world.player.guid = guid;
+        world.player.position = position;
+        world
+            .entities
+            .insert(Entity::new(guid, "Player".to_string(), position));
+
+        let mut movement = MovementSystem::new();
+        let mut session = Session::new_test();
+        let start = Instant::now();
+
+        movement.enqueue_input(
+            MovementInput::Hold {
+                control: MovementControl::Run {
+                    heading: 90.0_f32.to_radians(),
+                },
+            },
+            start,
+        );
+        movement
+            .tick(start, &mut world, &mut session)
+            .await
+            .expect("held run should start");
+
+        movement.enqueue_input(MovementInput::Stop, start + Duration::from_millis(30));
+        movement
+            .tick(start + Duration::from_millis(30), &mut world, &mut session)
+            .await
+            .expect("stop input should end held movement");
+
+        let player = world
+            .entities
+            .get(guid)
+            .expect("synthetic player entity should exist");
+        assert!(player.velocity.length_squared() <= 1e-6);
+        assert!(player.omega.length_squared() <= 1e-6);
         assert_eq!(session.packet_sequence, 4);
     }
 

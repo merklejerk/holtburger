@@ -404,12 +404,12 @@ Mitigation:
 - [x] Phase 1: Add buffered held/pulsed control state to `MovementSystem`.
 - [x] Phase 1: Add enqueue-style movement commands and compatibility shims.
 - [x] Phase 1: Remove public movement metadata from the normal input contract.
-- [ ] Phase 2: Make `tick` own locomotion expiry and wire synthesis.
-- [ ] Phase 2: Move wire movement generation out of the command handler.
-- [ ] Phase 2: Make local self-prediction derive from active control state only.
-- [ ] Phase 3: Add timing and displacement helpers for navigation.
-- [ ] Phase 4: Update approach/follow/sticky-melee navigation to emit low-level timed pulses.
-- [ ] Phase 4: Add navigation-local pulse planning and hysteresis state where needed.
+- [x] Phase 2: Make `tick` own locomotion expiry and wire synthesis.
+- [x] Phase 2: Move wire movement generation out of the command handler.
+- [x] Phase 2: Make local self-prediction derive from active control state only.
+- [x] Phase 3: Add timing and displacement helpers for navigation.
+- [x] Phase 4: Update approach/follow/sticky-melee navigation to emit low-level timed pulses.
+- [x] Phase 4: Add navigation-local pulse planning and hysteresis state where needed.
 - [ ] Phase 5: Remove legacy speed-shaped navigation coupling.
 - [ ] Phase 5: Update architecture docs and notes.
 
@@ -431,6 +431,9 @@ Mitigation:
 - Navigation emits raw `MovementInput` directly; `NavigationLocomotionPlan` is not part of the current design.
 - Enqueued movement inputs wait until the next tick for wire synthesis.
 - No specialized explicit metadata-override path is planned today.
+- March 26, 2026: Phase 2 closeout confirmed that the runtime already uses tick-owned movement execution; this pass added missing public-path regression coverage and updated the worksheet rather than pivoting the model again.
+- March 26, 2026: Phase 3 confirmed the helper surface can stay movement-owned in `MovementSystem`; no separate navigation math module is needed yet because the actuator already exposes the planning vocabulary navigation needs.
+- March 26, 2026: Phase 4 kept pulse cadence ownership inside `NavigationAutomation` by introducing a private navigation pulse planner; the reusable approach controller now emits pursuit-plan data (`heading`, `max_speed`, `remaining_distance`) instead of speed-shaped `Drive` primitives.
 
 ### Verification Log
 - Phase 1 complete:
@@ -438,7 +441,23 @@ Mitigation:
 - Removed `DriveVelocity` from the public movement primitive surface and updated controller/test expectations to use heading-bearing `Drive`.
 - Added buffered movement ingest state to `MovementSystem` and a new `ClientCommand::EnqueueMovementInput` command surface.
 - Moved legacy movement commands onto the buffered ingest path instead of immediate command-handler execution.
-- `cargo test -p holtburger-core` still has pending Phase 2 failures to resolve before the suite is green again.
+- Phase 2 complete:
+- Confirmed `Client::run` routes movement through the shared physics tick, with `MovementSystem::tick` owning input ingestion, pulse expiry, wire edge synthesis, and the active local-motion state used by prediction.
+- Confirmed `handle_movement_command` only enqueues movement intent; the command handler no longer emits wire movement directly.
+- Confirmed manual `SnapFacing` already goes through `ClientCommand::EnqueueMovementInput(MovementInput::SnapFacing { .. })`, leaving optimistic heading ownership inside `MovementSystem`.
+- Added public-path regression tests for held run tick stability, pulsed run expiry, and explicit stop transitions in [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs).
+- `cargo test -p holtburger-core --lib` passed on March 26, 2026.
+- Phase 3 complete:
+- Confirmed navigation already consumes the helper surface via `MovementSystem::kinematics`, `estimate_displacement`, and `estimate_duration_for_distance` when translating speed-shaped compatibility requests into buffered run inputs.
+- Documented the helper values in [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) as client/planning approximations rather than authoritative server guarantees.
+- Added focused helper tests for run speed, walk speed, turn rate, and helper consistency in [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs).
+- `cargo test -p holtburger-core --lib` passed on March 26, 2026 after the Phase 3 closeout changes.
+- Phase 4 complete:
+- Replaced `ApproachTargetEffect::Movement(MovementPrimitive::Drive/Stop)` with pursuit-plan and stop effects in [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs), so the controller now reports heading plus remaining-distance/max-speed planning data instead of speed-shaped drive primitives.
+- Added a private navigation pulse planner in [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs) so approach/follow/sticky-melee pursuit emit raw `MovementInput::{Hold,Pulse,Stop}` commands directly while avoiding per-tick pulse reissue churn.
+- Removed navigation-side reliance on `MovementPrimitive::Drive` translation for approach/follow/sticky pursuit; maintained-range stop handling now clears planner-owned locomotion state instead of going through the old primitive adapter.
+- Added navigation regressions proving near-arrival pulse issuance and non-thrashing pulse cadence before/after expiry in [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs).
+- `cargo test -p holtburger-core --lib` passed on March 26, 2026 after the Phase 4 changes.
 
 ### Open Questions
 - When walk, strafe, and backstep are added later, do they fit the same helper surface or need distinct timing APIs?

@@ -4,7 +4,9 @@ use crate::entity::EntityPositionSyncOutcome;
 use holtburger_common::math::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
-use holtburger_protocol::messages::movement::{PositionPack, PositionType, ServerAutonomousPositionData};
+use holtburger_protocol::messages::movement::{
+    PositionPack, PositionType, ServerAutonomousPositionData,
+};
 
 impl WorldState {
     fn emit_entity_position_sync(
@@ -318,13 +320,7 @@ impl WorldState {
             (old_lb, entity.position)
         };
 
-        self.emit_entity_position_sync(
-            guid,
-            old_lb,
-            pos,
-            EntityPositionSyncOutcome::Moved,
-            events,
-        );
+        self.emit_entity_position_sync(guid, old_lb, pos, EntityPositionSyncOutcome::Moved, events);
         true
     }
 

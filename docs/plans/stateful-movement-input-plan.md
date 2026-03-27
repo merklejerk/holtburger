@@ -436,6 +436,7 @@ Mitigation:
 - March 26, 2026: Phase 4 kept pulse cadence ownership inside `NavigationAutomation` by introducing a private navigation pulse planner; the reusable approach controller now emits pursuit-plan data (`heading`, `max_speed`, `remaining_distance`) instead of speed-shaped `Drive` primitives.
 - March 27, 2026: Phase 5 narrowed the remaining navigation/controller speed-shaped API seam from `move_speed` to `max_run_speed`, explicitly framing it as a movement-capability cap rather than a navigation-to-actuator contract.
 - March 27, 2026: Post-plan cleanup sweep removed a stale `MovementPacketMetadata` bridge from navigation and the CLI sync wiring after confirming that the stateful `MovementInput` path no longer consumed metadata outside the legacy direct-locomotion shim.
+- March 27, 2026: Follow-up cleanup removed the temporary `ClientCommand::ExecuteMovement(MovementRequest)` shim entirely once the last manual CLI caller and stale tests were moved onto `MovementInput`.
 
 ### Verification Log
 - Phase 1 complete:
@@ -470,6 +471,10 @@ Mitigation:
 - Removed stale navigation/CLI `MovementPacketMetadata` plumbing from [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs) and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs); that metadata bridge was dead after navigation switched to raw `MovementInput` planning.
 - Deleted the now-pointless CLI regression that only asserted the old metadata passthrough behavior in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
 - Verification on March 27, 2026: `cargo test -p holtburger-core --lib`, `cargo test -p holtburger-core --test approach_target_controller_api`, and `cargo check -p holtburger-cli` all passed after the cleanup sweep.
+- Post-plan command-surface cleanup on March 27, 2026:
+- Removed `ClientCommand::ExecuteMovement(MovementRequest)` from [crates/holtburger-core/src/client/types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/types.rs) and [crates/holtburger-core/src/client/commands.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/commands.rs), leaving `MovementInput` as the only public movement command surface.
+- Deleted the now-dead legacy queue path inside [crates/holtburger-core/src/client/movement.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement.rs) and migrated CLI/manual input assertions onto `MovementInput` in [apps/holtburger-cli/src/pages/game/input.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/input.rs) and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
+- Locked `MovementRequest` and `MovementPrimitive` down to movement-internal visibility in [crates/holtburger-core/src/client/movement_types.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/movement_types.rs) so the public API now matches the architecture boundary.
 
 ### Open Questions
 - When walk, strafe, and backstep are added later, do they fit the same helper surface or need distinct timing APIs?

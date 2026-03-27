@@ -37,9 +37,15 @@ enum BootstrapOutcome {
 }
 
 enum BootstrapEventOutcome {
-    Ready { initial_events: Vec<ClientViewEvent> },
-    Retry { message: String },
-    Fatal { message: String },
+    Ready {
+        initial_events: Vec<ClientViewEvent>,
+    },
+    Retry {
+        message: String,
+    },
+    Fatal {
+        message: String,
+    },
 }
 
 struct CapturedLog {
@@ -794,10 +800,7 @@ mod tests {
             &mut None,
         );
 
-        assert!(matches!(
-            outcome,
-            Some(BootstrapEventOutcome::Retry { .. })
-        ));
+        assert!(matches!(outcome, Some(BootstrapEventOutcome::Retry { .. })));
     }
 
     #[test]
@@ -812,10 +815,7 @@ mod tests {
             &mut None,
         );
 
-        assert!(matches!(
-            outcome,
-            Some(BootstrapEventOutcome::Fatal { .. })
-        ));
+        assert!(matches!(outcome, Some(BootstrapEventOutcome::Fatal { .. })));
     }
 
     #[test]

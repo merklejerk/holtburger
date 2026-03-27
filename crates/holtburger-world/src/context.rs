@@ -110,7 +110,10 @@ impl WorldContext for WorldState {
     }
 
     fn get_player_attribute_current(&self, attr: AttributeType) -> Option<u32> {
-        self.player.attributes.get(&attr).map(|attribute| attribute.current)
+        self.player
+            .attributes
+            .get(&attr)
+            .map(|attribute| attribute.current)
     }
 
     fn get_player_skill_current(&self, skill: SkillType) -> Option<u32> {
@@ -709,10 +712,7 @@ mod tests {
             equipment: HashSet::from([equipped_item_guid]),
             player_attributes: HashMap::from([(AttributeType::StrengthAttr, 100)]),
             player_skills: HashMap::from([(SkillType::Run, 300)]),
-            player_int_properties: vec![(
-                PropertyInt::AugmentationIncreasedCarryingCapacity,
-                1,
-            )],
+            player_int_properties: vec![(PropertyInt::AugmentationIncreasedCarryingCapacity, 1)],
             ..Default::default()
         };
 

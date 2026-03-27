@@ -1,8 +1,8 @@
 use holtburger_common::Vector3;
 use holtburger_common::position::WorldPosition;
 use holtburger_core::client::controllers::{
-    ApproachLocomotionPlan, ApproachTargetController, ApproachTargetEffect,
-    ApproachTargetInput, Controller, ControllerStatus,
+    ApproachLocomotionPlan, ApproachTargetController, ApproachTargetEffect, ApproachTargetInput,
+    Controller, ControllerStatus,
 };
 
 fn position(x: f32) -> WorldPosition {

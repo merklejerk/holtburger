@@ -1,7 +1,7 @@
 use crate::client::WireEvent;
 use crate::client::movement_types::{
-    MotionStyle, MovementControl, MovementInput, MovementPacketMetadata,
-    MovementPrimitive, MovementRequest, RUN_ANIM_SPEED, planar_velocity_for_heading,
+    MotionStyle, MovementControl, MovementInput, MovementPacketMetadata, MovementPrimitive,
+    MovementRequest, RUN_ANIM_SPEED, planar_velocity_for_heading,
 };
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
@@ -262,7 +262,6 @@ pub(super) struct MovementSystem {
     pending_snap_facing: Option<PendingSnapFacing>,
     active_public_locomotion: Option<ActiveBufferedControl>,
     active_public_turn: Option<ActiveBufferedControl>,
-    active_legacy_request: Option<MovementRequest>,
     local_motion: Option<LocalMotionIntent>,
     server_motion_active: bool,
     last_server_drive_intent: Option<ServerDriveIntent>,
@@ -287,7 +286,6 @@ enum QueuedMovementCommand {
         input: MovementInput,
         metadata: MovementPacketMetadata,
     },
-    Legacy(MovementRequest),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -357,7 +355,6 @@ impl MovementSystem {
             pending_snap_facing: None,
             active_public_locomotion: None,
             active_public_turn: None,
-            active_legacy_request: None,
             local_motion: None,
             server_motion_active: false,
             last_server_drive_intent: None,
@@ -405,10 +402,6 @@ impl MovementSystem {
         });
     }
 
-    pub(super) fn enqueue_legacy_request(&mut self, request: MovementRequest) {
-        self.queued_inputs.push(QueuedMovementCommand::Legacy(request));
-    }
-
     fn control_speed_mps(&self, control: MovementControl) -> f32 {
         match control {
             MovementControl::Run { .. } => RUN_ANIM_SPEED * SERVER_RUN_SPEED,
@@ -427,8 +420,6 @@ impl MovementSystem {
         metadata: MovementPacketMetadata,
         now: Instant,
     ) {
-        self.active_legacy_request = None;
-
         match input {
             MovementInput::Hold { control } => self.set_active_control(control, None),
             MovementInput::Pulse { control, duration } => {
@@ -459,7 +450,9 @@ impl MovementSystem {
             | MovementControl::Backstep { .. }
             | MovementControl::StrafeLeft { .. }
             | MovementControl::StrafeRight { .. } => self.active_public_locomotion = next,
-            MovementControl::TurnLeft | MovementControl::TurnRight => self.active_public_turn = next,
+            MovementControl::TurnLeft | MovementControl::TurnRight => {
+                self.active_public_turn = next
+            }
         }
     }
 
@@ -481,21 +474,21 @@ impl MovementSystem {
 
     fn public_request_for_tick(&self) -> Option<MovementRequest> {
         match self.active_public_locomotion.map(|active| active.control) {
-            Some(MovementControl::Run { heading }) => Some(MovementRequest::new(
-                MovementPrimitive::Drive {
+            Some(MovementControl::Run { heading }) => {
+                Some(MovementRequest::new(MovementPrimitive::Drive {
                     heading,
                     speed: SERVER_RUN_SPEED,
-                },
-            )),
+                }))
+            }
             Some(MovementControl::Walk { heading })
             | Some(MovementControl::Backstep { heading })
             | Some(MovementControl::StrafeLeft { heading })
-            | Some(MovementControl::StrafeRight { heading }) => Some(MovementRequest::new(
-                MovementPrimitive::Drive {
+            | Some(MovementControl::StrafeRight { heading }) => {
+                Some(MovementRequest::new(MovementPrimitive::Drive {
                     heading,
                     speed: 1.0,
-                },
-            )),
+                }))
+            }
             Some(MovementControl::TurnLeft) | Some(MovementControl::TurnRight) => None,
             None => None,
         }
@@ -512,12 +505,6 @@ impl MovementSystem {
             match command {
                 QueuedMovementCommand::Public { input, metadata } => {
                     self.ingest_public_input(input, metadata, now)
-                }
-                QueuedMovementCommand::Legacy(request) => {
-                    self.pending_snap_facing = None;
-                    self.active_public_locomotion = None;
-                    self.active_public_turn = None;
-                    self.active_legacy_request = Some(request);
                 }
             }
         }
@@ -540,7 +527,7 @@ impl MovementSystem {
             );
         }
 
-        let request = self.active_legacy_request.or_else(|| self.public_request_for_tick());
+        let request = self.public_request_for_tick();
 
         match request {
             Some(request) => events.extend(
@@ -647,8 +634,7 @@ impl MovementSystem {
             *cycle_start += SERVER_PULSE_PERIOD.mul_f32(completed_periods);
         }
 
-        now.saturating_duration_since(*cycle_start)
-            < SERVER_PULSE_PERIOD.mul_f32(duty_cycle)
+        now.saturating_duration_since(*cycle_start) < SERVER_PULSE_PERIOD.mul_f32(duty_cycle)
     }
 
     #[cfg(test)]
@@ -689,12 +675,8 @@ impl MovementSystem {
             }
         };
         let had_active_local_motion = self.local_motion.is_some();
-        let state_events = self.apply_movement_primitive(
-            primitive,
-            server_drive,
-            should_run_server_drive,
-            world,
-        );
+        let state_events =
+            self.apply_movement_primitive(primitive, server_drive, should_run_server_drive, world);
 
         match primitive {
             MovementPrimitive::Stop if self.should_send_stop_pulse() => {
@@ -1601,14 +1583,18 @@ mod tests {
         let now = Instant::now();
 
         assert!(movement.should_actuate_server_run(now, SERVER_RUN_SPEED * 0.25));
-        assert!(!movement.should_actuate_server_run(
-            now + Duration::from_millis(100),
-            SERVER_RUN_SPEED * 0.25,
-        ));
-        assert!(movement.should_actuate_server_run(
-            now + Duration::from_millis(220),
-            SERVER_RUN_SPEED * 0.25,
-        ));
+        assert!(
+            !movement.should_actuate_server_run(
+                now + Duration::from_millis(100),
+                SERVER_RUN_SPEED * 0.25,
+            )
+        );
+        assert!(
+            movement.should_actuate_server_run(
+                now + Duration::from_millis(220),
+                SERVER_RUN_SPEED * 0.25,
+            )
+        );
     }
 
     #[test]
@@ -1726,7 +1712,6 @@ mod tests {
             )
             .await
             .expect("drive request should succeed");
-
 
         entity.velocity = Vector3::new(0.0, 4.0, 0.0);
         world.entities.insert(entity);

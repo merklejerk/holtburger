@@ -4,7 +4,7 @@ use holtburger_core::client::controllers::{
     DesiredAttackProfile, TargetedAttackRequest,
 };
 #[cfg(test)]
-use holtburger_core::client::movement_types::{MovementPrimitive, MovementRequest};
+use holtburger_core::client::movement_types::{MovementControl, MovementInput};
 use holtburger_core::client::navigation::{
     NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
     ResolvedNavigationTarget,
@@ -775,10 +775,7 @@ impl GameState {
                     if Self::is_frontend_navigation_interaction(self.view.active_interaction)
                         && !Self::is_frontend_navigation_interaction(Some(interaction))
                     {
-                        let update = self
-                            .runtime
-                            .navigation
-                            .clear_navigation();
+                        let update = self.runtime.navigation.clear_navigation();
                         result.commands.extend(update.commands);
                     }
                     self.set_active_interaction(Some(interaction), &mut result);
@@ -1003,10 +1000,7 @@ impl GameState {
 
     pub(crate) fn clear_active_interaction(&mut self, result: &mut UpdateResult) {
         if Self::is_frontend_navigation_interaction(self.view.active_interaction) {
-            let update = self
-                .runtime
-                .navigation
-                .clear_navigation();
+            let update = self.runtime.navigation.clear_navigation();
             result.commands.extend(update.commands);
         }
 
@@ -1205,9 +1199,7 @@ impl GameState {
                 self.data.combat_runtime.queue_attack();
                 result.needs_redraw = true;
                 result.commands.push(ClientCommand::EnqueueMovementInput(
-                    holtburger_core::client::movement_types::MovementInput::SnapFacing {
-                        heading,
-                    },
+                    holtburger_core::client::movement_types::MovementInput::SnapFacing { heading },
                 ));
             }
             CombatAutomationEffect::Attack(request) => {
@@ -1272,7 +1264,10 @@ impl GameState {
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
-        let max_run_speed = self.data.player_run_rate().unwrap_or(DEFAULT_APPROACH_RUN_RATE);
+        let max_run_speed = self
+            .data
+            .player_run_rate()
+            .unwrap_or(DEFAULT_APPROACH_RUN_RATE);
         NavigationSyncInput {
             now,
             player_position: self.data.player_pos,
@@ -1386,10 +1381,7 @@ impl GameState {
     }
 
     fn handle_forced_reposition(&mut self, result: &mut UpdateResult) {
-        let update = self
-            .runtime
-            .navigation
-            .handle_forced_reposition();
+        let update = self.runtime.navigation.handle_forced_reposition();
         result.commands.extend(update.commands);
         self.clear_finished_approach_interaction(result);
         if !matches!(
@@ -1401,10 +1393,7 @@ impl GameState {
     }
 
     fn handle_teleport_start(&mut self, result: &mut UpdateResult) {
-        let update = self
-            .runtime
-            .navigation
-            .handle_teleport_start();
+        let update = self.runtime.navigation.handle_teleport_start();
         result.commands.extend(update.commands);
 
         if matches!(
@@ -1843,6 +1832,32 @@ mod tests {
         state.runtime.navigation.sticky_is_pursuing()
     }
 
+    fn is_run_movement_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::EnqueueMovementInput(MovementInput::Hold {
+                control: MovementControl::Run { .. },
+            }) | ClientCommand::EnqueueMovementInput(MovementInput::Pulse {
+                control: MovementControl::Run { .. },
+                ..
+            })
+        )
+    }
+
+    fn is_stop_movement_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::EnqueueMovementInput(MovementInput::Stop)
+        )
+    }
+
+    fn is_snap_facing_command(command: &ClientCommand) -> bool {
+        matches!(
+            command,
+            ClientCommand::EnqueueMovementInput(MovementInput::SnapFacing { .. })
+        )
+    }
+
     fn seed_active_approach(
         state: &mut GameState,
         target: Guid,
@@ -1859,9 +1874,9 @@ mod tests {
                 player_position: input.player_position,
                 target: input
                     .target_position
-                .map(|target_position| ResolvedNavigationTarget {
-                    guid: target,
-                    sample: EntitySpatialSample {
+                    .map(|target_position| ResolvedNavigationTarget {
+                        guid: target,
+                        sample: EntitySpatialSample {
                             guid: target,
                             authoritative_pose: target_position,
                             projected_pose: target_position,
@@ -3097,11 +3112,7 @@ mod tests {
                 command,
                 ClientCommand::TargetedMeleeAttack { .. }
                     | ClientCommand::TargetedMissileAttack { .. }
-                    | ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive: MovementPrimitive::SnapFacing { .. },
-                        ..
-                    })
-            )
+            ) || is_snap_facing_command(command)
         }));
         assert!(!state.data.combat_runtime.attack_queued);
     }
@@ -3158,13 +3169,7 @@ mod tests {
             },
         ));
 
-        assert!(result.commands.iter().any(|command| matches!(
-            command,
-            ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::SnapFacing { .. },
-                ..
-            })
-        )));
+        assert!(result.commands.iter().any(is_snap_facing_command));
         assert!(!has_active_approach(&state));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
 
@@ -3211,15 +3216,8 @@ mod tests {
         ));
 
         assert!(!result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::TargetedMeleeAttack { .. }
-                    | ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-            )
+            matches!(command, ClientCommand::TargetedMeleeAttack { .. })
+                || is_run_movement_command(command)
         }));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3247,18 +3245,7 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(
-            started.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        );
+        assert!(started.commands.iter().any(is_run_movement_command));
         assert!(has_active_approach(&state));
         assert_eq!(
             state.view.active_interaction,
@@ -3275,15 +3262,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3322,15 +3301,7 @@ mod tests {
             sequence: 42,
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(matches!(
             state.runtime.navigation.navigation_mode(),
             Some(NavigationMode::Follow { .. })
@@ -3378,17 +3349,18 @@ mod tests {
             sequence: 42,
         });
 
-        assert_eq!(state.data.entities.get(&target_guid).unwrap().position.coords.x, 6.0);
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert_eq!(
+            state
+                .data
+                .entities
+                .get(&target_guid)
+                .unwrap()
+                .position
+                .coords
+                .x,
+            6.0
+        );
+        assert!(result.commands.iter().any(is_run_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3419,16 +3391,7 @@ mod tests {
             .handle_action(AppAction::Follow { guid: target_guid })
             .unwrap();
 
-        assert!(started.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(started.commands.iter().any(is_run_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3443,15 +3406,7 @@ mod tests {
             },
         });
 
-        assert!(in_range.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(in_range.commands.iter().any(is_stop_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3466,16 +3421,7 @@ mod tests {
             },
         });
 
-        assert!(slipped.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(slipped.commands.iter().any(is_run_movement_command));
         assert_eq!(
             state.view.active_interaction,
             Some(Interaction::Following { target_guid })
@@ -3513,15 +3459,7 @@ mod tests {
 
         let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert_eq!(state.view.active_interaction, None);
     }
 
@@ -3553,25 +3491,14 @@ mod tests {
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
 
-        let stop_index = result.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        });
-        let drive_index = result.commands.iter().position(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive:
-                        holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        });
+        let stop_index = result
+            .commands
+            .iter()
+            .position(|command| is_stop_movement_command(command));
+        let drive_index = result
+            .commands
+            .iter()
+            .position(|command| is_run_movement_command(command));
 
         assert!(matches!((stop_index, drive_index), (Some(stop), Some(drive)) if stop < drive));
         assert!(has_active_approach(&state));
@@ -3608,31 +3535,12 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(
-            started.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        );
+        assert!(started.commands.iter().any(is_run_movement_command));
         assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 7 });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3668,15 +3576,7 @@ mod tests {
 
         let result = state.handle_view_event(ClientViewEvent::TeleportStarted { sequence: 8 });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(
             result
                 .commands
@@ -3721,15 +3621,7 @@ mod tests {
 
         let result = state.handle_action(AppAction::CancelInteraction).unwrap();
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
         assert_eq!(state.view.active_interaction, None);
     }
@@ -3757,18 +3649,7 @@ mod tests {
         let started = state
             .handle_action(AppAction::Approach { guid: target_guid })
             .unwrap();
-        assert!(
-            started.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        );
+        assert!(started.commands.iter().any(is_run_movement_command));
         assert!(has_active_approach(&state));
 
         let result = state.handle_view_event(ClientViewEvent::EntityMoved {
@@ -3780,15 +3661,7 @@ mod tests {
             },
         });
 
-        assert!(result.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(result.commands.iter().any(is_stop_movement_command));
         assert!(!has_active_approach(&state));
     }
 
@@ -3819,13 +3692,7 @@ mod tests {
         let mut turn = UpdateResult::new();
         state.sync_combat_automation(now, CombatMode::Missile, true, &mut turn);
 
-        assert!(turn.commands.iter().any(|command| matches!(
-            command,
-            ClientCommand::ExecuteMovement(MovementRequest {
-                primitive: MovementPrimitive::SnapFacing { .. },
-                ..
-            })
-        )));
+        assert!(turn.commands.iter().any(is_snap_facing_command));
         assert!(
             !turn
                 .commands
@@ -3888,15 +3755,7 @@ mod tests {
 
         let in_range = state.handle_tick(0.016);
 
-        assert!(in_range.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Stop,
-                    ..
-                })
-            )
-        }));
+        assert!(in_range.commands.iter().any(is_stop_movement_command));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(!sticky_is_pursuing(&state));
 
@@ -3905,18 +3764,7 @@ mod tests {
 
         let slipped_again = state.handle_tick(0.016);
 
-        assert!(
-            slipped_again.commands.iter().any(|command| {
-                matches!(
-                    command,
-                    ClientCommand::ExecuteMovement(MovementRequest {
-                        primitive:
-                            holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                        ..
-                    })
-                )
-            })
-        );
+        assert!(slipped_again.commands.iter().any(is_run_movement_command));
         assert_eq!(sticky_latched_target_guid(&state), Some(target_guid));
         assert!(sticky_is_pursuing(&state));
     }
@@ -4086,15 +3934,7 @@ mod tests {
         let mut first = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut first);
 
-        assert!(first.commands.iter().any(|command| {
-            matches!(
-                command,
-                ClientCommand::ExecuteMovement(MovementRequest {
-                    primitive: holtburger_core::client::movement_types::MovementPrimitive::Drive { .. },
-                    ..
-                })
-            )
-        }));
+        assert!(first.commands.iter().any(is_run_movement_command));
 
         let mut second = UpdateResult::new();
         state.start_approach_target(target_guid, 1.0, &mut second);
@@ -4102,5 +3942,4 @@ mod tests {
         assert!(second.commands.is_empty());
         assert!(has_active_approach(&state));
     }
-
 }

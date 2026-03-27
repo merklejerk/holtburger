@@ -740,6 +740,14 @@ impl Client {
                     let dt = now.duration_since(last_physics_time).as_secs_f32();
                     last_physics_time = now;
 
+                    let movement_events = self
+                        .movement
+                        .tick(now, &mut self.world, &mut self.session)
+                        .await?;
+                    for event in movement_events {
+                        self.handle_world_event(&event);
+                    }
+
                     let physics_events = self.world.tick();
                     for event in physics_events {
                         self.handle_world_event(&event);

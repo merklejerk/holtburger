@@ -1,4 +1,4 @@
-use crate::client::movement_types::MovementRequest;
+use crate::client::movement_types::{MovementInput, MovementRequest};
 use holtburger_common::properties::DamageType;
 use holtburger_common::{
     CharacterOption, CharacterOptions1, CharacterOptions2, ConfirmationType, Guid,
@@ -505,6 +505,7 @@ pub enum ClientCommand {
         slot: Option<TargetSlot>,
         amount: u32,
     },
+    EnqueueMovementInput(MovementInput),
     ExecuteMovement(MovementRequest),
     RaiseAttribute {
         attribute: AttributeType,

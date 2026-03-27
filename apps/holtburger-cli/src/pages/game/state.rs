@@ -1205,9 +1205,10 @@ impl GameState {
             CombatAutomationEffect::TurnTo { heading } => {
                 self.data.combat_runtime.queue_attack();
                 result.needs_redraw = true;
-                result.commands.push(ClientCommand::ExecuteMovement(
-                    MovementRequest::new(MovementPrimitive::SnapFacing { heading })
-                        .with_metadata(self.current_movement_metadata()),
+                result.commands.push(ClientCommand::EnqueueMovementInput(
+                    holtburger_core::client::movement_types::MovementInput::SnapFacing {
+                        heading,
+                    },
                 ));
             }
             CombatAutomationEffect::Attack(request) => {

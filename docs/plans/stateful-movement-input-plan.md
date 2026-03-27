@@ -399,11 +399,11 @@ Mitigation:
 ## Living Worksheet
 
 ### Task Checklist
-- [ ] Phase 1: Add low-level movement control and input types.
-- [ ] Phase 1: Remove `DriveVelocity` and update its call sites.
-- [ ] Phase 1: Add buffered held/pulsed control state to `MovementSystem`.
-- [ ] Phase 1: Add enqueue-style movement commands and compatibility shims.
-- [ ] Phase 1: Remove public movement metadata from the normal input contract.
+- [x] Phase 1: Add low-level movement control and input types.
+- [x] Phase 1: Remove `DriveVelocity` and update its call sites.
+- [x] Phase 1: Add buffered held/pulsed control state to `MovementSystem`.
+- [x] Phase 1: Add enqueue-style movement commands and compatibility shims.
+- [x] Phase 1: Remove public movement metadata from the normal input contract.
 - [ ] Phase 2: Make `tick` own locomotion expiry and wire synthesis.
 - [ ] Phase 2: Move wire movement generation out of the command handler.
 - [ ] Phase 2: Make local self-prediction derive from active control state only.
@@ -433,7 +433,12 @@ Mitigation:
 - No specialized explicit metadata-override path is planned today.
 
 ### Verification Log
-- Pending implementation.
+- Phase 1 complete:
+- Added `MovementControl` and `MovementInput` alongside a temporary legacy `MovementRequest` shim.
+- Removed `DriveVelocity` from the public movement primitive surface and updated controller/test expectations to use heading-bearing `Drive`.
+- Added buffered movement ingest state to `MovementSystem` and a new `ClientCommand::EnqueueMovementInput` command surface.
+- Moved legacy movement commands onto the buffered ingest path instead of immediate command-handler execution.
+- `cargo test -p holtburger-core` still has pending Phase 2 failures to resolve before the suite is green again.
 
 ### Open Questions
 - When walk, strafe, and backstep are added later, do they fit the same helper surface or need distinct timing APIs?

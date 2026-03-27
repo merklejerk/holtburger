@@ -3,9 +3,8 @@ use holtburger_core::client::controllers::{
     CombatAutomationController, CombatAutomationEffect, CombatAutomationInput, Controller,
     DesiredAttackProfile, TargetedAttackRequest,
 };
-use holtburger_core::client::movement_types::{
-    MovementPacketMetadata, MovementPrimitive, MovementRequest,
-};
+#[cfg(test)]
+use holtburger_core::client::movement_types::{MovementPrimitive, MovementRequest};
 use holtburger_core::client::navigation::{
     NavigationAutomation, NavigationIntent, NavigationMode, NavigationSyncInput,
     ResolvedNavigationTarget,
@@ -779,7 +778,7 @@ impl GameState {
                         let update = self
                             .runtime
                             .navigation
-                            .clear_navigation(self.current_movement_metadata());
+                            .clear_navigation();
                         result.commands.extend(update.commands);
                     }
                     self.set_active_interaction(Some(interaction), &mut result);
@@ -1007,7 +1006,7 @@ impl GameState {
             let update = self
                 .runtime
                 .navigation
-                .clear_navigation(self.current_movement_metadata());
+                .clear_navigation();
             result.commands.extend(update.commands);
         }
 
@@ -1273,9 +1272,7 @@ impl GameState {
         let target_use_radius = target_entity
             .and_then(|entity| entity.use_radius())
             .map(|radius| radius as f32);
-        let move_speed = self.data.player_run_rate().unwrap_or(DEFAULT_APPROACH_RUN_RATE);
-        let metadata = self.current_movement_metadata();
-
+        let max_run_speed = self.data.player_run_rate().unwrap_or(DEFAULT_APPROACH_RUN_RATE);
         NavigationSyncInput {
             now,
             player_position: self.data.player_pos,
@@ -1286,8 +1283,7 @@ impl GameState {
                     sample,
                     use_radius: target_use_radius,
                 }),
-            move_speed,
-            metadata,
+            max_run_speed,
         }
     }
 
@@ -1393,7 +1389,7 @@ impl GameState {
         let update = self
             .runtime
             .navigation
-            .handle_forced_reposition(self.current_movement_metadata());
+            .handle_forced_reposition();
         result.commands.extend(update.commands);
         self.clear_finished_approach_interaction(result);
         if !matches!(
@@ -1408,7 +1404,7 @@ impl GameState {
         let update = self
             .runtime
             .navigation
-            .handle_teleport_start(self.current_movement_metadata());
+            .handle_teleport_start();
         result.commands.extend(update.commands);
 
         if matches!(
@@ -1733,10 +1729,6 @@ impl GameState {
         result
     }
 
-    pub(crate) fn current_movement_metadata(&self) -> MovementPacketMetadata {
-        MovementPacketMetadata::default()
-    }
-
     fn refresh_entity_context_if_visible(&mut self, guid: Guid) {
         if matches!(
             self.view.context_view,
@@ -1867,9 +1859,9 @@ mod tests {
                 player_position: input.player_position,
                 target: input
                     .target_position
-                    .map(|target_position| ResolvedNavigationTarget {
-                        guid: target,
-                        sample: EntitySpatialSample {
+                .map(|target_position| ResolvedNavigationTarget {
+                    guid: target,
+                    sample: EntitySpatialSample {
                             guid: target,
                             authoritative_pose: target_position,
                             projected_pose: target_position,
@@ -1880,8 +1872,7 @@ mod tests {
                         },
                         use_radius: input.target_use_radius,
                     }),
-                move_speed: input.move_speed,
-                metadata: input.metadata,
+                max_run_speed: input.max_run_speed,
             },
         );
     }
@@ -1903,8 +1894,7 @@ mod tests {
                         use_radius: input.target_use_radius,
                     }
                 }),
-                move_speed: input.move_speed,
-                metadata: input.metadata,
+                max_run_speed: input.max_run_speed,
             },
         );
     }
@@ -2423,8 +2413,7 @@ mod tests {
                 player_position: Some(start_pos),
                 target_position: Some(target_pos),
                 target_use_radius: None,
-                move_speed: DEFAULT_APPROACH_RUN_RATE,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3159,8 +3148,7 @@ mod tests {
                 player_position,
                 target: Some(target_sample),
                 target_use_radius: None,
-                move_speed: DEFAULT_APPROACH_RUN_RATE,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -3894,8 +3882,7 @@ mod tests {
                     projection_mode: holtburger_core::ProjectionMode::SimulatingVelocity,
                 }),
                 target_use_radius: None,
-                move_speed: DEFAULT_APPROACH_RUN_RATE,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: DEFAULT_APPROACH_RUN_RATE,
             },
         );
 
@@ -4116,12 +4103,4 @@ mod tests {
         assert!(has_active_approach(&state));
     }
 
-    #[test]
-    fn movement_metadata_does_not_echo_server_grounded_state() {
-        let player_guid = Guid(0x50000001);
-        let mut state = GameState::new(player_guid, "Player".to_string(), "World".to_string());
-        state.data.player_grounded = Some(false);
-
-        assert_eq!(state.current_movement_metadata().contact, None);
-    }
 }

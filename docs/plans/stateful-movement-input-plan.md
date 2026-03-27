@@ -410,8 +410,8 @@ Mitigation:
 - [x] Phase 3: Add timing and displacement helpers for navigation.
 - [x] Phase 4: Update approach/follow/sticky-melee navigation to emit low-level timed pulses.
 - [x] Phase 4: Add navigation-local pulse planning and hysteresis state where needed.
-- [ ] Phase 5: Remove legacy speed-shaped navigation coupling.
-- [ ] Phase 5: Update architecture docs and notes.
+- [x] Phase 5: Remove legacy speed-shaped navigation coupling.
+- [x] Phase 5: Update architecture docs and notes.
 
 ### Decisions Log
 - Movement remains a reusable low-level actuator in `holtburger-core`, not a target-position navigation system.
@@ -434,6 +434,8 @@ Mitigation:
 - March 26, 2026: Phase 2 closeout confirmed that the runtime already uses tick-owned movement execution; this pass added missing public-path regression coverage and updated the worksheet rather than pivoting the model again.
 - March 26, 2026: Phase 3 confirmed the helper surface can stay movement-owned in `MovementSystem`; no separate navigation math module is needed yet because the actuator already exposes the planning vocabulary navigation needs.
 - March 26, 2026: Phase 4 kept pulse cadence ownership inside `NavigationAutomation` by introducing a private navigation pulse planner; the reusable approach controller now emits pursuit-plan data (`heading`, `max_speed`, `remaining_distance`) instead of speed-shaped `Drive` primitives.
+- March 27, 2026: Phase 5 narrowed the remaining navigation/controller speed-shaped API seam from `move_speed` to `max_run_speed`, explicitly framing it as a movement-capability cap rather than a navigation-to-actuator contract.
+- March 27, 2026: Post-plan cleanup sweep removed a stale `MovementPacketMetadata` bridge from navigation and the CLI sync wiring after confirming that the stateful `MovementInput` path no longer consumed metadata outside the legacy direct-locomotion shim.
 
 ### Verification Log
 - Phase 1 complete:
@@ -458,6 +460,16 @@ Mitigation:
 - Removed navigation-side reliance on `MovementPrimitive::Drive` translation for approach/follow/sticky pursuit; maintained-range stop handling now clears planner-owned locomotion state instead of going through the old primitive adapter.
 - Added navigation regressions proving near-arrival pulse issuance and non-thrashing pulse cadence before/after expiry in [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs).
 - `cargo test -p holtburger-core --lib` passed on March 26, 2026 after the Phase 4 changes.
+- Phase 5 complete:
+- Renamed the remaining navigation/controller run-rate input from `move_speed` to `max_run_speed` across [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs), [crates/holtburger-core/src/client/controllers/approach_target.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/controllers/approach_target.rs), and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs) so the API reads as a capability cap rather than an analog actuator signal.
+- Updated the external controller API regression in [crates/holtburger-core/tests/approach_target_controller_api.rs](/home/cluracan/code/holtburger/crates/holtburger-core/tests/approach_target_controller_api.rs) to validate the pursuit-plan public surface.
+- Updated [crates/holtburger-core/ARCHITECTURE.md](/home/cluracan/code/holtburger/crates/holtburger-core/ARCHITECTURE.md) to describe the final stateful movement boundary in terms of `MovementInput`, pursuit plans, and navigation-owned pulse cadence.
+- Added a repository memory note at [/home/cluracan/.codex/memories/stateful-movement-boundary-2026-03-27.md](/home/cluracan/.codex/memories/stateful-movement-boundary-2026-03-27.md) capturing the final movement/navigation ownership split.
+- Verification on March 27, 2026: `cargo test -p holtburger-core --lib`, `cargo test -p holtburger-core --test approach_target_controller_api`, and `cargo check -p holtburger-cli` all passed.
+- Post-plan cleanup sweep on March 27, 2026:
+- Removed stale navigation/CLI `MovementPacketMetadata` plumbing from [crates/holtburger-core/src/client/navigation.rs](/home/cluracan/code/holtburger/crates/holtburger-core/src/client/navigation.rs) and [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs); that metadata bridge was dead after navigation switched to raw `MovementInput` planning.
+- Deleted the now-pointless CLI regression that only asserted the old metadata passthrough behavior in [apps/holtburger-cli/src/pages/game/state.rs](/home/cluracan/code/holtburger/apps/holtburger-cli/src/pages/game/state.rs).
+- Verification on March 27, 2026: `cargo test -p holtburger-core --lib`, `cargo test -p holtburger-core --test approach_target_controller_api`, and `cargo check -p holtburger-cli` all passed after the cleanup sweep.
 
 ### Open Questions
 - When walk, strafe, and backstep are added later, do they fit the same helper surface or need distinct timing APIs?

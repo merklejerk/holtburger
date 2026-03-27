@@ -20,7 +20,7 @@ pub enum ApproachTargetInput {
         player_position: WorldPosition,
         target_position: Option<WorldPosition>,
         target_use_radius: Option<f32>,
-        move_speed: f32,
+        max_run_speed: f32,
     },
     Cancel,
     ForcedReposition,
@@ -67,9 +67,9 @@ impl ApproachTargetController {
     fn capped_move_speed(
         distance_to_target: f32,
         effective_arrival_distance: f32,
-        move_speed: f32,
+        max_run_speed: f32,
     ) -> f32 {
-        let requested_speed = move_speed.max(0.0);
+        let requested_speed = max_run_speed.max(0.0);
         let remaining_distance = (distance_to_target - effective_arrival_distance).max(0.0);
         let max_speed_for_remaining_distance =
             remaining_distance / (RUN_ANIM_SPEED * APPROACH_SLOWDOWN_HORIZON_SECS);
@@ -108,7 +108,7 @@ impl Controller for ApproachTargetController {
                 player_position,
                 target_position,
                 target_use_radius,
-                move_speed,
+                max_run_speed,
             } => {
                 let Some(target_position) = target_position else {
                     return ControllerUpdate::new(ControllerStatus::Completed)
@@ -136,7 +136,7 @@ impl Controller for ApproachTargetController {
                 let capped_move_speed = Self::capped_move_speed(
                     distance_to_target,
                     effective_arrival_distance,
-                    move_speed,
+                    max_run_speed,
                 );
                 let heading = player_position.heading_to(&target_position);
 
@@ -177,7 +177,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(0.5)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -200,7 +200,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         let update = controller.handle(&ApproachTargetInput::Tick {
@@ -208,7 +208,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -242,7 +242,7 @@ mod tests {
             player_position,
             target_position: Some(target_position),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -317,7 +317,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -341,7 +341,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         let update = controller.handle(&ApproachTargetInput::Tick {
@@ -349,7 +349,7 @@ mod tests {
             player_position: position(0.45),
             target_position: Some(position(10.0)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -383,7 +383,7 @@ mod tests {
             player_position,
             target_position: Some(target_position),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert!(matches!(
@@ -406,7 +406,7 @@ mod tests {
             player_position: position(0.0),
             target_position: None,
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -429,7 +429,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(2.5)),
             target_use_radius: Some(3.0),
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);
@@ -452,7 +452,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(1.6)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Active);
@@ -479,7 +479,7 @@ mod tests {
             player_position: position(0.0),
             target_position: Some(position(1.005)),
             target_use_radius: None,
-            move_speed: 4.5,
+            max_run_speed: 4.5,
         });
 
         assert_eq!(update.status, ControllerStatus::Completed);

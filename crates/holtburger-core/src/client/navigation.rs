@@ -21,10 +21,8 @@ use crate::client::controllers::{
     MaintainRangeInput,
 };
 use crate::client::movement::MovementSystem;
-use crate::client::movement::{SERVER_PULSE_PERIOD, SERVER_RUN_SPEED};
-use crate::client::movement_types::{
-    MovementControl, MovementInput, MovementPacketMetadata,
-};
+use crate::client::movement::SERVER_PULSE_PERIOD;
+use crate::client::movement_types::{MovementControl, MovementInput};
 use crate::client::projection::EntitySpatialSample;
 use crate::client::types::ClientCommand;
 use holtburger_common::Guid;
@@ -50,8 +48,7 @@ pub struct ApproachSyncInput {
     pub player_position: Option<WorldPosition>,
     pub target_position: Option<WorldPosition>,
     pub target_use_radius: Option<f32>,
-    pub move_speed: f32,
-    pub metadata: MovementPacketMetadata,
+    pub max_run_speed: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -63,8 +60,7 @@ pub struct StickyMeleeSyncInput {
     pub player_position: Option<WorldPosition>,
     pub target: Option<EntitySpatialSample>,
     pub target_use_radius: Option<f32>,
-    pub move_speed: f32,
-    pub metadata: MovementPacketMetadata,
+    pub max_run_speed: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -73,8 +69,7 @@ struct MaintainedTargetSyncInput {
     pub player_position: Option<WorldPosition>,
     pub target: Option<EntitySpatialSample>,
     pub target_use_radius: Option<f32>,
-    pub move_speed: f32,
-    pub metadata: MovementPacketMetadata,
+    pub max_run_speed: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -89,8 +84,7 @@ pub struct NavigationSyncInput {
     pub now: Instant,
     pub player_position: Option<WorldPosition>,
     pub target: Option<ResolvedNavigationTarget>,
-    pub move_speed: f32,
-    pub metadata: MovementPacketMetadata,
+    pub max_run_speed: f32,
 }
 
 impl NavigationSyncInput {
@@ -100,8 +94,7 @@ impl NavigationSyncInput {
             player_position: self.player_position,
             target_position: self.target.map(|target| target.sample.authoritative_pose),
             target_use_radius: self.target.and_then(|target| target.use_radius),
-            move_speed: self.move_speed,
-            metadata: self.metadata,
+            max_run_speed: self.max_run_speed,
         }
     }
 
@@ -111,8 +104,7 @@ impl NavigationSyncInput {
             player_position: self.player_position,
             target: self.target.map(|target| target.sample),
             target_use_radius: self.target.and_then(|target| target.use_radius),
-            move_speed: self.move_speed,
-            metadata: self.metadata,
+            max_run_speed: self.max_run_speed,
         }
     }
 }
@@ -235,8 +227,13 @@ impl NavigationPulsePlanner {
             heading: plan.heading,
         };
         let estimator = MovementSystem::new();
+        let kinematics = estimator.kinematics();
         let full_pulse_distance = estimator.estimate_displacement(control, SERVER_PULSE_PERIOD);
-        let speed_ratio = (plan.max_speed.max(0.0) / SERVER_RUN_SPEED).clamp(0.0, 1.0);
+        let speed_ratio = if kinematics.run_speed_mps <= 1e-6 {
+            0.0
+        } else {
+            (plan.max_speed.max(0.0) / kinematics.run_speed_mps).clamp(0.0, 1.0)
+        };
         let capped_pulse_distance = full_pulse_distance * speed_ratio.max(MIN_RUN_PULSE_DUTY_CYCLE);
         let desired_distance = plan.remaining_distance.min(capped_pulse_distance);
 
@@ -349,7 +346,7 @@ impl NavigationAutomation {
             return NavigationUpdate::default();
         }
 
-        let mut result = self.clear_navigation(input.metadata);
+        let mut result = self.clear_navigation();
         result.extend(self.start_approach_target(target, arrival_distance, input));
 
         result
@@ -373,13 +370,13 @@ impl NavigationAutomation {
             return NavigationUpdate::default();
         }
 
-        let mut result = self.clear_navigation(input.metadata);
+        let mut result = self.clear_navigation();
         result.extend(self.start_follow_target(target, arrival_distance, input));
 
         result
     }
 
-    pub fn clear_navigation(&mut self, metadata: MovementPacketMetadata) -> NavigationUpdate {
+    pub fn clear_navigation(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Idle => NavigationUpdate::default(),
@@ -395,7 +392,6 @@ impl NavigationAutomation {
                 &mut state.pursuit,
                 MaintainedMode::Follow,
                 true,
-                metadata,
             ),
             ActiveNavigation::StickyMelee(mut state) => Self::suspend_maintained_state(
                 state.target_guid,
@@ -403,7 +399,6 @@ impl NavigationAutomation {
                 &mut state.pursuit,
                 MaintainedMode::StickyMelee,
                 true,
-                metadata,
             ),
         }
     }
@@ -429,7 +424,7 @@ impl NavigationAutomation {
                 ) {
                     self.sync_approach_target(approach_input)
                 } else {
-                    let mut result = self.clear_navigation(approach_input.metadata);
+                    let mut result = self.clear_navigation();
                     result.extend(self.start_approach_target(
                         target,
                         arrival_distance,
@@ -452,10 +447,10 @@ impl NavigationAutomation {
                     if maintained_target_input.player_position.is_some() {
                         self.sync_follow_target(target, maintained_target_input)
                     } else {
-                        self.cancel_active_follow(maintained_target_input.metadata)
+                        self.cancel_active_follow()
                     }
                 } else {
-                    let mut result = self.clear_navigation(maintained_target_input.metadata);
+                    let mut result = self.clear_navigation();
                     result.extend(self.start_follow_target(
                         target,
                         arrival_distance,
@@ -476,8 +471,7 @@ impl NavigationAutomation {
                 player_position: maintained_target_input.player_position,
                 target: maintained_target_input.target,
                 target_use_radius: maintained_target_input.target_use_radius,
-                move_speed: maintained_target_input.move_speed,
-                metadata: maintained_target_input.metadata,
+                max_run_speed: maintained_target_input.max_run_speed,
             }),
         }
     }
@@ -678,10 +672,7 @@ impl NavigationAutomation {
         }
     }
 
-    fn cancel_active_approach_due_to_forced_reposition(
-        &mut self,
-        _metadata: MovementPacketMetadata,
-    ) -> NavigationUpdate {
+    fn cancel_active_approach_due_to_forced_reposition(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Approach(mut state) => Self::finish_direct_approach(
@@ -697,40 +688,37 @@ impl NavigationAutomation {
         }
     }
 
-    pub fn handle_forced_reposition(
-        &mut self,
-        metadata: MovementPacketMetadata,
-    ) -> NavigationUpdate {
+    pub fn handle_forced_reposition(&mut self) -> NavigationUpdate {
         match self.navigation_mode() {
             Some(NavigationMode::Approach { .. }) => {
-                self.cancel_active_approach_due_to_forced_reposition(metadata)
+                self.cancel_active_approach_due_to_forced_reposition()
             }
             Some(NavigationMode::Follow { .. }) => {
-                self.pause_follow_target_due_to_forced_reposition(metadata)
+                self.pause_follow_target_due_to_forced_reposition()
             }
             Some(NavigationMode::StickyMelee { .. }) => {
-                self.pause_sticky_melee_due_to_forced_reposition(metadata)
+                self.pause_sticky_melee_due_to_forced_reposition()
             }
             None => NavigationUpdate::default(),
         }
     }
 
-    pub fn handle_teleport_start(&mut self, metadata: MovementPacketMetadata) -> NavigationUpdate {
+    pub fn handle_teleport_start(&mut self) -> NavigationUpdate {
         match self.navigation_mode() {
             Some(NavigationMode::Approach { .. }) => {
-                self.cancel_active_approach_due_to_teleport_start(metadata)
+                self.cancel_active_approach_due_to_teleport_start()
             }
             Some(NavigationMode::Follow { .. }) => {
-                self.reset_follow_target_due_to_teleport_start(metadata)
+                self.reset_follow_target_due_to_teleport_start()
             }
             Some(NavigationMode::StickyMelee { .. }) => {
-                self.reset_sticky_melee_due_to_teleport_start(metadata)
+                self.reset_sticky_melee_due_to_teleport_start()
             }
             None => NavigationUpdate::default(),
         }
     }
 
-    fn cancel_active_follow(&mut self, metadata: MovementPacketMetadata) -> NavigationUpdate {
+    fn cancel_active_follow(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Follow(mut state) => Self::suspend_maintained_state(
@@ -739,7 +727,6 @@ impl NavigationAutomation {
                 &mut state.pursuit,
                 MaintainedMode::Follow,
                 true,
-                metadata,
             ),
             other => {
                 self.active = other;
@@ -748,10 +735,7 @@ impl NavigationAutomation {
         }
     }
 
-    fn cancel_active_approach_due_to_teleport_start(
-        &mut self,
-        _metadata: MovementPacketMetadata,
-    ) -> NavigationUpdate {
+    fn cancel_active_approach_due_to_teleport_start(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Approach(mut state) => Self::finish_direct_approach(
@@ -767,10 +751,7 @@ impl NavigationAutomation {
         }
     }
 
-    fn pause_follow_target_due_to_forced_reposition(
-        &mut self,
-        metadata: MovementPacketMetadata,
-    ) -> NavigationUpdate {
+    fn pause_follow_target_due_to_forced_reposition(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Follow(mut state) => {
@@ -780,7 +761,6 @@ impl NavigationAutomation {
                     &mut state.pursuit,
                     MaintainedMode::Follow,
                     false,
-                    metadata,
                 );
                 self.active = ActiveNavigation::Follow(state);
                 result
@@ -792,10 +772,7 @@ impl NavigationAutomation {
         }
     }
 
-    fn reset_follow_target_due_to_teleport_start(
-        &mut self,
-        metadata: MovementPacketMetadata,
-    ) -> NavigationUpdate {
+    fn reset_follow_target_due_to_teleport_start(&mut self) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::Follow(mut state) => Self::suspend_maintained_state(
@@ -804,7 +781,6 @@ impl NavigationAutomation {
                 &mut state.pursuit,
                 MaintainedMode::Follow,
                 true,
-                metadata,
             ),
             other => {
                 self.active = other;
@@ -816,7 +792,7 @@ impl NavigationAutomation {
     fn sync_sticky_melee(&mut self, input: StickyMeleeSyncInput) -> NavigationUpdate {
         let Some(target_guid) = input.target_guid else {
             return if matches!(self.active, ActiveNavigation::StickyMelee(_)) {
-                self.suspend_sticky_melee(input.metadata, true)
+                self.suspend_sticky_melee(true)
             } else {
                 NavigationUpdate::default()
             };
@@ -824,7 +800,7 @@ impl NavigationAutomation {
 
         if input.player_position.is_none() {
             return if matches!(self.active, ActiveNavigation::StickyMelee(_)) {
-                self.suspend_sticky_melee(input.metadata, true)
+                self.suspend_sticky_melee(true)
             } else {
                 NavigationUpdate::default()
             };
@@ -832,7 +808,7 @@ impl NavigationAutomation {
 
         if input.combat_mode != CombatMode::Melee || !input.attack_sequence_active {
             return if matches!(self.active, ActiveNavigation::StickyMelee(_)) {
-                self.suspend_sticky_melee(input.metadata, true)
+                self.suspend_sticky_melee(true)
             } else {
                 NavigationUpdate::default()
             };
@@ -859,17 +835,12 @@ impl NavigationAutomation {
                 player_position: input.player_position,
                 target: input.target,
                 target_use_radius: input.target_use_radius,
-                move_speed: input.move_speed,
-                metadata: input.metadata,
+                max_run_speed: input.max_run_speed,
             },
         )
     }
 
-    fn suspend_sticky_melee(
-        &mut self,
-        metadata: MovementPacketMetadata,
-        clear_latch: bool,
-    ) -> NavigationUpdate {
+    fn suspend_sticky_melee(&mut self, clear_latch: bool) -> NavigationUpdate {
         let active = std::mem::take(&mut self.active);
         match active {
             ActiveNavigation::StickyMelee(mut state) => {
@@ -879,7 +850,6 @@ impl NavigationAutomation {
                     &mut state.pursuit,
                     MaintainedMode::StickyMelee,
                     clear_latch,
-                    metadata,
                 );
                 if clear_latch {
                     self.active = ActiveNavigation::Idle;
@@ -895,18 +865,12 @@ impl NavigationAutomation {
         }
     }
 
-    fn pause_sticky_melee_due_to_forced_reposition(
-        &mut self,
-        metadata: MovementPacketMetadata,
-    ) -> NavigationUpdate {
-        self.suspend_sticky_melee(metadata, false)
+    fn pause_sticky_melee_due_to_forced_reposition(&mut self) -> NavigationUpdate {
+        self.suspend_sticky_melee(false)
     }
 
-    fn reset_sticky_melee_due_to_teleport_start(
-        &mut self,
-        metadata: MovementPacketMetadata,
-    ) -> NavigationUpdate {
-        self.suspend_sticky_melee(metadata, true)
+    fn reset_sticky_melee_due_to_teleport_start(&mut self) -> NavigationUpdate {
+        self.suspend_sticky_melee(true)
     }
     fn sync_sticky_melee_target(
         &mut self,
@@ -965,7 +929,7 @@ impl NavigationAutomation {
             player_position,
             target_position,
             target_use_radius: input.target_use_radius,
-            move_speed: input.move_speed,
+            max_run_speed: input.max_run_speed,
         });
 
         let completed = update.is_terminal();
@@ -1032,7 +996,6 @@ impl NavigationAutomation {
         pursuit: &mut Option<PursuitState>,
         mode: MaintainedMode,
         clear_latch: bool,
-        metadata: MovementPacketMetadata,
     ) -> NavigationUpdate {
         let update = maintain.handle(&MaintainRangeInput::Suspend { clear_latch });
         Self::apply_maintained_effects(
@@ -1045,8 +1008,7 @@ impl NavigationAutomation {
                 player_position: None,
                 target: None,
                 target_use_radius: None,
-                move_speed: 0.0,
-                metadata,
+                max_run_speed: 0.0,
             },
             AUTOMATION_TARGET_DISTANCE_LIMIT_M,
         )
@@ -1079,8 +1041,7 @@ impl NavigationAutomation {
                             player_position: input.player_position,
                             target_position: input.target.map(|target| target.projected_pose),
                             target_use_radius: input.target_use_radius,
-                            move_speed: input.move_speed,
-                            metadata: input.metadata,
+                            max_run_speed: input.max_run_speed,
                         },
                         automation_target_distance_limit_m,
                     ));
@@ -1336,8 +1297,7 @@ mod tests {
                     ProjectionMode::AuthoritativeOnly,
                 )
             }),
-            move_speed: 4.5,
-            metadata: MovementPacketMetadata::default(),
+            max_run_speed: 4.5,
         }
     }
 
@@ -1440,8 +1400,7 @@ mod tests {
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
                 target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: 4.5,
             },
         );
 
@@ -1458,8 +1417,7 @@ mod tests {
                 player_position: Some(position(0.0)),
                 target_position: Some(position(5.0)),
                 target_use_radius: None,
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: 4.5,
             },
         );
 
@@ -1536,8 +1494,7 @@ mod tests {
                     position(5.0),
                     ProjectionMode::AuthoritativeOnly,
                 )),
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: 4.5,
             },
         );
 
@@ -1553,8 +1510,7 @@ mod tests {
                     position(6.0),
                     ProjectionMode::AuthoritativeOnly,
                 )),
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: 4.5,
             },
         );
 
@@ -1595,8 +1551,7 @@ mod tests {
                     position(6.0),
                     ProjectionMode::AuthoritativeOnly,
                 )),
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: 4.5,
             },
         );
 
@@ -1647,8 +1602,7 @@ mod tests {
                     position(5.0),
                     ProjectionMode::AuthoritativeOnly,
                 )),
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: 4.5,
             },
         );
 
@@ -1727,8 +1681,7 @@ mod tests {
                     position_xy(0.0, 5.0),
                     ProjectionMode::SimulatingVelocity,
                 )),
-                move_speed: 4.5,
-                metadata: MovementPacketMetadata::default(),
+                max_run_speed: 4.5,
             },
         );
 
@@ -1858,7 +1811,7 @@ mod tests {
         );
 
         let result = automation
-            .cancel_active_approach_due_to_forced_reposition(MovementPacketMetadata::default());
+            .cancel_active_approach_due_to_forced_reposition();
 
         assert!(result.commands.iter().any(is_stop_command));
         assert!(!has_active_approach(&automation));
@@ -1883,7 +1836,7 @@ mod tests {
         assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
         assert!(automation.sticky_is_pursuing());
 
-        let paused = automation.handle_forced_reposition(MovementPacketMetadata::default());
+        let paused = automation.handle_forced_reposition();
 
         assert!(paused.commands.iter().any(is_stop_command));
         assert_eq!(automation.sticky_latched_target_guid(), Some(target_guid));
@@ -1924,7 +1877,7 @@ mod tests {
             sync_input(now, Some(position(0.0)), Some(position(1.5))),
         );
 
-        let cleared = automation.handle_teleport_start(MovementPacketMetadata::default());
+        let cleared = automation.handle_teleport_start();
 
         assert!(cleared.commands.iter().any(is_stop_command));
         assert_eq!(automation.sticky_latched_target_guid(), None);
